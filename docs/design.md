@@ -281,6 +281,27 @@ type WakeRequester interface {
     WakeRequested() <-chan struct{}
 }
 
+// ContentRunner is an optional Agent capability for hosts that
+// support structured-prompt entry — driving turns from `[]Content`
+// instead of a single string. Used for retry / replay flows where
+// the host has pre-built the conversation context. The TUI's
+// default submit path still uses Run(ctx, prompt); RunWithContents
+// is invoked by host-supplied affordances.
+//
+// See R-CHAT-12.
+type Content struct {
+    Role  string
+    Text  string
+    Parts []ContentPart
+}
+type ContentPart struct {
+    Kind string
+    Data any
+}
+type ContentRunner interface {
+    RunWithContents(ctx context.Context, contents []Content) iter.Seq2[Event, error]
+}
+
 // SubagentLister backs /subagents (v1 read-only).
 type SubagentLister interface {
     Subagents() []SubagentInfo

@@ -434,6 +434,17 @@ listed in `/help`:
   `PricingController` methods that return human-readable summary lines
   for the chat.
 
+- **R-CHAT-12** Hosts whose agent supports structured-prompt entry
+  (a list of `[]Content` fragments instead of a single prompt
+  string) MAY implement the optional `ContentRunner` capability.
+  When present, adapters can drive turns from a pre-built
+  conversation context — used for retry / replay flows where the
+  host has constructed the prompt programmatically rather than
+  reading it from the input box. The TUI's default Enter-submit
+  flow still uses `Agent.Run(ctx, prompt)`; `RunWithContents` is
+  invoked only by host-supplied affordances. Adapters translate
+  their host-native content shape (ADK `Content`, Anthropic
+  `Message`, etc.) into / out of `tui.Content`.
 - **R-CHAT-11** Operator-typed-during-streaming prompts route by
   `Options.MidTurnInjectionMode`:
   - **`QueueForNext`** (default) — the entry buffers as a `Queued`

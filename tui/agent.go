@@ -93,3 +93,43 @@ type InjectableAgent interface {
 type WakeRequester interface {
 	WakeRequested() <-chan struct{}
 }
+
+// Content is a neutral structured-prompt fragment for ContentRunner
+// (R-CHAT-12). Adapters translate their host's native content
+// representation (ADK Content, anthropic Message, etc.) into / out
+// of this shape so the TUI stays framework-agnostic.
+//
+// Role is one of "user" / "assistant" / "system" / "tool". Text is
+// the primary payload — structured parts (tool calls, function
+// responses, image refs) ride alongside in Parts. Both fields may
+// be set; a renderer or downstream agent decides precedence.
+type Content struct {
+	Role  string
+	Text  string
+	Parts []ContentPart
+}
+
+// ContentPart is one named-kind fragment within a Content (tool
+// call, tool response, image, etc.). Kind is a host-defined string
+// — adapters agree with their backend on the vocabulary. Data is
+// the raw payload, typed as `any` so adapters can pass through
+// structured values without forcing a serialization here.
+type ContentPart struct {
+	Kind string
+	Data any
+}
+
+// ContentRunner is an optional Agent capability: when implemented,
+// adapters can drive turns from a structured `[]Content` slice
+// instead of a single prompt string. Used by retry / replay flows
+// where the host has already constructed the conversation context
+// programmatically.
+//
+// Detected via type assertion; the TUI's default submit flow still
+// uses Agent.Run(ctx, prompt) until a host wires a UI affordance
+// that invokes RunWithContents.
+//
+// See R-CHAT-12 in requirements.md and design.md §3.3.
+type ContentRunner interface {
+	RunWithContents(ctx context.Context, contents []Content) iter.Seq2[Event, error]
+}
