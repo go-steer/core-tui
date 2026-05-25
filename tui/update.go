@@ -132,6 +132,12 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			m.refreshViewport()
 		}
 		return m, nil
+	case pendingExitClearMsg:
+		// Quiet disarm of the warn-then-exit one-shot. We don't
+		// echo a "warning cleared" message — the operator either
+		// pressed Ctrl+C again (already handled) or moved on.
+		m.pendingExit = false
+		return m, nil
 	}
 
 	// Forward unhandled messages to the input + viewport so navigation
@@ -321,13 +327,38 @@ func (m Model) handleKey(msg tea.KeyPressMsg) (tea.Model, tea.Cmd) {
 		}
 	}
 
+	// Reset the warn-then-exit one-shot on every keystroke that
+	// isn't a follow-up Ctrl+C. Without this a Ctrl+C followed by
+	// any typing would still latch the next Ctrl+C as an exit.
+	if stroke != "ctrl+c" && m.pendingExit {
+		m.pendingExit = false
+	}
+
 	switch stroke {
 	case "ctrl+c":
-		// Always quits (R-CHAT-6). Ctrl+D also quits as a familiar
-		// "EOF closes input" convention.
+		// Three-step ladder (mirrors internal/tui:626-641 + Claude Code):
+		//  1. mid-stream  -> cancel the in-flight turn, don't quit
+		//  2. idle, fresh -> set pendingExit + system warning; schedule
+		//                    a reset so the warning doesn't latch forever
+		//  3. idle, armed -> quit
+		if m.state == stateStreaming && m.cancelTurn != nil {
+			m.cancelTurn() // goroutine emits turnCancelledMsg
+			return m, nil
+		}
+		if !m.pendingExit {
+			m.pendingExit = true
+			m.history.Append(Message{
+				Role: RoleSystem,
+				Text: "press ctrl+c again within 2s to exit",
+			})
+			m.refreshViewport()
+			return m, pendingExitTick()
+		}
 		m.quitting = true
 		return m, tea.Quit
 	case "ctrl+d":
+		// Ctrl+D quits unconditionally — "EOF closes input" is the
+		// muscle memory and most TUIs honor it without a warning.
 		m.quitting = true
 		return m, tea.Quit
 
@@ -364,6 +395,25 @@ func (m Model) handleKey(msg tea.KeyPressMsg) (tea.Model, tea.Cmd) {
 		}
 		return m, nil
 
+	case "up":
+		// Shell-style history recall when the input is empty:
+		// step backward through the promptHistory ring. When non-
+		// empty the keypress falls through to the textarea so
+		// cursor movement still works mid-edit (parity with
+		// internal/tui:434-442).
+		if strings.TrimSpace(m.input.Value()) == "" || m.historyCursor >= 0 {
+			m.recallPrompt(-1)
+			return m, nil
+		}
+	case "down":
+		// Forward through history when actively navigating;
+		// fall through to textarea cursor movement otherwise
+		// (more common while composing).
+		if m.historyCursor >= 0 {
+			m.recallPrompt(+1)
+			return m, nil
+		}
+
 	case "enter":
 		// Submit (R-CHAT-1). When idle: dispatch as a slash command
 		// if the input begins with `/`, otherwise append the typed
@@ -372,6 +422,23 @@ func (m Model) handleKey(msg tea.KeyPressMsg) (tea.Model, tea.Cmd) {
 		// the input; the queue drains one entry per turn-end.
 		text := strings.TrimSpace(m.input.Value())
 		if text == "" {
+			return m, nil
+		}
+		// /clear confirmation: the prior /clear submission armed
+		// confirmingClear. Any submit while armed is interpreted as
+		// the y/yes answer (anything else cancels). Disarms after
+		// the answer either way.
+		if m.confirmingClear {
+			m.confirmingClear = false
+			m.input.Reset()
+			lower := strings.ToLower(text)
+			if lower == "y" || lower == "yes" {
+				m.history.Reset()
+				m.refreshViewport()
+				return m, nil
+			}
+			m.history.Append(Message{Role: RoleSystem, Text: "clear cancelled"})
+			m.refreshViewport()
 			return m, nil
 		}
 		if m.state == stateStreaming {
@@ -383,6 +450,10 @@ func (m Model) handleKey(msg tea.KeyPressMsg) (tea.Model, tea.Cmd) {
 		if strings.HasPrefix(text, "/") {
 			return m.dispatchSlash(text)
 		}
+		// Record the non-slash, non-empty prompt in history so
+		// ↑/↓ can recall it next time. recordPrompt dedupes
+		// consecutive duplicates + caps the ring at promptHistoryCap.
+		m.recordPrompt(text)
 		return m.submitTurn(text), spinnerTick()
 
 	case "shift+enter", "ctrl+j":
@@ -554,6 +625,10 @@ func (m Model) submitTurn(text string) Model {
 	}
 	m.cancelTurn = m.startAgentTurn(m.opts.Agent, text)
 	m.refreshViewport()
+	// Operator-initiated submit always scrolls to bottom — they want
+	// to see their own message land and the response start, even if
+	// they'd been scrolled up reading backlog.
+	m.viewport.GotoBottom()
 	// Spinner tick scheduled separately from event listener; both
 	// stream their own messages into Update.
 	return m
@@ -712,6 +787,64 @@ func (m Model) dispatchSlash(text string) (tea.Model, tea.Cmd) {
 	return m, nil
 }
 
+// promptHistoryCap bounds the shell-style recall buffer. 100 entries
+// is plenty for a single session — comparable shells (bash, zsh) keep
+// far more on disk but the TUI's buffer is session-only.
+const promptHistoryCap = 100
+
+// recordPrompt appends text to the recall buffer, dedupes against the
+// most recent entry, caps at promptHistoryCap, and resets the cursor
+// so the next ↑ starts from the freshest entry.
+func (m *Model) recordPrompt(text string) {
+	if text == "" {
+		return
+	}
+	if n := len(m.promptHistory); n > 0 && m.promptHistory[n-1] == text {
+		m.historyCursor = -1
+		m.historyDraft = ""
+		return
+	}
+	m.promptHistory = append(m.promptHistory, text)
+	if len(m.promptHistory) > promptHistoryCap {
+		m.promptHistory = m.promptHistory[len(m.promptHistory)-promptHistoryCap:]
+	}
+	m.historyCursor = -1
+	m.historyDraft = ""
+}
+
+// recallPrompt walks the recall buffer. delta = -1 steps back (older),
+// +1 forward (newer). The first backward step saves the operator's
+// in-flight input as historyDraft so stepping all the way forward
+// past the newest entry restores what they were typing.
+func (m *Model) recallPrompt(delta int) {
+	if len(m.promptHistory) == 0 {
+		return
+	}
+	if m.historyCursor < 0 {
+		// First nav. Save the in-flight draft so we can restore it
+		// on the eventual forward-past-newest step.
+		m.historyDraft = m.input.Value()
+		// Start from "past the newest" so ↑ lands on the newest.
+		m.historyCursor = len(m.promptHistory)
+	}
+	next := m.historyCursor + delta
+	if next < 0 {
+		next = 0
+	}
+	if next >= len(m.promptHistory) {
+		// Stepped past the newest entry → exit history mode and
+		// restore whatever the operator had been composing.
+		m.historyCursor = -1
+		m.input.SetValue(m.historyDraft)
+		m.historyDraft = ""
+		m.refreshViewport()
+		return
+	}
+	m.historyCursor = next
+	m.input.SetValue(m.promptHistory[next])
+	m.refreshViewport()
+}
+
 // sliceContains is a tiny generic membership check used by dispatchSlash
 // to test slash-command aliases. We avoid pulling slices.Contains so the
 // code reads top-to-bottom without an import jump.
@@ -725,9 +858,23 @@ func sliceContains(xs []string, target string) bool {
 }
 
 // dispatchPermission writes the operator's decision back to the
-// pending Prompter flow and clears the modal state so the next
-// inbound request can render.
+// pending Prompter flow, invokes the host's AlwaysAllow callback
+// when the decision is DecisionAllowAlways, and clears the modal
+// state so the next inbound request can render.
+//
+// The AlwaysAllow callback lets the host persist the entry (e.g.
+// writing to permissions.allow or path_scope.allow in .agents/
+// config.json). Errors are surfaced inline so the operator knows
+// the allow-always didn't stick. Mirrors internal/tui:242-246.
 func (m *Model) dispatchPermission(d PermissionDecision) {
+	if d == DecisionAllowAlways && m.opts.AlwaysAllow != nil && m.pendingPermission != nil {
+		if err := m.opts.AlwaysAllow(*m.pendingPermission); err != nil {
+			m.history.Append(Message{
+				Role: RoleError,
+				Text: "allow-always persistence failed: " + err.Error(),
+			})
+		}
+	}
 	if p, ok := m.opts.Prompter.(*Prompter); ok {
 		p.dispatchDecision(d)
 	}

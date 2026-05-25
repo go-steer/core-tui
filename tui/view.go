@@ -141,6 +141,10 @@ func (m Model) View() tea.View {
 	v := tea.NewView(body)
 	v.AltScreen = true
 	v.BackgroundColor = nil // respect the terminal's own background
+	// Cell-motion mouse capture so the wheel scrolls the viewport.
+	// Operators who want native terminal text-select hold Shift to
+	// bypass capture (matches internal/tui + Claude Code).
+	v.MouseMode = tea.MouseModeCellMotion
 	return v
 }
 
@@ -245,8 +249,15 @@ func (m *Model) refreshViewport() {
 		b.WriteString(m.styles.SystemText.Render(hint))
 	}
 
+	// Preserve scroll position across re-renders: only auto-scroll
+	// to the bottom when the operator is already pinned there. If
+	// they've scrolled up to read backlog, an incoming stream chunk
+	// must not yank them back (parity with internal/tui:512).
+	atBottom := m.viewport.AtBottom()
 	m.viewport.SetContent(b.String())
-	m.viewport.GotoBottom()
+	if atBottom {
+		m.viewport.GotoBottom()
+	}
 }
 
 // renderInProgress returns the live block at the bottom of the chat

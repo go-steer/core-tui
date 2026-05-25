@@ -45,8 +45,13 @@ func (m Model) dispatchBuiltinSlash(name, args string) (bool, tea.Model, tea.Cmd
 		return true, m, nil
 
 	case "clear":
-		m.history.Reset()
+		// Two-step confirmation: arming sets confirmingClear so the
+		// next Enter is interpreted as y/yes (wipe) or anything-else
+		// (cancel). Footer hint flips while armed so the operator
+		// sees what's expected.
+		m.confirmingClear = true
 		m.input.Reset()
+		m.history.Append(Message{Role: RoleSystem, Text: "clear chat history? press enter for y/yes — anything else cancels"})
 		m.refreshViewport()
 		return true, m, nil
 

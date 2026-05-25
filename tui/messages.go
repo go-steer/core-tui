@@ -83,6 +83,11 @@ type wakeMsg struct{}
 // the timer (R-WAKE-1).
 type toastClearMsg struct{}
 
+// pendingExitClearMsg fires ctrlCExitTTL after the first Ctrl+C
+// idle press so the "press again to exit" warning doesn't latch
+// forever — if no follow-up arrives the warning quietly disarms.
+type pendingExitClearMsg struct{}
+
 // permissionRequestMsg fires when the prompter's request channel
 // surfaces an inbound PermissionRequest (R-PERM-1). Update sets
 // the modal-pending state; the modal's key handler dispatches the

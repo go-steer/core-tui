@@ -36,10 +36,25 @@ const spinnerCadence = 3 * time.Second
 // without being intrusive.
 const toastTTL = 4 * time.Second
 
+// ctrlCExitTTL bounds how long the first idle Ctrl+C arms the
+// "press again to exit" one-shot. 2s matches Claude Code's tempo
+// — long enough to be a deliberate second press, short enough that
+// a stray follow-up Ctrl+C minutes later won't unexpectedly quit.
+const ctrlCExitTTL = 2 * time.Second
+
 // toastTick schedules a toastClearMsg toastTTL into the future.
 func toastTick() tea.Cmd {
 	return tea.Tick(toastTTL, func(time.Time) tea.Msg {
 		return toastClearMsg{}
+	})
+}
+
+// pendingExitTick schedules a pendingExitClearMsg ctrlCExitTTL into
+// the future so the warn-then-exit one-shot disarms if the operator
+// doesn't follow through.
+func pendingExitTick() tea.Cmd {
+	return tea.Tick(ctrlCExitTTL, func(time.Time) tea.Msg {
+		return pendingExitClearMsg{}
 	})
 }
 

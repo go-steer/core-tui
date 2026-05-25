@@ -18,6 +18,7 @@ import (
 	"strings"
 
 	"charm.land/glamour/v2"
+	"charm.land/glamour/v2/ansi"
 	"charm.land/glamour/v2/styles"
 )
 
@@ -41,18 +42,88 @@ type markdownRenderer struct {
 // on construction error so callers don't need to handle nil — any
 // markdown they pass to renderMarkdown will fall through to raw text.
 func newMarkdownRenderer(dark bool, width int) *markdownRenderer {
-	cfg := styles.DraculaStyleConfig
-	if !dark {
-		// Light-mode fallback. Glamour ships an ASCII style that
-		// reads cleanly on light backgrounds; richer light themes
-		// can land later via Options.MarkdownStyle (R-MD-4).
-		cfg = styles.ASCIIStyleConfig
-	}
 	r, _ := glamour.NewTermRenderer(
-		glamour.WithStyles(cfg),
+		glamour.WithStyles(tuiStyleConfig(dark)),
 		glamour.WithWordWrap(width),
 	)
 	return &markdownRenderer{r: r, dark: dark, width: width}
+}
+
+// tuiStyleConfig starts from Glamour's bundled dark/light style and
+// patches two rough edges that hit assistant streams hard:
+//
+//  1. H2-H6 in the bundled styles render with the literal "##"/"###"
+//     prefix in the output (e.g. "## Section" stays "## Section").
+//     We strip the prefix and substitute bold + color so heading
+//     depth is still visible without leaking raw markdown to the
+//     viewport. H1 is left alone — its inverted banner block already
+//     strips the "#".
+//
+//  2. Code fences get static separator lines above and below so the
+//     boundary of a code block is visually obvious even when syntax
+//     highlighting is muted. Generic chrome — Glamour doesn't plumb
+//     the language tag through to the static prefix/suffix.
+//
+// Lifted from internal/tui's cogoStyleConfig so behavior matches
+// what core-agent operators expect.
+func tuiStyleConfig(dark bool) ansi.StyleConfig {
+	cfg := styles.DarkStyleConfig
+	if !dark {
+		cfg = styles.LightStyleConfig
+	}
+	for level, h := range map[int]*ansi.StyleBlock{
+		2: &cfg.H2,
+		3: &cfg.H3,
+		4: &cfg.H4,
+		5: &cfg.H5,
+		6: &cfg.H6,
+	} {
+		h.Prefix = ""
+		c := headingColor(dark, level)
+		h.Color = &c
+		t := true
+		h.Bold = &t
+	}
+	cfg.CodeBlock.BlockPrefix = codeBlockTopBar
+	cfg.CodeBlock.BlockSuffix = codeBlockBottomBar
+	return cfg
+}
+
+// codeBlockTopBar / codeBlockBottomBar bracket fenced code blocks so
+// the boundary reads as a deliberate frame rather than disappearing
+// into the surrounding text.
+const (
+	codeBlockTopBar    = "──────── code ────────\n"
+	codeBlockBottomBar = "──────────────────────"
+)
+
+// headingColor returns the 256-color index for heading level n (2-6).
+// Cool-blue palette chosen so headings stay distinct from inline code
+// and bold body text. Lighter shade per deeper level so the visual
+// hierarchy still reads.
+func headingColor(dark bool, level int) string {
+	if !dark {
+		switch level {
+		case 2:
+			return "27"
+		case 3:
+			return "33"
+		case 4:
+			return "61"
+		default:
+			return "67"
+		}
+	}
+	switch level {
+	case 2:
+		return "75"
+	case 3:
+		return "39"
+	case 4:
+		return "147"
+	default:
+		return "110"
+	}
 }
 
 // renderMarkdown returns the Glamour-rendered form of text, or text

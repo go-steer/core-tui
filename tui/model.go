@@ -133,6 +133,34 @@ type Model struct {
 	// returns tea.Quit.
 	quitting bool
 
+	// pendingExit holds the warn-then-quit state for Ctrl+C while
+	// idle: first press sets it (showing a system message), second
+	// press within ctrlCExitTTL actually quits. Mirrors internal/tui
+	// + Claude Code: prevents accidental drops on a single fat-finger.
+	// Reset by any keystroke that isn't Ctrl+C and by the
+	// pendingExitClearMsg fired after the TTL.
+	pendingExit bool
+
+	// confirmingClear is true between a /clear submission and the
+	// operator's y/yes confirmation. While true the footer hint
+	// changes and the next Enter is interpreted as the confirmation
+	// answer (y/yes wipes history, anything else cancels).
+	confirmingClear bool
+
+	// promptHistory is the shell-style recall buffer: every
+	// non-slash submitted user prompt is appended (deduped if it
+	// matches the immediate previous entry). historyCursor walks
+	// the buffer when the operator presses ↑/↓ on an empty input.
+	// -1 = not navigating.
+	promptHistory  []string
+	historyCursor  int
+	historyDraft   string // user's in-flight input saved before navigation
+
+	// startedAt is the wall-clock time the TUI launched. Used by
+	// the transcript-on-exit hook so saved files name themselves
+	// with the session-start instant.
+	startedAt time.Time
+
 	// modelPickerIdx is the currently-focused row in the
 	// overlayModelPicker overlay. Reset to 0 every time the picker
 	// opens; ↑/↓ adjust; Enter dispatches SwitchModel for the row.
@@ -158,14 +186,16 @@ func NewModel(opts Options) Model {
 	vp := viewport.New()
 
 	m := Model{
-		opts:         opts,
-		styles:       NewStyles(true, opts.Branding), // overwritten on BackgroundColorMsg
-		viewport:     vp,
-		input:        ta,
-		statusLayout: opts.StatusLayout,
-		permMode:     opts.PermissionMode.Initial,
-		eventCh:      make(chan tea.Msg, 32),
-		seenToolIDs:  make(map[string]bool),
+		opts:          opts,
+		styles:        NewStyles(true, opts.Branding), // overwritten on BackgroundColorMsg
+		viewport:      vp,
+		input:         ta,
+		statusLayout:  opts.StatusLayout,
+		permMode:      opts.PermissionMode.Initial,
+		eventCh:       make(chan tea.Msg, 32),
+		seenToolIDs:   make(map[string]bool),
+		historyCursor: -1,
+		startedAt:     time.Now(),
 	}
 	for _, msg := range opts.SeedHistory {
 		m.history.Append(msg)
