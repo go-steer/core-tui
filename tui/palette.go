@@ -17,6 +17,7 @@ package tui
 import (
 	"fmt"
 	"io/fs"
+	"os"
 	"path/filepath"
 	"sort"
 	"strings"
@@ -78,28 +79,39 @@ type palette struct {
 	triggerPos int
 }
 
-// builtinSlashItems returns the static list of built-in slash commands
-// for the visual-preview slice. Real implementations will source the
-// list from the command registry (built-ins + Options.Commands +
-// SlashProvider). Items marked Available=false render dim — they exist
-// in the catalog but the host hasn't wired their capability.
+// builtinSlashItems returns the catalog of built-in slash commands.
+// Layout: three "essentials" pinned at the top (help / clear / quit
+// — the ones operators reach for reflexively), followed by the rest
+// in alphabetical order. Real dispatch happens in dispatchBuiltinSlash;
+// items here describe the palette UI only.
+//
+// Every built-in is Available=true: dispatchBuiltinSlash + the
+// underlying capability assertions handle the host-doesn't-implement
+// case at runtime (with a "agent doesn't implement X" system message)
+// rather than dimming the palette row — operators can still see what
+// commands exist and learn they need to wire X.
 func builtinSlashItems() []paletteItem {
-	return []paletteItem{
+	essentials := []paletteItem{
 		{Name: "help", Display: "/help, /?", Description: "show command reference", Available: true},
 		{Name: "clear", Description: "clear chat history", Available: true},
 		{Name: "quit", Display: "/quit, /exit, /q", Description: "exit", Available: true},
-		{Name: "memory", Description: "display loaded memory files", Available: true},
-		{Name: "stats", Description: "per-turn + session usage totals", Available: true},
-		{Name: "mcp", Description: "configured MCP servers", Available: true},
-		{Name: "skills", Description: "loaded skill bundles", Available: true},
-		{Name: "mouse", Description: "toggle mouse capture", Available: true},
-		{Name: "tools", Description: "list tools (requires ToolLister)", Available: false},
-		{Name: "model", Description: "switch model (requires ModelSwapper)", Available: false},
-		{Name: "reload", Description: "rebuild agent (requires Reloader)", Available: false},
-		{Name: "permissions", Description: "review session approvals (requires PermissionController)", Available: false},
-		{Name: "pricing", Description: "manage pricing (requires PricingController)", Available: false},
-		{Name: "interrupt", Display: "/interrupt, /int", Description: "cancel turn (requires Interruptible)", Available: false},
 	}
+	rest := []paletteItem{
+		{Name: "interrupt", Display: "/interrupt, /int", Description: "cancel the in-flight turn", Available: true},
+		{Name: "mcp", Description: "configured MCP servers and tools", Available: true},
+		{Name: "memory", Description: "display loaded memory files", Available: true},
+		{Name: "model", Description: "open model picker / switch model", Available: true},
+		{Name: "mouse", Description: "toggle mouse capture (placeholder)", Available: true},
+		{Name: "permissions", Description: "review session approvals", Available: true},
+		{Name: "pricing", Description: "manage pricing (refresh / set)", Available: true},
+		{Name: "reload", Description: "rebuild agent from disk", Available: true},
+		{Name: "skills", Description: "loaded skill bundles", Available: true},
+		{Name: "stats", Description: "per-turn + session usage totals", Available: true},
+		{Name: "subagents", Description: "list background subagents", Available: true},
+		{Name: "tools", Description: "list tools and gate state", Available: true},
+	}
+	sort.SliceStable(rest, func(i, j int) bool { return rest[i].Name < rest[j].Name })
+	return append(essentials, rest...)
 }
 
 // scanFileItems walks every root in scope and returns the eligible
@@ -110,12 +122,20 @@ func builtinSlashItems() []paletteItem {
 // palette snappy on big trees; the cap also defends against
 // runaway scope misconfiguration.
 //
-// Empty scope returns an empty list — the @ palette renders a hint
-// telling the operator no PathScope is wired.
+// Empty scope falls back to the current working directory so the
+// @ palette has a useful default — most hosts don't configure
+// PathScope at all and operators expect the project tree to be
+// in scope by default (matches internal/tui's projectRoot=cwd
+// behavior).
 func scanFileItems(scope PathScope) []paletteItem {
 	const maxFilePaletteItems = 500
-	if len(scope.Roots) == 0 {
-		return nil
+	roots := scope.Roots
+	if len(roots) == 0 {
+		if cwd, err := os.Getwd(); err == nil {
+			roots = []string{cwd}
+		} else {
+			return nil
+		}
 	}
 	skipDirs := map[string]bool{
 		".git": true, ".hg": true, ".svn": true,
@@ -124,7 +144,7 @@ func scanFileItems(scope PathScope) []paletteItem {
 		".agents": true, ".claude": true,
 	}
 	out := make([]paletteItem, 0, 64)
-	for _, root := range scope.Roots {
+	for _, root := range roots {
 		if root == "" {
 			continue
 		}
@@ -340,17 +360,28 @@ func (m Model) renderPalette(width int) string {
 	if len(items) == 0 {
 		lines = append(lines, "  "+m.styles.SystemText.Render("no matches"))
 	} else {
-		visible := items
-		if len(visible) > maxPaletteRows {
-			visible = visible[:maxPaletteRows]
+		// Scrolling window: the visible slice tracks the cursor so
+		// ↑/↓ can step past the maxPaletteRows boundary. When the
+		// cursor is below the window we slide it down; above, up.
+		start := 0
+		if m.palette.cursor >= maxPaletteRows {
+			start = m.palette.cursor - maxPaletteRows + 1
+		}
+		end := start + maxPaletteRows
+		if end > len(items) {
+			end = len(items)
+		}
+		visible := items[start:end]
+		if start > 0 {
+			lines = append(lines,
+				"  "+m.styles.Muted.Render(fmt.Sprintf("%s %d above", GlyphTruncate, start)))
 		}
 		for i, it := range visible {
-			lines = append(lines, m.renderPaletteRow(it, i == m.palette.cursor, width))
+			lines = append(lines, m.renderPaletteRow(it, start+i == m.palette.cursor, width))
 		}
-		if len(items) > maxPaletteRows {
+		if end < len(items) {
 			lines = append(lines,
-				"  "+m.styles.Muted.Render(fmt.Sprintf("%s and %d more — keep typing to narrow",
-					GlyphTruncate, len(items)-maxPaletteRows)))
+				"  "+m.styles.Muted.Render(fmt.Sprintf("%s %d more below", GlyphTruncate, len(items)-end)))
 		}
 	}
 

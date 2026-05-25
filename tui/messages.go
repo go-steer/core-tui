@@ -42,9 +42,14 @@ type toolCallMsg struct {
 
 // usageMsg snapshots the latest Usage from the agent. The TUI keeps
 // only the most recent value and reports it once at turn-end on the
-// finalized assistant message (R-USE-1).
+// finalized assistant message (R-USE-1). Cost / Model travel
+// alongside so adapters that compute pricing per turn can surface
+// it without an extra round-trip; zero values suppress the
+// respective footer/sidebar segments.
 type usageMsg struct {
-	usage Usage
+	usage   Usage
+	costUSD float64
+	model   string
 }
 
 // turnDoneMsg signals clean turn completion. Populated with the

@@ -197,6 +197,12 @@ func emitEvent(ctx context.Context, ch chan<- tea.Msg, ev Event) {
 		send(toolCallMsg{id: tc.ID, name: tc.Name, args: tc.Args})
 	}
 	if ev.Usage != nil {
-		send(usageMsg{usage: *ev.Usage})
+		send(usageMsg{usage: *ev.Usage, costUSD: ev.CostUSD, model: ev.Model})
+	} else if ev.Model != "" {
+		// Adapters that emit a model identifier on a usage-less
+		// event (e.g. the first stream chunk) still feed
+		// m.currentModel via this msg so the per-turn footer
+		// renders the model name from the first event onward.
+		send(usageMsg{model: ev.Model})
 	}
 }

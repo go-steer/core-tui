@@ -64,13 +64,24 @@ type MemoryFile struct {
 	Excerpt string // optional first few lines for the display
 }
 
-// MCPServerInfo is one entry in the /mcp display.
+// MCPServerInfo is one entry in the /mcp display. Tools carries the
+// per-server tool catalog (name + description) so /mcp can render a
+// nested view; an empty slice falls back to the ToolCount summary.
 type MCPServerInfo struct {
 	Name      string
 	Transport string // "stdio" / "http" / "sse" / "websocket"
 	URL       string // empty for stdio
 	Connected bool
 	ToolCount int
+	Tools     []MCPToolInfo
+}
+
+// MCPToolInfo is one tool exposed by an MCP server, for the /mcp
+// nested rendering. Name is required; Description is optional and
+// rendered indented under the name when present.
+type MCPToolInfo struct {
+	Name        string
+	Description string
 }
 
 // SkillInfo is one entry in the /skills display.

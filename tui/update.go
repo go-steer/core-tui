@@ -69,7 +69,19 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		m.applyToolCall(msg)
 		return m, m.eventListener()
 	case usageMsg:
-		m.currentUsage = &msg.usage
+		// Empty Usage (zero in/out) is the model-only signal — adapters
+		// flag the live model on the first chunk before any real usage
+		// has been computed. Don't clobber an existing currentUsage in
+		// that case.
+		if msg.usage.InputTokens != 0 || msg.usage.OutputTokens != 0 {
+			m.currentUsage = &msg.usage
+		}
+		if msg.costUSD > 0 {
+			m.currentCost = msg.costUSD
+		}
+		if msg.model != "" {
+			m.currentModel = msg.model
+		}
 		return m, m.eventListener()
 	case turnDoneMsg:
 		m.finalizeTurn(msg.elapsed, "")
@@ -288,9 +300,24 @@ func (m Model) handleKey(msg tea.KeyPressMsg) (tea.Model, tea.Cmd) {
 			m.palette.moveCursor(1)
 			return m, nil
 		case "tab":
+			// Tab inserts the selection without submitting so the
+			// operator can keep typing args (`/allow ` → `/allow pat`).
 			return m.paletteComplete(), nil
 		case "enter":
-			return m.paletteInsert(), nil
+			// Enter on a slash palette item: insert AND submit in one
+			// keystroke (mirrors internal/tui's UX so `/mcp ⏎` from
+			// the palette renders the catalog in one press, not two).
+			// File palette items still just insert — there's typically
+			// more text to type after the @path.
+			kind := m.palette.kind
+			m = m.paletteInsert().(Model)
+			if kind == paletteSlash {
+				text := strings.TrimSpace(m.input.Value())
+				if strings.HasPrefix(text, "/") {
+					return m.dispatchSlash(text)
+				}
+			}
+			return m, nil
 		}
 	}
 
@@ -517,6 +544,7 @@ func (m Model) submitTurn(text string) Model {
 	m.turnStarted = time.Now()
 	m.inProgressText = ""
 	m.currentUsage = nil
+	m.currentCost = 0
 	m.currentModel = ""
 	m.toolActive = false
 	m.thinkingIdx = 0
@@ -598,6 +626,7 @@ func (m *Model) finalizeTurn(elapsed time.Duration, notice string) {
 			Rendered: mr.renderMarkdown(m.inProgressText),
 			Model:    m.currentModel,
 			Usage:    m.currentUsage,
+			CostUSD:  m.currentCost,
 			Elapsed:  elapsed,
 		}
 		m.history.Append(msg)

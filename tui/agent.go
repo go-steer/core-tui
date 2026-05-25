@@ -48,6 +48,19 @@ type Event struct {
 	// Usage carries token counts. The TUI snapshots the most recent
 	// non-nil value and reports it at turn end.
 	Usage *Usage
+
+	// CostUSD is the dollar cost for THIS event's usage (typically
+	// the final per-turn cost when the agent emits its usage event).
+	// 0 suppresses the per-turn footer's "$X" segment. The TUI also
+	// snapshots the most recent positive value and reports it at
+	// turn end alongside Usage / Model.
+	CostUSD float64
+
+	// Model is the resolved model identifier for THIS event. Adapters
+	// populate it on the usage event so the per-turn footer ("◇ X
+	// · in · out · $X · 4s") and status sidebar can reflect the live
+	// agent. Empty events leave m.currentModel unchanged.
+	Model string
 }
 
 // ToolCall describes a single tool invocation.

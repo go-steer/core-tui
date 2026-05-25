@@ -17,9 +17,11 @@ package tui
 import (
 	"context"
 	"fmt"
+	"sort"
 	"strconv"
 	"strings"
 
+	"charm.land/lipgloss/v2"
 	tea "charm.land/bubbletea/v2"
 )
 
@@ -53,19 +55,19 @@ func (m Model) dispatchBuiltinSlash(name, args string) (bool, tea.Model, tea.Cmd
 		return true, m, tea.Quit
 
 	case "memory":
-		m.history.Append(Message{Role: RoleSystem, Text: renderMemoryList(m.opts.Memory)})
+		m.history.Append(Message{Role: RoleSystem, Text: m.renderMemoryList(m.opts.Memory)})
 		m.input.Reset()
 		m.refreshViewport()
 		return true, m, nil
 
 	case "mcp":
-		m.history.Append(Message{Role: RoleSystem, Text: renderMCPList(m.opts.MCPServers)})
+		m.history.Append(Message{Role: RoleSystem, Text: m.renderMCPList(m.opts.MCPServers)})
 		m.input.Reset()
 		m.refreshViewport()
 		return true, m, nil
 
 	case "skills":
-		m.history.Append(Message{Role: RoleSystem, Text: renderSkillList(m.opts.Skills)})
+		m.history.Append(Message{Role: RoleSystem, Text: m.renderSkillList(m.opts.Skills)})
 		m.input.Reset()
 		m.refreshViewport()
 		return true, m, nil
@@ -102,7 +104,7 @@ func (m Model) dispatchBuiltinSlash(name, args string) (bool, tea.Model, tea.Cmd
 		if !ok {
 			m.history.Append(Message{Role: RoleSystem, Text: "/tools: agent doesn't implement ToolLister"})
 		} else {
-			m.history.Append(Message{Role: RoleSystem, Text: renderToolList(lister.Tools())})
+			m.history.Append(Message{Role: RoleSystem, Text: m.renderToolList(lister.Tools())})
 		}
 		m.input.Reset()
 		m.refreshViewport()
@@ -313,60 +315,111 @@ func padRight(s string, width int) string {
 	return s + strings.Repeat(" ", width-len(s))
 }
 
-func renderMemoryList(files []MemoryFile) string {
+// Style helpers — bold accent (violet) for section headings, bold
+// secondary (pink) for tool / server item names. Mirrors the
+// internal/tui look so operators don't see a downgrade switching
+// adapters.
+func (m Model) headingStyle() lipgloss.Style {
+	return lipgloss.NewStyle().Foreground(BrandViolet).Bold(true)
+}
+
+func (m Model) itemNameStyle() lipgloss.Style {
+	return lipgloss.NewStyle().Foreground(BrandPink).Bold(true)
+}
+
+func (m Model) renderMemoryList(files []MemoryFile) string {
 	if len(files) == 0 {
-		return "/memory: no memory files loaded (host did not wire Options.Memory)"
+		return "No memory files loaded. Drop AGENTS.md / CLAUDE.md / GEMINI.md in the project or user-home tree to surface them here."
 	}
 	var b strings.Builder
-	b.WriteString(fmt.Sprintf("/memory: %d file(s)\n", len(files)))
-	for _, f := range files {
-		b.WriteString("  • " + f.Path)
+	b.WriteString(fmt.Sprintf("Memory files (%d):\n\n", len(files)))
+	for i, f := range files {
+		fmt.Fprintf(&b, "  %s %s\n", GlyphCollapsed, m.itemNameStyle().Render(f.Path))
 		if f.Excerpt != "" {
-			b.WriteString(" — " + truncate(f.Excerpt, 60))
+			fmt.Fprintf(&b, "      %s\n", strings.ReplaceAll(f.Excerpt, "\n", " "))
 		}
-		b.WriteString("\n")
+		if i < len(files)-1 {
+			b.WriteByte('\n')
+		}
 	}
 	return strings.TrimRight(b.String(), "\n")
 }
 
-func renderMCPList(servers []MCPServerInfo) string {
+// renderMCPList groups tools under their owning server (bold violet
+// header + ▸ pink tool name + indented description) so /mcp shows the
+// full catalog instead of just a per-server tool count. Falls back to
+// the count when the server provides no per-tool detail.
+func (m Model) renderMCPList(servers []MCPServerInfo) string {
 	if len(servers) == 0 {
-		return "/mcp: no MCP servers configured (host did not wire Options.MCPServers)"
+		return "No MCP servers configured. Drop a .agents/mcp.json describing servers (stdio or HTTP transport) to expose external tools to the agent."
 	}
 	var b strings.Builder
-	b.WriteString(fmt.Sprintf("/mcp: %d server(s)\n", len(servers)))
-	for _, s := range servers {
+	b.WriteString("MCP servers:\n\n")
+	for si, s := range servers {
 		status := "connected"
 		if !s.Connected {
 			status = "disconnected"
 		}
-		line := fmt.Sprintf("  • %s [%s] — %d tool(s)", s.Name, status, s.ToolCount)
+		fmt.Fprintf(&b, "  %s — %s", m.headingStyle().Render(s.Name), status)
 		if s.Transport != "" {
-			line += " (" + s.Transport + ")"
+			fmt.Fprintf(&b, " (%s)", s.Transport)
 		}
 		if s.URL != "" {
-			line += " " + s.URL
+			fmt.Fprintf(&b, " %s", s.URL)
 		}
-		b.WriteString(line + "\n")
+		b.WriteByte('\n')
+
+		switch {
+		case !s.Connected:
+			// Skip tool list for disconnected servers.
+		case len(s.Tools) == 0 && s.ToolCount == 0:
+			b.WriteString("      (server exposes no tools, or enumeration failed)\n")
+		case len(s.Tools) > 0:
+			tools := make([]MCPToolInfo, len(s.Tools))
+			copy(tools, s.Tools)
+			sort.Slice(tools, func(i, j int) bool { return tools[i].Name < tools[j].Name })
+			b.WriteByte('\n')
+			for i, t := range tools {
+				fmt.Fprintf(&b, "    %s %s\n", GlyphCollapsed, m.itemNameStyle().Render(t.Name))
+				if t.Description != "" {
+					fmt.Fprintf(&b, "        %s\n", strings.ReplaceAll(t.Description, "\n", " "))
+				}
+				if i < len(tools)-1 {
+					b.WriteByte('\n')
+				}
+			}
+		default:
+			// Server reported ToolCount but no per-tool details.
+			fmt.Fprintf(&b, "      %d tool(s)\n", s.ToolCount)
+		}
+		if si < len(servers)-1 {
+			b.WriteByte('\n')
+		}
 	}
 	return strings.TrimRight(b.String(), "\n")
 }
 
-func renderSkillList(skills []SkillInfo) string {
+func (m Model) renderSkillList(skills []SkillInfo) string {
 	if len(skills) == 0 {
-		return "/skills: no skill bundles loaded (host did not wire Options.Skills)"
+		return "No skills discovered. Drop SKILL.md bundles under .agents/skills/<name>/ to expose them to the agent."
 	}
+	sorted := make([]SkillInfo, len(skills))
+	copy(sorted, skills)
+	sort.Slice(sorted, func(i, j int) bool { return sorted[i].Name < sorted[j].Name })
 	var b strings.Builder
-	b.WriteString(fmt.Sprintf("/skills: %d skill(s)\n", len(skills)))
-	for _, s := range skills {
-		line := "  • " + s.Name
-		if s.Source != "" {
-			line += " [" + s.Source + "]"
+	fmt.Fprintf(&b, "Skills (%d):\n\n", len(sorted))
+	for i, s := range sorted {
+		fmt.Fprintf(&b, "  %s %s", GlyphCollapsed, m.itemNameStyle().Render(s.Name))
+		if s.Source != "" && s.Source != "local" {
+			fmt.Fprintf(&b, " [%s]", s.Source)
 		}
+		b.WriteByte('\n')
 		if s.Description != "" {
-			line += " — " + truncate(s.Description, 60)
+			fmt.Fprintf(&b, "      %s\n", strings.ReplaceAll(s.Description, "\n", " "))
 		}
-		b.WriteString(line + "\n")
+		if i < len(sorted)-1 {
+			b.WriteByte('\n')
+		}
 	}
 	return strings.TrimRight(b.String(), "\n")
 }
@@ -393,18 +446,42 @@ func renderStats(tracker UsageTracker) string {
 	return b.String()
 }
 
-func renderToolList(tools []ToolInfo) string {
+// renderToolList renders the agent's tool catalog in alphabetical
+// order: bold pink name on its own line with a ▸ marker, source +
+// gate annotation in muted brackets next to it, indented description
+// underneath, blank line between entries — matches internal/tui's
+// /tools layout so the catalog is scannable.
+func (m Model) renderToolList(tools []ToolInfo) string {
 	if len(tools) == 0 {
-		return "/tools: no tools registered"
+		return "Agent has no tools registered."
 	}
+	sorted := make([]ToolInfo, len(tools))
+	copy(sorted, tools)
+	sort.Slice(sorted, func(i, j int) bool { return sorted[i].Name < sorted[j].Name })
 	var b strings.Builder
-	b.WriteString(fmt.Sprintf("/tools: %d tool(s)\n", len(tools)))
-	for _, t := range tools {
-		line := fmt.Sprintf("  • %s [%s, %s]", t.Name, t.Source, t.GateState)
-		if t.Description != "" {
-			line += " — " + truncate(t.Description, 60)
+	fmt.Fprintf(&b, "Tools (%d):\n\n", len(sorted))
+	for i, t := range sorted {
+		fmt.Fprintf(&b, "  %s %s", GlyphCollapsed, m.itemNameStyle().Render(t.Name))
+		annotation := ""
+		if t.Source != "" {
+			annotation = t.Source
 		}
-		b.WriteString(line + "\n")
+		if t.GateState != "" {
+			if annotation != "" {
+				annotation += ", "
+			}
+			annotation += t.GateState
+		}
+		if annotation != "" {
+			fmt.Fprintf(&b, "  %s", m.styles.Muted.Render("["+annotation+"]"))
+		}
+		b.WriteByte('\n')
+		if t.Description != "" {
+			fmt.Fprintf(&b, "      %s\n", strings.ReplaceAll(t.Description, "\n", " "))
+		}
+		if i < len(sorted)-1 {
+			b.WriteByte('\n')
+		}
 	}
 	return strings.TrimRight(b.String(), "\n")
 }

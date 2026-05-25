@@ -106,8 +106,9 @@ type Model struct {
 	cancelTurn     context.CancelFunc // non-nil while state == stateStreaming
 	turnStarted    time.Time
 	inProgressText string // accumulator for streamed tokens
-	currentUsage   *Usage // most recent usage snapshot for this turn
-	currentModel   string // model name for the in-progress message
+	currentUsage   *Usage  // most recent usage snapshot for this turn
+	currentCost    float64 // most recent positive cost for this turn (USD)
+	currentModel   string  // model name for the in-progress message
 	toolActive     bool   // true after a ToolCall; flips back on next Text
 	seenToolIDs    map[string]bool
 	thinkingIdx    int  // rotation index into ThinkingPhrases / WorkingPhrases
