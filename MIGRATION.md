@@ -190,23 +190,63 @@ satisfactions.
 
 ### 3.1 Source-tree summary
 
-core-agent's TUI is structurally identical to cogo's but its agent
-exposes more surface:
+core-agent has grown substantially since the earlier audit. The
+agent's surface now includes a host-side **inbox** (mid-turn message
+injection), the `/btw` side-question path (with a modal Glamour-
+rendered answer that doesn't land in history), `/subagent` (direct
+background-agent spawn), a queue-panel state machine that tracks
+each operator-typed-during-streaming entry through queued → in-flight
+→ done | failed, and a wake-signal channel for background agents
+that need the operator's attention.
 
-- **`agent.Agent.Run`** — same `iter.Seq2[*session.Event, error]`
-  shape as cogo.
-- **`agent.Agent.Interrupt() bool`** — explicit interrupt (separate
-  from `ctx.Cancel`).
-- **`agent.Agent.AskSideQuestion(ctx, q) (string, error)`** — the
-  `/btw` side-question path; runs without tools, doesn't land in
-  history.
-- **`agent.Agent.Tools() []tool.Tool`** — runtime tool enumeration.
-- **`agent.Agent.BackgroundManager() *BackgroundAgentManager`** —
-  subagent spawn / status / list.
-- **`agent.Agent.EventLog() eventlog.Stream`** — durable event log
-  for resume / replay (out of scope for core-tui v1).
-- **`internal/pricing`** — `RefreshPricing` + `SetPricing` callbacks
-  for `/pricing`.
+Exhaustive list of `agent.Agent` exported methods:
+
+```go
+// Streaming + turn lifecycle.
+Run(ctx, prompt) iter.Seq2[*session.Event, error]
+RunWithContents(ctx, contents) iter.Seq2[*session.Event, error]  // alt: structured contents
+Interrupt() bool
+
+// Side questions (/btw).
+AskSideQuestion(ctx, q) (string, error)
+
+// Inbox — mid-turn message injection. Operator-typed-during-
+// streaming entries are Inject()ed; turn-end DrainInbox()s and
+// auto-continues with the drained messages as the next prompt.
+Inject(message) error
+DrainInbox() []string
+InboxArrived() <-chan struct{}
+PendingInboxCount() int
+
+// Wake — background agents request operator attention.
+WakeRequested() <-chan struct{}
+RequestWake()
+
+// Identity + observability.
+AppName() string
+AgentName() string
+ModelName() string
+UserID() string
+SessionID() string
+SessionService() session.Service
+EventLog() *eventlog.Handle
+
+// Tools + subagents (local view).
+Tools() []tool.Tool
+BackgroundManager() *BackgroundAgentManager
+
+// Attach mirrors (local agent serves attach RPCs too).
+AttachStatus() attach.StatusInfo
+AttachTools() []attach.ToolInfo
+AttachAgents() []attach.AgentInfo
+AttachInterrupt() bool
+```
+
+Other notable host pieces:
+
+- **`internal/pricing`** — `RefreshPricing(ctx)` + `SetPricing(modelID, in, out)` callbacks for `/pricing refresh` and `/pricing set`. `ModelConfig.Pricing` is now a per-model map (was a single struct), so overrides survive `/model` switches.
+- **`internal/config`** — new sections: `PricingFileConfig{Refresh, Source}`, `PathScopeConfig.Allow []string`, `URLScopeConfig{Allow, Deny, MaxBodyBytes, TimeoutSeconds, Headers}`, `AgentConfig.DisplayName` (maps to `Options.Branding.Wordmark`).
+- **`internal/attachclient.Client`** — RPCs grew: `Tools`, `Agents` (new), `Status`, `Inject`, `Wake` (new), `Interrupt`, `Stream(ctx, sid, since)` for SSE replay-on-reconnect.
 
 ### 3.2 Capability map
 
@@ -216,18 +256,33 @@ exposes more surface:
 | `ModelSwapper` | `rebuildAgent(modelID)` callback | Wrap; **cache the model list** at startup (or query a registry) so `AvailableModels()` returns synchronously — core-agent's callback is lazy. |
 | `Reloader` | `reloadFromDisk()` callback | Wrap; map `reloadResult` → `ReloadResult`. |
 | `PermissionController` | `permissions.Gate` (same shape as cogo's) | Wrap on `*Gate`. |
-| `PricingController` | `internal/pricing.RefreshPricing` + `SetPricing` | Wrap; surface the 5-layer precedence (config / project / user-manual / external / builtin / longest-prefix) inside `Refresh`. |
-| `ToolLister` | `agent.Agent.Tools() []tool.Tool` | Wrap; map `tool.Tool` → `tui.ToolInfo`. |
-| `SubagentLister` | `agent.Agent.BackgroundManager().Subagents()` | Wrap; map `BackgroundAgentManager` agent entries → `tui.SubagentInfo` (`Name, Status, LastReport, StartedAt`). |
-| `Interruptible` | `agent.Agent.Interrupt() bool` | One-line wrapper. |
+| `PricingController` | `internal/pricing.RefreshPricing` + `SetPricing` | Wrap; surface the 5-layer precedence (config / project / user-manual / external / builtin / longest-prefix) inside `Refresh`. core-agent's per-model `ModelConfig.Pricing` map is the host's storage; core-tui doesn't see it. |
+| `ToolLister` | `agent.Agent.Tools() []tool.Tool` (or `AttachTools()` in attach mode) | Wrap; map `tool.Tool` → `tui.ToolInfo`. |
+| `SubagentLister` | `agent.Agent.BackgroundManager().Subagents()` (or `AttachAgents()` in attach mode) | Wrap; map entries → `tui.SubagentInfo` (`Name, Status, LastReport, StartedAt`). |
+| `Interruptible` | `agent.Agent.Interrupt() bool` (or `AttachInterrupt()` in attach mode) | One-line wrapper. |
 | `StatusReporter` | `agent.Agent.AttachStatus()` (returns `attach.StatusInfo`) | Wrap; map `StatusInfo.State` to the core-tui state string. |
-| `SlashProvider` | `/btw` slash | **Needed.** Implement `SlashProvider.SlashCommands()` returning the `/btw` spec; `InvokeSlash` calls `AskSideQuestion` and appends the answer as a `RoleSystem` message via `tui.PostSystem`. |
+| `SlashProvider` | `/subagent` flag parser + `/btw` invocation | **Needed.** See §3.3 below — `/subagent` is pure SlashProvider; `/btw` needs the resolution from §5. |
 | `PermissionPrompter` (TUI-provided) | `gate.SetPrompter` | Wire. |
 | `Elicitor` (TUI-provided) | each MCP server's elicit callback | Wire per server. |
 | `UserPrompter` (TUI-provided) | (not used today — core-agent has no `ask_question` tool) | Optional. Wire if a future tool needs it. |
 | `Options.UsageTracker` | `internal/usage.Tracker` | Same as cogo. |
 | `Options.MentionProviders` | (not needed) | Built-in file provider is sufficient. |
+| `Options.Branding.Wordmark` | `AgentConfig.DisplayName` | Pass through. |
 | `Options.PersistModelChoice` / `Options.PersistStatusLayout` / `Options.PermissionMode.Persist` | core-agent's config save | Wrap. |
+
+### 3.3 Slash commands the adapter owns via SlashProvider
+
+core-agent has two slash commands that aren't built-in to core-tui
+and need a `SlashProvider` adapter:
+
+- **`/subagent <goal> --name=X --tools=Y --max-turns=10 …`** — flag
+  parser produces a `BackgroundSpec`, calls
+  `agent.BackgroundManager().Spawn(ctx, "", spec)`. The adapter
+  parses the flag tail; core-tui passes the raw `args` string
+  through. Returned `SlashResult.SystemMessage` confirms the spawn
+  ("subagent X started, branch=Y, watching via /subagents").
+- **`/btw <question>`** — see §5.1 for the resolution. This one
+  needs more than `SlashProvider` provides today.
 
 ### 3.3 core-agent local adapter sketch
 
@@ -412,18 +467,40 @@ func (a *attachAgent) Tools() []tui.ToolInfo {
 
 ## 5. Gaps surfaced by the audits
 
+### 5.1 Real semantic gaps (need a resolution before adapter work)
+
+These are genuine core-tui surface gaps surfaced by core-agent's
+expanded TUI. Each has a "punt" path (adapter works around it) and
+a "spec it" path (core-tui grows the capability). The migration
+design doc **in core-agent's repo** picks one path per gap and binds
+the adapter accordingly.
+
+| Gap | What it is | Punt | Spec it |
+|---|---|---|---|
+| **`/btw` modal-rendered answer** | core-agent renders the side-question answer in a transient modal that doesn't land in chat history, with Glamour markdown applied. `SlashProvider.SlashResult.SystemMessage` is a single string and lands as a permanent `RoleSystem` row. | Adapter appends answer as `SystemMessage`; lives in history forever, no Glamour. Acceptable for short answers; ugly for long markdown ones. | Add a `SideQuester` capability or extend `SlashResult` with a `ModalOverlay` field carrying `Question / Answer / Err` so the TUI renders a dismissable Glamour modal. |
+| **Mid-turn inbox injection** | `agent.Inject(message)` feeds a message INTO the currently-streaming turn. core-agent's TUI does this on every operator-typed-during-streaming entry; the agent drains the inbox on turn-end and auto-continues. R-CHAT-10 queueing is for the NEXT turn — different semantics. | Adapter exposes the inbox as a separate side-channel: typing during streaming calls `Inject` directly, and R-CHAT-10 queueing remains the "submit for next turn" path. Two queues, two semantics — confusing for operators. | Add `InjectableAgent` capability + `Options.MidTurnInject` flag — when set, the queue panel's `enqueue` calls `Inject` instead of (or in addition to) buffering. |
+| **Queue-panel state machine** | core-agent's queue tracks each entry through `queued → in-flight → done / failed` with per-entry error display + 2s fade for Done entries. core-tui's `[]string` queue is flat. | Adapter renders its own queue panel; core-tui's queue panel hides when adapter takes over. Two queue UIs in the same codebase. | Promote `Model.queue` from `[]string` to `[]QueueEntry{Text, State, Err, Created}`; render state glyphs (⏳ ↻ ✓ ✗); cull `Done` after a TTL. |
+| **Wake signal (`WakeRequested()`)** | Background agents can request operator attention via a channel. core-agent's TUI doesn't surface this in UI yet — channel exists, no visible affordance. | Defer until there's a designed UX. core-agent's existing channel keeps working server-side. | Add `WakeRequester` capability + a toast/banner affordance (per the Antigravity ui-references entry). |
+| **`RunWithContents` (structured prompts)** | core-agent has an alternate `Run` that takes structured `[]Content` instead of a string. Used for retry with synthesized context. | Adapter ignores it; only `Run(ctx, prompt string)` is exercised. | Extend `tui.Agent` with an optional `RunWithContents` method for hosts with structured-prompt needs. |
+
+### 5.2 Adapter-responsibility gaps (no spec change needed)
+
 | Gap | Hosts affected | Where it lands |
 |---|---|---|
-| `/btw` side questions | core-agent local | Implement via `SlashProvider` (adapter sends the answer back as `SystemMessage`). Not a core-tui spec change. |
-| Mid-turn message injection (`Client.Inject` for running turn) | core-agent attach | Adapter binds to a custom key or its own slash command. core-tui v1 doesn't have a slot for mid-turn injection — distinct from R-CHAT-10 queueing which is for the *next* turn. |
-| Runtime tool introspection (`Tools()`) | cogo | cogo limitation — `/tools` degrades to "not available". When cogo adds `Agent.Tools()`, the adapter wires `ToolLister` in one PR. |
+| Runtime tool introspection (`Tools()`) | cogo | cogo limitation, not core-tui's. When cogo adds `Agent.Tools()`, the adapter wires `ToolLister` in one PR. |
 | Lazy model list | core-agent | Adapter responsibility — cache at startup so `ModelSwapper.AvailableModels()` returns synchronously. |
+| `PricingFileConfig` + `URLScopeConfig` storage | core-agent | Adapter loads from `internal/config`; core-tui doesn't see it. |
+| `AgentConfig.DisplayName` | core-agent | Pass through to `Options.Branding.Wordmark`. |
+| Per-model pricing map (`ModelConfig.Pricing` as map) | core-agent | Adapter's `PricingController.Set` writes into the map; core-tui doesn't see it. |
 | Durable event-log / resume | core-agent local | Out of scope per [D20](./docs/decisions.md#d20-resume--replay) (v2). |
 | Attach reconnection lifecycle | core-agent attach | Adapter responsibility per [D11](./docs/decisions.md#d11-attach-mode-remote-agent-over-http-unix-socket). |
 | Attach auth token refresh | core-agent attach | Adapter responsibility. |
 
-None of these block the migration. The first two are noted as future
-core-tui capabilities; the rest are documented adapter responsibilities.
+The §5.1 gaps are the ones that need a design decision **before** the
+adapter is written. Each one is "spec it now" or "punt and adapter
+works around" — the right call depends on how much core-agent's
+operators rely on the feature today. The §5.2 gaps are pure adapter
+responsibilities with no core-tui spec change implied.
 
 ---
 
