@@ -29,6 +29,14 @@ will migrate to depend on it.
   the library must deliver.
 - **[Design](./docs/design.md)** — module layout, the plug-in surface,
   lifecycle, test strategy.
+- **[Style](./docs/style.md)** — visual house style (palette, glyphs,
+  spacing, modal composition).
+- **[Decisions](./docs/decisions.md)** — every load-bearing choice
+  with rationale + rejected alternatives.
+- **[UI references](./docs/ui-references.md)** — observations from
+  other agentic TUIs (Antigravity, Claude Code, Codex, Crush, Cursor).
+- **[Migration guide](./MIGRATION.md)** — adapter contract + per-host
+  capability mapping (cogo, core-agent local + attach) + sketches.
 - **Site** — https://go-steer.github.io/core-tui/ (published once the
   first commit lands).
 
