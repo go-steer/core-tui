@@ -15,6 +15,8 @@
 package tui
 
 import (
+	"strings"
+
 	"charm.land/bubbles/v2/textarea"
 	tea "charm.land/bubbletea/v2"
 )
@@ -61,22 +63,25 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 // handleKey runs the keymap for the visual-preview slice. The slice
 // owns these bindings (no real agent dispatch yet); follow-up slices
 // will replace this with full slash routing and modal state machines.
+//
+// We use msg.String() (a normalized keystroke like "ctrl+b" /
+// "shift+enter") for dispatch — Code+Mod bit-fiddling is brittle in
+// the face of v2's keyboard-enhancement protocol.
 func (m Model) handleKey(msg tea.KeyPressMsg) (tea.Model, tea.Cmd) {
-	key := msg.Key()
+	stroke := msg.String()
+
 	// Modal-close: Esc closes any open overlay before any other handler.
-	if m.overlay != overlayNone && key.Code == tea.KeyEscape {
+	if m.overlay != overlayNone && stroke == "esc" {
 		m.overlay = overlayNone
 		return m, nil
 	}
 
-	// Quit on Ctrl+C / Ctrl+D regardless of focus.
-	if key.Mod&tea.ModCtrl != 0 && (key.Code == 'c' || key.Code == 'd') {
+	switch stroke {
+	case "ctrl+c", "ctrl+d":
 		m.quitting = true
 		return m, tea.Quit
-	}
 
-	// Ctrl+B toggles status layout.
-	if key.Mod&tea.ModCtrl != 0 && key.Code == 'b' {
+	case "ctrl+b":
 		if m.statusLayout == StatusHeader {
 			m.statusLayout = StatusSidebar
 		} else {
@@ -85,41 +90,78 @@ func (m Model) handleKey(msg tea.KeyPressMsg) (tea.Model, tea.Cmd) {
 		m.resize()
 		m.refreshViewport()
 		return m, nil
-	}
 
-	// Shift+Tab cycles the permission mode chip (R-PERM-6/7). Only
-	// effective when the host wired the chip.
-	if key.Code == tea.KeyTab && key.Mod&tea.ModShift != 0 && m.permissionModeWired() {
-		m.permMode = m.permMode.Next()
-		_ = m.opts.PermissionMode.Set(m.permMode)
-		if m.opts.PermissionMode.Persist != nil {
-			_ = m.opts.PermissionMode.Persist(m.permMode)
+	case "shift+tab":
+		if m.permissionModeWired() {
+			m.permMode = m.permMode.Next()
+			_ = m.opts.PermissionMode.Set(m.permMode)
+			if m.opts.PermissionMode.Persist != nil {
+				_ = m.opts.PermissionMode.Persist(m.permMode)
+			}
 		}
 		return m, nil
-	}
 
-	// Ctrl+P / Ctrl+G / Ctrl+Y / Ctrl+E open the four sample modals.
-	// Hardcoded content — this is a visual preview, not a real form
-	// dispatch yet.
-	if key.Mod&tea.ModCtrl != 0 {
-		switch key.Code {
-		case 'p':
-			m.overlay = overlayPalette
-			return m, nil
-		case 'g':
-			m.overlay = overlayModelPicker
-			return m, nil
-		case 'y':
-			m.overlay = overlayPermission
-			return m, nil
-		case 'e':
-			m.overlay = overlayElicit
+	case "ctrl+p":
+		m.overlay = overlayPalette
+		return m, nil
+	case "ctrl+g":
+		m.overlay = overlayModelPicker
+		return m, nil
+	case "ctrl+y":
+		m.overlay = overlayPermission
+		return m, nil
+	case "ctrl+e":
+		m.overlay = overlayElicit
+		return m, nil
+
+	case "enter":
+		// Submit the textarea (R-CHAT-1: Enter submits). For the
+		// visual-preview slice "submit" just appends the typed text
+		// as a RoleUser message and clears the input so the operator
+		// gets feedback. A real slice wires this into the agent.
+		text := strings.TrimSpace(m.input.Value())
+		if text != "" {
+			m.history.Append(Message{Role: RoleUser, Text: text})
+			m.input.Reset()
+			m.refreshViewport()
+		}
+		return m, nil
+
+	case "shift+enter", "ctrl+j":
+		// Insert a newline (R-CHAT-1: Shift-Enter / Ctrl-J inserts
+		// newline). Synthesize an Enter KeyPressMsg with no modifier
+		// and forward to the textarea — that hits its InsertNewline
+		// binding.
+		fakeEnter := tea.KeyPressMsg(tea.Key{Code: tea.KeyEnter})
+		var cmd tea.Cmd
+		m.input, cmd = m.input.Update(fakeEnter)
+		return m, cmd
+
+	case "?":
+		// Surface the full keymap as a system message so the footer
+		// can stay terse. Only triggers when `?` is typed with an
+		// empty input — otherwise the user is mid-sentence and
+		// expects the literal `?` character.
+		if strings.TrimSpace(m.input.Value()) == "" {
+			m.history.Append(Message{
+				Role: RoleSystem,
+				Text: "Keys: enter submit · shift+enter / ctrl+j newline · ctrl+c quit · " +
+					"ctrl+b toggle layout · shift+tab cycle perm-mode · " +
+					"ctrl+p palette · ctrl+g model · ctrl+y permission · ctrl+e elicit · esc close modal",
+			})
+			m.refreshViewport()
 			return m, nil
 		}
 	}
 
-	// Forward to the input field for everything else.
-	var cmd tea.Cmd
-	m.input, cmd = m.input.Update(msg)
-	return m, cmd
+	// Forward unmatched keys to the input field for typing. Viewport
+	// gets the message too so PgUp/PgDn/Home/End scroll the chat
+	// even while the input is focused.
+	var (
+		taCmd tea.Cmd
+		vpCmd tea.Cmd
+	)
+	m.input, taCmd = m.input.Update(msg)
+	m.viewport, vpCmd = m.viewport.Update(msg)
+	return m, tea.Batch(taCmd, vpCmd)
 }

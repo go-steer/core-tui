@@ -63,6 +63,12 @@ func main() {
 func seededConversation() []tui.Message {
 	return []tui.Message{
 		{
+			Role: tui.RoleSystem,
+			Text: "Visual preview — type ? for the full keymap. Demos: ctrl+p palette · " +
+				"ctrl+g model · ctrl+y permission · ctrl+e elicit · ctrl+b toggle layout · " +
+				"shift+tab cycle perm-mode.",
+		},
+		{
 			Role: tui.RoleUser,
 			Text: "Add a NOT NULL constraint to users.email and write the migration.",
 		},

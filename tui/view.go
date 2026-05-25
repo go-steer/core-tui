@@ -62,15 +62,20 @@ func (m Model) View() tea.View {
 
 	chat := m.viewport.View()
 	input := m.renderInputBox()
-	footer := m.renderFooter()
 
 	var body string
 	switch m.effectiveLayout() {
 	case StatusSidebar:
-		left := lipgloss.JoinVertical(lipgloss.Left,
-			chat,
-			input,
-			footer,
+		// Footer wraps to the chat column, NOT to m.width — otherwise
+		// the left block grows wider than the chat column and the
+		// sidebar gets pushed off the right edge of the terminal.
+		chatWidth := m.width - sidebarWidth - 3
+		footer := m.renderFooter(chatWidth)
+		// Force `left` to exactly chatWidth wide so the sidebar lands
+		// at column chatWidth + divider regardless of how short the
+		// individual rows are.
+		left := lipgloss.NewStyle().Width(chatWidth).Render(
+			lipgloss.JoinVertical(lipgloss.Left, chat, input, footer),
 		)
 		sidebar := m.renderSidebar()
 		divider := strings.Repeat(GlyphColumn+"\n", lipgloss.Height(left))
@@ -81,6 +86,7 @@ func (m Model) View() tea.View {
 		)
 	default:
 		header := m.renderHeader()
+		footer := m.renderFooter(m.width)
 		body = lipgloss.JoinVertical(lipgloss.Left,
 			header,
 			chat,
@@ -122,10 +128,16 @@ func (m *Model) resize() {
 		headerHeight = 2 // status line + a blank row
 	}
 	// Allow the footer to wrap onto a second line when the terminal
-	// is narrow; reserve up to 2 rows for it.
+	// is narrow; reserve up to 2 rows for it. Footer wrap width must
+	// match the column it'll render in — chatWidth in sidebar mode,
+	// m.width in header mode.
 	footerRows := footerHeight
-	if m.width > 0 {
-		footerRows = lipgloss.Height(wordWrap(m.renderFooter(), m.width))
+	footerWidth := m.width
+	if layout == StatusSidebar {
+		footerWidth = chatWidth
+	}
+	if footerWidth > 0 {
+		footerRows = lipgloss.Height(m.renderFooter(footerWidth))
 		if footerRows < 1 {
 			footerRows = 1
 		}
@@ -302,17 +314,23 @@ func (m Model) renderInputBox() string {
 	return top + "\n" + m.input.View()
 }
 
-// renderFooter renders the bottom keymap legend (style.md §7.1).
-// Wraps onto a second line when narrower than the legend.
-func (m Model) renderFooter() string {
+// renderFooter renders the bottom keymap legend (style.md §7.1)
+// wrapped to width. Pass chatWidth in StatusSidebar mode and m.width
+// in StatusHeader mode — wrapping to the wrong width can push the
+// right-side panels off-screen.
+//
+// Only the four essential keys are surfaced by default. Everything
+// else (modal shortcuts, layout / mode cycling, newline insertion)
+// is discoverable via `?`, mirroring how Antigravity and Claude Code
+// keep their footer terse.
+func (m Model) renderFooter(width int) string {
 	hint := m.opts.Branding.FooterHint
 	if hint == "" {
-		hint = "ctrl+c quit " + GlyphSeparator + " ctrl+b toggle layout " + GlyphSeparator +
-			" shift+tab cycle perm-mode " + GlyphSeparator + " ctrl+p palette " + GlyphSeparator +
-			" ctrl+g model " + GlyphSeparator + " ctrl+y permission " + GlyphSeparator + " ctrl+e elicit"
+		sep := " " + GlyphSeparator + " "
+		hint = "enter submit" + sep + "shift+enter newline" + sep + "ctrl+c quit" + sep + "? for more"
 	}
-	if m.width > 0 {
-		hint = wordWrap(hint, m.width)
+	if width > 0 {
+		hint = wordWrap(hint, width)
 	}
 	return m.styles.Footer.Render(hint)
 }
