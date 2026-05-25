@@ -38,16 +38,54 @@ embedder into an IPC layer.
 
 **Question:** Bubble Tea v1 or v2?
 
+**Context:** Charm shipped the v2 line in early 2026 — Bubble Tea v2.0,
+Lip Gloss v2, Bubbles v2.0, Glamour v2.0, plus the related Huh v2 form
+library. Import paths moved to the vanity domain (`charm.land/<pkg>/v2`).
+The release is stable, not a preview.
+
 **Options:**
 
-- (A) **v1 (`github.com/charmbracelet/bubbletea`).** Both source TUIs
-  use it. Stable, mature, well-tested.
-- (B) v2 (preview). Newer architecture (e.g. focused components, better
-  layout primitives) but API still in flux as of early 2026; would
-  require rewriting much of the existing TUI rather than porting.
+- (A) v1 (`github.com/charmbracelet/bubbletea`). Both source TUIs use
+  it today; the port from each host's `internal/tui` to core-tui is
+  mechanical. v2 becomes a follow-up migration later.
+- (B) **v2 (`charm.land/bubbletea/v2` + matching v2 of bubbles, lipgloss,
+  glamour).** Lift from the source TUIs but adapt to v2 idioms on the
+  way in: the new Cursed Renderer (orders-of-magnitude lower bandwidth
+  for Wish-style remote rendering, useful for attach-mode TUIs), Mode
+  2026 synchronized output, progressive keyboard enhancements (key
+  releases, super/hyper modifiers), I/O ownership consolidated in
+  Bubble Tea (Lip Gloss is now a pure library), built-in colorprofile
+  downsampling, native progress / cursor / progress-bar primitives,
+  hyperlink support in Glamour.
 
-**Recommendation: (A) v1.** Keep the port mechanical. v2 can be a
-follow-up migration once the API stabilizes.
+**Recommendation: (B) v2.** The extraction is already a rewrite of
+sorts — we're refactoring the seam between TUI and agent at the same
+time — so paying the v2 cost now is cheaper than porting to v1 and
+migrating again later. Concrete consequences captured in the rest of
+this doc:
+
+- New import paths everywhere (`charm.land/bubbletea/v2`,
+  `charm.land/bubbles/v2`, `charm.land/lipgloss/v2`,
+  `charm.land/glamour/v2`).
+- Light/dark detection no longer needs the "query before Bubble Tea
+  takes stdin" hack — v2 owns I/O and delivers
+  `tea.BackgroundColorMsg`. See [R-MD-2 in requirements.md](./requirements.md#311-markdown-rendering-must).
+- Lip Gloss v2 dropped `AdaptiveColor`; we either use the `compat`
+  shim or pick colors explicitly off the background message. We
+  default to the latter for clarity.
+- Bubbles v2 swapped exported `Width`/`Height` fields on viewport,
+  textinput, table, help, progress, filepicker for getter/setter
+  methods. The lifted code from the source TUIs needs a mechanical
+  pass to match.
+- `muesli/reflow` drops out of the direct dep list — Lip Gloss v2's
+  wrapping primitives cover what we used it for. If a corner case
+  surfaces we can re-add it surgically.
+
+**Tradeoff acknowledged:** The lifted code from cogo/core-agent is v1;
+we'll write a one-time adaptation pass instead of a pure lift. The
+upside is that we never owe a "migrate to v2" PR after v1.0 ships, and
+the attach-mode TUI in particular benefits from the Cursed Renderer's
+bandwidth profile.
 
 ---
 
@@ -465,8 +503,9 @@ source TUIs.
   Branding config; one cogo-like and one core-agent-like demo wiring
   showing both hosts can satisfy the interface.
 - **v2 (deferred):** Resume from transcript / eventlog; replay a
-  recording; subagents panel widget; live attach reconnection UX;
-  Bubble Tea v2 migration.
+  recording; subagents panel widget; live attach reconnection UX.
+  (Bubble Tea v2 is in scope for v1 per [D2](#d2-bubble-tea-major-version);
+  no separate migration is planned.)
 
 ---
 
@@ -482,3 +521,51 @@ source TUIs.
 
 **Recommendation: (B).** Matches the more recent of the two source
 TUIs; the Shift-to-select convention is documented in the help text.
+
+---
+
+## D26. Form / picker widget primitives
+
+**Question:** Hand-roll the modal widgets (permission modal, model
+picker, permissions review picker, MCP elicitation form, future
+agent-driven prompts) or build them on top of `charm.land/huh/v2`?
+
+**Context:** v1 of both source TUIs hand-rolled every modal because
+huh v1 wasn't a natural fit (Bubble Tea program ownership conflicts,
+limited validation hooks). huh v2 (released alongside Bubble Tea v2
+in March 2026) is purpose-built to embed inside a host Bubble Tea
+program and exposes `Input`, `Select`, `MultiSelect`, `Confirm`, and
+`Note` as composable fields with built-in validation, theming, and
+focus management.
+
+**Options:**
+
+- (A) Hand-rolled. Direct port from the source TUIs. We own every
+  keymap, layout decision, and validation rule.
+- (B) **huh v2 (`charm.land/huh/v2`).** Use it as the implementation
+  primitive for every modal that's really a form or a picker. We
+  still own the *contract* (`Elicitor`, `PermissionPrompter`,
+  `ModelSwapper`); the form fields underneath become huh `Field`s.
+  Theming flows through Lip Gloss v2 so brand colors (`Options.Branding`)
+  apply uniformly.
+
+**Recommendation: (B) huh v2.** Concrete mappings:
+
+| TUI surface | huh primitive |
+|---|---|
+| Permission modal (R-PERM-1/2) | `huh.NewSelect` with the six decisions; description text carries tool / detail / sub-agent name |
+| `/permissions` review picker (R-PERM-4) | `huh.NewMultiSelect` with toggleable recommendations |
+| `/model` picker (R-MOD-1) | `huh.NewSelect` over `ModelSwapper.AvailableModels()` |
+| MCP elicit form (R-ELIC-1 form mode) | `huh.NewGroup` of `Input` / `Select` / `Confirm` per JSON-schema property |
+| MCP elicit URL action (R-ELIC-1 URL mode) | `huh.NewConfirm` with custom "open / accept / decline" affordances |
+| Future agent-driven prompts (e.g. an agent capability that asks the user a question mid-turn) | same `huh.Field` set, dispatched through a new `UserPrompter` capability |
+
+**Tradeoff acknowledged:** huh v2 is one more direct dependency,
+adding ~one transitive subtree to the import graph (already pulls in
+Bubble Tea v2 / Lip Gloss v2 / Bubbles v2, which we depend on
+anyway). We give up some pixel-perfect control over modal layout in
+exchange for not maintaining hand-rolled focus / Tab / validation
+plumbing in every modal. Hand-rolled modals stay possible for
+surfaces that genuinely don't fit a form (the slash-command palette
+and the file-`@`-picker, which are autocomplete UIs, not forms — they
+keep their bespoke implementations).

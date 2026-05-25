@@ -91,6 +91,13 @@ The default test run needs no network and no API keys.
   `Agent.Run` is a capability the TUI feature-detects via type
   assertion. A missing capability degrades to a "not available in
   this host" message — never a hard error.
+- **Charm v2 only.** Imports are `charm.land/bubbletea/v2`,
+  `charm.land/bubbles/v2`, `charm.land/lipgloss/v2`,
+  `charm.land/glamour/v2`, `charm.land/huh/v2`. No `github.com/charmbracelet/...`
+  imports — those are the v1 line. Background-color handling uses
+  `tea.BackgroundColorMsg`; do not call into the v1 termenv-based
+  query path. See [`docs/decisions.md` D2](./docs/decisions.md#d2-bubble-tea-major-version)
+  for the rationale.
 
 ## How we develop
 

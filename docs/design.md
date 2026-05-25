@@ -39,6 +39,7 @@ core-tui/
 ├── tui/                # the library — public surface
 │   ├── agent.go        Agent interface + capability interfaces + Event types
 │   ├── prompter.go     PermissionPrompter + PermissionRequest/Decision
+│   │                   (blocking decision modal renders via huh.Select)
 │   ├── elicitor.go     Elicitor + ElicitRequest/Result
 │   ├── tracker.go      UsageTracker interface (host implements; TUI reads)
 │   ├── options.go      Options struct + Branding + defaults
@@ -56,9 +57,9 @@ core-tui/
 │   ├── styles.go       Styles + adaptive colors
 │   ├── thinking.go     rotating "thinking" indicator
 │   ├── branding.go     default brand + Branding helpers
-│   ├── modelpicker.go  model picker overlay
-│   ├── permpicker.go   permissions review overlay
-│   ├── elicit.go       MCP-elicit modal state
+│   ├── modelpicker.go  model picker overlay (huh.Select)
+│   ├── permpicker.go   permissions review overlay (huh.MultiSelect)
+│   ├── elicit.go       MCP-elicit modal state (huh.Group)
 │   ├── transcript.go   on-exit transcript writer
 │   ├── agentcmd.go     translates Agent events → tea.Msgs
 │   └── *_test.go       table-driven Update() tests + smoke tests
@@ -641,10 +642,13 @@ Adapter LOC budget: ~400 lines (more capabilities to wire).
    reflects the current MCP SDK schema flattening. If the SDK adds
    nested-object support, we need to extend the elicit modal. Out of
    scope for v1; document the constraint in the API doc.
-4. **Bubble Tea v1 EOL.** When upstream commits to v2, we will need a
-   migration. The internal-package split keeps the blast radius
-   contained: only `program.go`, `model.go`, `update.go`, `view.go`
-   touch tea directly.
+4. **Charm v2 churn.** We target the Charm v2 line (Bubble Tea v2 /
+   Bubbles v2 / Lip Gloss v2 / Glamour v2 / Huh v2) per
+   [decisions.md D2 + D26](./decisions.md). v2.0 is stable but young —
+   patch / minor releases may surface behavioral fixes we need to
+   absorb. Mitigation: keep `tea`-touching code concentrated in
+   `program.go`, `model.go`, `update.go`, `view.go`, and the modal
+   files; pin minor versions in `go.mod` and bump deliberately.
 
 ## 11. Implementation plan (informational)
 

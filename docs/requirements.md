@@ -211,8 +211,12 @@ listed in `/help`:
 - **R-MD-1** Final assistant messages are rendered via Glamour with
   custom heading styles (bold H2–H6 with color) and code-fence
   borders.
-- **R-MD-2** Light/dark terminal background detected once at startup
-  (before tea takes stdin) and re-used for all renders.
+- **R-MD-2** Light/dark terminal background is sourced from Bubble Tea
+  v2's `tea.BackgroundColorMsg` (delivered during program startup;
+  Bubble Tea v2 owns terminal I/O so we no longer pre-query stdin) and
+  cached for the rest of the session. If the terminal later reports a
+  changed background, the cache updates and subsequent renders pick up
+  the new value.
 - **R-MD-3** Streaming partial text is rendered through Glamour on
   every update so the user sees formatted markdown as the turn
   unfolds. The renderer must tolerate half-formed input (e.g. an
@@ -274,8 +278,13 @@ listed in `/help`:
 ## 4. Non-functional Requirements
 
 - **N-LANG** Go ≥ 1.23 (for `iter.Seq2`). No cgo.
-- **N-DEPS** Direct dependencies limited to: `bubbletea`, `bubbles`,
-  `lipgloss`, `glamour`, `muesli/reflow`. No transitive coupling to
+- **N-DEPS** Direct dependencies limited to the Charm v2 set:
+  `charm.land/bubbletea/v2`, `charm.land/bubbles/v2`,
+  `charm.land/lipgloss/v2`, `charm.land/glamour/v2`, and
+  `charm.land/huh/v2` (used for the form-style modals — see
+  [decisions.md D26](./decisions.md#d26-form--picker-widget-primitives)).
+  `muesli/reflow` is no longer a direct dependency; Lip Gloss v2's
+  wrapping primitives cover its role. No transitive coupling to
   Google ADK, MCP SDK, or any agent framework. (Hosts may pull those
   in.)
 - **N-PERF** TUI must remain responsive on a 200-message history;
@@ -315,7 +324,6 @@ listed in `/help`:
   decision D11).
 - Headless / non-interactive REPL mode.
 - OTEL traces from TUI code.
-- Bubble Tea v2 (defer until upstream stabilizes).
 - Windows-specific tooling.
 
 ## 7. Acceptance criteria
