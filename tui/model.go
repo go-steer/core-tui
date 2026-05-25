@@ -76,6 +76,21 @@ type Model struct {
 	// Esc / Enter / Space.
 	sideAnswer *SideAnswer
 
+	// pendingPermission is the active PermissionRequest awaiting an
+	// operator decision (R-PERM-1). Nil = no modal open. Key
+	// handler dispatches back via opts.Prompter.dispatchDecision.
+	pendingPermission *PermissionRequest
+
+	// pendingElicit is the active ElicitRequest awaiting form
+	// submission / decline / cancel (R-ELIC-1). Nil = no modal
+	// open. Per-field cursor + values tracked in elicitFieldIdx +
+	// elicitValues. Key handler dispatches back via
+	// opts.Elicitor.dispatchResult.
+	pendingElicit    *ElicitRequest
+	pendingElicitSrv string         // server name for the title bar
+	elicitFieldIdx   int            // currently-focused field (Tab/Shift+Tab nav)
+	elicitValues     map[string]any // in-progress form values
+
 	// toast is a transient banner that renders between the input
 	// box and the footer (R-WAKE-1). Cleared after toastTTL via
 	// cullToast on the next render. Set by wakeMsg handling.

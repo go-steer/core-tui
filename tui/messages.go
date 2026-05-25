@@ -77,3 +77,20 @@ type wakeMsg struct{}
 // drops the toast on receive unless a fresher wake has restarted
 // the timer (R-WAKE-1).
 type toastClearMsg struct{}
+
+// permissionRequestMsg fires when the prompter's request channel
+// surfaces an inbound PermissionRequest (R-PERM-1). Update sets
+// the modal-pending state; the modal's key handler dispatches the
+// decision back via Prompter.dispatchDecision.
+type permissionRequestMsg struct {
+	req PermissionRequest
+}
+
+// elicitRequestMsg fires when the elicitor's request channel
+// surfaces an inbound ElicitRequest (R-ELIC-1). Update sets the
+// elicit-pending state; the form's key handler dispatches the
+// result back via elicitor.dispatchResult.
+type elicitRequestMsg struct {
+	serverName string
+	req        ElicitRequest
+}

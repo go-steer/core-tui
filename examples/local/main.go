@@ -79,6 +79,40 @@ func makeDemoWakeChannel() chan struct{} {
 // demo channel; real hosts return their agent's wake channel.
 func (demoAgent) WakeRequested() <-chan struct{} { return wakeCh }
 
+// demoPermissionAfter fires a synthetic permission prompt after
+// delay so the visual preview can demo the modal. The decision
+// returned by the operator is just printed to stderr — the demo
+// agent doesn't actually need approval.
+func demoPermissionAfter(p tui.PermissionPrompter, delay time.Duration) {
+	time.Sleep(delay)
+	_, _ = p.AskApproval(context.Background(), tui.PermissionRequest{
+		Kind:        tui.PermissionKindEdit,
+		ToolName:    "Write",
+		Detail:      "- if user.Email == \"\" {\n+ if user.Email == \"\" || !strings.Contains(user.Email, \"@\") {",
+		DetailKind:  tui.DetailDiff,
+		Verb:        "edit",
+		PersistTool: "edit",
+		PersistKey:  "internal/auth/session.go",
+	})
+}
+
+// demoElicitAfter fires a synthetic MCP elicit request after delay
+// so the visual preview demos the form modal end-to-end.
+func demoElicitAfter(e tui.Elicitor, delay time.Duration) {
+	time.Sleep(delay)
+	_, _ = e.Elicit(context.Background(), "github", tui.ElicitRequest{
+		Mode:        tui.ElicitFormMode,
+		Title:       "repository access",
+		Description: "the github MCP server needs a repo + branch to push to",
+		Fields: []tui.ElicitField{
+			{Name: "repo", Type: tui.ElicitFieldString, Required: true, Default: "go-steer/core-tui"},
+			{Name: "branch", Type: tui.ElicitFieldString, Required: true, Default: "main"},
+			{Name: "force", Type: tui.ElicitFieldBoolean, Description: "force push", Default: false},
+			{Name: "visibility", Type: tui.ElicitFieldEnum, EnumChoices: []string{"public", "private", "internal"}, Default: "private"},
+		},
+	})
+}
+
 func (demoAgent) SlashCommands() []tui.SlashCommandSpec {
 	return []tui.SlashCommandSpec{
 		{
@@ -107,12 +141,24 @@ func (demoAgent) InvokeSlash(_ context.Context, name, args string) (tui.SlashRes
 }
 
 func main() {
+	prompter := tui.NewPrompter()
+	elicitor := tui.NewElicitor()
+
+	// Fire a fake permission prompt + elicit request a few seconds
+	// after launch so the visual preview demos both modals end-to-
+	// end. A real host wires these into its permission gate +
+	// MCP servers.
+	go demoPermissionAfter(prompter, 8*time.Second)
+	go demoElicitAfter(elicitor, 18*time.Second)
+
 	opts := tui.Options{
 		// Scripted agent plays a believable coding-task turn on every
 		// submit so the operator can see streaming + spinner + Glamour
 		// + per-turn footer end-to-end. Same script regardless of
 		// prompt — it's a visual harness, not a real agent.
 		Agent:        demoAgent{Agent: testagent.NewScripted(testagent.CodingDemo())},
+		Prompter:     prompter,
+		Elicitor:     elicitor,
 		StatusLayout: tui.StatusHeader,
 		// QueueForNext (default) demos R-CHAT-10 — type-ahead entries
 		// buffer as ○ queued and drain on turn-end. Flip to

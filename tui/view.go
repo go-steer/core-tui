@@ -119,13 +119,21 @@ func (m Model) View() tea.View {
 		body = lipgloss.JoinVertical(lipgloss.Left, parts...)
 	}
 
-	// Overlay any active modal centered over the body. Side-answer
-	// modal (R-CMD-5) wins precedence over the demo modals because
-	// it represents an active agent response.
-	if m.sideAnswer != nil {
+	// Overlay any active modal centered over the body. Precedence:
+	// permission > elicit > sideAnswer > demo modals. Permission and
+	// elicit gate real agent activity so they win the screen even
+	// over a /btw side-answer.
+	switch {
+	case m.pendingPermission != nil:
+		modal := m.renderPermissionModal()
+		body = lipgloss.Place(m.width, m.height, lipgloss.Center, lipgloss.Center, modal)
+	case m.pendingElicit != nil:
+		modal := m.renderElicitModal()
+		body = lipgloss.Place(m.width, m.height, lipgloss.Center, lipgloss.Center, modal)
+	case m.sideAnswer != nil:
 		modal := m.renderSideAnswer()
 		body = lipgloss.Place(m.width, m.height, lipgloss.Center, lipgloss.Center, modal)
-	} else if m.overlay != overlayNone {
+	case m.overlay != overlayNone:
 		modal := m.renderOverlay()
 		body = lipgloss.Place(m.width, m.height, lipgloss.Center, lipgloss.Center, modal)
 	}
@@ -631,7 +639,7 @@ func (m *Model) renderSideAnswer() string {
 		q = string([]rune(q)[:width-13]) + GlyphTruncate
 	}
 	titleBar := m.styles.ModalTitle.Render("by the way: " + q)
-	titleRule := m.styles.ModalBorder.Render(strings.Repeat(GlyphRule, max(0, width-lipgloss.Width(titleBar)-3)))
+	titleRule := m.styles.ModalBorder.Render(strings.Repeat(GlyphRule, nonNeg(width-lipgloss.Width(titleBar)-3)))
 	titleLine := titleBar + " " + titleRule
 
 	var body string
@@ -645,7 +653,7 @@ func (m *Model) renderSideAnswer() string {
 		body = mr.renderMarkdown(m.sideAnswer.Answer)
 	}
 
-	footerRule := m.styles.ModalBorder.Render(strings.Repeat(GlyphRule, max(0, width-2)))
+	footerRule := m.styles.ModalBorder.Render(strings.Repeat(GlyphRule, nonNeg(width-2)))
 	footerLine := m.styles.ModalFooter.Render("esc / enter / space dismiss")
 
 	content := lipgloss.JoinVertical(lipgloss.Left,
@@ -678,13 +686,203 @@ func (m Model) renderToast(width int) string {
 	return m.styles.PermissionWarn.Render(body)
 }
 
-// max returns the larger of a and b. Tiny helper to keep the
-// modal-width clamping calls readable.
-func max(a, b int) int {
-	if a > b {
-		return a
+// renderPermissionModal renders the permission-approval prompt
+// (R-PERM-1 / R-PERM-2). Six decision keys spelled out in the
+// footer; the per-tool payload (diff / shell / http / args)
+// renders in the body styled per req.DetailKind.
+func (m *Model) renderPermissionModal() string {
+	req := m.pendingPermission
+	if req == nil {
+		return ""
 	}
-	return b
+	width := 80
+	if m.width > 0 && width > m.width-4 {
+		width = m.width - 4
+	}
+	if width < 30 {
+		width = 30
+	}
+
+	titleBar := m.styles.ModalTitle.Render("Permission required: " + req.ToolName)
+	titleRule := m.styles.ModalBorder.Render(strings.Repeat(GlyphRule, nonNeg(width-lipgloss.Width(titleBar)-3)))
+	titleLine := titleBar + " " + titleRule
+
+	var lines []string
+	if req.Source != "" {
+		lines = append(lines, m.styles.Muted.Render("from sub-agent: "+req.Source))
+	}
+	if req.Verb != "" {
+		lines = append(lines, m.styles.Muted.Render("verb: "+req.Verb))
+	}
+	if req.Detail != "" {
+		lines = append(lines, m.renderPermissionDetail(req, width-4))
+	}
+	body := strings.Join(lines, "\n")
+
+	keys := []string{
+		"y allow once",
+		"n deny",
+		"s allow session",
+	}
+	if req.Verb != "" {
+		keys = append(keys, "v allow verb")
+	}
+	keys = append(keys, "t allow tool", "a allow always", "esc deny")
+	footerLine := m.styles.ModalFooter.Render(strings.Join(keys, " "+GlyphSeparator+" "))
+	footerRule := m.styles.ModalBorder.Render(strings.Repeat(GlyphRule, nonNeg(width-2)))
+
+	content := lipgloss.JoinVertical(lipgloss.Left,
+		titleLine,
+		"",
+		body,
+		"",
+		footerRule,
+		footerLine,
+	)
+	return m.styles.ModalBorder.Padding(0, 1).Width(width).Render(content)
+}
+
+// renderPermissionDetail renders the payload through Glamour with
+// the right code-fence language tag from req.DetailKind so the
+// diff / shell / http blocks get the expected styling.
+func (m *Model) renderPermissionDetail(req *PermissionRequest, width int) string {
+	if req.Detail == "" {
+		return ""
+	}
+	mr := m.ensureMarkdown()
+	switch req.DetailKind {
+	case DetailDiff:
+		return mr.renderMarkdown("```diff\n" + req.Detail + "\n```")
+	case DetailShell:
+		return mr.renderMarkdown("```bash\n" + req.Detail + "\n```")
+	case DetailHTTP:
+		return mr.renderMarkdown("```http\n" + req.Detail + "\n```")
+	case DetailArgs:
+		return mr.renderMarkdown("```json\n" + req.Detail + "\n```")
+	default:
+		return wordWrap(req.Detail, width)
+	}
+}
+
+// renderElicitModal renders an MCP elicit request as either a form
+// (per-field) or URL action row (R-ELIC-1 / R-ELIC-2).
+func (m *Model) renderElicitModal() string {
+	req := m.pendingElicit
+	if req == nil {
+		return ""
+	}
+	width := 72
+	if m.width > 0 && width > m.width-4 {
+		width = m.width - 4
+	}
+	if width < 30 {
+		width = 30
+	}
+
+	title := req.Title
+	if title == "" {
+		title = "MCP request"
+	}
+	if m.pendingElicitSrv != "" {
+		title = m.pendingElicitSrv + " " + GlyphSeparator + " " + title
+	}
+	titleBar := m.styles.ModalTitle.Render(title)
+	titleRule := m.styles.ModalBorder.Render(strings.Repeat(GlyphRule, nonNeg(width-lipgloss.Width(titleBar)-3)))
+	titleLine := titleBar + " " + titleRule
+
+	var body, footer string
+	if req.Mode == ElicitURLMode {
+		body = m.styles.Accent.Render(req.URL)
+		if req.Description != "" {
+			body = m.styles.Muted.Render(req.Description) + "\n\n" + body
+		}
+		footer = "a / enter accept " + GlyphSeparator + " n decline " + GlyphSeparator + " esc cancel"
+	} else {
+		body = m.renderElicitForm(width - 4)
+		footer = "tab next " + GlyphSeparator + " shift+tab prev " + GlyphSeparator +
+			" space toggle " + GlyphSeparator + " ←/→ enum " + GlyphSeparator +
+			" enter submit " + GlyphSeparator + " esc cancel"
+	}
+
+	footerRule := m.styles.ModalBorder.Render(strings.Repeat(GlyphRule, nonNeg(width-2)))
+	footerLine := m.styles.ModalFooter.Render(footer)
+	content := lipgloss.JoinVertical(lipgloss.Left,
+		titleLine,
+		"",
+		body,
+		"",
+		footerRule,
+		footerLine,
+	)
+	return m.styles.ModalBorder.Padding(0, 1).Width(width).Render(content)
+}
+
+// renderElicitForm renders the form's fields one per line, with
+// the focused row highlighted in the accent color.
+func (m *Model) renderElicitForm(width int) string {
+	req := m.pendingElicit
+	if req == nil {
+		return ""
+	}
+	var rows []string
+	for i, f := range req.Fields {
+		row := m.renderElicitField(f, i == m.elicitFieldIdx, width)
+		rows = append(rows, row)
+	}
+	return strings.Join(rows, "\n")
+}
+
+// renderElicitField renders one field row (label : value), styling
+// the focused one accent-bold. Width is reserved for future
+// per-field truncation; unused today but kept on the signature so
+// callers don't have to refactor when it lands.
+func (m *Model) renderElicitField(f ElicitField, focused bool, _ int) string {
+	label := f.Name
+	if f.Required {
+		label += "*"
+	}
+	value := m.formatElicitValue(f)
+	row := fmt.Sprintf("  %-16s %s", label+":", value)
+	if focused {
+		return m.styles.Accent.Render("> " + strings.TrimPrefix(row, "  "))
+	}
+	return m.styles.AssistantText.Render(row)
+}
+
+// formatElicitValue renders the current value of a field for the
+// modal — booleans as checkboxes, enums with arrow hints, strings/
+// numbers as the literal value or a placeholder.
+func (m *Model) formatElicitValue(f ElicitField) string {
+	switch f.Type {
+	case ElicitFieldBoolean:
+		on, _ := m.elicitValues[f.Name].(bool)
+		if on {
+			return "[✓]"
+		}
+		return "[ ]"
+	case ElicitFieldEnum:
+		v, _ := m.elicitValues[f.Name].(string)
+		if v == "" && len(f.EnumChoices) > 0 {
+			v = f.EnumChoices[0]
+		}
+		return "‹ " + v + " ›"
+	default:
+		v, _ := m.elicitValues[f.Name].(string)
+		if v == "" {
+			return m.styles.Muted.Render("(empty)")
+		}
+		return v
+	}
+}
+
+// nonNeg returns x when x > 0, else 0. Used for the modal-width
+// rule arithmetic where a too-narrow terminal can produce negative
+// repeat counts; strings.Repeat panics on negative counts.
+func nonNeg(x int) int {
+	if x < 0 {
+		return 0
+	}
+	return x
 }
 
 // renderHelpPanel renders the bottom-anchored stacked help panel when

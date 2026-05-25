@@ -36,6 +36,8 @@ func (m Model) Init() tea.Cmd {
 		textarea.Blink,
 		m.eventListener(),
 		m.wakeListener(),
+		m.promptListener(),
+		m.elicitListener(),
 	)
 }
 
@@ -92,6 +94,24 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		// Re-issue both the wake subscription (drain the next one)
 		// and a tick that auto-clears the toast after toastTTL.
 		return m, tea.Batch(m.wakeListener(), toastTick())
+	case permissionRequestMsg:
+		req := msg.req
+		m.pendingPermission = &req
+		m.refreshViewport()
+		return m, nil
+	case elicitRequestMsg:
+		r := msg.req
+		m.pendingElicit = &r
+		m.pendingElicitSrv = msg.serverName
+		m.elicitFieldIdx = 0
+		m.elicitValues = make(map[string]any, len(r.Fields))
+		for _, f := range r.Fields {
+			if f.Default != nil {
+				m.elicitValues[f.Name] = f.Default
+			}
+		}
+		m.refreshViewport()
+		return m, nil
 	case toastClearMsg:
 		// Only clear if the same toast is still up (a fresh wake
 		// during the TTL window restarts the timer).
@@ -127,6 +147,14 @@ func (m Model) handleKey(msg tea.KeyPressMsg) (tea.Model, tea.Cmd) {
 	// other modal → help panel → palette → interrupt-in-flight →
 	// no-op. Never quits.
 	if stroke == "esc" {
+		if m.pendingPermission != nil {
+			m.dispatchPermission(DecisionDeny)
+			return m, m.promptListener()
+		}
+		if m.pendingElicit != nil {
+			m.dispatchElicit(ElicitResult{Action: ElicitActionCancel})
+			return m, m.elicitListener()
+		}
 		if m.sideAnswer != nil {
 			m.sideAnswer = nil
 			m.resize()
@@ -161,6 +189,45 @@ func (m Model) handleKey(msg tea.KeyPressMsg) (tea.Model, tea.Cmd) {
 		m.sideAnswer = nil
 		m.resize()
 		m.refreshViewport()
+		return m, nil
+	}
+
+	// Permission modal — R-PERM-2's six decision keys. Highest
+	// precedence after Esc so nothing else fires while pending.
+	if m.pendingPermission != nil {
+		switch stroke {
+		case "y":
+			m.dispatchPermission(DecisionAllowOnce)
+			return m, m.promptListener()
+		case "n":
+			m.dispatchPermission(DecisionDeny)
+			return m, m.promptListener()
+		case "s":
+			m.dispatchPermission(DecisionAllowSession)
+			return m, m.promptListener()
+		case "v":
+			if m.pendingPermission.Verb != "" {
+				m.dispatchPermission(DecisionAllowSessionVerb)
+				return m, m.promptListener()
+			}
+		case "t":
+			m.dispatchPermission(DecisionAllowSessionTool)
+			return m, m.promptListener()
+		case "a":
+			m.dispatchPermission(DecisionAllowAlways)
+			return m, m.promptListener()
+		}
+		// Swallow any other key — modal is exclusive while open.
+		return m, nil
+	}
+
+	// Elicit modal — Tab/Shift+Tab nav, Enter submit, n decline,
+	// Space toggle bool/enum, and printable chars feed the focused
+	// string/number field.
+	if m.pendingElicit != nil {
+		if cmd := m.handleElicitKey(stroke); cmd != nil {
+			return m, cmd
+		}
 		return m, nil
 	}
 
@@ -577,6 +644,153 @@ func sliceContains(xs []string, target string) bool {
 		}
 	}
 	return false
+}
+
+// dispatchPermission writes the operator's decision back to the
+// pending Prompter flow and clears the modal state so the next
+// inbound request can render.
+func (m *Model) dispatchPermission(d PermissionDecision) {
+	if p, ok := m.opts.Prompter.(*Prompter); ok {
+		p.dispatchDecision(d)
+	}
+	m.pendingPermission = nil
+	m.refreshViewport()
+}
+
+// dispatchElicit writes the operator's elicit result back to the
+// pending elicitor flow and clears the modal state.
+func (m *Model) dispatchElicit(r ElicitResult) {
+	if e, ok := m.opts.Elicitor.(*elicitor); ok {
+		e.dispatchResult(r)
+	}
+	m.pendingElicit = nil
+	m.pendingElicitSrv = ""
+	m.elicitFieldIdx = 0
+	m.elicitValues = nil
+	m.refreshViewport()
+}
+
+// handleElicitKey routes a keystroke to the elicit form's nav /
+// per-field-edit handlers (R-ELIC-2). Returns the Cmd to issue
+// after the keystroke (the re-armed elicit listener when a result
+// is dispatched, otherwise nil for in-form moves).
+func (m *Model) handleElicitKey(stroke string) tea.Cmd {
+	req := m.pendingElicit
+	if req.Mode == ElicitURLMode {
+		switch stroke {
+		case "a", "enter":
+			m.dispatchElicit(ElicitResult{Action: ElicitActionSubmit})
+			return m.elicitListener()
+		case "n":
+			m.dispatchElicit(ElicitResult{Action: ElicitActionDecline})
+			return m.elicitListener()
+		}
+		// 'o' would open the URL in a browser — deferred to a
+		// later slice (we don't depend on os/exec yet).
+		return func() tea.Msg { return nil } // swallow other keys
+	}
+
+	// Form mode.
+	switch stroke {
+	case "enter":
+		// Validate required fields; on success submit.
+		for _, f := range req.Fields {
+			if !f.Required {
+				continue
+			}
+			v, ok := m.elicitValues[f.Name]
+			if !ok || isElicitEmpty(v) {
+				// Move cursor to the missing field; don't submit.
+				for i, ff := range req.Fields {
+					if ff.Name == f.Name {
+						m.elicitFieldIdx = i
+						break
+					}
+				}
+				m.refreshViewport()
+				return func() tea.Msg { return nil }
+			}
+		}
+		m.dispatchElicit(ElicitResult{Action: ElicitActionSubmit, Values: m.elicitValues})
+		return m.elicitListener()
+	case "tab":
+		m.elicitFieldIdx = (m.elicitFieldIdx + 1) % len(req.Fields)
+		m.refreshViewport()
+		return func() tea.Msg { return nil }
+	case "shift+tab":
+		m.elicitFieldIdx = (m.elicitFieldIdx - 1 + len(req.Fields)) % len(req.Fields)
+		m.refreshViewport()
+		return func() tea.Msg { return nil }
+	case "space":
+		f := req.Fields[m.elicitFieldIdx]
+		if f.Type == ElicitFieldBoolean {
+			cur, _ := m.elicitValues[f.Name].(bool)
+			m.elicitValues[f.Name] = !cur
+			m.refreshViewport()
+			return func() tea.Msg { return nil }
+		}
+	case "left", "right":
+		f := req.Fields[m.elicitFieldIdx]
+		if f.Type == ElicitFieldEnum && len(f.EnumChoices) > 0 {
+			idx := indexOfEnum(f.EnumChoices, m.elicitValues[f.Name])
+			delta := 1
+			if stroke == "left" {
+				delta = -1
+			}
+			idx = (idx + delta + len(f.EnumChoices)) % len(f.EnumChoices)
+			m.elicitValues[f.Name] = f.EnumChoices[idx]
+			m.refreshViewport()
+			return func() tea.Msg { return nil }
+		}
+	case "backspace":
+		f := req.Fields[m.elicitFieldIdx]
+		if f.Type == ElicitFieldString {
+			cur, _ := m.elicitValues[f.Name].(string)
+			if cur != "" {
+				m.elicitValues[f.Name] = cur[:len(cur)-1]
+				m.refreshViewport()
+				return func() tea.Msg { return nil }
+			}
+		}
+	}
+	// Printable single-rune keystrokes — append to string fields.
+	if len(stroke) == 1 {
+		f := req.Fields[m.elicitFieldIdx]
+		if f.Type == ElicitFieldString || f.Type == ElicitFieldNumber || f.Type == ElicitFieldInteger {
+			cur, _ := m.elicitValues[f.Name].(string)
+			m.elicitValues[f.Name] = cur + stroke
+			m.refreshViewport()
+			return func() tea.Msg { return nil }
+		}
+	}
+	return func() tea.Msg { return nil }
+}
+
+// isElicitEmpty reports whether v is the zero value for its type
+// — used by Enter's submit-time validation against required fields.
+func isElicitEmpty(v any) bool {
+	switch t := v.(type) {
+	case nil:
+		return true
+	case string:
+		return t == ""
+	case bool:
+		return false // every bool is a valid choice
+	default:
+		return false
+	}
+}
+
+// indexOfEnum returns the index of v in choices, defaulting to 0
+// when v is nil or not found. Used by enum left/right cycling.
+func indexOfEnum(choices []string, v any) int {
+	s, _ := v.(string)
+	for i, c := range choices {
+		if c == s {
+			return i
+		}
+	}
+	return 0
 }
 
 // maybeDrainQueue auto-starts the next Queued prompt as a fresh turn

@@ -22,6 +22,11 @@ import (
 	tea "charm.land/bubbletea/v2"
 )
 
+// Compile-time enforcement that the unexported *elicitor satisfies
+// the public Elicitor interface — flags a regression early if the
+// method set drifts.
+var _ Elicitor = (*elicitor)(nil)
+
 // spinnerCadence is the rotation period for thinking/working verbs
 // (R-CHAT-3).
 const spinnerCadence = 3 * time.Second
@@ -36,6 +41,53 @@ func toastTick() tea.Cmd {
 	return tea.Tick(toastTTL, func(time.Time) tea.Msg {
 		return toastClearMsg{}
 	})
+}
+
+// promptListener returns a Cmd that blocks on the prompter's
+// request channel and forwards each inbound request as a
+// permissionRequestMsg (R-PERM-1). Re-issued by Update after every
+// dispatch so the loop drains one request at a time. Returns nil
+// when no prompter is wired.
+func (m Model) promptListener() tea.Cmd {
+	if m.opts.Prompter == nil {
+		return nil
+	}
+	p, ok := m.opts.Prompter.(*Prompter)
+	if !ok {
+		// Host wired its own PermissionPrompter implementation;
+		// the TUI can't drain a channel it doesn't own. Adapters
+		// pass tui.NewPrompter() — this branch is the diagnostic
+		// path if someone substitutes their own.
+		return nil
+	}
+	return func() tea.Msg {
+		req, ok := p.nextRequest(context.Background())
+		if !ok {
+			return nil
+		}
+		return permissionRequestMsg{req: req}
+	}
+}
+
+// elicitListener returns a Cmd that blocks on the elicitor's
+// request channel and forwards each inbound request as an
+// elicitRequestMsg (R-ELIC-1). Same drain-loop pattern as
+// promptListener.
+func (m Model) elicitListener() tea.Cmd {
+	if m.opts.Elicitor == nil {
+		return nil
+	}
+	e, ok := m.opts.Elicitor.(*elicitor)
+	if !ok {
+		return nil
+	}
+	return func() tea.Msg {
+		flow, ok := e.nextRequest(context.Background())
+		if !ok {
+			return nil
+		}
+		return elicitRequestMsg{serverName: flow.serverName, req: flow.req}
+	}
 }
 
 // eventListener returns a Cmd that blocks on the model's event channel

@@ -49,6 +49,19 @@ type Options struct {
 	// this nil.
 	SeedHistory []Message
 
+	// Prompter is the TUI-provided PermissionPrompter that the host
+	// wires into its permission gate before the first turn (R-PERM-1).
+	// Hosts construct one via tui.NewPrompter() and pass it both
+	// into the gate (`gate.SetPrompter(prompter)`) AND here. The TUI
+	// drains the prompter's request channel and renders a modal
+	// for each inbound request.
+	Prompter PermissionPrompter
+
+	// Elicitor is the TUI-provided Elicitor that the host wires
+	// into each MCP server's elicit callback before MCP connect
+	// (R-ELIC-1). Construct via tui.NewElicitor().
+	Elicitor Elicitor
+
 	// MidTurnInjectionMode picks what happens when the operator
 	// submits a prompt while a turn is in flight (R-CHAT-11). Zero
 	// value (`QueueForNext`) preserves the R-CHAT-10 default:
