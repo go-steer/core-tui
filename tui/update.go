@@ -96,6 +96,9 @@ func (m Model) handleKey(msg tea.KeyPressMsg) (tea.Model, tea.Cmd) {
 		} else {
 			m.statusLayout = StatusHeader
 		}
+		if m.opts.PersistStatusLayout != nil {
+			_ = m.opts.PersistStatusLayout(m.statusLayout)
+		}
 		m.resize()
 		m.refreshViewport()
 		return m, nil

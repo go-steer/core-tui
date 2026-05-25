@@ -23,8 +23,17 @@ type Options struct {
 	// R-BRAND-1. Zero value uses defaults.
 	Branding Branding
 
-	// StatusLayout picks the status surface (R-USE-2).
+	// StatusLayout picks the status surface (R-USE-2). The initial
+	// value is whatever the host sets here; the user can flip it at
+	// runtime via Ctrl+B.
 	StatusLayout StatusLayout
+
+	// PersistStatusLayout is called when the user toggles the status
+	// layout at runtime so the host can write the choice to a
+	// settings file. Hosts that read it back into StatusLayout on
+	// the next launch give users a layout preference that survives
+	// restarts. Nil means the toggle stays session-local.
+	PersistStatusLayout func(StatusLayout) error
 
 	// PermissionMode wires the permission-mode chip (R-PERM-6 / R-PERM-7).
 	// Zero value hides the chip and disables Shift+Tab cycling.

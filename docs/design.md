@@ -360,6 +360,12 @@ type Options struct {
     // single line above the chat; StatusSidebar = right-hand column.
     StatusLayout StatusLayout
 
+    // PersistStatusLayout is invoked when the user toggles the
+    // status layout at runtime (Ctrl+B). Nil leaves the toggle
+    // session-local; non-nil lets the host write the choice to a
+    // settings file so it survives restarts.
+    PersistStatusLayout func(StatusLayout) error
+
     // Spinner verb pools (R-CHAT-3). Nil = built-in defaults.
     ThinkingPhrases []string // rotated while the model is generating
     WorkingPhrases  []string // rotated while a tool call is in flight

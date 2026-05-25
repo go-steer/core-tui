@@ -289,9 +289,14 @@ listed in `/help`:
     TUIs, Antigravity, and Claude Code.
   - **`StatusSidebar`** — a fixed-width right-hand column carrying
     the status plus any host-supplied auxiliary blocks (modified
-    files, LSPs, MCPs, sub-agents). Collapsible at runtime via a
-    bound keystroke (default `Ctrl+B`). Matches Crush. See
+    files, LSPs, MCPs, sub-agents). Matches Crush. See
     [`ui-references.md` (Crush §Layout)](./ui-references.md#charmbraceletcrush).
+
+  `Ctrl+B` toggles between layouts at runtime. When the host wires
+  `Options.PersistStatusLayout`, the TUI invokes it on every toggle
+  so the choice can survive restarts (the host reads the persisted
+  value back into `Options.StatusLayout` on next launch). Without
+  the callback the toggle stays session-local.
 - **R-USE-3** Pricing values come from `Options.UsageTracker`; the
   TUI does not own pricing tables.
 
