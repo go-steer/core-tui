@@ -86,13 +86,13 @@ to contaminate.
 
 ### Patterns worth borrowing
 
-| Antigravity pattern | Where it could land in core-tui |
+| Antigravity pattern | Status |
 |---|---|
-| Cognition marker includes elapsed + token count (`Thought for 6s, 388 tokens`) | Stronger version of R-CHAT-3's rotating "thinking" line. Could become a settled per-turn affordance. |
-| State verbs distinguish `Loading...` (model) vs `Working...` (tool) | Currently R-CHAT-3 has one rotating phrase. Two verbs convey what's actually happening. |
-| Inline `(ctrl+o to expand)` affordance per tool call | Better than a context-sensitive footer for discoverability. Could refine R-CHAT-5. |
-| Artifact counter + review command on the in-progress message | We don't have artifacts as a concept; if a future agent capability surfaces structured deliverables, this is the UX. |
-| Built-in pager for file output instead of shelling out | Worth considering when the assistant returns large file contents — keeps the TUI's keymap consistent. |
+| Cognition marker includes elapsed + token count (`Thought for 6s, 388 tokens`) | Inspiration only — implementation-time polish. |
+| State verbs distinguish `Loading...` (model) vs `Working...` (tool) | **Adopted** — see [R-CHAT-3](./requirements.md#31-core-chat-loop-must) (model-active / tool-active split). |
+| Inline `(ctrl+o to expand)` affordance per tool call | Inspiration only — refinement of R-CHAT-5 at implementation. |
+| Artifact counter + review command on the in-progress message | Inspiration only — no artifact concept in v1. |
+| Built-in pager for file output instead of shelling out | Inspiration only — implementation-time choice. |
 
 ### Patterns to reject
 
@@ -197,14 +197,14 @@ cleanroom rule.
 
 ### Patterns worth borrowing
 
-| Claude Code pattern | Where it could land in core-tui |
+| Claude Code pattern | Status |
 |---|---|
-| Permission-mode chip with `Shift+Tab` cycling | Not in our spec; would be a new requirement under §3.7. Cleaner than `/permissions` for the common case. |
-| Inline permission prompts (no modal) for low-risk decisions | Our R-PERM-1 mandates a blocking modal; could be relaxed to "modal for high-risk, inline for low-risk" with the host classifying. |
-| Task-aware spinner verbs (Searching / Editing / Running) | Refinement of R-CHAT-3 — the rotating phrases could be agent-classified rather than random. Would need a hook on the `Event` type. |
-| Slash palette and `@` palette share the same row affordance | We already align (R-PAL-1 + R-PAL-2); the visual consistency is the point. |
-| System-reminder channel separate from chat | Useful for surfacing context (recent edits, plan changes) without polluting the conversation. Could become a new requirement under §3.X. |
-| Diff shown above choice in permission prompts | Same takeaway as Crush — strengthens R-PERM-1's "Detail" requirement. |
+| Permission-mode chip with `Shift+Tab` cycling | **Adopted** — see [R-PERM-6 / R-PERM-7](./requirements.md#37-permissions-ux-must) (default / acceptEdits / plan / bypassPermissions). |
+| Inline permission prompts (no modal) for low-risk decisions | Inspiration only — R-PERM-1 stays modal in v1. |
+| Task-aware spinner verbs (Searching / Editing / Running) | **Adopted** — see [R-CHAT-3](./requirements.md#31-core-chat-loop-must) via `Options.ToolSummarizers` taking precedence over the `WorkingPhrases` rotation. |
+| Slash palette and `@` palette share the same row affordance | Already covered by R-PAL-1 + R-PAL-2. |
+| System-reminder channel separate from chat | Inspiration only — defer to v0.2+. |
+| Diff shown above choice in permission prompts | **Adopted** — see [R-PERM-1](./requirements.md#37-permissions-ux-must) (`DetailKind` enum: diff/shell/http/args). |
 
 ### Patterns to reject
 
@@ -365,14 +365,14 @@ isn't.
 
 ### Patterns worth borrowing (UX only, recreate from scratch)
 
-| Crush pattern | Where it could land in core-tui |
+| Crush pattern | Status |
 |---|---|
-| Sidebar with model + cost + LSP/MCP status, collapsible | Discussion under R-USE-2 — header bar is one option; collapsible sidebar is another. Worth a design.md addendum. |
-| Per-overlay context-sensitive footer keymap | Underspecified in R-FOOT-1 — could be tightened to "footer hint reformulates per active overlay." |
-| Permission modal shows the actual payload (diff for edits, command for bash), not just the verb | Strengthens R-PERM-1 — could become an explicit "Detail must include the rendered diff when the tool is an edit, the full command when the tool is bash" sub-rule. |
-| Live filter + right-aligned shortcut hint in palettes | Already covered by R-PAL-3; the right-aligned shortcut is a small palette polish to add when implementing. |
-| Toast/banner for confirmations | Not in current spec. Worth a new requirement under §3.15 or a new §3.X for non-chat notifications. |
-| `Thought for Ns` between-step beats | Different from R-CHAT-3 rotating indicator. Could complement it; would need a new requirement or an R-CHAT-3 extension. |
+| Sidebar with model + cost + LSP/MCP status, collapsible | **Adopted** — see [R-USE-2](./requirements.md#310-usage-tracking--display-must) (`Options.StatusLayout` = `StatusHeader` or `StatusSidebar`). |
+| Per-overlay context-sensitive footer keymap | Inspiration only — implementation-time polish on R-FOOT-1. |
+| Permission modal shows the actual payload (diff for edits, command for bash), not just the verb | **Adopted** — see [R-PERM-1](./requirements.md#37-permissions-ux-must) (`PermissionRequest.Detail` + `DetailKind`). |
+| Live filter + right-aligned shortcut hint in palettes | Already covered by R-PAL-3; right-aligned shortcut is inspiration-only polish. |
+| Toast/banner for confirmations | Inspiration only — defer to v0.2+. |
+| `Thought for Ns` between-step beats | Inspiration only — implementation-time polish. |
 
 ### Patterns to reject
 

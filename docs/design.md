@@ -47,6 +47,8 @@ core-tui/
 │   ├── model.go        bubbletea.Model implementation
 │   ├── update.go       Update() dispatcher + slash routing
 │   ├── view.go         View() rendering + modal compositors
+│   ├── status.go       header/sidebar status surface (R-USE-2)
+│                       — single file; layout switch is at render time
 │   ├── keys.go         KeyMap + defaults
 │   ├── commands.go     SlashAction enum + ParseSlash + Help text
 │   ├── palette.go      slash/file palette state
@@ -311,10 +313,23 @@ type Options struct {
     // Persistence callbacks.
     PersistModelChoice func(modelID string) error
 
+    // Permission-mode wiring (R-PERM-6/7). Zero value hides the
+    // permission-mode chip and disables Shift+Tab cycling.
+    PermissionMode PermissionModeWiring
+
+    // Status surface layout (R-USE-2). StatusHeader (zero value) =
+    // single line above the chat; StatusSidebar = right-hand column.
+    StatusLayout StatusLayout
+
+    // Spinner verb pools (R-CHAT-3). Nil = built-in defaults.
+    ThinkingPhrases []string // rotated while the model is generating
+    WorkingPhrases  []string // rotated while a tool call is in flight
+
     // Slash-command extension.
     Commands []SlashCommand
 
-    // Tool-summary extension.
+    // Tool-summary extension. Summarizer output overrides
+    // WorkingPhrases rotation for the tool it covers (R-CHAT-3).
     ToolSummarizers map[string]ToolSummarizer
 
     // Markdown style override (default: light/dark autodetect).
@@ -323,6 +338,30 @@ type Options struct {
     // Mouse default (on if zero-value left).
     MouseDefault MouseSetting
 }
+
+// PermissionModeWiring backs R-PERM-6 / R-PERM-7. Set is required
+// when any field is non-zero; Persist is optional.
+type PermissionModeWiring struct {
+    Initial PermissionMode
+    Set     func(PermissionMode) error
+    Persist func(PermissionMode) error
+}
+
+type PermissionMode int
+
+const (
+    PermissionModeDefault PermissionMode = iota
+    PermissionModeAcceptEdits
+    PermissionModePlan
+    PermissionModeBypass
+)
+
+type StatusLayout int
+
+const (
+    StatusHeader StatusLayout = iota
+    StatusSidebar
+)
 ```
 
 `Config` carries only what the TUI cares about: current model name,
@@ -346,9 +385,16 @@ type PermissionPrompter interface {
 type PermissionRequest struct {
     Kind     PermissionKind
     ToolName string
-    Detail   string
-    Verb     string // empty when no verb extractable
-    Source   string // empty for parent agent; subagent name otherwise
+
+    // Detail is the rendered payload the user is being asked to
+    // approve (R-PERM-1). For file edits, the unified diff text;
+    // for shell, the verbatim command; for HTTP, the URL + method
+    // + body summary; for other tools, a key=value or JSON dump.
+    Detail     string
+    DetailKind DetailKind
+
+    Verb   string // empty when no verb extractable
+    Source string // empty for parent agent; subagent name otherwise
 
     // Persistence hint that the host's gate filled in. Round-tripped
     // back to the host on a DecisionAllowAlways via the AlwaysAllow
@@ -356,6 +402,18 @@ type PermissionRequest struct {
     PersistTool string
     PersistKey  string
 }
+
+// DetailKind picks the Glamour code-fence language tag the modal
+// uses when rendering Detail. DetailPlain renders unstyled.
+type DetailKind int
+
+const (
+    DetailPlain DetailKind = iota
+    DetailDiff   // unified diff (red/green hunks)
+    DetailShell  // bash / sh command line
+    DetailHTTP   // URL + method + body
+    DetailArgs   // JSON or key=value tool args
+)
 
 type PermissionDecision int
 
@@ -437,6 +495,23 @@ responsibility (see §6).
                        ▼
               tui.Run returns exitCode to host
 ```
+
+### 4.0 Spinner state inference (R-CHAT-3)
+
+The TUI tracks one bit of additional state — *"is a tool call
+outstanding?"* — derived purely from the existing `Event` stream:
+
+- A `ToolCall` event flips the bit to **tool-active**.
+- A subsequent `Text` event (`Partial=true` or `false`) flips it
+  back to **model-active**.
+- `Usage` and other non-text/non-tool events leave the bit alone.
+
+The spinner's verb pool is chosen from this bit:
+`Options.ThinkingPhrases` while model-active, `Options.WorkingPhrases`
+while tool-active. If `Options.ToolSummarizers` covers the tool
+named in the most recent `ToolCall`, the summarizer's
+present-continuous string replaces the rotation entirely. No new
+`Event` field is needed — the stream already conveys the transition.
 
 ### 4.1 Concurrency model
 

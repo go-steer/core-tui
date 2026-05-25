@@ -50,9 +50,21 @@ documented Go interface set (see `design.md` for the shape).
   Enter submits, Shift-Enter / Ctrl-J inserts newline.
 - **R-CHAT-2** Display the conversation in a scrollable viewport with
   role-tagged styling (user, assistant, system, error, tool).
-- **R-CHAT-3** While a turn is in flight, disable the input, show a
-  spinner, and rotate a "thinking" indicator line in the chat (3-sec
-  cadence; phrases configurable; defaults included).
+- **R-CHAT-3** While a turn is in flight, disable the input and show
+  a spinner with a state-aware verb line in the chat. The verb pool
+  is chosen by inferred activity:
+  - **Model active** (assistant tokens streaming, no outstanding tool
+    call): rotate `Options.ThinkingPhrases` (defaults: "Considering",
+    "Drafting", "Reasoning", …) on a 3-sec cadence.
+  - **Tool active** (a `ToolCall` event was emitted and no follow-up
+    `Text` has resumed yet): rotate `Options.WorkingPhrases` (defaults:
+    "Reading file", "Running command", "Searching", …). When the host
+    registers a `ToolSummarizer` for the tool name in flight, its
+    present-continuous string takes precedence over the rotation.
+  The TUI infers which state to render from the event sequence — no
+  new `Event` field is required. See [`ui-references.md`](./ui-references.md)
+  for the Antigravity `Loading…`/`Working…` and Claude Code
+  task-aware-spinner references.
 - **R-CHAT-4** Stream partial assistant tokens into the in-progress
   assistant message as they arrive, rendering them through Glamour on
   each update so the user sees formatted markdown while the turn is
@@ -156,8 +168,22 @@ listed in `/help`:
 
 - **R-PERM-1** When the host's permission gate invokes the
   TUI-supplied `PermissionPrompter`, the TUI must render a blocking
-  modal showing: tool name, detail (e.g. the bash command), and the
-  originating sub-agent name when present.
+  modal showing: tool name, the originating sub-agent name when
+  present, and the **full payload** the agent is asking permission
+  to execute. "Full payload" means:
+  - **File edits** — the full diff (red/green hunks) of what will be
+    written, not just the target path.
+  - **Shell commands** — the verbatim command line about to run, with
+    the shell that will run it identified.
+  - **Network calls** — the full URL + method + body summary.
+  - **Other tools** — the structured tool args (JSON or a key-value
+    list).
+  Hosts populate the payload via `PermissionRequest.Detail` (the
+  rendered text) and `PermissionRequest.DetailKind` (the styling hint
+  — `diff` / `shell` / `http` / `args` / `plain`). The TUI picks the
+  appropriate Glamour language tag from `DetailKind` so syntax
+  colors line up. Both Crush and Claude Code converged on this; see
+  [`ui-references.md`](./ui-references.md).
 - **R-PERM-2** The modal supports six decisions: `y` allow-once,
   `n`/`esc` deny, `s` allow-session, `v` allow-session-verb (suppress
   if no verb is extractable), `t` allow-session-tool, `a`
@@ -172,6 +198,22 @@ listed in `/help`:
 - **R-PERM-5** `/allow`, `/allow bundle:<name>`, `/deny` apply
   changes to the live gate **and** persist in one operation —
   `/reload` must not be required for the new rule to take effect.
+- **R-PERM-6** The TUI exposes a **permission-mode indicator** in
+  the status surface (header or sidebar — see R-USE-2) with four
+  states: `default` (every tool call asks), `acceptEdits` (file-edit
+  tools auto-allow; everything else still asks), `plan` (no tool
+  calls execute; the agent is restricted to planning + read-only
+  tools), and `bypassPermissions` (every tool call auto-allows —
+  destructive mode, the chip renders with a warning style).
+  `Shift+Tab` cycles through the four states. When the host doesn't
+  wire `Options.PermissionMode` the chip is hidden and `Shift+Tab`
+  has no effect.
+- **R-PERM-7** Mode changes invoke `Options.PermissionMode.Set(mode)`
+  so the host can apply the change to its gate. If
+  `Options.PermissionMode.Persist(mode)` is non-nil it is also called
+  so the host can write the choice to a settings file. Initial mode
+  is read from `Options.PermissionMode.Initial`. Borrowed from
+  Claude Code; see [`ui-references.md`](./ui-references.md).
 
 ### 3.8 Model picker (must)
 
@@ -202,7 +244,18 @@ listed in `/help`:
 
 - **R-USE-1** Per-turn (input tokens, output tokens, cost) and
   session totals must be visible in `/stats`.
-- **R-USE-2** Header shows current-model + session-totals summary.
+- **R-USE-2** A persistent status surface displays the current model,
+  the current permission mode (per R-PERM-6), and session totals
+  (input tokens, output tokens, cost, context-window %). Layout is
+  configurable via `Options.StatusLayout` with two presets:
+  - **`StatusHeader`** (default) — a single status line above the
+    chat. Minimal terminal-real-estate cost; matches the v1 source
+    TUIs, Antigravity, and Claude Code.
+  - **`StatusSidebar`** — a fixed-width right-hand column carrying
+    the status plus any host-supplied auxiliary blocks (modified
+    files, LSPs, MCPs, sub-agents). Collapsible at runtime via a
+    bound keystroke (default `Ctrl+B`). Matches Crush. See
+    [`ui-references.md` (Crush §Layout)](./ui-references.md#charmbraceletcrush).
 - **R-USE-3** Pricing values come from `Options.UsageTracker`; the
   TUI does not own pricing tables.
 
