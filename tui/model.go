@@ -70,6 +70,12 @@ type Model struct {
 	// the start of the input or `@` anywhere.
 	palette *palette
 
+	// sideAnswer is the active /btw-style modal overlay (R-CMD-5).
+	// Nil = no side-answer open. Carries the question, the agent's
+	// answer (or err), and the Glamour render width. Dismissed with
+	// Esc / Enter / Space.
+	sideAnswer *SideAnswer
+
 	// Streaming-turn state (R-CHAT-3 / R-CHAT-4 / R-CHAT-6).
 	state          turnState
 	cancelTurn     context.CancelFunc // non-nil while state == stateStreaming

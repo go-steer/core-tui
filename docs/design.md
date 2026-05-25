@@ -284,7 +284,18 @@ type SlashCommandSpec struct {
     Description string   // shown in /help and the palette hint
 }
 type SlashResult struct {
-    SystemMessage string // optional line rendered in chat after the call
+    SystemMessage string      // optional line rendered in chat after the call
+    ModalAnswer   *SideAnswer // optional /btw-style modal (R-CMD-5)
+}
+
+// SideAnswer carries a /btw-style transient Q+A overlay. Renders as
+// a dismissable Glamour modal; the answer does NOT land in chat
+// history. When Err is non-nil the modal renders an error state in
+// place of the answer body. See R-CMD-5.
+type SideAnswer struct {
+    Question string
+    Answer   string
+    Err      error
 }
 ```
 

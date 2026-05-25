@@ -110,8 +110,13 @@ func (m Model) View() tea.View {
 		body = lipgloss.JoinVertical(lipgloss.Left, parts...)
 	}
 
-	// Overlay any active modal centered over the body.
-	if m.overlay != overlayNone {
+	// Overlay any active modal centered over the body. Side-answer
+	// modal (R-CMD-5) wins precedence over the demo modals because
+	// it represents an active agent response.
+	if m.sideAnswer != nil {
+		modal := m.renderSideAnswer()
+		body = lipgloss.Place(m.width, m.height, lipgloss.Center, lipgloss.Center, modal)
+	} else if m.overlay != overlayNone {
 		modal := m.renderOverlay()
 		body = lipgloss.Place(m.width, m.height, lipgloss.Center, lipgloss.Center, modal)
 	}
@@ -553,6 +558,64 @@ func (m Model) renderTurnFooter(msg Message) string {
 	return m.styles.Muted.Italic(true).Render("└ " + strings.Join(parts, " "+GlyphSeparator+" "))
 }
 
+// renderSideAnswer renders the /btw-style side-answer modal (R-CMD-5).
+// The question lands in the title bar (truncated), the answer renders
+// through Glamour in the body, the footer shows the dismiss keys.
+// Returns empty when no side-answer is active.
+func (m *Model) renderSideAnswer() string {
+	if m.sideAnswer == nil {
+		return ""
+	}
+	width := 72
+	if m.width > 0 && width > m.width-4 {
+		width = m.width - 4
+	}
+	if width < 20 {
+		width = 20
+	}
+
+	q := m.sideAnswer.Question
+	if lipgloss.Width(q) > width-12 {
+		q = string([]rune(q)[:width-13]) + GlyphTruncate
+	}
+	titleBar := m.styles.ModalTitle.Render("by the way: " + q)
+	titleRule := m.styles.ModalBorder.Render(strings.Repeat(GlyphRule, max(0, width-lipgloss.Width(titleBar)-3)))
+	titleLine := titleBar + " " + titleRule
+
+	var body string
+	switch {
+	case m.sideAnswer.Err != nil:
+		body = m.styles.ErrorText.Render(wordWrap(m.sideAnswer.Err.Error(), width-4))
+	case strings.TrimSpace(m.sideAnswer.Answer) == "":
+		body = m.styles.SystemText.Render("(no answer)")
+	default:
+		mr := m.ensureMarkdown()
+		body = mr.renderMarkdown(m.sideAnswer.Answer)
+	}
+
+	footerRule := m.styles.ModalBorder.Render(strings.Repeat(GlyphRule, max(0, width-2)))
+	footerLine := m.styles.ModalFooter.Render("esc / enter / space dismiss")
+
+	content := lipgloss.JoinVertical(lipgloss.Left,
+		titleLine,
+		"",
+		body,
+		"",
+		footerRule,
+		footerLine,
+	)
+	return m.styles.ModalBorder.Padding(0, 1).Width(width).Render(content)
+}
+
+// max returns the larger of a and b. Tiny helper to keep the
+// modal-width clamping calls readable.
+func max(a, b int) int {
+	if a > b {
+		return a
+	}
+	return b
+}
+
 // renderHelpPanel renders the bottom-anchored stacked help panel when
 // m.helpOpen is true. Returns empty string when closed so callers can
 // conditionally include it without branching on `if helpOpen` in the
@@ -578,6 +641,10 @@ func (m Model) renderHelpPanel(width int) string {
 			{"tab", "complete prefix"},
 			{"enter", "insert selection"},
 			{"esc", "close palette"},
+		}},
+		{"Side-answer modal (R-CMD-5)", [][2]string{
+			{"/btw <q>", "open a transient Glamour-rendered modal"},
+			{"esc / enter / space", "dismiss modal (answer doesn't land in history)"},
 		}},
 		{"Navigation", [][2]string{
 			{"pgup / pgdn", "scroll chat"},

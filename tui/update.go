@@ -15,6 +15,7 @@
 package tui
 
 import (
+	"context"
 	"fmt"
 	"strings"
 	"time"
@@ -104,9 +105,16 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 func (m Model) handleKey(msg tea.KeyPressMsg) (tea.Model, tea.Cmd) {
 	stroke := msg.String()
 
-	// Esc cascades through overlays (R-CHAT-6): modal → help panel →
-	// palette → interrupt-in-flight → no-op. Never quits.
+	// Esc cascades through overlays (R-CHAT-6): side-answer modal →
+	// other modal → help panel → palette → interrupt-in-flight →
+	// no-op. Never quits.
 	if stroke == "esc" {
+		if m.sideAnswer != nil {
+			m.sideAnswer = nil
+			m.resize()
+			m.refreshViewport()
+			return m, nil
+		}
 		if m.overlay != overlayNone {
 			m.overlay = overlayNone
 			return m, nil
@@ -127,6 +135,14 @@ func (m Model) handleKey(msg tea.KeyPressMsg) (tea.Model, tea.Cmd) {
 			m.cancelTurn() // goroutine emits turnCancelledMsg
 			return m, nil
 		}
+		return m, nil
+	}
+
+	// Side-answer modal also dismisses on Enter / Space (R-CMD-5).
+	if m.sideAnswer != nil && (stroke == "enter" || stroke == "space") {
+		m.sideAnswer = nil
+		m.resize()
+		m.refreshViewport()
 		return m, nil
 	}
 
@@ -192,10 +208,11 @@ func (m Model) handleKey(msg tea.KeyPressMsg) (tea.Model, tea.Cmd) {
 		return m, nil
 
 	case "enter":
-		// Submit (R-CHAT-1). When idle: append the typed text as a
-		// RoleUser message and start an agent turn. When streaming
-		// (R-CHAT-10): append to the prompt queue and clear the
-		// input; the queue drains one entry per turn-end.
+		// Submit (R-CHAT-1). When idle: dispatch as a slash command
+		// if the input begins with `/`, otherwise append the typed
+		// text as a RoleUser message and start an agent turn. When
+		// streaming (R-CHAT-10): append to the prompt queue and clear
+		// the input; the queue drains one entry per turn-end.
 		text := strings.TrimSpace(m.input.Value())
 		if text == "" {
 			return m, nil
@@ -205,6 +222,9 @@ func (m Model) handleKey(msg tea.KeyPressMsg) (tea.Model, tea.Cmd) {
 			m.input.Reset()
 			m.refreshViewport()
 			return m, nil
+		}
+		if strings.HasPrefix(text, "/") {
+			return m.dispatchSlash(text)
 		}
 		return m.submitTurn(text), spinnerTick()
 
@@ -463,6 +483,78 @@ func (m *Model) finalizeTurn(elapsed time.Duration, notice string) {
 
 	_ = m.input.Focus()
 	m.refreshViewport()
+}
+
+// dispatchSlash handles `/name args...` submitted from the input.
+// Built-in slash commands aren't wired yet (a later slice owns the
+// /help, /clear, /quit dispatch); for now we only route to the
+// agent's SlashProvider when present. Unknown commands surface as
+// a system row pointing at /help.
+func (m Model) dispatchSlash(text string) (tea.Model, tea.Cmd) {
+	rest := strings.TrimPrefix(text, "/")
+	name, args, _ := strings.Cut(rest, " ")
+	name = strings.ToLower(name)
+	args = strings.TrimSpace(args)
+
+	provider, ok := m.opts.Agent.(SlashProvider)
+	if !ok {
+		m.history.Append(Message{
+			Role: RoleSystem,
+			Text: "unknown command /" + name + " — the agent doesn't expose any slash commands",
+		})
+		m.input.Reset()
+		m.refreshViewport()
+		return m, nil
+	}
+
+	matched := false
+	for _, spec := range provider.SlashCommands() {
+		if spec.Name == name || sliceContains(spec.Aliases, name) {
+			matched = true
+			break
+		}
+	}
+	if !matched {
+		m.history.Append(Message{
+			Role: RoleSystem,
+			Text: "unknown command /" + name + " — type / to see what's available",
+		})
+		m.input.Reset()
+		m.refreshViewport()
+		return m, nil
+	}
+
+	m.input.Reset()
+	res, err := provider.InvokeSlash(context.Background(), name, args)
+	if err != nil {
+		m.history.Append(Message{
+			Role: RoleError,
+			Text: "/" + name + " failed: " + err.Error(),
+		})
+		m.refreshViewport()
+		return m, nil
+	}
+	if res.ModalAnswer != nil {
+		m.sideAnswer = res.ModalAnswer
+	}
+	if res.SystemMessage != "" {
+		m.history.Append(Message{Role: RoleSystem, Text: res.SystemMessage})
+	}
+	m.resize()
+	m.refreshViewport()
+	return m, nil
+}
+
+// sliceContains is a tiny generic membership check used by dispatchSlash
+// to test slash-command aliases. We avoid pulling slices.Contains so the
+// code reads top-to-bottom without an import jump.
+func sliceContains(xs []string, target string) bool {
+	for _, x := range xs {
+		if x == target {
+			return true
+		}
+	}
+	return false
 }
 
 // maybeDrainQueue auto-starts the next queued prompt as a fresh

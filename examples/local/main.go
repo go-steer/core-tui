@@ -40,13 +40,47 @@ import (
 	"github.com/go-steer/core-tui/tui/testagent"
 )
 
+// demoAgent wraps the scripted testagent and adds a SlashProvider
+// implementation so /btw in the visual preview opens a real
+// side-answer modal end-to-end. A real host's agent type would
+// expose its own SlashCommands + InvokeSlash; this composition is
+// for the visual harness only.
+type demoAgent struct{ tui.Agent }
+
+func (demoAgent) SlashCommands() []tui.SlashCommandSpec {
+	return []tui.SlashCommandSpec{
+		{
+			Name:        "btw",
+			Aliases:     []string{"by-the-way"},
+			Description: "ask a side question (modal, doesn't land in chat history)",
+		},
+	}
+}
+
+func (demoAgent) InvokeSlash(_ context.Context, name, args string) (tui.SlashResult, error) {
+	if name != "btw" && name != "by-the-way" {
+		return tui.SlashResult{}, fmt.Errorf("unknown slash: %s", name)
+	}
+	q := args
+	if q == "" {
+		q = "what's on the agenda?"
+	}
+	answer := "**Side-question answer** rendered through *Glamour* in a transient modal.\n\n" +
+		"This is what `/btw " + q + "` would surface from the agent's `AskSideQuestion`.\n\n" +
+		"- Question came from `args` after the slash.\n" +
+		"- Answer renders as Markdown.\n" +
+		"- Dismiss with `Esc`, `Enter`, or `Space`.\n" +
+		"- Nothing lands in chat history."
+	return tui.SlashResult{ModalAnswer: &tui.SideAnswer{Question: q, Answer: answer}}, nil
+}
+
 func main() {
 	opts := tui.Options{
 		// Scripted agent plays a believable coding-task turn on every
 		// submit so the operator can see streaming + spinner + Glamour
 		// + per-turn footer end-to-end. Same script regardless of
 		// prompt — it's a visual harness, not a real agent.
-		Agent:        testagent.NewScripted(testagent.CodingDemo()),
+		Agent:        demoAgent{Agent: testagent.NewScripted(testagent.CodingDemo())},
 		StatusLayout: tui.StatusHeader,
 		PermissionMode: tui.PermissionModeWiring{
 			Initial: tui.PermissionModeDefault,
@@ -70,7 +104,7 @@ func seededConversation() []tui.Message {
 			Role: tui.RoleSystem,
 			Text: "Visual preview — type ? for the full keymap. Try: / for slash palette · " +
 				"@ for file palette · ctrl+g model · ctrl+y permission · ctrl+e elicit · " +
-				"ctrl+b toggle layout · shift+tab cycle perm-mode. " +
+				"ctrl+b toggle layout · shift+tab cycle perm-mode · /btw <q> for a side-answer modal. " +
 				"Press enter to start a streaming turn; type ahead and press enter again to " +
 				"queue follow-up prompts — they auto-fire as each turn ends.",
 		},

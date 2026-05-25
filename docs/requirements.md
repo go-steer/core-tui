@@ -169,6 +169,17 @@ listed in `/help`:
   invocations back to the agent via the same capability. Agent
   commands must not collide with built-in names; on collision the
   built-in wins and a system warning is logged.
+- **R-CMD-5** `SlashProvider.InvokeSlash` returns a `SlashResult`
+  whose `ModalAnswer *SideAnswer` field, when non-nil, renders as a
+  **transient Glamour-formatted modal overlay** (question + answer,
+  or error state) that the operator dismisses with `Esc`, `Enter`,
+  or `Space`. The answer is **not** persisted to chat history — used
+  by `/btw`-style side-question commands where the answer should
+  display once and disappear. Modal-answer composition uses the
+  same border + footer compositor as the elicit / model-picker
+  modals (style.md §6) so the visual language stays uniform. When
+  `SystemMessage` is also set, it renders as a chat row after the
+  modal is dismissed.
 
 ### 3.4 Command palette (must)
 
