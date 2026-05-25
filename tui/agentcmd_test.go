@@ -179,11 +179,16 @@ func TestMaybeDrainQueue_EmptyKeepsListener(t *testing.T) {
 }
 
 // TestMaybeDrainQueue_PopsHeadAndStartsTurn pins R-CHAT-10: when the
-// queue is non-empty, draining starts the first entry as a new
-// streaming turn and shrinks the queue by one.
+// queue has a Queued entry, draining marks it InFlight and starts a
+// new streaming turn. The entry stays in the queue panel (with the
+// new state glyph) instead of being popped — finalizeTurn flips it
+// to Done / Failed when its turn completes.
 func TestMaybeDrainQueue_PopsHeadAndStartsTurn(t *testing.T) {
 	m := NewModel(Options{Agent: stubAgent{}})
-	m.queue = []string{"first queued", "second queued"}
+	m.queue = []QueueEntry{
+		{Text: "first queued", State: QueueQueued},
+		{Text: "second queued", State: QueueQueued},
+	}
 	model, cmd := m.maybeDrainQueue()
 	if cmd == nil {
 		t.Errorf("expected non-nil Cmd batch")
@@ -192,8 +197,14 @@ func TestMaybeDrainQueue_PopsHeadAndStartsTurn(t *testing.T) {
 	if got.state != stateStreaming {
 		t.Errorf("state = %v, want stateStreaming", got.state)
 	}
-	if len(got.queue) != 1 || got.queue[0] != "second queued" {
-		t.Errorf("queue after drain = %v, want [second queued]", got.queue)
+	if len(got.queue) != 2 {
+		t.Fatalf("queue len after drain = %d, want 2 (entries stay, only state flips)", len(got.queue))
+	}
+	if got.queue[0].State != QueueInFlight {
+		t.Errorf("queue[0].State = %v, want InFlight", got.queue[0].State)
+	}
+	if got.queue[1].State != QueueQueued {
+		t.Errorf("queue[1].State = %v, want Queued", got.queue[1].State)
 	}
 	got.cancelTurn() // clean up the goroutine
 }

@@ -218,7 +218,11 @@ func (m Model) handleKey(msg tea.KeyPressMsg) (tea.Model, tea.Cmd) {
 			return m, nil
 		}
 		if m.state == stateStreaming {
-			m.queue = append(m.queue, text)
+			m.queue = append(m.queue, QueueEntry{
+				Text:    text,
+				State:   QueueQueued,
+				Created: time.Now(),
+			})
 			m.input.Reset()
 			m.refreshViewport()
 			return m, nil
@@ -477,8 +481,12 @@ func (m *Model) finalizeTurn(elapsed time.Duration, notice string) {
 	switch {
 	case notice == "(interrupted)":
 		m.history.Append(Message{Role: RoleSystem, Text: notice})
+		m.markInFlightTerminal(false, "interrupted")
 	case notice != "":
 		m.history.Append(Message{Role: RoleError, Text: notice})
+		m.markInFlightTerminal(false, notice)
+	default:
+		m.markInFlightTerminal(true, "")
 	}
 
 	_ = m.input.Focus()
@@ -557,18 +565,63 @@ func sliceContains(xs []string, target string) bool {
 	return false
 }
 
-// maybeDrainQueue auto-starts the next queued prompt as a fresh
-// turn (R-CHAT-10). Returns the next-step Cmd batch: just the event
-// listener when the queue is empty; listener + spinner tick when
-// a new turn fires.
+// maybeDrainQueue auto-starts the next Queued prompt as a fresh turn
+// (R-CHAT-10). Marks the popped entry InFlight so it stays visible
+// in the queue panel during streaming, then finalizeTurn flips it to
+// Done / Failed. Skips terminal-state entries (Done / Failed) that
+// haven't culled yet. Returns the next-step Cmd batch.
 func (m Model) maybeDrainQueue() (tea.Model, tea.Cmd) {
-	if len(m.queue) == 0 {
+	next, idx := -1, -1
+	for i := range m.queue {
+		if m.queue[i].State == QueueQueued {
+			next, idx = i, i
+			break
+		}
+	}
+	if next < 0 {
 		return m, m.eventListener()
 	}
-	next := m.queue[0]
-	m.queue = m.queue[1:]
-	out := m.submitTurn(next)
+	prompt := m.queue[idx].Text
+	m.queue[idx].State = QueueInFlight
+	out := m.submitTurn(prompt)
 	return out, tea.Batch(spinnerTick(), out.eventListener())
+}
+
+// markInFlightTerminal flips the InFlight queue entry (if any) to a
+// terminal state. Called from finalizeTurn so the panel can show the
+// result before the cullTTL drops it.
+func (m *Model) markInFlightTerminal(success bool, reason string) {
+	for i := range m.queue {
+		if m.queue[i].State != QueueInFlight {
+			continue
+		}
+		if success {
+			m.queue[i].State = QueueDone
+		} else {
+			m.queue[i].State = QueueFailed
+			m.queue[i].Err = reason
+		}
+		m.queue[i].Created = time.Now() // restart TTL from the transition
+		return
+	}
+}
+
+// cullQueue drops Done / Failed entries whose terminal-state TTL has
+// elapsed. Called from the render path so the panel naturally fades
+// completed entries as the operator keeps using the TUI.
+func (m *Model) cullQueue() {
+	if len(m.queue) == 0 {
+		return
+	}
+	now := time.Now()
+	kept := m.queue[:0]
+	for _, e := range m.queue {
+		if e.State.terminalState() && now.Sub(e.Created) > cullTTL {
+			continue
+		}
+		kept = append(kept, e)
+	}
+	m.queue = kept
 }
 
 // trimToolArg truncates a tool-arg summary to max runes, appending a

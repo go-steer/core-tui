@@ -256,43 +256,80 @@ func (m *Model) renderInProgress() string {
 	return strings.Join(parts, "\n")
 }
 
-// renderQueuePanel renders the prompt queue (R-CHAT-10) as a thin
-// dim block beneath the in-progress message: a header with the
-// count, then up to queuePanelMax entries one per line, prefixed
-// with the user-prompt glyph. Older / extra entries are summarized
-// with a truncation tail. Empty string when the queue is empty.
-func (m Model) renderQueuePanel() string {
+// renderQueuePanel renders the prompt queue (R-CHAT-10) with per-
+// entry state glyphs (○ queued · ● in-flight · ✓ done · ✗ failed).
+// Done / Failed entries linger for cullTTL before falling off so the
+// operator sees the result. Empty string when the queue is empty.
+func (m *Model) renderQueuePanel() string {
+	m.cullQueue()
 	if len(m.queue) == 0 {
 		return ""
 	}
-	const queuePanelMax = 3
+	const queuePanelMax = 4
 	width := m.viewport.Width()
 	if width <= 0 {
 		width = 80
 	}
 
-	header := m.styles.Muted.Italic(true).Render(
-		fmt.Sprintf("queued (%d) — fires after this turn ends", len(m.queue)),
-	)
+	pending := 0
+	for _, e := range m.queue {
+		if e.State == QueueQueued {
+			pending++
+		}
+	}
+	headerText := fmt.Sprintf("queue (%d entries, %d pending)", len(m.queue), pending)
+	if pending == 0 {
+		headerText = fmt.Sprintf("queue (%d entries)", len(m.queue))
+	}
+	header := m.styles.Muted.Italic(true).Render(headerText)
 	rows := []string{"", header}
 
 	visible := m.queue
 	tail := 0
 	if len(visible) > queuePanelMax {
+		// Keep the most recent entries — older queued ones still
+		// rendered but the head of the panel shows what just fell
+		// out of view as a truncation hint.
 		tail = len(visible) - queuePanelMax
-		visible = visible[:queuePanelMax]
-	}
-	for i, q := range visible {
-		marker := fmt.Sprintf("%d. ", i+1)
-		body := trimToolArg(q, width-len(marker)-4)
-		rows = append(rows, m.styles.Muted.Render("  "+marker+body))
+		visible = visible[len(visible)-queuePanelMax:]
 	}
 	if tail > 0 {
 		rows = append(rows, m.styles.Muted.Render(
-			fmt.Sprintf("  %s and %d more", GlyphTruncate, tail),
+			fmt.Sprintf("  %s %d earlier entries", GlyphTruncate, tail),
 		))
 	}
+	for _, e := range visible {
+		rows = append(rows, m.renderQueueRow(e, width))
+	}
 	return strings.Join(rows, "\n")
+}
+
+// renderQueueRow renders a single queue entry with its state glyph
+// and color treatment. Failed entries append a truncated error tail.
+func (m Model) renderQueueRow(e QueueEntry, width int) string {
+	glyph, style := m.queueRowStyle(e.State)
+	body := trimToolArg(e.Text, width-6)
+	row := "  " + glyph + " " + body
+	if e.State == QueueFailed && e.Err != "" {
+		row += "  " + m.styles.ErrorText.Render("("+trimToolArg(e.Err, 32)+")")
+	}
+	return style.Render(row)
+}
+
+// queueRowStyle returns the (glyph, base style) pair for one queue
+// state. Reuses the tool-state glyph vocabulary from style.md §2 so
+// the panel matches the rest of the TUI.
+func (m Model) queueRowStyle(s QueueState) (string, lipgloss.Style) {
+	switch s {
+	case QueueInFlight:
+		return GlyphTool, m.styles.Accent
+	case QueueDone:
+		return GlyphToolDone, m.styles.Muted
+	case QueueFailed:
+		return GlyphToolFail, m.styles.ErrorText
+	default:
+		return GlyphToolPending, m.styles.Muted
+	}
 }
 
 // renderSpinnerLine renders the rotating cognition verb (R-CHAT-3).

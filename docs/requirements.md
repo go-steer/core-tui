@@ -96,16 +96,35 @@ documented Go interface set (see `design.md` for the shape).
   the operator can type the next prompt without waiting. Pressing
   `Enter` during streaming appends the typed text to a per-session
   prompt queue rather than submitting immediately; the input clears
-  and is ready for the next one. The TUI displays the queue (count +
-  first N entries) between the in-progress message and the input box
-  so the operator sees what's pending. On turn completion the queue
-  drains one item at a time: each finalized turn (clean, error, or
-  interrupted) auto-starts the next queued prompt as a fresh turn,
-  reusing all the streaming infrastructure. `Esc` while streaming
-  interrupts the active turn (R-CHAT-6) — it does not clear the
-  queue. A dedicated affordance (`/clearqueue` or similar) can clear
-  queued items in a later slice; for now the queue is append-only
-  until drained.
+  and is ready for the next one. Each queue entry transitions
+  through a four-state lifecycle:
+  - **`QueueQueued`** (○) — typed during streaming, waiting for the
+    running turn to finish.
+  - **`QueueInFlight`** (●) — drained from the queue, currently the
+    streaming turn. Rendered in the accent color so the operator can
+    track what's running.
+  - **`QueueDone`** (✓) — turn finished cleanly. Lingers in the
+    panel for `cullTTL` (~2 s) before falling off so the operator
+    sees the result.
+  - **`QueueFailed`** (✗) — turn errored or was interrupted. Same
+    lingering cull TTL as Done; carries the truncated error string
+    as a dim tail (`(rate limit exceeded)`).
+
+  The queue panel renders between the in-progress message and the
+  input box with a header showing total entry count and pending
+  count (`queue (3 entries, 2 pending)`). State glyphs come from the
+  tool-state palette (style.md §2) so the panel reads consistently
+  with the rest of the TUI. Up to 4 entries render directly; older
+  entries collapse into a `… N earlier entries` truncation hint at
+  the top.
+
+  On turn completion (clean, error, or interrupted) the next
+  `Queued` entry auto-starts as a fresh turn — `markInFlightTerminal`
+  flips the current entry's state first, then `maybeDrainQueue` scans
+  for the next `Queued` one. `Esc` while streaming interrupts the
+  active turn (R-CHAT-6) and the entry flips to `Failed`; the queue
+  is not cleared. A `/clearqueue` affordance is a later slice; for
+  now the cull TTL is the only way entries leave the panel.
 - **R-CHAT-9** The TUI supports two render modes selected by
   `Options.RenderMode`:
   - **`RenderAltScreen`** (default) — full alt-screen takeover. The
