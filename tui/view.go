@@ -277,7 +277,9 @@ func (m Model) renderMessage(msg Message) string {
 		}
 		body := m.styles.AssistantText.Render(text)
 		if footer := m.renderTurnFooter(msg); footer != "" {
-			return body + "\n" + footer
+			// Blank line + `└ ` prefix on the footer subordinates the
+			// metadata visually to the message above (git-log style).
+			return body + "\n\n" + footer
 		}
 		return body
 	case RoleSystem:
@@ -499,7 +501,7 @@ func (m Model) renderTurnFooter(msg Message) string {
 	if msg.Elapsed > 0 {
 		parts = append(parts, msg.Elapsed.Round(100_000_000).String())
 	}
-	return m.styles.Muted.Italic(true).Render(strings.Join(parts, " "+GlyphSeparator+" "))
+	return m.styles.Muted.Italic(true).Render("└ " + strings.Join(parts, " "+GlyphSeparator+" "))
 }
 
 // renderHelpPanel renders the bottom-anchored stacked help panel when
