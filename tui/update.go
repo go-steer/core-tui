@@ -231,6 +231,51 @@ func (m Model) handleKey(msg tea.KeyPressMsg) (tea.Model, tea.Cmd) {
 		return m, nil
 	}
 
+	// Model picker overlay — exclusive while open. ↑/↓ navigate,
+	// Enter dispatches SwitchModel + PersistModelChoice, Esc cancels
+	// (handled in the Esc cascade above).
+	if m.overlay == overlayModelPicker {
+		swapper, ok := m.opts.Agent.(ModelSwapper)
+		if !ok {
+			m.overlay = overlayNone
+			return m, nil
+		}
+		models := swapper.AvailableModels()
+		if len(models) == 0 {
+			m.overlay = overlayNone
+			m.history.Append(Message{Role: RoleSystem, Text: "/model: no models available"})
+			m.refreshViewport()
+			return m, nil
+		}
+		switch stroke {
+		case "up", "ctrl+p":
+			m.modelPickerIdx = (m.modelPickerIdx - 1 + len(models)) % len(models)
+			return m, nil
+		case "down", "ctrl+n":
+			m.modelPickerIdx = (m.modelPickerIdx + 1) % len(models)
+			return m, nil
+		case "enter":
+			pick := models[m.modelPickerIdx]
+			newAgent, err := swapper.SwitchModel(pick.ID)
+			m.overlay = overlayNone
+			if err != nil {
+				m.history.Append(Message{Role: RoleError, Text: "/model: switch failed: " + err.Error()})
+				m.refreshViewport()
+				return m, nil
+			}
+			m.opts.Agent = newAgent
+			m.history.Append(Message{Role: RoleSystem, Text: "/model: switched to " + pick.ID})
+			if m.opts.PersistModelChoice != nil {
+				if perr := m.opts.PersistModelChoice(pick.ID); perr != nil {
+					m.history.Append(Message{Role: RoleError, Text: "/model: persist failed: " + perr.Error()})
+				}
+			}
+			m.refreshViewport()
+			return m, nil
+		}
+		return m, nil
+	}
+
 	// Palette dispatch — when a palette is open we consume the nav
 	// keys ourselves; everything else falls through to the textarea
 	// and the post-forward filter sync re-reads the input.
@@ -283,13 +328,13 @@ func (m Model) handleKey(msg tea.KeyPressMsg) (tea.Model, tea.Cmd) {
 		return m, nil
 
 	case "ctrl+g":
-		m.overlay = overlayModelPicker
-		return m, nil
-	case "ctrl+y":
-		m.overlay = overlayPermission
-		return m, nil
-	case "ctrl+e":
-		m.overlay = overlayElicit
+		// Open the model picker. Only useful when the agent
+		// implements ModelSwapper; otherwise the overlay would
+		// render an empty list, so swallow the keystroke instead.
+		if _, ok := m.opts.Agent.(ModelSwapper); ok {
+			m.overlay = overlayModelPicker
+			m.modelPickerIdx = 0
+		}
 		return m, nil
 
 	case "enter":
@@ -372,7 +417,7 @@ func (m *Model) refreshPalette() {
 			return
 		}
 		if idx := lastAtTokenStart(value); idx >= 0 {
-			m.palette = newFilePalette(idx)
+			m.palette = newFilePalette(idx, m.opts.PathScope)
 			m.palette.filter = atFilterFrom(value, idx)
 			m.resize()
 			return

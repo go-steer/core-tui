@@ -523,59 +523,70 @@ func (m Model) renderFooter(width int) string {
 	return m.styles.Footer.Render(hint)
 }
 
-// renderOverlay renders the currently active modal. Content is
-// hardcoded sample content for the visual-preview slice; a later
-// slice replaces these with real huh-backed forms (per D26).
+// renderOverlay renders the currently active enum-driven modal.
+// Today that's only the model picker (overlayModelPicker); the
+// overlayPermission / overlayElicit enum values are vestigial demo
+// hooks from the visual-preview slice — the real permission and
+// elicit modals render via renderPermissionModal / renderElicitModal
+// against pendingPermission / pendingElicit (see view.go:127-138).
+//
+// When the host's Agent doesn't implement ModelSwapper, the overlay
+// renders a one-line "not available" notice rather than an empty
+// frame so the operator knows why the picker is barren.
 func (m Model) renderOverlay() string {
-	var title, body, footer string
-	switch m.overlay {
-	case overlayModelPicker:
-		title = "Choose a Model"
-		body = strings.Join([]string{
-			m.styles.Muted.Render("Anthropic"),
-			"  " + m.styles.Accent.Render("> Claude Opus 4.7"),
-			"  Claude Sonnet 4.6",
-			"  Claude Haiku 4.5",
-			"",
-			m.styles.Muted.Render("Google"),
-			"  Gemini 3.5 Flash",
-			"  Gemini 3.5 Pro",
-		}, "\n")
-		footer = "↑↓ choose " + GlyphSeparator + " enter accept " + GlyphSeparator + " esc cancel"
-	case overlayPermission:
-		title = "Permission Required"
-		body = strings.Join([]string{
-			m.styles.Muted.Render("Tool ") + m.styles.Accent.Render("Write"),
-			m.styles.Muted.Render("File ") + "internal/auth/session.go",
-			"",
-			m.styles.SystemText.Render("Diff (preview):"),
-			m.styles.ErrorText.Render("- if user.Email == \"\" {"),
-			m.styles.SystemText.Render("+ if user.Email == \"\" || !strings.Contains(user.Email, \"@\") {"),
-			"",
-			"  [" + m.styles.Accent.Render("Allow once") + "]  [Allow for session]  [Allow always]  [Deny]",
-		}, "\n")
-		footer = "1/2/3/4 choose " + GlyphSeparator + " esc cancel"
-	case overlayElicit:
-		title = "MCP server requests input"
-		body = strings.Join([]string{
-			m.styles.Muted.Render("Server ") + m.styles.Accent.Render("github"),
-			"",
-			fmt.Sprintf("  %-14s %s", "Repository:", m.styles.Accent.Render("go-steer/core-tui")),
-			fmt.Sprintf("  %-14s %s", "Branch:", "main"),
-			fmt.Sprintf("  %-14s %s", "Confirm:", "[•] yes  [ ] no"),
-		}, "\n")
-		footer = "tab next field " + GlyphSeparator + " enter submit " + GlyphSeparator + " esc decline"
+	if m.overlay != overlayModelPicker {
+		return ""
 	}
 
 	width := 64
-	if width > m.width-4 {
+	if m.width > 0 && width > m.width-4 {
 		width = m.width - 4
 	}
+	if width < 30 {
+		width = 30
+	}
+
+	title := "Choose a Model"
+	var body string
+	swapper, ok := m.opts.Agent.(ModelSwapper)
+	if !ok {
+		body = m.styles.Muted.Render("agent does not implement ModelSwapper")
+	} else {
+		models := swapper.AvailableModels()
+		if len(models) == 0 {
+			body = m.styles.Muted.Render("(no models advertised by the agent)")
+		} else {
+			rows := make([]string, 0, len(models))
+			for i, mi := range models {
+				disp := mi.Display
+				if disp == "" {
+					disp = mi.ID
+				}
+				marker := "  "
+				if i == m.modelPickerIdx {
+					marker = "> "
+				}
+				row := marker + disp
+				if mi.ID != disp {
+					row += m.styles.Muted.Render("  (" + mi.ID + ")")
+				}
+				if mi.Description != "" {
+					row += "  " + m.styles.Muted.Render(mi.Description)
+				}
+				if i == m.modelPickerIdx {
+					row = m.styles.Accent.Render(row)
+				}
+				rows = append(rows, row)
+			}
+			body = strings.Join(rows, "\n")
+		}
+	}
+	footer := "↑↓ choose " + GlyphSeparator + " enter accept " + GlyphSeparator + " esc cancel"
 
 	titleBar := m.styles.ModalTitle.Render(title)
-	rule := m.styles.ModalBorder.Render(strings.Repeat(GlyphRule, width-len(title)-3))
-	titleLine := titleBar + " " + rule
-	footerRule := m.styles.ModalBorder.Render(strings.Repeat(GlyphRule, width-2))
+	titleRule := m.styles.ModalBorder.Render(strings.Repeat(GlyphRule, nonNeg(width-lipgloss.Width(titleBar)-3)))
+	titleLine := titleBar + " " + titleRule
+	footerRule := m.styles.ModalBorder.Render(strings.Repeat(GlyphRule, nonNeg(width-2)))
 	footerLine := m.styles.ModalFooter.Render(footer)
 
 	content := lipgloss.JoinVertical(lipgloss.Left,
@@ -926,11 +937,9 @@ func (m Model) renderHelpPanel(width int) string {
 			{"ctrl+b", "toggle header / sidebar"},
 			{"shift+tab", "cycle permission mode"},
 		}},
-		{"Demo modals (visual preview)", [][2]string{
-			{"ctrl+g", "model picker"},
-			{"ctrl+y", "permission modal"},
-			{"ctrl+e", "MCP elicitation"},
-			{"esc", "close any modal"},
+		{"Modals", [][2]string{
+			{"ctrl+g", "model picker (when ModelSwapper is wired)"},
+			{"esc", "close / cancel any open modal"},
 		}},
 		{"Interrupt / quit", [][2]string{
 			{"esc", "interrupt in-flight turn (doesn't clear queue)"},

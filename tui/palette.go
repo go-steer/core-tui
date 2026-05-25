@@ -16,6 +16,8 @@ package tui
 
 import (
 	"fmt"
+	"io/fs"
+	"path/filepath"
 	"sort"
 	"strings"
 
@@ -100,22 +102,86 @@ func builtinSlashItems() []paletteItem {
 	}
 }
 
-// sampleFileItems returns hardcoded paths for the visual-preview
-// slice's @ palette. Real implementations source from filepath.WalkDir
-// honoring Options.PathScope + R-PAL-4 exclude list.
-func sampleFileItems() []paletteItem {
-	return []paletteItem{
-		{Name: "tui/agent.go", Description: "1.5K", Available: true},
-		{Name: "tui/model.go", Description: "2.4K", Available: true},
-		{Name: "tui/update.go", Description: "4.1K", Available: true},
-		{Name: "tui/view.go", Description: "9.2K", Available: true},
-		{Name: "tui/style.go", Description: "5.0K", Available: true},
-		{Name: "tui/palette.go", Description: "7.8K", Available: true},
-		{Name: "docs/requirements.md", Description: "21K", Available: true},
-		{Name: "docs/design.md", Description: "27K", Available: true},
-		{Name: "docs/decisions.md", Description: "20K", Available: true},
-		{Name: "docs/style.md", Description: "10K", Available: true},
-		{Name: "examples/local/main.go", Description: "3.7K", Available: true},
+// scanFileItems walks every root in scope and returns the eligible
+// paths as paletteItems. Honors R-PAL-4 by skipping common noise
+// directories (.git, node_modules, vendor, dist, build, target,
+// .agents, .claude) and hidden dotfiles at every depth. Symlinks
+// are not followed. Caps at maxFilePaletteItems to keep the
+// palette snappy on big trees; the cap also defends against
+// runaway scope misconfiguration.
+//
+// Empty scope returns an empty list — the @ palette renders a hint
+// telling the operator no PathScope is wired.
+func scanFileItems(scope PathScope) []paletteItem {
+	const maxFilePaletteItems = 500
+	if len(scope.Roots) == 0 {
+		return nil
+	}
+	skipDirs := map[string]bool{
+		".git": true, ".hg": true, ".svn": true,
+		"node_modules": true, "vendor": true,
+		"dist": true, "build": true, "target": true,
+		".agents": true, ".claude": true,
+	}
+	out := make([]paletteItem, 0, 64)
+	for _, root := range scope.Roots {
+		if root == "" {
+			continue
+		}
+		_ = filepath.WalkDir(root, func(path string, d fs.DirEntry, err error) error {
+			if err != nil {
+				return nil // skip unreadable subtrees rather than aborting
+			}
+			name := d.Name()
+			if d.IsDir() {
+				if path != root && (skipDirs[name] || strings.HasPrefix(name, ".")) {
+					return filepath.SkipDir
+				}
+				return nil
+			}
+			if strings.HasPrefix(name, ".") {
+				return nil
+			}
+			if len(out) >= maxFilePaletteItems {
+				return filepath.SkipAll
+			}
+			rel, rerr := filepath.Rel(root, path)
+			if rerr != nil {
+				rel = path
+			}
+			size := ""
+			if info, ierr := d.Info(); ierr == nil {
+				size = formatFileSize(info.Size())
+			}
+			out = append(out, paletteItem{
+				Name:        rel,
+				Description: size,
+				Available:   true,
+			})
+			return nil
+		})
+		if len(out) >= maxFilePaletteItems {
+			break
+		}
+	}
+	return out
+}
+
+// formatFileSize renders bytes in compact human form for the @
+// palette description column. 0 falls back to empty so the column
+// doesn't render a noisy "0".
+func formatFileSize(n int64) string {
+	switch {
+	case n <= 0:
+		return ""
+	case n < 1024:
+		return fmt.Sprintf("%dB", n)
+	case n < 1024*1024:
+		return fmt.Sprintf("%.1fK", float64(n)/1024)
+	case n < 1024*1024*1024:
+		return fmt.Sprintf("%.1fM", float64(n)/(1024*1024))
+	default:
+		return fmt.Sprintf("%.1fG", float64(n)/(1024*1024*1024))
 	}
 }
 
@@ -129,11 +195,14 @@ func newSlashPalette(pos int) *palette {
 	}
 }
 
-// newFilePalette opens an @ palette at trigger position pos.
-func newFilePalette(pos int) *palette {
+// newFilePalette opens an @ palette at trigger position pos. The
+// items are sourced from scanning every PathScope root (R-PAL-4).
+// Empty scope yields an empty palette — the renderer surfaces the
+// "no PathScope configured" hint instead of a misleading file list.
+func newFilePalette(pos int, scope PathScope) *palette {
 	return &palette{
 		kind:       paletteFile,
-		items:      sampleFileItems(),
+		items:      scanFileItems(scope),
 		triggerPos: pos,
 	}
 }

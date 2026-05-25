@@ -34,14 +34,16 @@ const (
 	stateStreaming                  // turn in flight: input disabled, spinner active
 )
 
-// overlay identifies which modal, if any, is currently visible.
+// overlay identifies which enum-driven modal, if any, is currently
+// visible. Permission + elicit modals don't ride this enum — they're
+// keyed off pendingPermission / pendingElicit directly so the real
+// flows can open them without the TUI having to also flip an
+// overlay value.
 type overlay int
 
 const (
 	overlayNone overlay = iota
 	overlayModelPicker
-	overlayPermission
-	overlayElicit
 )
 
 // Model is the Bubble Tea model that drives the TUI. Field set is the
@@ -129,6 +131,11 @@ type Model struct {
 	// quitting flips when Ctrl+C / Ctrl+D land, so the next Update
 	// returns tea.Quit.
 	quitting bool
+
+	// modelPickerIdx is the currently-focused row in the
+	// overlayModelPicker overlay. Reset to 0 every time the picker
+	// opens; ↑/↓ adjust; Enter dispatches SwitchModel for the row.
+	modelPickerIdx int
 }
 
 // NewModel constructs a Model from Options. SeedHistory entries are

@@ -117,9 +117,12 @@ func (m Model) dispatchBuiltinSlash(name, args string) (bool, tea.Model, tea.Cmd
 			return true, m, nil
 		}
 		if args == "" {
-			m.history.Append(Message{Role: RoleSystem, Text: renderModelList(swapper.AvailableModels())})
+			// No-arg form opens the interactive picker overlay
+			// (mirrors Ctrl+G). Avoids dumping a long model list
+			// into the chat when the operator wanted to choose.
+			m.overlay = overlayModelPicker
+			m.modelPickerIdx = 0
 			m.input.Reset()
-			m.refreshViewport()
 			return true, m, nil
 		}
 		// `/model <id>` switches without opening a picker — useful for
