@@ -16,6 +16,8 @@ package tui
 
 import (
 	"context"
+	"fmt"
+	"strconv"
 	"time"
 
 	"charm.land/bubbles/v2/textarea"
@@ -204,4 +206,99 @@ func (m Model) wordmark() string {
 		return m.opts.Branding.Wordmark
 	}
 	return "core-tui"
+}
+
+// displayModelName picks the best model identifier to surface on the
+// status header/sidebar. Order:
+//
+//  1. StatusReporter.Status().ModelName  — the host's authoritative
+//     read of the live model (preferred; updates on /model swap).
+//  2. m.currentModel                     — set per-turn from streamed
+//     Event.Model when the host populates it; empty before any turn.
+//  3. "(model not set)"                  — placeholder so the chip
+//     isn't blank when neither source has fired yet.
+func (m Model) displayModelName() string {
+	if reporter, ok := m.opts.Agent.(StatusReporter); ok {
+		if s := reporter.Status(); s.ModelName != "" {
+			return s.ModelName
+		}
+	}
+	if m.currentModel != "" {
+		return m.currentModel
+	}
+	return "(model not set)"
+}
+
+// usageSummaryOneLine returns the compact "Nk in · Nk out · $X · used/size"
+// spend block for the status header. Empty when no UsageTracker is
+// wired (the header just drops the trailing segment rather than
+// rendering placeholder zeros that look like real data).
+func (m Model) usageSummaryOneLine() string {
+	if m.opts.UsageTracker == nil {
+		return ""
+	}
+	t := m.opts.UsageTracker.SessionTotals()
+	cost := m.opts.UsageTracker.SessionCostUSD()
+	used := m.opts.UsageTracker.ContextWindowUsed()
+	size := m.opts.UsageTracker.ContextWindowSize()
+	sep := " " + GlyphSeparator + " "
+	out := formatKTokens(t.InputTokens) + " in" + sep + formatKTokens(t.OutputTokens) + " out" + sep + fmt.Sprintf("$%.4f", cost)
+	if size > 0 {
+		out += sep + formatKTokens(used) + " / " + formatKTokens(size)
+	}
+	return out
+}
+
+// usageSummaryStacked returns the sidebar's two-line spend block.
+// First line: "Nk in · Nk out"; second line: "$X · used / size" (or
+// just "$X" when context window is unknown). Empty pair when no
+// UsageTracker is wired.
+func (m Model) usageSummaryStacked() (string, string) {
+	if m.opts.UsageTracker == nil {
+		return "", ""
+	}
+	t := m.opts.UsageTracker.SessionTotals()
+	cost := m.opts.UsageTracker.SessionCostUSD()
+	used := m.opts.UsageTracker.ContextWindowUsed()
+	size := m.opts.UsageTracker.ContextWindowSize()
+	sep := " " + GlyphSeparator + " "
+	line1 := formatKTokens(t.InputTokens) + " in" + sep + formatKTokens(t.OutputTokens) + " out"
+	line2 := fmt.Sprintf("$%.4f", cost)
+	if size > 0 {
+		line2 += sep + formatKTokens(used) + " / " + formatKTokens(size)
+	}
+	return line1, line2
+}
+
+// formatKTokens renders an integer token count in compact human form
+// — "1.5K" for 1500, "23K" for 23000, plain "850" for sub-1K. Mirrors
+// the format the per-turn footer uses (R-USE-1).
+func formatKTokens(n int) string {
+	if n < 1000 {
+		return strconv.Itoa(n)
+	}
+	if n < 10000 {
+		return fmt.Sprintf("%.1fK", float64(n)/1000)
+	}
+	return fmt.Sprintf("%dK", n/1000)
+}
+
+// subagentSummary renders the sidebar's subagent rows from a wired
+// SubagentLister. Returns ("none") when the capability is unwired or
+// the list is empty so the section reads consistently.
+func (m Model) subagentSummary() []string {
+	lister, ok := m.opts.Agent.(SubagentLister)
+	if !ok {
+		return []string{"none (no SubagentLister)"}
+	}
+	subs := lister.Subagents()
+	if len(subs) == 0 {
+		return []string{"none"}
+	}
+	out := make([]string, 0, len(subs))
+	for _, s := range subs {
+		row := s.Name + " [" + s.Status + "]"
+		out = append(out, row)
+	}
+	return out
 }

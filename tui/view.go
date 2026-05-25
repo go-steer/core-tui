@@ -427,7 +427,7 @@ func (m Model) renderStatusLine() string {
 	parts := []string{
 		m.styles.Wordmark.Render(m.wordmark()),
 		m.sep(),
-		m.styles.AgentIdentity.Render(GlyphModel + " " + "Claude Sonnet 4"),
+		m.styles.AgentIdentity.Render(GlyphModel + " " + m.displayModelName()),
 	}
 	if m.permissionModeWired() {
 		parts = append(parts,
@@ -435,33 +435,36 @@ func (m Model) renderStatusLine() string {
 			m.renderPermissionChip(),
 		)
 	}
-	parts = append(parts,
-		m.sep(),
-		m.styles.Muted.Render(fmt.Sprintf(
-			"15.2K in %s 4.1K out %s $0.04 %s 19.3K / 200K",
-			GlyphSeparator, GlyphSeparator, GlyphSeparator,
-		)),
-	)
+	if summary := m.usageSummaryOneLine(); summary != "" {
+		parts = append(parts,
+			m.sep(),
+			m.styles.Muted.Render(summary),
+		)
+	}
 	return strings.Join(parts, "")
 }
 
 // renderSidebar renders the StatusSidebar layout's right-hand panel
 // (style.md §7.2). Stacks the model + mode + spend metrics in a
 // readable vertical layout — separate input/output tokens, context-
-// window %, cumulative cost, instead of the prior conflated form.
+// window %, cumulative cost — sourced live from the host's
+// UsageTracker + SubagentLister. The "modified files" preview section
+// was dropped pending a real file-watch capability; until one exists
+// any rendered value is fiction.
 func (m Model) renderSidebar() string {
-	header := lipgloss.JoinVertical(lipgloss.Left,
-		"  "+m.styles.AgentIdentity.Render(GlyphModel+" Claude Sonnet 4"),
-		"    "+m.styles.Muted.Render(m.permMode.String()),
-		"    "+m.styles.Muted.Render("15.2K in "+GlyphSeparator+" 4.1K out"),
-		"    "+m.styles.Muted.Render("$0.04 "+GlyphSeparator+" 19.3K / 200K"),
-	)
-	modified := m.sidebarSection("modified files",
-		"cmd/foo/main.go     +12 -3",
-		"pkg/bar/bar_test.go  +5",
-	)
-	sub := m.sidebarSection("subagents", "none")
-	return lipgloss.JoinVertical(lipgloss.Left, header, "", modified, "", sub)
+	headerLines := []string{
+		"  " + m.styles.AgentIdentity.Render(GlyphModel+" "+m.displayModelName()),
+		"    " + m.styles.Muted.Render(m.permMode.String()),
+	}
+	if line1, line2 := m.usageSummaryStacked(); line1 != "" {
+		headerLines = append(headerLines,
+			"    "+m.styles.Muted.Render(line1),
+			"    "+m.styles.Muted.Render(line2),
+		)
+	}
+	header := lipgloss.JoinVertical(lipgloss.Left, headerLines...)
+	sub := m.sidebarSection("subagents", m.subagentSummary()...)
+	return lipgloss.JoinVertical(lipgloss.Left, header, "", sub)
 }
 
 // sidebarSection renders a `─ heading ─` section with body rows.
@@ -512,7 +515,7 @@ func (m Model) renderFooter(width int) string {
 	hint := m.opts.Branding.FooterHint
 	if hint == "" {
 		sep := " " + GlyphSeparator + " "
-		hint = "enter submit" + sep + "shift+enter newline" + sep + "ctrl+c quit" + sep + "? for more"
+		hint = "enter submit" + sep + "ctrl+j newline" + sep + "ctrl+c quit" + sep + "? for more"
 	}
 	if width > 0 {
 		hint = wordWrap(hint, width)
@@ -900,7 +903,7 @@ func (m Model) renderHelpPanel(width int) string {
 	}{
 		{"Input", [][2]string{
 			{"enter", "submit (or enqueue if a turn is running)"},
-			{"shift+enter / ctrl+j", "newline"},
+			{"ctrl+j", "newline (shift+enter on terminals that distinguish it)"},
 			{"?", "toggle this menu"},
 		}},
 		{"Palettes (live filter)", [][2]string{

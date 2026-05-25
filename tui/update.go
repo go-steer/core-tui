@@ -575,15 +575,19 @@ func (m *Model) finalizeTurn(elapsed time.Duration, notice string) {
 }
 
 // dispatchSlash handles `/name args...` submitted from the input.
-// Built-in slash commands aren't wired yet (a later slice owns the
-// /help, /clear, /quit dispatch); for now we only route to the
-// agent's SlashProvider when present. Unknown commands surface as
-// a system row pointing at /help.
+// Tries the TUI's built-in dispatcher first (slash_builtin.go);
+// unrecognized names fall through to the agent's optional
+// SlashProvider (/btw, /subagent, etc.); anything still unmatched
+// surfaces as a system row pointing at /help.
 func (m Model) dispatchSlash(text string) (tea.Model, tea.Cmd) {
 	rest := strings.TrimPrefix(text, "/")
 	name, args, _ := strings.Cut(rest, " ")
 	name = strings.ToLower(name)
 	args = strings.TrimSpace(args)
+
+	if handled, model, cmd := m.dispatchBuiltinSlash(name, args); handled {
+		return model, cmd
+	}
 
 	provider, ok := m.opts.Agent.(SlashProvider)
 	if !ok {
