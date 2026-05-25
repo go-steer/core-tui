@@ -70,8 +70,9 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 func (m Model) handleKey(msg tea.KeyPressMsg) (tea.Model, tea.Cmd) {
 	stroke := msg.String()
 
-	// Modal-close: Esc closes any open overlay or help panel before
-	// any other handler.
+	// Esc cascades through overlays (R-CHAT-6): modal → help panel →
+	// palette → interrupt-in-flight (placeholder until streaming) →
+	// no-op. Never quits.
 	if stroke == "esc" {
 		if m.overlay != overlayNone {
 			m.overlay = overlayNone
@@ -83,10 +84,42 @@ func (m Model) handleKey(msg tea.KeyPressMsg) (tea.Model, tea.Cmd) {
 			m.refreshViewport()
 			return m, nil
 		}
+		if m.palette != nil {
+			m.palette = nil
+			m.resize()
+			m.refreshViewport()
+			return m, nil
+		}
+		// Placeholder: when streaming lands, this branch will call
+		// the turn's cancel func and emit an "(interrupted)" notice.
+		return m, nil
+	}
+
+	// Palette dispatch — when a palette is open we consume the nav
+	// keys ourselves; everything else falls through to the textarea
+	// and the post-forward filter sync re-reads the input.
+	if m.palette != nil {
+		switch stroke {
+		case "up", "ctrl+p":
+			m.palette.moveCursor(-1)
+			return m, nil
+		case "down", "ctrl+n":
+			m.palette.moveCursor(1)
+			return m, nil
+		case "tab":
+			return m.paletteComplete(), nil
+		case "enter":
+			return m.paletteInsert(), nil
+		}
 	}
 
 	switch stroke {
-	case "ctrl+c", "ctrl+d":
+	case "ctrl+c":
+		// Always quits (R-CHAT-6). Ctrl+D also quits as a familiar
+		// "EOF closes input" convention.
+		m.quitting = true
+		return m, tea.Quit
+	case "ctrl+d":
 		m.quitting = true
 		return m, tea.Quit
 
@@ -113,9 +146,6 @@ func (m Model) handleKey(msg tea.KeyPressMsg) (tea.Model, tea.Cmd) {
 		}
 		return m, nil
 
-	case "ctrl+p":
-		m.overlay = overlayPalette
-		return m, nil
 	case "ctrl+g":
 		m.overlay = overlayModelPicker
 		return m, nil
@@ -170,5 +200,148 @@ func (m Model) handleKey(msg tea.KeyPressMsg) (tea.Model, tea.Cmd) {
 	)
 	m.input, taCmd = m.input.Update(msg)
 	m.viewport, vpCmd = m.viewport.Update(msg)
+	// Refresh palette state from the updated input — opens a new
+	// palette on a fresh `/` or `@` trigger, closes the active one
+	// when the trigger is deleted, or updates the filter on any
+	// other keystroke.
+	m.refreshPalette()
 	return m, tea.Batch(taCmd, vpCmd)
+}
+
+// refreshPalette re-derives palette state from the current textarea
+// content. Called from handleKey after every forwarded keystroke so
+// the palette opens / closes / re-filters in lock-step with the user
+// typing into the input.
+//
+// Triggering rules (R-PAL-1 / R-PAL-2):
+//   - `/` at the very start of input opens a slash palette.
+//   - `@` at a word boundary anywhere opens a file palette.
+//   - Deleting the trigger char closes the active palette.
+func (m *Model) refreshPalette() {
+	value := m.input.Value()
+
+	if m.palette == nil {
+		if strings.HasPrefix(value, "/") {
+			m.palette = newSlashPalette(0)
+			m.palette.filter = value[1:]
+			m.resize()
+			return
+		}
+		if idx := lastAtTokenStart(value); idx >= 0 {
+			m.palette = newFilePalette(idx)
+			m.palette.filter = atFilterFrom(value, idx)
+			m.resize()
+			return
+		}
+		return
+	}
+
+	// Palette is open — verify the trigger char still sits at
+	// triggerPos, otherwise close it.
+	if m.palette.triggerPos >= len(value) {
+		m.palette = nil
+		m.resize()
+		return
+	}
+	if string(value[m.palette.triggerPos]) != m.palette.triggerRune() {
+		m.palette = nil
+		m.resize()
+		return
+	}
+	if m.palette.kind == paletteSlash {
+		m.palette.filter = value[1:]
+	} else {
+		m.palette.filter = atFilterFrom(value, m.palette.triggerPos)
+	}
+	// Clamp cursor to the new filtered list.
+	if n := len(m.palette.filtered()); m.palette.cursor >= n {
+		if n > 0 {
+			m.palette.cursor = n - 1
+		} else {
+			m.palette.cursor = 0
+		}
+	}
+}
+
+// lastAtTokenStart returns the byte index of the most recent `@` in s
+// that sits at a word boundary (start of string or after whitespace),
+// or -1 when no such `@` exists.
+func lastAtTokenStart(s string) int {
+	for i := len(s) - 1; i >= 0; i-- {
+		if s[i] != '@' {
+			continue
+		}
+		if i == 0 {
+			return 0
+		}
+		switch s[i-1] {
+		case ' ', '\t', '\n':
+			return i
+		}
+	}
+	return -1
+}
+
+// atFilterFrom returns the filter text following an `@` at position
+// triggerPos in s — everything after `@` up to (but not including)
+// the next whitespace or end-of-string.
+func atFilterFrom(s string, triggerPos int) string {
+	rest := s[triggerPos+1:]
+	if sp := strings.IndexAny(rest, " \t\n"); sp >= 0 {
+		return rest[:sp]
+	}
+	return rest
+}
+
+// paletteComplete extends the input with the longest common prefix
+// of the matched palette items (Tab while palette is open). Leaves
+// the palette open for further filtering. Idempotent when the filter
+// is already the full common prefix.
+func (m Model) paletteComplete() tea.Model {
+	if m.palette == nil {
+		return m
+	}
+	extension := m.palette.completion()
+	if extension == "" {
+		return m
+	}
+	value := m.input.Value()
+	tokenEnd := m.palette.triggerPos + 1 + len(m.palette.filter)
+	if tokenEnd > len(value) {
+		tokenEnd = len(value)
+	}
+	newValue := value[:m.palette.triggerPos] + m.palette.triggerRune() + extension + value[tokenEnd:]
+	m.input.SetValue(newValue)
+	m.refreshPalette()
+	return m
+}
+
+// paletteInsert replaces the typed trigger token with the selected
+// item's insert form and closes the palette (Enter while palette is
+// open). Unavailable items are skipped — closing the palette
+// silently — until a real slice surfaces a system-message hint.
+func (m Model) paletteInsert() tea.Model {
+	if m.palette == nil {
+		return m
+	}
+	item, ok := m.palette.selected()
+	if !ok || !item.Available {
+		m.palette = nil
+		m.resize()
+		return m
+	}
+	value := m.input.Value()
+	tokenEnd := m.palette.triggerPos + 1 + len(m.palette.filter)
+	if tokenEnd > len(value) {
+		tokenEnd = len(value)
+	}
+	insertText := item.insertText(m.palette.kind)
+	if m.palette.kind == paletteFile {
+		insertText += " "
+	}
+	newValue := value[:m.palette.triggerPos] + insertText + value[tokenEnd:]
+	m.input.SetValue(newValue)
+	m.palette = nil
+	m.resize()
+	return m
 }

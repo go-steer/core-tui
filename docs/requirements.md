@@ -74,9 +74,13 @@ documented Go interface set (see `design.md` for the shape).
 - **R-CHAT-5** Show one-line tool-call summaries inline with assistant
   prose so the user sees actions interleaved with text. Dedupe by
   function call ID so partial/committed events don't double-render.
-- **R-CHAT-6** Ctrl-C while idle exits; while a turn is in flight
-  cancels the turn via context cancellation and emits an
-  "(interrupted)" notice.
+- **R-CHAT-6** `Esc` interrupts an in-flight turn via context
+  cancellation and emits an "(interrupted)" notice; when no turn is
+  running, `Esc` cascades through (modal → help panel → palette →
+  no-op) so it never accidentally quits. `Ctrl+C` always quits.
+  This split mirrors Claude Code, Crush, and Antigravity — keeps
+  "stop this turn" and "exit the app" on distinct keys so users
+  never have to think about which Ctrl+C this one is.
 - **R-CHAT-7** Auto-scroll the viewport to bottom when new content
   arrives **only if the user was already at the bottom**. Preserve
   scroll position when the user has scrolled up.

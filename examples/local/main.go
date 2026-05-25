@@ -64,9 +64,9 @@ func seededConversation() []tui.Message {
 	return []tui.Message{
 		{
 			Role: tui.RoleSystem,
-			Text: "Visual preview — type ? for the full keymap. Demos: ctrl+p palette · " +
-				"ctrl+g model · ctrl+y permission · ctrl+e elicit · ctrl+b toggle layout · " +
-				"shift+tab cycle perm-mode.",
+			Text: "Visual preview — type ? for the full keymap. Try: / for slash palette · " +
+				"@ for file palette · ctrl+g model · ctrl+y permission · ctrl+e elicit · " +
+				"ctrl+b toggle layout · shift+tab cycle perm-mode.",
 		},
 		{
 			Role: tui.RoleUser,

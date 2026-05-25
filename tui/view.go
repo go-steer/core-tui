@@ -72,12 +72,16 @@ func (m Model) View() tea.View {
 		chatWidth := m.width - sidebarWidth - 3
 		footer := m.renderFooter(chatWidth)
 		help := m.renderHelpPanel(chatWidth)
+		pal := m.renderPalette(chatWidth)
 		// Force `left` to exactly chatWidth wide so the sidebar lands
 		// at column chatWidth + divider regardless of how short the
 		// individual rows are.
 		leftParts := []string{chat}
 		if help != "" {
 			leftParts = append(leftParts, help)
+		}
+		if pal != "" {
+			leftParts = append(leftParts, pal)
 		}
 		leftParts = append(leftParts, input, footer)
 		left := lipgloss.NewStyle().Width(chatWidth).Render(
@@ -94,9 +98,13 @@ func (m Model) View() tea.View {
 		header := m.renderHeader()
 		footer := m.renderFooter(m.width)
 		help := m.renderHelpPanel(m.width)
+		pal := m.renderPalette(m.width)
 		parts := []string{header, chat}
 		if help != "" {
 			parts = append(parts, help)
+		}
+		if pal != "" {
+			parts = append(parts, pal)
 		}
 		parts = append(parts, input, footer)
 		body = lipgloss.JoinVertical(lipgloss.Left, parts...)
@@ -153,7 +161,11 @@ func (m *Model) resize() {
 	if m.helpOpen {
 		helpRows = lipgloss.Height(m.renderHelpPanel(footerWidth))
 	}
-	chatHeight := m.height - headerHeight - inputHeight - footerRows - helpRows - 2 // 2 = input top border + spacer
+	palRows := 0
+	if m.palette != nil {
+		palRows = lipgloss.Height(m.renderPalette(footerWidth))
+	}
+	chatHeight := m.height - headerHeight - inputHeight - footerRows - helpRows - palRows - 2 // 2 = input top border + spacer
 	if chatHeight < 3 {
 		chatHeight = 3
 	}
@@ -352,18 +364,6 @@ func (m Model) renderFooter(width int) string {
 func (m Model) renderOverlay() string {
 	var title, body, footer string
 	switch m.overlay {
-	case overlayPalette:
-		title = "Commands"
-		body = strings.Join([]string{
-			"> ",
-			"",
-			m.styles.Accent.Render("> /model") + m.styles.Muted.Render("        switch the active model"),
-			"  /clear      " + m.styles.Muted.Render("clear chat history"),
-			"  /help       " + m.styles.Muted.Render("show command reference"),
-			"  /reload     " + m.styles.Muted.Render("re-read .agents/ from disk"),
-			"  /quit       " + m.styles.Muted.Render("exit"),
-		}, "\n")
-		footer = "↑↓ choose " + GlyphSeparator + " enter select " + GlyphSeparator + " esc cancel"
 	case overlayModelPicker:
 		title = "Choose a Model"
 		body = strings.Join([]string{
@@ -474,6 +474,14 @@ func (m Model) renderHelpPanel(width int) string {
 			{"shift+enter / ctrl+j", "newline"},
 			{"?", "toggle this menu"},
 		}},
+		{"Palettes (live filter)", [][2]string{
+			{"/ (at start)", "slash command palette"},
+			{"@ (anywhere)", "project file palette"},
+			{"↑ / ↓", "navigate palette"},
+			{"tab", "complete prefix"},
+			{"enter", "insert selection"},
+			{"esc", "close palette"},
+		}},
 		{"Navigation", [][2]string{
 			{"pgup / pgdn", "scroll chat"},
 			{"home / end", "top / bottom"},
@@ -483,13 +491,13 @@ func (m Model) renderHelpPanel(width int) string {
 			{"shift+tab", "cycle permission mode"},
 		}},
 		{"Demo modals (visual preview)", [][2]string{
-			{"ctrl+p", "command palette"},
 			{"ctrl+g", "model picker"},
 			{"ctrl+y", "permission modal"},
 			{"ctrl+e", "MCP elicitation"},
 			{"esc", "close any modal"},
 		}},
-		{"Quit", [][2]string{
+		{"Interrupt / quit", [][2]string{
+			{"esc", "interrupt in-flight turn"},
 			{"ctrl+c, ctrl+d", "exit"},
 		}},
 	}

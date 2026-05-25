@@ -24,7 +24,6 @@ type overlay int
 
 const (
 	overlayNone overlay = iota
-	overlayPalette
 	overlayModelPicker
 	overlayPermission
 	overlayElicit
@@ -52,6 +51,11 @@ type Model struct {
 	// (`?` to open / close). When open, the chat viewport shrinks
 	// to make room above the input.
 	helpOpen bool
+
+	// palette is the active slash / file palette overlay (R-PAL-1 /
+	// R-PAL-2). Nil = no palette open. Triggered by typing `/` at
+	// the start of the input or `@` anywhere.
+	palette *palette
 
 	// quitting flips when Ctrl+C / Ctrl+D land, so the next Update
 	// returns tea.Quit.
