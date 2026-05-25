@@ -76,6 +76,12 @@ type Model struct {
 	// Esc / Enter / Space.
 	sideAnswer *SideAnswer
 
+	// toast is a transient banner that renders between the input
+	// box and the footer (R-WAKE-1). Cleared after toastTTL via
+	// cullToast on the next render. Set by wakeMsg handling.
+	toast      string
+	toastSetAt time.Time
+
 	// Streaming-turn state (R-CHAT-3 / R-CHAT-4 / R-CHAT-6).
 	state          turnState
 	cancelTurn     context.CancelFunc // non-nil while state == stateStreaming

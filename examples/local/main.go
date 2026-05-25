@@ -55,6 +55,30 @@ type demoAgent struct{ tui.Agent }
 // would push the message onto an inbox / context-augmentation channel.
 func (demoAgent) Inject(_ string) error { return nil }
 
+// wakeCh and demoWaker drive the WakeRequester demo (R-WAKE-1). A
+// goroutine fires a wake every 25 seconds so the toast banner
+// surfaces a few times across a session.
+var wakeCh = makeDemoWakeChannel()
+
+func makeDemoWakeChannel() chan struct{} {
+	ch := make(chan struct{}, 4)
+	go func() {
+		ticker := time.NewTicker(25 * time.Second)
+		defer ticker.Stop()
+		for range ticker.C {
+			select {
+			case ch <- struct{}{}:
+			default:
+			}
+		}
+	}()
+	return ch
+}
+
+// WakeRequested implements tui.WakeRequester. Returns the shared
+// demo channel; real hosts return their agent's wake channel.
+func (demoAgent) WakeRequested() <-chan struct{} { return wakeCh }
+
 func (demoAgent) SlashCommands() []tui.SlashCommandSpec {
 	return []tui.SlashCommandSpec{
 		{

@@ -270,6 +270,17 @@ type InjectableAgent interface {
     Inject(message string) error
 }
 
+// WakeRequester is an optional capability for hosts whose agent
+// emits "I need the operator's attention" signals. The TUI
+// subscribes once at startup; each receive triggers a transient
+// toast banner. Hosts own channel lifecycle — closing the channel
+// is fine.
+//
+// See R-WAKE-1.
+type WakeRequester interface {
+    WakeRequested() <-chan struct{}
+}
+
 // SubagentLister backs /subagents (v1 read-only).
 type SubagentLister interface {
     Subagents() []SubagentInfo

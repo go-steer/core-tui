@@ -17,6 +17,7 @@ package tui
 import (
 	"fmt"
 	"strings"
+	"time"
 
 	tea "charm.land/bubbletea/v2"
 	"charm.land/lipgloss/v2"
@@ -83,7 +84,11 @@ func (m Model) View() tea.View {
 		if pal != "" {
 			leftParts = append(leftParts, pal)
 		}
-		leftParts = append(leftParts, input, footer)
+		leftParts = append(leftParts, input)
+		if t := m.renderToast(chatWidth); t != "" {
+			leftParts = append(leftParts, t)
+		}
+		leftParts = append(leftParts, footer)
 		left := lipgloss.NewStyle().Width(chatWidth).Render(
 			lipgloss.JoinVertical(lipgloss.Left, leftParts...),
 		)
@@ -106,7 +111,11 @@ func (m Model) View() tea.View {
 		if pal != "" {
 			parts = append(parts, pal)
 		}
-		parts = append(parts, input, footer)
+		parts = append(parts, input)
+		if t := m.renderToast(m.width); t != "" {
+			parts = append(parts, t)
+		}
+		parts = append(parts, footer)
 		body = lipgloss.JoinVertical(lipgloss.Left, parts...)
 	}
 
@@ -648,6 +657,25 @@ func (m *Model) renderSideAnswer() string {
 		footerLine,
 	)
 	return m.styles.ModalBorder.Padding(0, 1).Width(width).Render(content)
+}
+
+// renderToast renders the transient wake banner (R-WAKE-1) between
+// the input box and the footer. Empty string when no toast is
+// active or its TTL has elapsed; the on-render TTL check is the
+// secondary defense behind toastClearMsg in case the timer Cmd was
+// dropped.
+func (m Model) renderToast(width int) string {
+	if m.toast == "" || width <= 0 {
+		return ""
+	}
+	if time.Since(m.toastSetAt) > toastTTL {
+		return ""
+	}
+	body := "  " + GlyphWarn + "  " + m.toast
+	if w := lipgloss.Width(body); w < width {
+		body += strings.Repeat(" ", width-w)
+	}
+	return m.styles.PermissionWarn.Render(body)
 }
 
 // max returns the larger of a and b. Tiny helper to keep the

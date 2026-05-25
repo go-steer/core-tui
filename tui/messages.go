@@ -66,3 +66,14 @@ type turnCancelledMsg struct{}
 // spinnerTickMsg fires every spinnerCadence to rotate the
 // thinking/working verb (R-CHAT-3).
 type spinnerTickMsg struct{}
+
+// wakeMsg fires when the host's WakeRequester capability signals
+// the operator should be notified (R-WAKE-1). Carries no payload —
+// the toast banner content is fixed; subsequent design slices can
+// extend with a Reason field if hosts want per-wake messages.
+type wakeMsg struct{}
+
+// toastClearMsg fires toastTTL after a toast was raised; Update
+// drops the toast on receive unless a fresher wake has restarted
+// the timer (R-WAKE-1).
+type toastClearMsg struct{}

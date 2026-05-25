@@ -76,3 +76,20 @@ type Usage struct {
 type InjectableAgent interface {
 	Inject(message string) error
 }
+
+// WakeRequester is an optional capability: hosts whose agent
+// emits "I need the operator's attention" signals (typically from
+// background sub-agents reporting completion or asking for input)
+// implement it. WakeRequested returns a receive-only channel; each
+// receive triggers a transient toast banner in the TUI.
+//
+// The TUI subscribes once at startup via a goroutine that ranges
+// over the channel; the host owns channel lifecycle (closing the
+// channel is fine — the goroutine exits cleanly). The interface
+// makes no promise about coalescing: rapid back-to-back wakes will
+// render multiple toasts in sequence.
+//
+// See R-WAKE-1 in requirements.md and design.md §3.3.
+type WakeRequester interface {
+	WakeRequested() <-chan struct{}
+}

@@ -465,7 +465,22 @@ listed in `/help`:
   user. Borrowed from the Antigravity CLI's `ask_question` tool; see
   [`ui-references.md`](./ui-references.md).
 
-### 3.20 System clipboard (should)
+### 3.20 Wake signals (should)
+
+- **R-WAKE-1** When the host's agent implements the optional
+  `WakeRequester` capability (`WakeRequested() <-chan struct{}`),
+  the TUI subscribes to the channel at startup. Each receive
+  triggers a transient toast banner rendered between the input box
+  and the footer, in the warn color, prefixed with `⚠  `. The
+  toast clears after `toastTTL` (~4 s); a fresh wake during the TTL
+  window restarts the timer. The interface makes no promise about
+  coalescing — rapid back-to-back wakes render multiple toasts in
+  sequence. Hosts that close the wake channel cleanly stop the
+  subscription without a goroutine leak. Without the capability,
+  no toast affordance renders and the banner row collapses to zero
+  height.
+
+### 3.21 System clipboard (should)
 
 - **R-CLIP-1** A bound key (default `Ctrl+Y`) copies the focused
   content — a rendered code block, a tool-call payload, a system

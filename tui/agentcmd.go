@@ -26,6 +26,18 @@ import (
 // (R-CHAT-3).
 const spinnerCadence = 3 * time.Second
 
+// toastTTL is how long a wake-triggered toast banner stays visible
+// before auto-dismissing (R-WAKE-1). 4s is long enough to read
+// without being intrusive.
+const toastTTL = 4 * time.Second
+
+// toastTick schedules a toastClearMsg toastTTL into the future.
+func toastTick() tea.Cmd {
+	return tea.Tick(toastTTL, func(time.Time) tea.Msg {
+		return toastClearMsg{}
+	})
+}
+
 // eventListener returns a Cmd that blocks on the model's event channel
 // and forwards the next message into the Bubble Tea loop. Update
 // re-issues this Cmd after every event-flavored message so the loop
@@ -50,6 +62,29 @@ func spinnerTick() tea.Cmd {
 	return tea.Tick(spinnerCadence, func(time.Time) tea.Msg {
 		return spinnerTickMsg{}
 	})
+}
+
+// wakeListener returns a Cmd that blocks on the agent's
+// WakeRequested channel and forwards each receive as a wakeMsg
+// (R-WAKE-1). Update re-issues the Cmd after every wakeMsg so the
+// loop drains continuously. Returns nil when the host's agent
+// doesn't satisfy WakeRequester.
+func (m Model) wakeListener() tea.Cmd {
+	waker, ok := m.opts.Agent.(WakeRequester)
+	if !ok {
+		return nil
+	}
+	ch := waker.WakeRequested()
+	if ch == nil {
+		return nil
+	}
+	return func() tea.Msg {
+		_, ok := <-ch
+		if !ok {
+			return nil // channel closed; subscription ends
+		}
+		return wakeMsg{}
+	}
 }
 
 // startAgentTurn launches a goroutine that ranges over agent.Run and

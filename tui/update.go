@@ -26,13 +26,16 @@ import (
 
 // Init asks the terminal for its background color so the style bundle
 // can resolve dark vs light at startup (R-MD-2), starts the textarea
-// cursor blink, and primes the event listener that drains messages
-// from the agent dispatch goroutine.
+// cursor blink, primes the event listener that drains messages from
+// the agent dispatch goroutine, and (when the host's agent
+// implements WakeRequester) subscribes to the wake channel for
+// transient toast banners (R-WAKE-1).
 func (m Model) Init() tea.Cmd {
 	return tea.Batch(
 		tea.RequestBackgroundColor,
 		textarea.Blink,
 		m.eventListener(),
+		m.wakeListener(),
 	)
 }
 
@@ -82,6 +85,21 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		m.thinkingIdx++
 		m.refreshViewport()
 		return m, spinnerTick()
+	case wakeMsg:
+		m.toast = "agent needs your attention"
+		m.toastSetAt = time.Now()
+		m.refreshViewport()
+		// Re-issue both the wake subscription (drain the next one)
+		// and a tick that auto-clears the toast after toastTTL.
+		return m, tea.Batch(m.wakeListener(), toastTick())
+	case toastClearMsg:
+		// Only clear if the same toast is still up (a fresh wake
+		// during the TTL window restarts the timer).
+		if time.Since(m.toastSetAt) >= toastTTL {
+			m.toast = ""
+			m.refreshViewport()
+		}
+		return m, nil
 	}
 
 	// Forward unhandled messages to the input + viewport so navigation
