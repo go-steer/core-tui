@@ -62,6 +62,35 @@ type Options struct {
 	// (R-ELIC-1). Construct via tui.NewElicitor().
 	Elicitor Elicitor
 
+	// AlwaysAllow is invoked when the operator picks
+	// DecisionAllowAlways in the permission modal (R-PERM-3). The
+	// host persists the entry to its allowlist; on nil callback the
+	// TUI falls back to allow-session and logs a system message.
+	AlwaysAllow func(req PermissionRequest) error
+
+	// UsageTracker provides per-turn + session totals for the status
+	// surface (R-USE-2) and /stats (R-USE-1). Optional — when nil
+	// the per-turn footer renders only the Usage / Model / Elapsed
+	// fields the agent populates directly on the Message and the
+	// session-total slot in the status surface stays empty.
+	UsageTracker UsageTracker
+
+	// AgentsDir is the path the TUI writes the on-exit transcript
+	// to (R-TR-1) when non-empty.
+	AgentsDir string
+
+	// Memory / MCPServers / Skills feed the display-only slash
+	// commands (/memory, /mcp, /skills). Optional — when nil the
+	// corresponding slash renders an empty list with a hint about
+	// configuring the host.
+	Memory     []MemoryFile
+	MCPServers []MCPServerInfo
+	Skills     []SkillInfo
+
+	// PathScope is the list of roots the @file palette filters
+	// against (R-SCOPE-1). Empty means no scope filtering.
+	PathScope PathScope
+
 	// MidTurnInjectionMode picks what happens when the operator
 	// submits a prompt while a turn is in flight (R-CHAT-11). Zero
 	// value (`QueueForNext`) preserves the R-CHAT-10 default:
