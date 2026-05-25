@@ -467,21 +467,21 @@ func (a *attachAgent) Tools() []tui.ToolInfo {
 
 ## 5. Gaps surfaced by the audits
 
-### 5.1 Real semantic gaps (need a resolution before adapter work)
+### 5.1 Real semantic gaps (resolved: all five become core-tui PRs)
 
 These are genuine core-tui surface gaps surfaced by core-agent's
-expanded TUI. Each has a "punt" path (adapter works around it) and
-a "spec it" path (core-tui grows the capability). The migration
-design doc **in core-agent's repo** picks one path per gap and binds
-the adapter accordingly.
+expanded TUI. The core-agent
+[`core-tui-adapter-design.md`](https://github.com/go-steer/core-agent/blob/main/docs/core-tui-adapter-design.md)
+resolved all five as "spec it" — each becomes a focused PR in
+core-tui that lands before the core-agent adapter PR.
 
-| Gap | What it is | Punt | Spec it |
-|---|---|---|---|
-| **`/btw` modal-rendered answer** | core-agent renders the side-question answer in a transient modal that doesn't land in chat history, with Glamour markdown applied. `SlashProvider.SlashResult.SystemMessage` is a single string and lands as a permanent `RoleSystem` row. | Adapter appends answer as `SystemMessage`; lives in history forever, no Glamour. Acceptable for short answers; ugly for long markdown ones. | Add a `SideQuester` capability or extend `SlashResult` with a `ModalOverlay` field carrying `Question / Answer / Err` so the TUI renders a dismissable Glamour modal. |
-| **Mid-turn inbox injection** | `agent.Inject(message)` feeds a message INTO the currently-streaming turn. core-agent's TUI does this on every operator-typed-during-streaming entry; the agent drains the inbox on turn-end and auto-continues. R-CHAT-10 queueing is for the NEXT turn — different semantics. | Adapter exposes the inbox as a separate side-channel: typing during streaming calls `Inject` directly, and R-CHAT-10 queueing remains the "submit for next turn" path. Two queues, two semantics — confusing for operators. | Add `InjectableAgent` capability + `Options.MidTurnInject` flag — when set, the queue panel's `enqueue` calls `Inject` instead of (or in addition to) buffering. |
-| **Queue-panel state machine** | core-agent's queue tracks each entry through `queued → in-flight → done / failed` with per-entry error display + 2s fade for Done entries. core-tui's `[]string` queue is flat. | Adapter renders its own queue panel; core-tui's queue panel hides when adapter takes over. Two queue UIs in the same codebase. | Promote `Model.queue` from `[]string` to `[]QueueEntry{Text, State, Err, Created}`; render state glyphs (⏳ ↻ ✓ ✗); cull `Done` after a TTL. |
-| **Wake signal (`WakeRequested()`)** | Background agents can request operator attention via a channel. core-agent's TUI doesn't surface this in UI yet — channel exists, no visible affordance. | Defer until there's a designed UX. core-agent's existing channel keeps working server-side. | Add `WakeRequester` capability + a toast/banner affordance (per the Antigravity ui-references entry). |
-| **`RunWithContents` (structured prompts)** | core-agent has an alternate `Run` that takes structured `[]Content` instead of a string. Used for retry with synthesized context. | Adapter ignores it; only `Run(ctx, prompt string)` is exercised. | Extend `tui.Agent` with an optional `RunWithContents` method for hosts with structured-prompt needs. |
+| Gap | What it is | Resolution |
+|---|---|---|
+| **`/btw` modal-rendered answer** | core-agent renders the side-question answer in a transient modal that doesn't land in chat history, with Glamour markdown applied. `SlashProvider.SlashResult.SystemMessage` is a single string and lands as a permanent `RoleSystem` row. | **Spec it (PR 1).** Extend `SlashResult` with an optional `ModalAnswer *SideAnswer` field carrying `Question / Answer / Err`; core-tui renders a dismissable Glamour modal when non-nil. |
+| **Queue-panel state machine** | core-agent's queue tracks each entry through `queued → in-flight → done / failed` with per-entry error display + 2s fade for Done entries. core-tui's `[]string` queue is flat. | **Spec it (PR 2).** Promote `Model.queue` from `[]string` to `[]QueueEntry{Text, State, Err, Created}`; state glyphs (⏳ ↻ ✓ ✗); TTL-based culling. |
+| **Mid-turn inbox injection** | `agent.Inject(message)` feeds a message INTO the currently-streaming turn. core-agent's TUI does this on every operator-typed-during-streaming entry; the agent drains the inbox on turn-end and auto-continues. R-CHAT-10 queueing is for the NEXT turn — different semantics. | **Spec it (PR 3).** Add `InjectableAgent` capability + `Options.MidTurnInjectionMode` enum (default `QueueForNext` preserves R-CHAT-10; opt-in `InjectIntoCurrent` routes queue Enter through `Inject`). |
+| **Wake signal (`WakeRequested()`)** | Background agents can request operator attention via a channel. core-agent's TUI doesn't surface this in UI yet — channel exists, no visible affordance. | **Spec it (PR 4).** Add `WakeRequester` capability with `WakeRequested() <-chan struct{}`; render a transient toast banner on each signal (per the Crush toast pattern in [ui-references.md](./docs/ui-references.md)). New `R-WAKE-1` requirement. |
+| **`RunWithContents` (structured prompts)** | core-agent has an alternate `Run` that takes structured `[]Content` instead of a string. Used for retry with synthesized context. | **Spec it (PR 5).** Add `RunWithContents` as an optional method on `tui.Agent` (feature-detected via type assertion). |
 
 ### 5.2 Adapter-responsibility gaps (no spec change needed)
 
