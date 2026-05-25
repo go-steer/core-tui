@@ -17,6 +17,7 @@ package tui
 import (
 	"context"
 	"fmt"
+	"strconv"
 	"strings"
 	"time"
 
@@ -608,8 +609,27 @@ func (m Model) paletteComplete() tea.Model {
 // state. The textarea stays focused so the operator can type ahead
 // (R-CHAT-10 prompt queueing). Called from the Enter handler and
 // from maybeDrainQueue.
+//
+// Before dispatching, expands any `@<path>` tokens by reading the
+// referenced files and appending them under a "Referenced files:"
+// section so the model sees inline content (R-PAL-2 + R-CHAT-13).
+// Failed reads are surfaced as system messages so the operator can
+// fix typos; the prompt still ships with the readable refs.
 func (m Model) submitTurn(text string) Model {
 	m.history.Append(Message{Role: RoleUser, Text: text})
+
+	// Resolve @-refs against the operator's view of the filesystem.
+	expanded, refs, diags := expandAtRefs(text, readFileSafe(maxAtRefBytes))
+	for _, d := range diags {
+		m.history.Append(Message{Role: RoleError, Text: d})
+	}
+	if len(refs) > 0 {
+		m.history.Append(Message{
+			Role: RoleSystem,
+			Text: "Inlined file references: " + strings.Join(refs, ", "),
+		})
+	}
+	text = expanded
 	m.input.Reset()
 	m.state = stateStreaming
 	m.turnStarted = time.Now()
@@ -650,9 +670,17 @@ func (m *Model) applyStreamChunk(msg streamChunkMsg) {
 	m.refreshViewport()
 }
 
-// applyToolCall handles a toolCallMsg. Dedup by ID (R-CHAT-5), append
-// a one-line tool row to history (the in-progress assistant message
-// stays above it visually), and flip the spinner to tool-active.
+// applyToolCall handles a toolCallMsg. Dedup by ID (R-CHAT-5),
+// close the in-progress assistant segment (so subsequent chunks
+// land in a NEW segment below the tool row — without this the
+// pre-tool text and post-tool text would merge into one blob with
+// the tool row floating below both), append a one-line tool row,
+// flip the spinner to tool-active.
+//
+// Args are summarized via toolArgHint, which knows the common
+// built-ins (bash → "$ <cmd>", read_file → path, grep → "pattern
+// in dir", etc.) and falls back to the first arg's value for
+// unknown tools.
 func (m *Model) applyToolCall(msg toolCallMsg) {
 	if msg.id != "" {
 		if m.seenToolIDs[msg.id] {
@@ -660,22 +688,110 @@ func (m *Model) applyToolCall(msg toolCallMsg) {
 		}
 		m.seenToolIDs[msg.id] = true
 	}
-	args := ""
-	if len(msg.args) > 0 {
-		// One-line summary: just the first arg's value, truncated.
-		// A real slice would pick a host-supplied summarizer.
+
+	// Segment boundary: commit whatever assistant text streamed
+	// before this tool call as its own finalized Message so the
+	// next stream chunks build up a fresh in-progress segment
+	// below the tool row. Glamour render is cached on the segment
+	// to match finalizeTurn's behavior.
+	if strings.TrimSpace(m.inProgressText) != "" {
+		mr := m.ensureMarkdown()
+		m.history.Append(Message{
+			Role:     RoleAssistant,
+			Text:     m.inProgressText,
+			Rendered: mr.renderMarkdown(m.inProgressText),
+		})
+		m.inProgressText = ""
+	}
+
+	hint := toolArgHint(msg.name, msg.args)
+	if hint == "" && len(msg.args) > 0 {
+		// Fallback for unknown tools: first arg value, truncated.
 		for _, v := range msg.args {
-			args = trimToolArg(fmt.Sprint(v), 80)
+			hint = trimToolArg(fmt.Sprint(v), 200)
 			break
 		}
 	}
 	m.history.Append(Message{
 		Role:     RoleTool,
 		ToolName: msg.name,
-		ToolArgs: args,
+		ToolArgs: hint,
 	})
 	m.toolActive = true
 	m.refreshViewport()
+}
+
+// toolArgHint produces the muted-italic detail that renders after
+// the bold tool name. Knows the core-agent built-ins so a `bash`
+// call reads `⚙ bash · $ ls -la /tmp` rather than the generic
+// first-arg dump. Lifted from internal/tui/model.go:397-464.
+func toolArgHint(name string, args map[string]any) string {
+	if args == nil {
+		return ""
+	}
+	pick := func(keys ...string) string {
+		for _, k := range keys {
+			if v, ok := args[k]; ok {
+				if s, ok := v.(string); ok && s != "" {
+					return s
+				}
+			}
+		}
+		return ""
+	}
+	switch name {
+	case "bash":
+		if cmd := pick("command", "cmd"); cmd != "" {
+			return "$ " + strings.ReplaceAll(strings.ReplaceAll(cmd, "\n", " "), "\t", " ")
+		}
+	case "read_file", "write_file", "edit_file":
+		return pick("path", "file", "filename")
+	case "read_many_files":
+		if pattern := pick("pattern"); pattern != "" {
+			return pattern
+		}
+		if paths, ok := args["paths"].([]any); ok && len(paths) > 0 {
+			if s, ok := paths[0].(string); ok {
+				if len(paths) > 1 {
+					return fmt.Sprintf("%s (+%d)", s, len(paths)-1)
+				}
+				return s
+			}
+		}
+	case "grep", "glob":
+		pattern := pick("pattern", "query")
+		path := pick("path", "dir")
+		switch {
+		case pattern != "" && path != "":
+			return strconv.Quote(pattern) + " in " + path
+		case pattern != "":
+			return strconv.Quote(pattern)
+		case path != "":
+			return path
+		}
+	case "list_files", "ls", "list_dir":
+		return pick("path", "dir")
+	case "go_build", "go_test", "go_vet":
+		if p := pick("pattern"); p != "" {
+			return p
+		}
+		return "./..."
+	case "go_doc":
+		return pick("target")
+	case "go_symbol_find":
+		return pick("name")
+	case "go_implements":
+		return pick("interface")
+	case "todo":
+		action := pick("action")
+		if action == "add" {
+			if text := pick("text"); text != "" {
+				return "add: " + text
+			}
+		}
+		return action
+	}
+	return ""
 }
 
 // finalizeTurn closes the active turn: appends the in-progress

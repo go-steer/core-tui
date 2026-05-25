@@ -525,13 +525,49 @@ func (m Model) renderInputBox() string {
 func (m Model) renderFooter(width int) string {
 	hint := m.opts.Branding.FooterHint
 	if hint == "" {
-		sep := " " + GlyphSeparator + " "
-		hint = "enter submit" + sep + "ctrl+j newline" + sep + "ctrl+c quit" + sep + "? for more"
+		hint = m.footerHint()
 	}
 	if width > 0 {
 		hint = wordWrap(hint, width)
 	}
 	return m.styles.Footer.Render(hint)
+}
+
+// footerHint picks the right keymap legend for the current modal /
+// flow state (parity with internal/tui:359-378). The legend is the
+// operator's most discoverable affordance after `?`, so we surface
+// the active flow's keys instead of the generic submit/newline
+// reminder when something specific is open.
+func (m Model) footerHint() string {
+	sep := " " + GlyphSeparator + " "
+	switch {
+	case m.pendingPermission != nil:
+		keys := []string{"y allow once", "n deny", "s allow session"}
+		if m.pendingPermission.Verb != "" {
+			keys = append(keys, "v allow verb")
+		}
+		keys = append(keys, "t allow tool", "a allow always", "esc deny")
+		return "Permission required" + sep + strings.Join(keys, sep)
+	case m.pendingElicit != nil:
+		if m.pendingElicit.Mode == ElicitURLMode {
+			return "MCP elicitation" + sep + "a/enter accept" + sep + "n decline" + sep + "esc cancel"
+		}
+		return "MCP elicitation" + sep + "tab next field" + sep + "enter submit" + sep + "esc cancel"
+	case m.overlay == overlayModelPicker:
+		return "Choose a model" + sep + "↑↓ navigate" + sep + "enter accept" + sep + "esc cancel"
+	case m.confirmingClear:
+		return "Confirm clear?" + sep + "type y / yes to wipe" + sep + "anything else cancels"
+	case m.sideAnswer != nil:
+		return "Side answer" + sep + "enter/space/esc dismiss"
+	case m.state == stateStreaming:
+		return "Streaming…" + sep + "esc interrupt" + sep + "enter queues prompt" + sep + "ctrl+c cancel turn"
+	case m.palette != nil:
+		if m.palette.kind == paletteFile {
+			return "Files" + sep + "↑↓ choose" + sep + "enter insert" + sep + "esc cancel"
+		}
+		return "Slash" + sep + "↑↓ choose" + sep + "enter run" + sep + "tab insert" + sep + "esc cancel"
+	}
+	return "enter submit" + sep + "ctrl+j newline" + sep + "ctrl+c quit" + sep + "? for more"
 }
 
 // renderOverlay renders the currently active enum-driven modal.
@@ -567,6 +603,7 @@ func (m Model) renderOverlay() string {
 		if len(models) == 0 {
 			body = m.styles.Muted.Render("(no models advertised by the agent)")
 		} else {
+			current := m.displayModelName()
 			rows := make([]string, 0, len(models))
 			for i, mi := range models {
 				disp := mi.Display
@@ -580,6 +617,9 @@ func (m Model) renderOverlay() string {
 				row := marker + disp
 				if mi.ID != disp {
 					row += m.styles.Muted.Render("  (" + mi.ID + ")")
+				}
+				if mi.ID == current || disp == current {
+					row += "  " + m.styles.Muted.Render("(current)")
 				}
 				if mi.Description != "" {
 					row += "  " + m.styles.Muted.Render(mi.Description)

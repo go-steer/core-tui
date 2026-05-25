@@ -224,9 +224,68 @@ func (m Model) dispatchBuiltinSlash(name, args string) (bool, tea.Model, tea.Cmd
 		m.input.Reset()
 		m.refreshViewport()
 		return true, m, nil
+
+	case "allow":
+		text := m.handleAllowDeny(args, "allow")
+		m.history.Append(Message{Role: RoleSystem, Text: text})
+		m.input.Reset()
+		m.refreshViewport()
+		return true, m, nil
+
+	case "deny":
+		text := m.handleAllowDeny(args, "deny")
+		m.history.Append(Message{Role: RoleSystem, Text: text})
+		m.input.Reset()
+		m.refreshViewport()
+		return true, m, nil
 	}
 
 	return false, m, nil
+}
+
+// handleAllowDeny dispatches /allow + /deny to the PermissionController
+// capability. Two arg shapes:
+//
+//	/allow <pattern>            → AddAllowPatterns([pattern])
+//	/allow bundle:<bundle-name> → AddBuiltinAllowExtra(bundle-name)
+//	/deny  <pattern>            → AddDenyPatterns([pattern])
+//
+// bundle:<name> is allow-only because the gate has no built-in deny
+// bundles. The returned text is the system-message body the caller
+// renders.
+func (m Model) handleAllowDeny(args, op string) string {
+	ctrl, ok := m.opts.Agent.(PermissionController)
+	if !ok {
+		return "/" + op + ": agent doesn't implement PermissionController"
+	}
+	args = strings.TrimSpace(args)
+	if args == "" {
+		hint := "<pattern>   e.g. /" + op + " bash:git *"
+		if op == "allow" {
+			hint += "   or   /allow bundle:dev_tools"
+		}
+		return "/" + op + ": usage — /" + op + " " + hint
+	}
+	if op == "allow" && strings.HasPrefix(args, "bundle:") {
+		name := strings.TrimPrefix(args, "bundle:")
+		if name == "" {
+			return "/allow bundle: empty bundle name — try /allow bundle:dev_tools"
+		}
+		if err := ctrl.AddBuiltinAllowExtra(name); err != nil {
+			return "/allow bundle: " + err.Error()
+		}
+		return "/allow: enabled bundle " + name
+	}
+	var err error
+	if op == "allow" {
+		err = ctrl.AddAllowPatterns([]string{args})
+	} else {
+		err = ctrl.AddDenyPatterns([]string{args})
+	}
+	if err != nil {
+		return "/" + op + ": " + err.Error()
+	}
+	return "/" + op + ": added " + args
 }
 
 // handlePricing parses the /pricing subcommand and dispatches. Two

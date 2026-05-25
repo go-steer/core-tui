@@ -97,6 +97,8 @@ func builtinSlashItems() []paletteItem {
 		{Name: "quit", Display: "/quit, /exit, /q", Description: "exit", Available: true},
 	}
 	rest := []paletteItem{
+		{Name: "allow", Description: "add allow pattern (e.g. /allow bash:git *)", Available: true},
+		{Name: "deny", Description: "add deny pattern", Available: true},
 		{Name: "interrupt", Display: "/interrupt, /int", Description: "cancel the in-flight turn", Available: true},
 		{Name: "mcp", Description: "configured MCP servers and tools", Available: true},
 		{Name: "memory", Description: "display loaded memory files", Available: true},
