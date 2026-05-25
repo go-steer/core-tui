@@ -82,6 +82,12 @@ type Model struct {
 	thinkingIdx    int  // rotation index into ThinkingPhrases / WorkingPhrases
 	spinnerActive  bool // gates spinner tick scheduling
 
+	// queue holds prompts the operator typed + submitted while a
+	// turn was in flight (R-CHAT-10). Drained one-at-a-time when
+	// finalizeTurn fires: the first queued prompt auto-starts the
+	// next turn.
+	queue []string
+
 	// eventCh is the bridge between the agent dispatch goroutine and
 	// the Bubble Tea loop. eventListener drains it one message at a
 	// time. Buffered so a fast agent can't stall on a slow Update.

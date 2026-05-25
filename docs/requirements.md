@@ -92,6 +92,20 @@ documented Go interface set (see `design.md` for the shape).
   buffer replaces the original; otherwise the editor session is
   read-only and the buffer is discarded. Degrades to a system
   warning if no editor can be resolved.
+- **R-CHAT-10** While a turn is in flight the input stays editable —
+  the operator can type the next prompt without waiting. Pressing
+  `Enter` during streaming appends the typed text to a per-session
+  prompt queue rather than submitting immediately; the input clears
+  and is ready for the next one. The TUI displays the queue (count +
+  first N entries) between the in-progress message and the input box
+  so the operator sees what's pending. On turn completion the queue
+  drains one item at a time: each finalized turn (clean, error, or
+  interrupted) auto-starts the next queued prompt as a fresh turn,
+  reusing all the streaming infrastructure. `Esc` while streaming
+  interrupts the active turn (R-CHAT-6) — it does not clear the
+  queue. A dedicated affordance (`/clearqueue` or similar) can clear
+  queued items in a later slice; for now the queue is append-only
+  until drained.
 - **R-CHAT-9** The TUI supports two render modes selected by
   `Options.RenderMode`:
   - **`RenderAltScreen`** (default) — full alt-screen takeover. The

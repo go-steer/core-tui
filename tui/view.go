@@ -165,7 +165,11 @@ func (m *Model) resize() {
 	if m.palette != nil {
 		palRows = lipgloss.Height(m.renderPalette(footerWidth))
 	}
-	chatHeight := m.height - headerHeight - inputHeight - footerRows - helpRows - palRows - 2 // 2 = input top border + spacer
+	queueRows := 0
+	if len(m.queue) > 0 {
+		queueRows = lipgloss.Height(m.renderQueuePanel())
+	}
+	chatHeight := m.height - headerHeight - inputHeight - footerRows - helpRows - palRows - queueRows - 2 // 2 = input top border + spacer
 	if chatHeight < 3 {
 		chatHeight = 3
 	}
@@ -226,19 +230,64 @@ func (m *Model) refreshViewport() {
 // renderInProgress returns the live block at the bottom of the chat
 // while a turn is streaming: the accumulated assistant text rendered
 // through Glamour (R-CHAT-4), followed by the spinner verb line
-// (R-CHAT-3). Empty string when no turn is in flight.
+// (R-CHAT-3) and the prompt queue panel (R-CHAT-10). Empty string
+// when no turn is in flight AND the queue is empty.
 func (m *Model) renderInProgress() string {
-	if m.state != stateStreaming {
+	if m.state != stateStreaming && len(m.queue) == 0 {
 		return ""
 	}
 	var parts []string
-	if strings.TrimSpace(m.inProgressText) != "" {
-		mr := m.ensureMarkdown()
-		body := mr.renderMarkdown(m.inProgressText)
-		parts = append(parts, m.styles.AssistantText.Render(body))
+	if m.state == stateStreaming {
+		if strings.TrimSpace(m.inProgressText) != "" {
+			mr := m.ensureMarkdown()
+			body := mr.renderMarkdown(m.inProgressText)
+			parts = append(parts, m.styles.AssistantText.Render(body))
+		}
+		parts = append(parts, m.renderSpinnerLine())
 	}
-	parts = append(parts, m.renderSpinnerLine())
+	if q := m.renderQueuePanel(); q != "" {
+		parts = append(parts, q)
+	}
 	return strings.Join(parts, "\n")
+}
+
+// renderQueuePanel renders the prompt queue (R-CHAT-10) as a thin
+// dim block beneath the in-progress message: a header with the
+// count, then up to queuePanelMax entries one per line, prefixed
+// with the user-prompt glyph. Older / extra entries are summarized
+// with a truncation tail. Empty string when the queue is empty.
+func (m Model) renderQueuePanel() string {
+	if len(m.queue) == 0 {
+		return ""
+	}
+	const queuePanelMax = 3
+	width := m.viewport.Width()
+	if width <= 0 {
+		width = 80
+	}
+
+	header := m.styles.Muted.Italic(true).Render(
+		fmt.Sprintf("queued (%d) — fires after this turn ends", len(m.queue)),
+	)
+	rows := []string{"", header}
+
+	visible := m.queue
+	tail := 0
+	if len(visible) > queuePanelMax {
+		tail = len(visible) - queuePanelMax
+		visible = visible[:queuePanelMax]
+	}
+	for i, q := range visible {
+		marker := fmt.Sprintf("%d. ", i+1)
+		body := trimToolArg(q, width-len(marker)-4)
+		rows = append(rows, m.styles.Muted.Render("  "+marker+body))
+	}
+	if tail > 0 {
+		rows = append(rows, m.styles.Muted.Render(
+			fmt.Sprintf("  %s and %d more", GlyphTruncate, tail),
+		))
+	}
+	return strings.Join(rows, "\n")
 }
 
 // renderSpinnerLine renders the rotating cognition verb (R-CHAT-3).
@@ -518,7 +567,7 @@ func (m Model) renderHelpPanel(width int) string {
 		keys  [][2]string
 	}{
 		{"Input", [][2]string{
-			{"enter", "submit"},
+			{"enter", "submit (or enqueue if a turn is running)"},
 			{"shift+enter / ctrl+j", "newline"},
 			{"?", "toggle this menu"},
 		}},
@@ -545,7 +594,7 @@ func (m Model) renderHelpPanel(width int) string {
 			{"esc", "close any modal"},
 		}},
 		{"Interrupt / quit", [][2]string{
-			{"esc", "interrupt in-flight turn"},
+			{"esc", "interrupt in-flight turn (doesn't clear queue)"},
 			{"ctrl+c, ctrl+d", "exit"},
 		}},
 	}

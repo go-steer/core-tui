@@ -67,13 +67,13 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		return m, m.eventListener()
 	case turnDoneMsg:
 		m.finalizeTurn(msg.elapsed, "")
-		return m, m.eventListener()
+		return m.maybeDrainQueue()
 	case turnErrMsg:
 		m.finalizeTurn(0, msg.err.Error())
-		return m, m.eventListener()
+		return m.maybeDrainQueue()
 	case turnCancelledMsg:
 		m.finalizeTurn(0, "(interrupted)")
-		return m, m.eventListener()
+		return m.maybeDrainQueue()
 	case spinnerTickMsg:
 		if m.state != stateStreaming {
 			return m, nil
@@ -193,13 +193,17 @@ func (m Model) handleKey(msg tea.KeyPressMsg) (tea.Model, tea.Cmd) {
 
 	case "enter":
 		// Submit (R-CHAT-1). When idle: append the typed text as a
-		// RoleUser message and start an agent turn. When streaming:
-		// ignore (input is gated; user must Esc-interrupt first).
-		if m.state == stateStreaming {
-			return m, nil
-		}
+		// RoleUser message and start an agent turn. When streaming
+		// (R-CHAT-10): append to the prompt queue and clear the
+		// input; the queue drains one entry per turn-end.
 		text := strings.TrimSpace(m.input.Value())
 		if text == "" {
+			return m, nil
+		}
+		if m.state == stateStreaming {
+			m.queue = append(m.queue, text)
+			m.input.Reset()
+			m.refreshViewport()
 			return m, nil
 		}
 		return m.submitTurn(text), spinnerTick()
@@ -352,12 +356,13 @@ func (m Model) paletteComplete() tea.Model {
 }
 
 // submitTurn appends the user's message, kicks off the agent dispatch
-// goroutine, blurs the input, schedules a spinner tick, and flips to
-// the streaming state. Called from the Enter handler.
-func (m Model) submitTurn(text string) tea.Model {
+// goroutine, schedules a spinner tick, and flips to the streaming
+// state. The textarea stays focused so the operator can type ahead
+// (R-CHAT-10 prompt queueing). Called from the Enter handler and
+// from maybeDrainQueue.
+func (m Model) submitTurn(text string) Model {
 	m.history.Append(Message{Role: RoleUser, Text: text})
 	m.input.Reset()
-	m.input.Blur()
 	m.state = stateStreaming
 	m.turnStarted = time.Now()
 	m.inProgressText = ""
@@ -458,6 +463,20 @@ func (m *Model) finalizeTurn(elapsed time.Duration, notice string) {
 
 	_ = m.input.Focus()
 	m.refreshViewport()
+}
+
+// maybeDrainQueue auto-starts the next queued prompt as a fresh
+// turn (R-CHAT-10). Returns the next-step Cmd batch: just the event
+// listener when the queue is empty; listener + spinner tick when
+// a new turn fires.
+func (m Model) maybeDrainQueue() (tea.Model, tea.Cmd) {
+	if len(m.queue) == 0 {
+		return m, m.eventListener()
+	}
+	next := m.queue[0]
+	m.queue = m.queue[1:]
+	out := m.submitTurn(next)
+	return out, tea.Batch(spinnerTick(), out.eventListener())
 }
 
 // trimToolArg truncates a tool-arg summary to max runes, appending a

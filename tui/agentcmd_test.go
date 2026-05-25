@@ -16,6 +16,7 @@ package tui
 
 import (
 	"context"
+	"iter"
 	"testing"
 	"time"
 
@@ -157,6 +158,52 @@ func TestFinalizeTurn_InterruptedNotice(t *testing.T) {
 	if entries[0].Role != RoleSystem {
 		t.Errorf("(interrupted) role = %v, want RoleSystem", entries[0].Role)
 	}
+}
+
+// TestMaybeDrainQueue_EmptyKeepsListener pins that draining an empty
+// queue is a no-op + the event listener Cmd is re-issued so the
+// stream loop keeps running for the next turn.
+func TestMaybeDrainQueue_EmptyKeepsListener(t *testing.T) {
+	m := NewModel(Options{})
+	model, cmd := m.maybeDrainQueue()
+	if cmd == nil {
+		t.Errorf("expected non-nil eventListener Cmd")
+	}
+	got := model.(Model)
+	if got.state != stateIdle {
+		t.Errorf("state = %v, want stateIdle", got.state)
+	}
+	if len(got.queue) != 0 {
+		t.Errorf("queue = %d, want 0", len(got.queue))
+	}
+}
+
+// TestMaybeDrainQueue_PopsHeadAndStartsTurn pins R-CHAT-10: when the
+// queue is non-empty, draining starts the first entry as a new
+// streaming turn and shrinks the queue by one.
+func TestMaybeDrainQueue_PopsHeadAndStartsTurn(t *testing.T) {
+	m := NewModel(Options{Agent: stubAgent{}})
+	m.queue = []string{"first queued", "second queued"}
+	model, cmd := m.maybeDrainQueue()
+	if cmd == nil {
+		t.Errorf("expected non-nil Cmd batch")
+	}
+	got := model.(Model)
+	if got.state != stateStreaming {
+		t.Errorf("state = %v, want stateStreaming", got.state)
+	}
+	if len(got.queue) != 1 || got.queue[0] != "second queued" {
+		t.Errorf("queue after drain = %v, want [second queued]", got.queue)
+	}
+	got.cancelTurn() // clean up the goroutine
+}
+
+// stubAgent yields no events — used to start a turn without spinning
+// up real streaming for unit tests.
+type stubAgent struct{}
+
+func (stubAgent) Run(_ context.Context, _ string) iter.Seq2[Event, error] {
+	return func(_ func(Event, error) bool) {}
 }
 
 // drain returns every message currently buffered in ch, draining the

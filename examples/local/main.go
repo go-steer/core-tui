@@ -70,7 +70,9 @@ func seededConversation() []tui.Message {
 			Role: tui.RoleSystem,
 			Text: "Visual preview — type ? for the full keymap. Try: / for slash palette · " +
 				"@ for file palette · ctrl+g model · ctrl+y permission · ctrl+e elicit · " +
-				"ctrl+b toggle layout · shift+tab cycle perm-mode.",
+				"ctrl+b toggle layout · shift+tab cycle perm-mode. " +
+				"Press enter to start a streaming turn; type ahead and press enter again to " +
+				"queue follow-up prompts — they auto-fire as each turn ends.",
 		},
 		{
 			Role: tui.RoleUser,
