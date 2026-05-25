@@ -1,0 +1,126 @@
+# Copyright 2026 The go-steer team
+#
+# Licensed under the Apache License, Version 2.0 (the "License");
+# you may not use this file except in compliance with the License.
+# You may obtain a copy of the License at
+#
+#     http://www.apache.org/licenses/LICENSE-2.0
+#
+# Unless required by applicable law or agreed to in writing, software
+# distributed under the License is distributed on an "AS IS" BASIS,
+# WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+# See the License for the specific language governing permissions and
+# limitations under the License.
+
+name: CI
+
+on:
+  push:
+    branches: [main]
+    paths-ignore: ['**/*.md']
+  pull_request:
+    branches: [main]
+    paths-ignore: ['**/*.md']
+
+# Cancel in-progress runs when a new commit lands on the same branch
+# so we don't queue stale tests.
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+permissions:
+  contents: read
+
+env:
+  GO_VERSION: '1.26'
+
+# Each job below is a thin wrapper over a script under
+# dev/ci/presubmits/. The same script is what `dev/tools/ci` runs
+# locally, so a green local run is the same green run as remote CI.
+# Keep the wiring boring — logic lives in dev/tools/, not in YAML.
+
+jobs:
+  test:
+    name: test
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-go@v5
+        with:
+          go-version: ${{ env.GO_VERSION }}
+          check-latest: true
+          # setup-go@v5 caches ~/go/pkg/mod + ~/.cache/go-build using a
+          # key derived from go.sum. Letting it own those paths avoids
+          # the `tar: File exists` collision an explicit actions/cache@v4
+          # caused when both tried to restore the same directories.
+          cache-dependency-path: '**/go.sum'
+      - run: go mod download
+      - name: Vet
+        run: dev/ci/presubmits/vet
+      - name: Build
+        run: dev/ci/presubmits/build
+      - name: Test
+        # Provider-gated tests (anthropic-vertex) skip cleanly in CI
+        # without GCP creds — see models/anthropic/vertex_test.go.
+        run: dev/ci/presubmits/test-unit
+      - name: Coverage summary
+        run: |
+          echo "## Coverage" >> "$GITHUB_STEP_SUMMARY"
+          echo '```' >> "$GITHUB_STEP_SUMMARY"
+          go tool cover -func=coverage.out | tee -a "$GITHUB_STEP_SUMMARY"
+          echo '```' >> "$GITHUB_STEP_SUMMARY"
+      - uses: actions/upload-artifact@v4
+        with:
+          name: coverage
+          path: coverage.out
+          retention-days: 14
+          if-no-files-found: error
+
+  lint:
+    name: lint
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-go@v5
+        with:
+          go-version: ${{ env.GO_VERSION }}
+          check-latest: true
+          # setup-go@v5 owns the Go module + build caches (see note in
+          # the test job above). Only the golangci-lint cache needs an
+          # explicit actions/cache entry — different path, no overlap
+          # with what setup-go restores.
+          cache-dependency-path: '**/go.sum'
+      - uses: actions/cache@v4
+        with:
+          path: ~/.cache/golangci-lint
+          key: ${{ runner.os }}-golangci-${{ env.GO_VERSION }}-${{ hashFiles('**/go.sum', 'dev/tools/.golangci.yml') }}
+          restore-keys: |
+            ${{ runner.os }}-golangci-${{ env.GO_VERSION }}-
+      - name: Format
+        run: dev/ci/presubmits/verify-go-format
+      - name: golangci-lint
+        run: dev/ci/presubmits/lint-go
+
+  tidy:
+    name: go mod tidy is clean
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-go@v5
+        with:
+          go-version: ${{ env.GO_VERSION }}
+          check-latest: true
+      - name: Verify tidy
+        run: dev/ci/presubmits/verify-mod-tidy
+
+  vuln:
+    name: govulncheck
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-go@v5
+        with:
+          go-version: ${{ env.GO_VERSION }}
+          check-latest: true
+      - name: Vuln scan
+        run: dev/ci/presubmits/verify-vuln

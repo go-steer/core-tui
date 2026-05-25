@@ -1,0 +1,40 @@
+# Binaries for programs and plugins.
+*.exe
+*.exe~
+*.dll
+*.so
+*.dylib
+
+# Test binaries built with `go test -c`.
+*.test
+
+# Coverage profiles + other test artifacts.
+*.out
+coverage.*
+*.coverprofile
+profile.cov
+
+# Example binaries (built from ./examples/...). core-tui is a library —
+# no top-level binary is produced.
+/examples/local/local
+/examples/permissions/permissions
+
+# AI assistant working state — never committed to this repo.
+.claude/
+
+# Per-user .agents/ state.
+/.agents/sessions/
+/.agents/logs/
+
+# Local environment overrides.
+.env
+.env.local
+
+# Editor / IDE noise.
+.idea/
+.vscode/
+.DS_Store
+*.swp
+
+# Personal working notes — kept on disk but not in version control.
+TODO.md
