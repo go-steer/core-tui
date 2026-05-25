@@ -80,6 +80,30 @@ documented Go interface set (see `design.md` for the shape).
 - **R-CHAT-7** Auto-scroll the viewport to bottom when new content
   arrives **only if the user was already at the bottom**. Preserve
   scroll position when the user has scrolled up.
+- **R-CHAT-8** A bound key (default `Ctrl+E`) suspends the TUI via
+  `tea.ExecProcess`, opens the focused code block / system message /
+  diff payload in `$EDITOR` (falling back to `vi` when unset), and
+  resumes the TUI cleanly on editor exit. When the focused content
+  was an editable payload (e.g. a permission-modal diff), the saved
+  buffer replaces the original; otherwise the editor session is
+  read-only and the buffer is discarded. Degrades to a system
+  warning if no editor can be resolved.
+- **R-CHAT-9** The TUI supports two render modes selected by
+  `Options.RenderMode`:
+  - **`RenderAltScreen`** (default) — full alt-screen takeover. The
+    viewport is the only chat surface; the terminal's native
+    scrollback is empty during the session. Matches v1 cogo /
+    core-agent behavior and every TUI in [`ui-references.md`](./ui-references.md)
+    except Antigravity inline mode.
+  - **`RenderInline`** — hybrid scrollback. Committed turn blocks are
+    emitted into the terminal's native scrollback via `tea.Println`;
+    `View()` keeps only the live input row + the in-progress
+    assistant message in the active viewport. The user can scroll
+    back through prior turns with the terminal's own scrollback
+    (mouse wheel, `tmux` copy-mode, `screen -h`, etc.) instead of an
+    in-app viewport. On resize the TUI debounces the event, flushes
+    any pending output, and resynchronizes. Borrowed from the
+    Antigravity CLI; see [`ui-references.md`](./ui-references.md).
 
 ### 3.2 Prompt history (must)
 
@@ -154,6 +178,18 @@ listed in `/help`:
 - **R-AT-3** The expanded prompt (after `@` substitution) is what
   gets sent to the agent; the unexpanded form is what's saved to the
   prompt-history recall.
+- **R-AT-4** Hosts may register additional mention sources beyond
+  files via `Options.MentionProviders` (e.g. symbols from a code
+  index, git refs, web URLs, terminal command outputs, lint
+  problems). Each provider supplies a `Prefix` (the trigger after
+  `@`, e.g. `sym:`, `git:`, `url:`), a `Lookup(query)` returning
+  ranked matches with display + insert + expand callbacks, and an
+  optional `SectionHeader` for grouping in the palette. The TUI
+  merges entries from every registered provider into the `@` palette
+  under provider-scoped section headers (mirrors the `SlashProvider`
+  pattern in R-CMD-4). The built-in file provider always runs first;
+  hosts cannot disable it. Borrowed from the Antigravity CLI's
+  multi-modal `@`-typeahead; see [`ui-references.md`](./ui-references.md).
 
 ### 3.6 Path scope (must)
 
@@ -285,6 +321,14 @@ listed in `/help`:
 - **R-MOUSE-2** Default is ON; `Options.MouseDefault` overrides;
   `/mouse [on|off]` toggles at runtime; help text mentions Shift-to-
   select.
+- **R-MOUSE-3** When mouse capture is enabled, the TUI surfaces an
+  auto-expiring overlay hint at the bottom of the viewport reading
+  `Hold Shift to select text` for the first few seconds of the
+  session (and after each `/mouse on` toggle). The hint fades on a
+  short timer (~5s) so users discover the modifier without permanent
+  chrome. Hint text and timeout are overridable via
+  `Options.MouseHint` + `Options.MouseHintTTL`. Borrowed from the
+  Antigravity CLI; see [`ui-references.md`](./ui-references.md).
 
 ### 3.13 Branding (must)
 
@@ -333,6 +377,36 @@ listed in `/help`:
 - **R-PRICE-1** `/pricing refresh` and `/pricing set` call
   `PricingController` methods that return human-readable summary lines
   for the chat.
+
+### 3.19 Agent-driven prompts (should)
+
+- **R-PROMPT-1** When the host wires the TUI-supplied `UserPrompter`
+  into its agent, the agent may call `AskUser` mid-turn to elicit a
+  structured multiple-choice answer from the operator. The TUI
+  renders a blocking modal listing the choices (label + optional
+  dim description per row); ↑↓ to navigate, Enter to confirm, Esc to
+  cancel. On confirm, the agent receives the selected choice's
+  `Value`; on cancel, the agent receives a cancellation sentinel and
+  decides whether to retry or abort the turn. Distinct from MCP
+  elicitation (R-ELIC-1) which is server-initiated and form-shaped —
+  this is the **agent itself** asking a discrete question of the
+  user. Borrowed from the Antigravity CLI's `ask_question` tool; see
+  [`ui-references.md`](./ui-references.md).
+
+### 3.20 System clipboard (should)
+
+- **R-CLIP-1** A bound key (default `Ctrl+Y`) copies the focused
+  content — a rendered code block, a tool-call payload, a system
+  message, or the in-flight assistant reply — to the system
+  clipboard via OSC 52 (Operating System Command sequence 52). OSC 52
+  works across iTerm2, GNOME Terminal, kitty, alacritty, Windows
+  Terminal, plus `tmux`/`screen` with the standard `set-clipboard
+  on`/`alternate-screen on` settings, and over SSH without local
+  clipboard tooling. When the terminal rejects the escape (rare on
+  modern terminals) the TUI emits a system message naming the
+  fallback (`pbcopy`/`xclip`/`wl-copy`) it tried if any were
+  resolvable, or instructions for the user otherwise. No host
+  configuration required; works out of the box.
 
 ## 4. Non-functional Requirements
 

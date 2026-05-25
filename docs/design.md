@@ -288,6 +288,45 @@ type SlashResult struct {
 }
 ```
 
+`MentionProvider` is not a capability on Agent — it's a host-side
+configuration item delivered through `Options.MentionProviders`. The
+TUI merges entries from every provider into the `@` palette under
+section headers (R-AT-4). Multiple providers can share the prefix
+namespace as long as their `Prefix` differs (e.g. one provider serves
+`@sym:`, another `@git:`).
+
+```go
+type MentionProvider struct {
+    // Prefix is the literal that follows "@" to scope the lookup
+    // (e.g. "sym:", "git:", "url:"). The built-in file provider has
+    // an empty Prefix and matches any "@" not claimed by a registered
+    // provider.
+    Prefix string
+
+    // SectionHeader is the title shown above this provider's entries
+    // in the palette (e.g. "Symbols", "Git refs").
+    SectionHeader string
+
+    // Lookup runs on each keystroke. Should return ranked matches
+    // (prefix matches first, then substring) and is expected to
+    // de-bounce internally if it touches anything expensive.
+    Lookup func(ctx context.Context, query string) ([]MentionMatch, error)
+}
+
+type MentionMatch struct {
+    // Display is the visible row in the palette.
+    Display string
+    // Insert is the literal that replaces the typed @-token on
+    // selection (the form persisted to prompt history).
+    Insert string
+    // Expand is called when the user submits a prompt containing
+    // Insert; the returned string is inlined in place of Insert
+    // before the prompt reaches the agent. Empty Expand means the
+    // Insert form is sent as-is.
+    Expand func(ctx context.Context) (string, error)
+}
+```
+
 ### 3.4 Required-from-host (TUI → host) callbacks
 
 These are not capability interfaces — they are concrete callbacks the
@@ -337,7 +376,28 @@ type Options struct {
 
     // Mouse default (on if zero-value left).
     MouseDefault MouseSetting
+
+    // MouseHint is the auto-expiring "Hold Shift to select text"
+    // overlay shown when mouse capture is on (R-MOUSE-3). Empty
+    // string uses the default. Zero MouseHintTTL uses 5 seconds.
+    MouseHint    string
+    MouseHintTTL time.Duration
+
+    // RenderMode picks alt-screen vs hybrid-scrollback rendering
+    // (R-CHAT-9). RenderAltScreen is the default.
+    RenderMode RenderMode
+
+    // MentionProviders extends the @ palette beyond files (R-AT-4).
+    // The built-in file provider always runs; this list is additive.
+    MentionProviders []MentionProvider
 }
+
+type RenderMode int
+
+const (
+    RenderAltScreen RenderMode = iota
+    RenderInline
+)
 
 // PermissionModeWiring backs R-PERM-6 / R-PERM-7. Set is required
 // when any field is non-zero; Persist is optional.
@@ -429,6 +489,33 @@ const (
 // Elicitor mirrors the pattern for MCP elicitation.
 type Elicitor interface {
     Elicit(ctx context.Context, serverName string, req ElicitRequest) (ElicitResult, error)
+}
+
+// UserPrompter is implemented by the TUI. Hosts pass the value
+// returned by tui.NewUserPrompter() into their agent so the agent
+// can call AskUser mid-turn for structured multiple-choice input
+// (R-PROMPT-1). Distinct from Elicitor (MCP-server-initiated, form-
+// shaped) — this is the agent itself asking a discrete question.
+type UserPrompter interface {
+    AskUser(ctx context.Context, req UserPromptRequest) (UserPromptResponse, error)
+}
+
+type UserPromptRequest struct {
+    Question     string       // shown bold at the top of the modal
+    Description  string       // optional dim subtitle below the question
+    Choices      []UserChoice // ≥ 2 entries; renders as a huh.Select
+    DefaultIndex int          // index of the initially highlighted choice
+}
+
+type UserChoice struct {
+    Label       string // primary text on the row
+    Description string // optional dim subtitle for the row
+    Value       string // round-tripped back as Response.Selected on confirm
+}
+
+type UserPromptResponse struct {
+    Selected  string // the chosen UserChoice.Value
+    Cancelled bool   // true when the operator pressed Esc
 }
 ```
 
@@ -533,6 +620,34 @@ present-continuous string replaces the rotation entirely. No new
   (no auto-quit). Operator can `/quit`.
 - Cancellation: distinguished from errors (turnCancelledMsg →
   "(interrupted)" notice rather than error banner).
+
+### 4.3 Render mode (R-CHAT-9)
+
+Two strategies governed by `Options.RenderMode`:
+
+- **`RenderAltScreen`** (default) — `tea.View.AltScreen = true`. The
+  TUI owns the full terminal viewport for the duration of the
+  session. Scrollback is the in-app `viewport.Model`. Matches every
+  v1 source TUI and is the safe choice for short or moderately
+  scrolling sessions.
+- **`RenderInline`** — `tea.View.AltScreen = false`. As each turn
+  commits (the assistant message reaches its final Glamour render
+  and any tool calls have rendered into history), the rendered block
+  is `tea.Println`-pushed into the terminal's native scrollback and
+  removed from the in-app viewport. `View()` keeps only:
+  - the live input row,
+  - the in-progress assistant message (with its streaming spinner /
+    `Thinking…` / `Working…` indicator), and
+  - any active modal overlay.
+  On `WindowSizeMsg` the TUI debounces (~150 ms), flushes any
+  pending `Println` writes, and recomputes wrap widths so the
+  scrollback stays clean across resizes. The TUI tracks the boundary
+  between "in scrollback" and "in viewport" so the per-turn `─` rule
+  (style.md §3) appears exactly once even when the boundary moves.
+
+The mode is not user-toggleable at runtime — switching alters
+terminal state in ways that can corrupt the scrollback. Hosts pick
+the mode at construction and keep it for the session.
 
 ## 5. Slash-command routing
 

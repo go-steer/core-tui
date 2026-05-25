@@ -93,6 +93,21 @@ to contaminate.
 | Inline `(ctrl+o to expand)` affordance per tool call | Inspiration only — refinement of R-CHAT-5 at implementation. |
 | Artifact counter + review command on the in-progress message | Inspiration only — no artifact concept in v1. |
 | Built-in pager for file output instead of shelling out | Inspiration only — implementation-time choice. |
+| Hybrid inline-scrollback rendering (commits turn blocks to terminal native scroll history via `tea.Println`) | **Adopted** — see [R-CHAT-9](./requirements.md#31-core-chat-loop-must) (`Options.RenderMode` = `AltScreen` or `Inline`) + [design.md §4.3](./design.md#43-render-mode-r-chat-9). |
+| Multi-modal `@`-mention typeahead (symbols, artifacts, git commits, web URLs, …) | **Adopted** — see [R-AT-4](./requirements.md#35-file-expansion-must) (`Options.MentionProviders`). |
+| Agent-initiated `ask_question` multiple-choice modal | **Adopted** — see [R-PROMPT-1](./requirements.md#319-agent-driven-prompts-should) (`UserPrompter`). |
+| Suspend TUI to `$EDITOR` via `tea.ExecProcess` for inspection / editing | **Adopted** — see [R-CHAT-8](./requirements.md#31-core-chat-loop-must). |
+| OSC 52 system clipboard integration | **Adopted** — see [R-CLIP-1](./requirements.md#320-system-clipboard-should). |
+| Auto-expiring "Hold Shift to select text" overlay when mouse capture is on | **Adopted** — see [R-MOUSE-3](./requirements.md#312-mouse-support-must). |
+| Subagent details panel with `Ctrl+K` fast approval | Inspiration only — R-SUB-1 stays read-only in v1. |
+| Review-card FSM consolidating multi-file approvals | Inspiration only — single-file modal (R-PERM-1) covers v1; multi-file review is a delta to consider later. |
+| Cached static rendered views during heavy scrolling | Inspiration only — implementation-time optimization. |
+| Ghost-line auto-completion inline in the prompt | Inspiration only — defer to v0.2+. |
+| Multi-root workspace add at runtime (`/add_workspace_dir`) | Inspiration only — `PathScope` (R-SCOPE-1) covers v1 statically. |
+| `/btw` ephemeral side-questions, `/fork`, `/rewind`, `/tasks`, `/context` token attribution | Rejected — agent-side concerns, not TUI surface. |
+| Sentiment-based feedback triggers | Rejected — agent-side concern. |
+| Workspace-trust sandboxing, auto-updater | Rejected — host-level configuration concern. |
+| Browser automation, WebM recording | Rejected — agent capability, not TUI. |
 
 ### Patterns to reject
 
