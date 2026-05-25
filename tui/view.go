@@ -264,7 +264,7 @@ func (m Model) renderStatusLine() string {
 	parts = append(parts,
 		m.sep(),
 		m.styles.Muted.Render(fmt.Sprintf(
-			"15.2K in %s 4.1K out %s $0.04 %s 9%% ctx",
+			"15.2K in %s 4.1K out %s $0.04 %s 19.3K / 200K",
 			GlyphSeparator, GlyphSeparator, GlyphSeparator,
 		)),
 	)
@@ -280,7 +280,7 @@ func (m Model) renderSidebar() string {
 		"  "+m.styles.AgentIdentity.Render(GlyphModel+" Claude Sonnet 4"),
 		"    "+m.styles.Muted.Render(m.permMode.String()),
 		"    "+m.styles.Muted.Render("15.2K in "+GlyphSeparator+" 4.1K out"),
-		"    "+m.styles.Muted.Render("$0.04 "+GlyphSeparator+" 9% ctx"),
+		"    "+m.styles.Muted.Render("$0.04 "+GlyphSeparator+" 19.3K / 200K"),
 	)
 	modified := m.sidebarSection("modified files",
 		"cmd/foo/main.go     +12 -3",

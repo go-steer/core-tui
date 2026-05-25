@@ -281,9 +281,12 @@ listed in `/help`:
 - **R-USE-1** Per-turn (input tokens, output tokens, cost) and
   session totals must be visible in `/stats`.
 - **R-USE-2** A persistent status surface displays the current model,
-  the current permission mode (per R-PERM-6), and session totals
-  (input tokens, output tokens, cost, context-window %). Layout is
-  configurable via `Options.StatusLayout` with two presets:
+  the current permission mode (per R-PERM-6), session totals (input
+  tokens, output tokens, cost), and context-window utilization
+  rendered as **`used / limit`** (e.g. `19.3K / 200K`) — absolute
+  numbers are more legible than a bare `%` and reveal the model's
+  context size at a glance. Layout is configurable via
+  `Options.StatusLayout` with two presets:
   - **`StatusHeader`** (default) — a single status line above the
     chat. Minimal terminal-real-estate cost; matches the v1 source
     TUIs, Antigravity, and Claude Code.
