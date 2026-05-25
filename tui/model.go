@@ -48,6 +48,11 @@ type Model struct {
 	permMode     PermissionMode
 	overlay      overlay
 
+	// helpOpen toggles the bottom-anchored stacked help panel
+	// (`?` to open / close). When open, the chat viewport shrinks
+	// to make room above the input.
+	helpOpen bool
+
 	// quitting flips when Ctrl+C / Ctrl+D land, so the next Update
 	// returns tea.Quit.
 	quitting bool

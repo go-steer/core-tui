@@ -71,11 +71,17 @@ func (m Model) View() tea.View {
 		// sidebar gets pushed off the right edge of the terminal.
 		chatWidth := m.width - sidebarWidth - 3
 		footer := m.renderFooter(chatWidth)
+		help := m.renderHelpPanel(chatWidth)
 		// Force `left` to exactly chatWidth wide so the sidebar lands
 		// at column chatWidth + divider regardless of how short the
 		// individual rows are.
+		leftParts := []string{chat}
+		if help != "" {
+			leftParts = append(leftParts, help)
+		}
+		leftParts = append(leftParts, input, footer)
 		left := lipgloss.NewStyle().Width(chatWidth).Render(
-			lipgloss.JoinVertical(lipgloss.Left, chat, input, footer),
+			lipgloss.JoinVertical(lipgloss.Left, leftParts...),
 		)
 		sidebar := m.renderSidebar()
 		divider := strings.Repeat(GlyphColumn+"\n", lipgloss.Height(left))
@@ -87,12 +93,13 @@ func (m Model) View() tea.View {
 	default:
 		header := m.renderHeader()
 		footer := m.renderFooter(m.width)
-		body = lipgloss.JoinVertical(lipgloss.Left,
-			header,
-			chat,
-			input,
-			footer,
-		)
+		help := m.renderHelpPanel(m.width)
+		parts := []string{header, chat}
+		if help != "" {
+			parts = append(parts, help)
+		}
+		parts = append(parts, input, footer)
+		body = lipgloss.JoinVertical(lipgloss.Left, parts...)
 	}
 
 	// Overlay any active modal centered over the body.
@@ -142,7 +149,11 @@ func (m *Model) resize() {
 			footerRows = 1
 		}
 	}
-	chatHeight := m.height - headerHeight - inputHeight - footerRows - 2 // 2 = input top border + spacer
+	helpRows := 0
+	if m.helpOpen {
+		helpRows = lipgloss.Height(m.renderHelpPanel(footerWidth))
+	}
+	chatHeight := m.height - headerHeight - inputHeight - footerRows - helpRows - 2 // 2 = input top border + spacer
 	if chatHeight < 3 {
 		chatHeight = 3
 	}
@@ -443,6 +454,70 @@ func (m Model) renderTurnFooter(msg Message) string {
 		parts = append(parts, msg.Elapsed.Round(100_000_000).String())
 	}
 	return m.styles.Muted.Italic(true).Render(strings.Join(parts, " "+GlyphSeparator+" "))
+}
+
+// renderHelpPanel renders the bottom-anchored stacked help panel when
+// m.helpOpen is true. Returns empty string when closed so callers can
+// conditionally include it without branching on `if helpOpen` in the
+// View() composition. Width sets the column width — pass chatWidth in
+// sidebar mode and m.width in header mode.
+func (m Model) renderHelpPanel(width int) string {
+	if !m.helpOpen || width <= 0 {
+		return ""
+	}
+	sections := []struct {
+		title string
+		keys  [][2]string
+	}{
+		{"Input", [][2]string{
+			{"enter", "submit"},
+			{"shift+enter / ctrl+j", "newline"},
+			{"?", "toggle this menu"},
+		}},
+		{"Navigation", [][2]string{
+			{"pgup / pgdn", "scroll chat"},
+			{"home / end", "top / bottom"},
+		}},
+		{"Layout & mode", [][2]string{
+			{"ctrl+b", "toggle header / sidebar"},
+			{"shift+tab", "cycle permission mode"},
+		}},
+		{"Demo modals (visual preview)", [][2]string{
+			{"ctrl+p", "command palette"},
+			{"ctrl+g", "model picker"},
+			{"ctrl+y", "permission modal"},
+			{"ctrl+e", "MCP elicitation"},
+			{"esc", "close any modal"},
+		}},
+		{"Quit", [][2]string{
+			{"ctrl+c, ctrl+d", "exit"},
+		}},
+	}
+
+	const keyCol = 24
+	rule := m.styles.Rule.Render(strings.Repeat(GlyphRule, width))
+	title := m.styles.Accent.Render("Help") + "  " +
+		m.styles.Muted.Render("(? to close)")
+
+	lines := []string{rule, title}
+	for i, sec := range sections {
+		if i > 0 {
+			lines = append(lines, "")
+		}
+		lines = append(lines, "  "+m.styles.SidebarHeading.Render(sec.title))
+		for _, kv := range sec.keys {
+			key := kv[0]
+			pad := keyCol - lipgloss.Width(key)
+			if pad < 1 {
+				pad = 1
+			}
+			row := "    " + m.styles.AssistantText.Bold(true).Render(key) +
+				strings.Repeat(" ", pad) + m.styles.Muted.Render(kv[1])
+			lines = append(lines, row)
+		}
+	}
+	lines = append(lines, rule)
+	return strings.Join(lines, "\n")
 }
 
 // humanTokens formats an integer token count as a short string

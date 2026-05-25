@@ -70,10 +70,19 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 func (m Model) handleKey(msg tea.KeyPressMsg) (tea.Model, tea.Cmd) {
 	stroke := msg.String()
 
-	// Modal-close: Esc closes any open overlay before any other handler.
-	if m.overlay != overlayNone && stroke == "esc" {
-		m.overlay = overlayNone
-		return m, nil
+	// Modal-close: Esc closes any open overlay or help panel before
+	// any other handler.
+	if stroke == "esc" {
+		if m.overlay != overlayNone {
+			m.overlay = overlayNone
+			return m, nil
+		}
+		if m.helpOpen {
+			m.helpOpen = false
+			m.resize()
+			m.refreshViewport()
+			return m, nil
+		}
 	}
 
 	switch stroke {
@@ -138,17 +147,12 @@ func (m Model) handleKey(msg tea.KeyPressMsg) (tea.Model, tea.Cmd) {
 		return m, cmd
 
 	case "?":
-		// Surface the full keymap as a system message so the footer
-		// can stay terse. Only triggers when `?` is typed with an
-		// empty input — otherwise the user is mid-sentence and
-		// expects the literal `?` character.
+		// Toggle the bottom-anchored stacked help panel. Only fires
+		// when input is empty so users can still type `?` mid-sentence
+		// without hijacking the key.
 		if strings.TrimSpace(m.input.Value()) == "" {
-			m.history.Append(Message{
-				Role: RoleSystem,
-				Text: "Keys: enter submit · shift+enter / ctrl+j newline · ctrl+c quit · " +
-					"ctrl+b toggle layout · shift+tab cycle perm-mode · " +
-					"ctrl+p palette · ctrl+g model · ctrl+y permission · ctrl+e elicit · esc close modal",
-			})
+			m.helpOpen = !m.helpOpen
+			m.resize()
 			m.refreshViewport()
 			return m, nil
 		}
