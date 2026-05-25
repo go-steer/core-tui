@@ -34,6 +34,7 @@ import (
 	"context"
 	"fmt"
 	"os"
+	"time"
 
 	"github.com/go-steer/core-tui/tui"
 	"github.com/go-steer/core-tui/tui/testagent"
@@ -99,6 +100,10 @@ func seededConversation() []tui.Message {
 			Text: "Done. The migration is at `db/migrations/0042_users_email_not_null.sql` " +
 				"and verifies cleanly against dev. Want me to also write the matching " +
 				"down-migration?",
+			Model:   "Claude Sonnet 4.6",
+			Usage:   &tui.Usage{InputTokens: 8421, OutputTokens: 2103},
+			CostUSD: 0.0124,
+			Elapsed: 4*time.Second + 200*time.Millisecond,
 		},
 		{
 			Role: tui.RoleError,

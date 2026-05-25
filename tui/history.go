@@ -14,6 +14,8 @@
 
 package tui
 
+import "time"
+
 // Role tags each entry in the chat log so the renderer can pick the
 // right style and glyph.
 type Role int
@@ -38,6 +40,15 @@ type Message struct {
 	// ToolName, ToolArgs populated when Role == RoleTool.
 	ToolName string
 	ToolArgs string
+
+	// Per-turn metadata populated by the TUI on the final assistant
+	// Message of each turn so the renderer can append a one-line
+	// `◇ Model · 8.4K in · 2.1K out · $0.012 · 4s` footer (R-USE-1).
+	// Nil / zero values suppress the footer.
+	Usage   *Usage
+	Model   string
+	Elapsed time.Duration
+	CostUSD float64
 }
 
 // Display returns the renderable string for this message, preferring

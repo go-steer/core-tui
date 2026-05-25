@@ -20,11 +20,37 @@ import (
 
 	tea "charm.land/bubbletea/v2"
 	"charm.land/lipgloss/v2"
+	"github.com/charmbracelet/x/ansi"
 )
 
 // sidebarWidth is the fixed-column count of the StatusSidebar panel
 // (style.md §5).
 const sidebarWidth = 32
+
+// sidebarMinChatWidth is the minimum chat-column count we'll accept
+// before forcing a fallback to StatusHeader layout. Below this we
+// can't fit useful chat content next to a 32-col sidebar.
+const sidebarMinChatWidth = 40
+
+// wordWrap word-wraps s at width cols, preserving ANSI escapes from
+// any prior lipgloss styling. Width <= 0 returns s unchanged.
+func wordWrap(s string, width int) string {
+	if width <= 0 {
+		return s
+	}
+	return ansi.Wordwrap(s, width, " -")
+}
+
+// effectiveLayout returns the layout we'll actually render — falls
+// back from StatusSidebar to StatusHeader when the terminal is too
+// narrow to fit both the sidebar and a useful chat column.
+func (m Model) effectiveLayout() StatusLayout {
+	if m.statusLayout == StatusSidebar &&
+		m.width-sidebarWidth-3 < sidebarMinChatWidth {
+		return StatusHeader
+	}
+	return m.statusLayout
+}
 
 // View composes the full TUI. Returns a tea.View with AltScreen on
 // and the brand cursor block. Layout is governed by m.statusLayout
@@ -39,7 +65,7 @@ func (m Model) View() tea.View {
 	footer := m.renderFooter()
 
 	var body string
-	switch m.statusLayout {
+	switch m.effectiveLayout() {
 	case StatusSidebar:
 		left := lipgloss.JoinVertical(lipgloss.Left,
 			chat,
@@ -83,27 +109,35 @@ func (m *Model) resize() {
 		return
 	}
 
+	layout := m.effectiveLayout()
 	chatWidth := m.width
-	if m.statusLayout == StatusSidebar {
-		// Reserve sidebar + one column for the divider + one space of
-		// padding on each side of the divider.
+	if layout == StatusSidebar {
 		chatWidth = m.width - sidebarWidth - 3
-		if chatWidth < 20 {
-			chatWidth = 20
-		}
 	}
 
 	const inputHeight = 3
 	const footerHeight = 1
 	headerHeight := 0
-	if m.statusLayout == StatusHeader {
+	if layout == StatusHeader {
 		headerHeight = 2 // status line + a blank row
 	}
-	chatHeight := m.height - headerHeight - inputHeight - footerHeight - 2 // 2 = input top border + per-turn rule
+	// Allow the footer to wrap onto a second line when the terminal
+	// is narrow; reserve up to 2 rows for it.
+	footerRows := footerHeight
+	if m.width > 0 {
+		footerRows = lipgloss.Height(wordWrap(m.renderFooter(), m.width))
+		if footerRows < 1 {
+			footerRows = 1
+		}
+	}
+	chatHeight := m.height - headerHeight - inputHeight - footerRows - 2 // 2 = input top border + spacer
 	if chatHeight < 3 {
 		chatHeight = 3
 	}
 
+	if chatWidth < 1 {
+		chatWidth = 1
+	}
 	m.viewport.SetWidth(chatWidth)
 	m.viewport.SetHeight(chatHeight)
 	m.input.SetWidth(chatWidth - 2) // leave room for the input border
@@ -150,26 +184,34 @@ func (m *Model) refreshViewport() {
 }
 
 // renderMessage renders a single Message row with the correct glyph
-// + style for its Role (style.md §2 + §4).
+// + style for its Role (style.md §2 + §4). Output is word-wrapped to
+// the viewport width so narrow terminals don't run text off-screen.
 func (m Model) renderMessage(msg Message) string {
+	width := m.viewport.Width()
 	switch msg.Role {
 	case RoleUser:
 		prefix := m.styles.UserPrefix.Render(GlyphUserPrompt)
-		return prefix + " " + m.styles.UserText.Render(msg.Display())
+		body := wordWrap(msg.Display(), width-2)
+		return prefix + " " + m.styles.UserText.Render(body)
 	case RoleAssistant:
-		return m.styles.AssistantText.Render(msg.Display())
+		body := m.styles.AssistantText.Render(wordWrap(msg.Display(), width))
+		if footer := m.renderTurnFooter(msg); footer != "" {
+			return body + "\n" + footer
+		}
+		return body
 	case RoleSystem:
-		return m.styles.SystemText.Render("ℹ  " + msg.Display())
+		return m.styles.SystemText.Render(wordWrap("ℹ  "+msg.Display(), width))
 	case RoleError:
-		return m.styles.ErrorText.Render(GlyphWarn + "  " + msg.Display())
+		return m.styles.ErrorText.Render(wordWrap(GlyphWarn+"  "+msg.Display(), width))
 	case RoleTool:
 		head := m.styles.ToolHead.Render(GlyphTool + " " + msg.ToolName)
 		if msg.ToolArgs != "" {
-			return head + " " + m.styles.ToolBody.Render(msg.ToolArgs)
+			args := wordWrap(msg.ToolArgs, width-lipgloss.Width(head)-1)
+			return head + " " + m.styles.ToolBody.Render(args)
 		}
 		return head
 	}
-	return msg.Display()
+	return wordWrap(msg.Display(), width)
 }
 
 // renderHeader renders the StatusHeader layout's top line — status
@@ -180,7 +222,10 @@ func (m Model) renderHeader() string {
 }
 
 // renderStatusLine renders the one-line status used in StatusHeader
-// (style.md §7.2).
+// (style.md §7.2). Format intentionally puts the spend metrics in a
+// human-readable form: `15.2K in · 4.1K out · $0.04 · 9% ctx` rather
+// than the bare "9% (19.3K)" which conflated context-fill % with
+// total tokens.
 func (m Model) renderStatusLine() string {
 	parts := []string{
 		m.styles.Wordmark.Render(m.wordmark()),
@@ -195,17 +240,24 @@ func (m Model) renderStatusLine() string {
 	}
 	parts = append(parts,
 		m.sep(),
-		m.styles.Muted.Render("9% (19.3K) "+GlyphSeparator+" $0.04"),
+		m.styles.Muted.Render(fmt.Sprintf(
+			"15.2K in %s 4.1K out %s $0.04 %s 9%% ctx",
+			GlyphSeparator, GlyphSeparator, GlyphSeparator,
+		)),
 	)
 	return strings.Join(parts, "")
 }
 
 // renderSidebar renders the StatusSidebar layout's right-hand panel
-// (style.md §7.2).
+// (style.md §7.2). Stacks the model + mode + spend metrics in a
+// readable vertical layout — separate input/output tokens, context-
+// window %, cumulative cost, instead of the prior conflated form.
 func (m Model) renderSidebar() string {
 	header := lipgloss.JoinVertical(lipgloss.Left,
 		"  "+m.styles.AgentIdentity.Render(GlyphModel+" Claude Sonnet 4"),
-		"    "+m.styles.Muted.Render(m.permMode.String()+" "+GlyphSeparator+" 9% (19.3K) "+GlyphSeparator+" $0.04"),
+		"    "+m.styles.Muted.Render(m.permMode.String()),
+		"    "+m.styles.Muted.Render("15.2K in "+GlyphSeparator+" 4.1K out"),
+		"    "+m.styles.Muted.Render("$0.04 "+GlyphSeparator+" 9% ctx"),
 	)
 	modified := m.sidebarSection("modified files",
 		"cmd/foo/main.go     +12 -3",
@@ -251,12 +303,16 @@ func (m Model) renderInputBox() string {
 }
 
 // renderFooter renders the bottom keymap legend (style.md §7.1).
+// Wraps onto a second line when narrower than the legend.
 func (m Model) renderFooter() string {
 	hint := m.opts.Branding.FooterHint
 	if hint == "" {
 		hint = "ctrl+c quit " + GlyphSeparator + " ctrl+b toggle layout " + GlyphSeparator +
 			" shift+tab cycle perm-mode " + GlyphSeparator + " ctrl+p palette " + GlyphSeparator +
 			" ctrl+g model " + GlyphSeparator + " ctrl+y permission " + GlyphSeparator + " ctrl+e elicit"
+	}
+	if m.width > 0 {
+		hint = wordWrap(hint, m.width)
 	}
 	return m.styles.Footer.Render(hint)
 }
@@ -342,4 +398,45 @@ func (m Model) renderOverlay() string {
 // sep returns the dim ` · ` separator used in status assembly.
 func (m Model) sep() string {
 	return m.styles.Muted.Render(" " + GlyphSeparator + " ")
+}
+
+// renderTurnFooter emits the per-turn assistant footer (R-USE-1)
+// when the message carries Usage / Model / Elapsed metadata. Empty
+// string when no metadata is present so seeded or mid-stream
+// messages don't get an empty stub.
+func (m Model) renderTurnFooter(msg Message) string {
+	if msg.Usage == nil && msg.Model == "" && msg.Elapsed == 0 {
+		return ""
+	}
+	parts := []string{}
+	if msg.Model != "" {
+		parts = append(parts, GlyphModel+" "+msg.Model)
+	}
+	if msg.Usage != nil {
+		parts = append(parts,
+			fmt.Sprintf("%s in", humanTokens(msg.Usage.InputTokens)),
+			fmt.Sprintf("%s out", humanTokens(msg.Usage.OutputTokens)),
+		)
+	}
+	if msg.CostUSD > 0 {
+		parts = append(parts, fmt.Sprintf("$%.4f", msg.CostUSD))
+	}
+	if msg.Elapsed > 0 {
+		parts = append(parts, msg.Elapsed.Round(100_000_000).String())
+	}
+	return m.styles.Muted.Italic(true).Render(strings.Join(parts, " "+GlyphSeparator+" "))
+}
+
+// humanTokens formats an integer token count as a short string
+// (4096 → "4.1K", 1_234_567 → "1.2M"). Used in both status and per-
+// turn footer (R-USE-1 / R-USE-2).
+func humanTokens(n int) string {
+	switch {
+	case n >= 1_000_000:
+		return fmt.Sprintf("%.1fM", float64(n)/1_000_000)
+	case n >= 1_000:
+		return fmt.Sprintf("%.1fK", float64(n)/1_000)
+	default:
+		return fmt.Sprintf("%d", n)
+	}
 }

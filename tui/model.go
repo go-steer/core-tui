@@ -64,6 +64,10 @@ func NewModel(opts Options) Model {
 	ta.Prompt = ""
 	ta.ShowLineNumbers = false
 	ta.SetHeight(3)
+	// Focus the textarea so KeyPressMsg events route to it. Focus()
+	// returns a blink Cmd we deliberately drop here — Init below
+	// returns textarea.Blink directly to start the cursor animation.
+	_ = ta.Focus()
 
 	vp := viewport.New()
 

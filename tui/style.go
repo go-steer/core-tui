@@ -35,7 +35,7 @@ var (
 // Glyph vocabulary (style.md §2). One anchor glyph per row, ever.
 const (
 	GlyphModel       = "◇"
-	GlyphTool        = "●"
+	GlyphTool        = "⚙"
 	GlyphToolPending = "○"
 	GlyphToolDone    = "✓"
 	GlyphToolFail    = "✗"

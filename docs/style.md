@@ -79,10 +79,11 @@ fixed meaning across the TUI.
 | Glyph | Code point | Meaning                                              |
 |-------|------------|------------------------------------------------------|
 | `◇`   | `U+25C7`   | Model identity (precedes model name in status).      |
-| `●`   | `U+25CF`   | Tool call (head of a tool-call summary line).        |
-| `○`   | `U+25CB`   | Tool call awaiting / pending.                        |
-| `✓`   | `U+2713`   | Tool call completed (replaces `●` after success).    |
-| `✗`   | `U+2717`   | Tool call failed / denied.                           |
+| `⚙`   | `U+2699`   | Tool call (head of a tool-call summary line). Static — state changes append a marker after the tool name rather than replacing the head glyph. |
+| `○`   | `U+25CB`   | Tool call awaiting / pending (appended after name).  |
+| `●`   | `U+25CF`   | Tool call running (appended after name).             |
+| `✓`   | `U+2713`   | Tool call completed (appended after name).           |
+| `✗`   | `U+2717`   | Tool call failed / denied (appended after name).     |
 | `▸`   | `U+25B8`   | Collapsible / expandable section (collapsed state).  |
 | `▾`   | `U+25BE`   | Collapsible / expandable section (expanded state).   |
 | `⚠`   | `U+26A0`   | Warning row (system color: `FgWarn`).                |

@@ -15,14 +15,15 @@
 package tui
 
 import (
+	"charm.land/bubbles/v2/textarea"
 	tea "charm.land/bubbletea/v2"
 )
 
 // Init asks the terminal for its background color so the style bundle
-// can resolve dark vs light at startup (R-MD-2). Returns the
-// RequestBackgroundColor Cmd.
+// can resolve dark vs light at startup (R-MD-2), and starts the
+// textarea cursor blink.
 func (m Model) Init() tea.Cmd {
-	return tea.RequestBackgroundColor
+	return tea.Batch(tea.RequestBackgroundColor, textarea.Blink)
 }
 
 // Update is the Bubble Tea dispatcher. The visual-preview slice
