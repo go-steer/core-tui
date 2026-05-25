@@ -179,9 +179,10 @@ func (m *Model) resize() {
 	m.input.SetHeight(inputHeight)
 }
 
-// refreshViewport rebuilds the viewport's content from history. Called
-// after any change that affects rendered text (resize, style change,
-// new message).
+// refreshViewport rebuilds the viewport's content from history plus
+// the in-progress assistant message (R-CHAT-4) and spinner verb
+// (R-CHAT-3). Called after any change that affects rendered text:
+// resize, style change, new message, stream chunk, spinner tick.
 func (m *Model) refreshViewport() {
 	if m.width == 0 {
 		return
@@ -192,9 +193,6 @@ func (m *Model) refreshViewport() {
 
 	for i, msg := range entries {
 		if i > 0 {
-			// Per-turn rule between user turns and inside the same
-			// turn for tool/system rows. style.md §3 keeps the rule
-			// rare — only between role transitions to user.
 			if msg.Role == RoleUser {
 				b.WriteString("\n")
 				b.WriteString(rule)
@@ -206,7 +204,14 @@ func (m *Model) refreshViewport() {
 		b.WriteString(m.renderMessage(msg))
 	}
 
-	if m.history.Len() == 0 {
+	if inProgress := m.renderInProgress(); inProgress != "" {
+		if m.history.Len() > 0 {
+			b.WriteString("\n\n")
+		}
+		b.WriteString(inProgress)
+	}
+
+	if m.history.Len() == 0 && m.state == stateIdle {
 		hint := m.opts.Branding.EmptyStateHint
 		if hint == "" {
 			hint = "Ask me anything to get started."
@@ -216,6 +221,39 @@ func (m *Model) refreshViewport() {
 
 	m.viewport.SetContent(b.String())
 	m.viewport.GotoBottom()
+}
+
+// renderInProgress returns the live block at the bottom of the chat
+// while a turn is streaming: the accumulated assistant text rendered
+// through Glamour (R-CHAT-4), followed by the spinner verb line
+// (R-CHAT-3). Empty string when no turn is in flight.
+func (m *Model) renderInProgress() string {
+	if m.state != stateStreaming {
+		return ""
+	}
+	var parts []string
+	if strings.TrimSpace(m.inProgressText) != "" {
+		mr := m.ensureMarkdown()
+		body := mr.renderMarkdown(m.inProgressText)
+		parts = append(parts, m.styles.AssistantText.Render(body))
+	}
+	parts = append(parts, m.renderSpinnerLine())
+	return strings.Join(parts, "\n")
+}
+
+// renderSpinnerLine renders the rotating cognition verb (R-CHAT-3).
+// Picks ThinkingPhrases when the model is generating and
+// WorkingPhrases after a tool call until the next text chunk.
+func (m Model) renderSpinnerLine() string {
+	pool := m.thinkingPhrases()
+	if m.toolActive {
+		pool = m.workingPhrases()
+	}
+	if len(pool) == 0 {
+		return ""
+	}
+	verb := pool[m.thinkingIdx%len(pool)]
+	return m.styles.Muted.Italic(true).Render(verb + GlyphTruncate)
 }
 
 // renderMessage renders a single Message row with the correct glyph
@@ -229,7 +267,15 @@ func (m Model) renderMessage(msg Message) string {
 		body := wordWrap(msg.Display(), width-2)
 		return prefix + " " + m.styles.UserText.Render(body)
 	case RoleAssistant:
-		body := m.styles.AssistantText.Render(wordWrap(msg.Display(), width))
+		// Display() returns the cached Glamour render (Rendered) when
+		// available; otherwise the raw text. We word-wrap only the
+		// raw path — the Glamour render already wrapped to the
+		// renderer's WithWordWrap width.
+		text := msg.Display()
+		if msg.Rendered == "" {
+			text = wordWrap(text, width)
+		}
+		body := m.styles.AssistantText.Render(text)
 		if footer := m.renderTurnFooter(msg); footer != "" {
 			return body + "\n" + footer
 		}

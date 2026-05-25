@@ -42,7 +42,11 @@ import (
 
 func main() {
 	opts := tui.Options{
-		Agent:        testagent.New(),
+		// Scripted agent plays a believable coding-task turn on every
+		// submit so the operator can see streaming + spinner + Glamour
+		// + per-turn footer end-to-end. Same script regardless of
+		// prompt — it's a visual harness, not a real agent.
+		Agent:        testagent.NewScripted(testagent.CodingDemo()),
 		StatusLayout: tui.StatusHeader,
 		PermissionMode: tui.PermissionModeWiring{
 			Initial: tui.PermissionModeDefault,

@@ -15,8 +15,21 @@
 package tui
 
 import (
+	"context"
+	"time"
+
 	"charm.land/bubbles/v2/textarea"
 	"charm.land/bubbles/v2/viewport"
+	tea "charm.land/bubbletea/v2"
+)
+
+// turnState is the high-level activity bit the spinner and input
+// gating key off of.
+type turnState int
+
+const (
+	stateIdle      turnState = iota // input enabled, no spinner
+	stateStreaming                  // turn in flight: input disabled, spinner active
 )
 
 // overlay identifies which modal, if any, is currently visible.
@@ -57,6 +70,27 @@ type Model struct {
 	// the start of the input or `@` anywhere.
 	palette *palette
 
+	// Streaming-turn state (R-CHAT-3 / R-CHAT-4 / R-CHAT-6).
+	state          turnState
+	cancelTurn     context.CancelFunc // non-nil while state == stateStreaming
+	turnStarted    time.Time
+	inProgressText string // accumulator for streamed tokens
+	currentUsage   *Usage // most recent usage snapshot for this turn
+	currentModel   string // model name for the in-progress message
+	toolActive     bool   // true after a ToolCall; flips back on next Text
+	seenToolIDs    map[string]bool
+	thinkingIdx    int  // rotation index into ThinkingPhrases / WorkingPhrases
+	spinnerActive  bool // gates spinner tick scheduling
+
+	// eventCh is the bridge between the agent dispatch goroutine and
+	// the Bubble Tea loop. eventListener drains it one message at a
+	// time. Buffered so a fast agent can't stall on a slow Update.
+	eventCh chan tea.Msg
+
+	// markdown is the lazily-built Glamour renderer; rebuilt when
+	// dark/light or width changes. nil until first use.
+	markdown *markdownRenderer
+
 	// quitting flips when Ctrl+C / Ctrl+D land, so the next Update
 	// returns tea.Quit.
 	quitting bool
@@ -87,11 +121,43 @@ func NewModel(opts Options) Model {
 		input:        ta,
 		statusLayout: opts.StatusLayout,
 		permMode:     opts.PermissionMode.Initial,
+		eventCh:      make(chan tea.Msg, 32),
+		seenToolIDs:  make(map[string]bool),
 	}
 	for _, msg := range opts.SeedHistory {
 		m.history.Append(msg)
 	}
 	return m
+}
+
+// thinkingPhrases / workingPhrases return the rotated verb pools
+// (R-CHAT-3). Falls back to a small built-in set when Options are
+// not set.
+func (m Model) thinkingPhrases() []string {
+	if len(m.opts.ThinkingPhrases) > 0 {
+		return m.opts.ThinkingPhrases
+	}
+	return []string{"Considering", "Drafting", "Reasoning", "Mulling", "Composing"}
+}
+
+func (m Model) workingPhrases() []string {
+	if len(m.opts.WorkingPhrases) > 0 {
+		return m.opts.WorkingPhrases
+	}
+	return []string{"Working", "Running", "Reading", "Searching", "Editing"}
+}
+
+// ensureMarkdown returns the cached markdown renderer, rebuilding it
+// when dark/light or width has changed since the last call.
+func (m *Model) ensureMarkdown() *markdownRenderer {
+	width := m.viewport.Width()
+	if width <= 0 {
+		width = 80
+	}
+	if m.markdown == nil || m.markdown.dark != m.styles.Dark || m.markdown.width != width {
+		m.markdown = newMarkdownRenderer(m.styles.Dark, width)
+	}
+	return m.markdown
 }
 
 // permissionModeWired reports whether the host configured the chip.

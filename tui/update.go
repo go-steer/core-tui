@@ -15,17 +15,24 @@
 package tui
 
 import (
+	"fmt"
 	"strings"
+	"time"
 
 	"charm.land/bubbles/v2/textarea"
 	tea "charm.land/bubbletea/v2"
 )
 
 // Init asks the terminal for its background color so the style bundle
-// can resolve dark vs light at startup (R-MD-2), and starts the
-// textarea cursor blink.
+// can resolve dark vs light at startup (R-MD-2), starts the textarea
+// cursor blink, and primes the event listener that drains messages
+// from the agent dispatch goroutine.
 func (m Model) Init() tea.Cmd {
-	return tea.Batch(tea.RequestBackgroundColor, textarea.Blink)
+	return tea.Batch(
+		tea.RequestBackgroundColor,
+		textarea.Blink,
+		m.eventListener(),
+	)
 }
 
 // Update is the Bubble Tea dispatcher. The visual-preview slice
@@ -42,11 +49,38 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 
 	case tea.BackgroundColorMsg:
 		m.styles = NewStyles(msg.IsDark(), m.opts.Branding)
+		m.markdown = nil // force rebuild on next render
 		m.refreshViewport()
 		return m, nil
 
 	case tea.KeyPressMsg:
 		return m.handleKey(msg)
+
+	case streamChunkMsg:
+		m.applyStreamChunk(msg)
+		return m, m.eventListener()
+	case toolCallMsg:
+		m.applyToolCall(msg)
+		return m, m.eventListener()
+	case usageMsg:
+		m.currentUsage = &msg.usage
+		return m, m.eventListener()
+	case turnDoneMsg:
+		m.finalizeTurn(msg.elapsed, "")
+		return m, m.eventListener()
+	case turnErrMsg:
+		m.finalizeTurn(0, msg.err.Error())
+		return m, m.eventListener()
+	case turnCancelledMsg:
+		m.finalizeTurn(0, "(interrupted)")
+		return m, m.eventListener()
+	case spinnerTickMsg:
+		if m.state != stateStreaming {
+			return m, nil
+		}
+		m.thinkingIdx++
+		m.refreshViewport()
+		return m, spinnerTick()
 	}
 
 	// Forward unhandled messages to the input + viewport so navigation
@@ -71,8 +105,7 @@ func (m Model) handleKey(msg tea.KeyPressMsg) (tea.Model, tea.Cmd) {
 	stroke := msg.String()
 
 	// Esc cascades through overlays (R-CHAT-6): modal → help panel →
-	// palette → interrupt-in-flight (placeholder until streaming) →
-	// no-op. Never quits.
+	// palette → interrupt-in-flight → no-op. Never quits.
 	if stroke == "esc" {
 		if m.overlay != overlayNone {
 			m.overlay = overlayNone
@@ -90,8 +123,10 @@ func (m Model) handleKey(msg tea.KeyPressMsg) (tea.Model, tea.Cmd) {
 			m.refreshViewport()
 			return m, nil
 		}
-		// Placeholder: when streaming lands, this branch will call
-		// the turn's cancel func and emit an "(interrupted)" notice.
+		if m.state == stateStreaming && m.cancelTurn != nil {
+			m.cancelTurn() // goroutine emits turnCancelledMsg
+			return m, nil
+		}
 		return m, nil
 	}
 
@@ -157,17 +192,17 @@ func (m Model) handleKey(msg tea.KeyPressMsg) (tea.Model, tea.Cmd) {
 		return m, nil
 
 	case "enter":
-		// Submit the textarea (R-CHAT-1: Enter submits). For the
-		// visual-preview slice "submit" just appends the typed text
-		// as a RoleUser message and clears the input so the operator
-		// gets feedback. A real slice wires this into the agent.
-		text := strings.TrimSpace(m.input.Value())
-		if text != "" {
-			m.history.Append(Message{Role: RoleUser, Text: text})
-			m.input.Reset()
-			m.refreshViewport()
+		// Submit (R-CHAT-1). When idle: append the typed text as a
+		// RoleUser message and start an agent turn. When streaming:
+		// ignore (input is gated; user must Esc-interrupt first).
+		if m.state == stateStreaming {
+			return m, nil
 		}
-		return m, nil
+		text := strings.TrimSpace(m.input.Value())
+		if text == "" {
+			return m, nil
+		}
+		return m.submitTurn(text), spinnerTick()
 
 	case "shift+enter", "ctrl+j":
 		// Insert a newline (R-CHAT-1: Shift-Enter / Ctrl-J inserts
@@ -314,6 +349,125 @@ func (m Model) paletteComplete() tea.Model {
 	m.input.SetValue(newValue)
 	m.refreshPalette()
 	return m
+}
+
+// submitTurn appends the user's message, kicks off the agent dispatch
+// goroutine, blurs the input, schedules a spinner tick, and flips to
+// the streaming state. Called from the Enter handler.
+func (m Model) submitTurn(text string) tea.Model {
+	m.history.Append(Message{Role: RoleUser, Text: text})
+	m.input.Reset()
+	m.input.Blur()
+	m.state = stateStreaming
+	m.turnStarted = time.Now()
+	m.inProgressText = ""
+	m.currentUsage = nil
+	m.currentModel = ""
+	m.toolActive = false
+	m.thinkingIdx = 0
+	m.spinnerActive = true
+	for k := range m.seenToolIDs {
+		delete(m.seenToolIDs, k)
+	}
+	m.cancelTurn = m.startAgentTurn(m.opts.Agent, text)
+	m.refreshViewport()
+	// Spinner tick scheduled separately from event listener; both
+	// stream their own messages into Update.
+	return m
+}
+
+// applyStreamChunk handles a streamChunkMsg from the agent. Accumulates
+// partial tokens into m.inProgressText, flips the spinner from
+// tool-active back to model-active (R-CHAT-3), and re-renders the
+// viewport so the user sees the in-progress message grow.
+func (m *Model) applyStreamChunk(msg streamChunkMsg) {
+	m.toolActive = false
+	if msg.partial {
+		m.inProgressText += msg.text
+	} else {
+		// Committed full text — overwrite (some agents echo the
+		// full message at turn-end).
+		m.inProgressText = msg.text
+	}
+	m.refreshViewport()
+}
+
+// applyToolCall handles a toolCallMsg. Dedup by ID (R-CHAT-5), append
+// a one-line tool row to history (the in-progress assistant message
+// stays above it visually), and flip the spinner to tool-active.
+func (m *Model) applyToolCall(msg toolCallMsg) {
+	if msg.id != "" {
+		if m.seenToolIDs[msg.id] {
+			return
+		}
+		m.seenToolIDs[msg.id] = true
+	}
+	args := ""
+	if len(msg.args) > 0 {
+		// One-line summary: just the first arg's value, truncated.
+		// A real slice would pick a host-supplied summarizer.
+		for _, v := range msg.args {
+			args = trimToolArg(fmt.Sprint(v), 80)
+			break
+		}
+	}
+	m.history.Append(Message{
+		Role:     RoleTool,
+		ToolName: msg.name,
+		ToolArgs: args,
+	})
+	m.toolActive = true
+	m.refreshViewport()
+}
+
+// finalizeTurn closes the active turn: appends the in-progress
+// assistant text as a finalized Message with cached Glamour render +
+// Usage / Model / Elapsed metadata, flips back to idle, re-focuses
+// the input. When notice is non-empty, an extra system / error row
+// is appended (used for "(interrupted)" and turnErr error text).
+func (m *Model) finalizeTurn(elapsed time.Duration, notice string) {
+	if m.cancelTurn != nil {
+		m.cancelTurn()
+		m.cancelTurn = nil
+	}
+	m.state = stateIdle
+	m.spinnerActive = false
+
+	// Commit the streamed text as a Message. Skip when empty (the
+	// agent emitted only tool calls, no assistant prose).
+	if strings.TrimSpace(m.inProgressText) != "" {
+		mr := m.ensureMarkdown()
+		msg := Message{
+			Role:     RoleAssistant,
+			Text:     m.inProgressText,
+			Rendered: mr.renderMarkdown(m.inProgressText),
+			Model:    m.currentModel,
+			Usage:    m.currentUsage,
+			Elapsed:  elapsed,
+		}
+		m.history.Append(msg)
+	}
+	m.inProgressText = ""
+
+	switch {
+	case notice == "(interrupted)":
+		m.history.Append(Message{Role: RoleSystem, Text: notice})
+	case notice != "":
+		m.history.Append(Message{Role: RoleError, Text: notice})
+	}
+
+	_ = m.input.Focus()
+	m.refreshViewport()
+}
+
+// trimToolArg truncates a tool-arg summary to max runes, appending a
+// truncation marker (style.md §2 GlyphTruncate).
+func trimToolArg(s string, max int) string {
+	r := []rune(s)
+	if len(r) <= max {
+		return s
+	}
+	return string(r[:max]) + GlyphTruncate
 }
 
 // paletteInsert replaces the typed trigger token with the selected
