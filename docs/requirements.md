@@ -288,9 +288,15 @@ listed in `/help`:
 
 ### 3.13 Branding (must)
 
-- **R-BRAND-1** Header wordmark, accent color, empty-state hint,
-  footer hint, and textarea placeholder are all overridable via
-  `Options.Branding`. Defaults are neutral ("core-tui").
+- **R-BRAND-1** Header wordmark, accent color, secondary color, cursor
+  color, empty-state hint, footer hint, and textarea placeholder are
+  overridable via `Options.Branding`. Defaults are neutral
+  ("core-tui") and rooted in the house visual style — color palette,
+  glyph vocabulary, spacing rhythm, typography rules, border policy,
+  and modal composition are all specified in [`style.md`](./style.md)
+  and are NOT overridable. Hosts that need a different modal
+  aesthetic build their own modal rather than reshaping the
+  defaults.
 
 ### 3.14 Transcript persistence (must)
 
