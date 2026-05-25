@@ -48,7 +48,31 @@ type Options struct {
 	// the examples/local visual-preview binary; production hosts leave
 	// this nil.
 	SeedHistory []Message
+
+	// MidTurnInjectionMode picks what happens when the operator
+	// submits a prompt while a turn is in flight (R-CHAT-11). Zero
+	// value (`QueueForNext`) preserves the R-CHAT-10 default:
+	// buffer the entry as Queued, auto-drain on turn-end.
+	// `InjectIntoCurrent` routes the entry through
+	// `InjectableAgent.Inject` instead so it lands in the running
+	// turn's context — falls back to `QueueForNext` when the agent
+	// doesn't satisfy `InjectableAgent`.
+	MidTurnInjectionMode MidTurnInjectionMode
 }
+
+// MidTurnInjectionMode controls operator-typed-during-streaming
+// routing (R-CHAT-11).
+type MidTurnInjectionMode int
+
+const (
+	// QueueForNext (default) buffers the entry as a Queued queue
+	// row; drains on the next turn-end (R-CHAT-10).
+	QueueForNext MidTurnInjectionMode = iota
+	// InjectIntoCurrent calls InjectableAgent.Inject so the entry
+	// lands in the running turn's context. The queue entry renders
+	// immediately as Done with an "injected" suffix.
+	InjectIntoCurrent
+)
 
 // Branding overrides the brand-line and chrome strings. Empty fields
 // fall back to the house defaults (style.md §1.1 + §8).

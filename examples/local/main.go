@@ -40,12 +40,20 @@ import (
 	"github.com/go-steer/core-tui/tui/testagent"
 )
 
-// demoAgent wraps the scripted testagent and adds a SlashProvider
-// implementation so /btw in the visual preview opens a real
-// side-answer modal end-to-end. A real host's agent type would
-// expose its own SlashCommands + InvokeSlash; this composition is
+// demoAgent wraps the scripted testagent and adds capability
+// implementations so the visual preview exercises real end-to-end
+// flows: /btw opens a SideAnswer modal via SlashProvider, and
+// (when Options.MidTurnInjectionMode == InjectIntoCurrent) typing
+// during streaming routes through InjectableAgent.Inject. A real
+// host's agent exposes these on its own type; this composition is
 // for the visual harness only.
 type demoAgent struct{ tui.Agent }
+
+// Inject implements tui.InjectableAgent. The demo doesn't actually
+// feed the message into the scripted playback — it just returns nil
+// so the queue panel can render an injected entry. A real host
+// would push the message onto an inbox / context-augmentation channel.
+func (demoAgent) Inject(_ string) error { return nil }
 
 func (demoAgent) SlashCommands() []tui.SlashCommandSpec {
 	return []tui.SlashCommandSpec{
@@ -82,6 +90,11 @@ func main() {
 		// prompt — it's a visual harness, not a real agent.
 		Agent:        demoAgent{Agent: testagent.NewScripted(testagent.CodingDemo())},
 		StatusLayout: tui.StatusHeader,
+		// QueueForNext (default) demos R-CHAT-10 — type-ahead entries
+		// buffer as ○ queued and drain on turn-end. Flip to
+		// InjectIntoCurrent to demo R-CHAT-11 — entries land as
+		// ✓ Done (injected) immediately, no auto-drain.
+		MidTurnInjectionMode: tui.QueueForNext,
 		PermissionMode: tui.PermissionModeWiring{
 			Initial: tui.PermissionModeDefault,
 			Set:     func(m tui.PermissionMode) error { return nil },

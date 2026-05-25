@@ -15,6 +15,8 @@
 package tui
 
 import (
+	"context"
+	"iter"
 	"testing"
 	"time"
 )
@@ -109,6 +111,89 @@ func TestCullQueue_DoesNotCullInFlight(t *testing.T) {
 		t.Errorf("InFlight entry was culled or mutated: %+v", m.queue)
 	}
 }
+
+// injectingAgent is a stub for the InjectIntoCurrent tests. tracks
+// each Inject call so the test can assert delivery; nextErr lets a
+// test simulate a host-side failure.
+type injectingAgent struct {
+	calls   []string
+	nextErr error
+}
+
+func (a *injectingAgent) Run(_ context.Context, _ string) iter.Seq2[Event, error] {
+	return func(_ func(Event, error) bool) {}
+}
+func (a *injectingAgent) Inject(msg string) error {
+	a.calls = append(a.calls, msg)
+	return a.nextErr
+}
+
+// TestEnqueueDuringStream_InjectsWhenModeSet pins R-CHAT-11: with
+// MidTurnInjectionMode == InjectIntoCurrent and an agent that
+// satisfies InjectableAgent, the entry routes through Inject and
+// lands as Done (injected), NOT as Queued.
+func TestEnqueueDuringStream_InjectsWhenModeSet(t *testing.T) {
+	agent := &injectingAgent{}
+	m := NewModel(Options{
+		Agent:                agent,
+		MidTurnInjectionMode: InjectIntoCurrent,
+	})
+	m.enqueueDuringStream("inject me")
+
+	if len(agent.calls) != 1 || agent.calls[0] != "inject me" {
+		t.Errorf("agent calls = %v, want [inject me]", agent.calls)
+	}
+	if len(m.queue) != 1 {
+		t.Fatalf("queue len = %d, want 1", len(m.queue))
+	}
+	got := m.queue[0]
+	if got.State != QueueDone {
+		t.Errorf("state = %v, want Done", got.State)
+	}
+	if !got.Injected {
+		t.Errorf("Injected = false, want true")
+	}
+}
+
+// TestEnqueueDuringStream_FallsBackWhenAgentLacksInject pins that
+// the mode degrades silently when the agent doesn't satisfy
+// InjectableAgent — entry lands as Queued, no error.
+func TestEnqueueDuringStream_FallsBackWhenAgentLacksInject(t *testing.T) {
+	m := NewModel(Options{
+		Agent:                stubAgent{}, // no Inject method
+		MidTurnInjectionMode: InjectIntoCurrent,
+	})
+	m.enqueueDuringStream("buffer me")
+	if len(m.queue) != 1 || m.queue[0].State != QueueQueued {
+		t.Errorf("queue = %+v, want one Queued entry", m.queue)
+	}
+}
+
+// TestEnqueueDuringStream_InjectErrorMarksFailed pins that an
+// Inject failure renders the entry as Failed with the error tail,
+// so the operator sees what happened instead of silent loss.
+func TestEnqueueDuringStream_InjectErrorMarksFailed(t *testing.T) {
+	agent := &injectingAgent{nextErr: errInjectStub}
+	m := NewModel(Options{
+		Agent:                agent,
+		MidTurnInjectionMode: InjectIntoCurrent,
+	})
+	m.enqueueDuringStream("oops")
+	if len(m.queue) != 1 || m.queue[0].State != QueueFailed {
+		t.Fatalf("queue = %+v, want one Failed entry", m.queue)
+	}
+	if m.queue[0].Err == "" {
+		t.Errorf("Err is empty; want the Inject error string")
+	}
+}
+
+// errInjectStub is a sentinel for the Inject-failure test; declaring
+// it here keeps the test file self-contained.
+var errInjectStub = errInjectStubVal{}
+
+type errInjectStubVal struct{}
+
+func (errInjectStubVal) Error() string { return "inject stub failure" }
 
 // entryTexts pulls Text values out of entries for diagnostic prints.
 func entryTexts(es []QueueEntry) []string {

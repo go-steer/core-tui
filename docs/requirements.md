@@ -434,6 +434,22 @@ listed in `/help`:
   `PricingController` methods that return human-readable summary lines
   for the chat.
 
+- **R-CHAT-11** Operator-typed-during-streaming prompts route by
+  `Options.MidTurnInjectionMode`:
+  - **`QueueForNext`** (default) — the entry buffers as a `Queued`
+    queue row per R-CHAT-10 and drains on the next turn-end.
+  - **`InjectIntoCurrent`** — the entry is fed into the running
+    turn's context via the agent's `InjectableAgent.Inject` method.
+    The queue row renders immediately as `Done` with a dim
+    `(injected)` suffix so the operator sees what was injected;
+    `cullTTL` drops it ~2 s later. When the agent doesn't satisfy
+    `InjectableAgent`, this mode silently degrades to
+    `QueueForNext` (no runtime error — type-assertion check).
+  Hosts with an inbox-style runtime (e.g. core-agent's
+  `agent.Inject` + `DrainInbox`) opt into `InjectIntoCurrent` to
+  preserve the mid-turn-context UX. Hosts without an inbox keep
+  the default and the queue stays buffer-only.
+
 ### 3.19 Agent-driven prompts (should)
 
 - **R-PROMPT-1** When the host wires the TUI-supplied `UserPrompter`

@@ -48,15 +48,19 @@ func (s QueueState) String() string {
 }
 
 // QueueEntry is one row in the operator-typed-during-streaming queue
-// panel (R-CHAT-10). Text holds the verbatim prompt; State tracks the
-// lifecycle; Err carries the failure reason when State == QueueFailed;
-// Created stamps when the entry was enqueued so the TTL cull knows
-// when to drop terminal-state entries.
+// panel (R-CHAT-10 / R-CHAT-11). Text holds the verbatim prompt;
+// State tracks the lifecycle; Err carries the failure reason when
+// State == QueueFailed; Created stamps when the entry was enqueued
+// (or transitioned to terminal state) so the TTL cull knows when to
+// drop it; Injected is true for entries routed through
+// InjectableAgent.Inject (`InjectIntoCurrent` mode) so the renderer
+// can label them distinctly from queue-drained entries.
 type QueueEntry struct {
-	Text    string
-	State   QueueState
-	Err     string
-	Created time.Time
+	Text     string
+	State    QueueState
+	Err      string
+	Created  time.Time
+	Injected bool
 }
 
 // cullTTL is how long QueueDone / QueueFailed entries linger in the

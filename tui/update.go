@@ -218,11 +218,7 @@ func (m Model) handleKey(msg tea.KeyPressMsg) (tea.Model, tea.Cmd) {
 			return m, nil
 		}
 		if m.state == stateStreaming {
-			m.queue = append(m.queue, QueueEntry{
-				Text:    text,
-				State:   QueueQueued,
-				Created: time.Now(),
-			})
+			m.enqueueDuringStream(text)
 			m.input.Reset()
 			m.refreshViewport()
 			return m, nil
@@ -585,6 +581,46 @@ func (m Model) maybeDrainQueue() (tea.Model, tea.Cmd) {
 	m.queue[idx].State = QueueInFlight
 	out := m.submitTurn(prompt)
 	return out, tea.Batch(spinnerTick(), out.eventListener())
+}
+
+// enqueueDuringStream routes an operator-typed-during-streaming
+// prompt per Options.MidTurnInjectionMode (R-CHAT-10 / R-CHAT-11):
+//
+//   - `QueueForNext` (default) — append as a Queued queue row;
+//     `maybeDrainQueue` picks it up on the next turn-end.
+//   - `InjectIntoCurrent` — call the agent's `Inject` so the entry
+//     joins the running turn's context. The queue row renders
+//     immediately as Done so the operator sees what was injected;
+//     cullTTL drops it after ~2s. Falls back to `QueueForNext` when
+//     the agent doesn't satisfy `InjectableAgent` (no runtime error).
+func (m *Model) enqueueDuringStream(text string) {
+	if m.opts.MidTurnInjectionMode == InjectIntoCurrent {
+		if injector, ok := m.opts.Agent.(InjectableAgent); ok {
+			if err := injector.Inject(text); err != nil {
+				m.queue = append(m.queue, QueueEntry{
+					Text:     text,
+					State:    QueueFailed,
+					Err:      err.Error(),
+					Created:  time.Now(),
+					Injected: true,
+				})
+				return
+			}
+			m.queue = append(m.queue, QueueEntry{
+				Text:     text,
+				State:    QueueDone,
+				Created:  time.Now(),
+				Injected: true,
+			})
+			return
+		}
+		// Agent doesn't support injection — fall back to QueueForNext.
+	}
+	m.queue = append(m.queue, QueueEntry{
+		Text:    text,
+		State:   QueueQueued,
+		Created: time.Now(),
+	})
 }
 
 // markInFlightTerminal flips the InFlight queue entry (if any) to a

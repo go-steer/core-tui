@@ -258,6 +258,18 @@ type ToolInfo struct {
     Name, Description, Source, GateState string
 }
 
+// InjectableAgent is an optional capability the TUI checks via type
+// assertion when Options.MidTurnInjectionMode == InjectIntoCurrent.
+// When implemented, operator-typed-during-streaming prompts route
+// through Inject so they land in the running turn's context (rather
+// than buffering for the next turn). Without the capability,
+// MidTurnInjectionMode silently degrades to QueueForNext.
+//
+// See R-CHAT-11.
+type InjectableAgent interface {
+    Inject(message string) error
+}
+
 // SubagentLister backs /subagents (v1 read-only).
 type SubagentLister interface {
     Subagents() []SubagentInfo

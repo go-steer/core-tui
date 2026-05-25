@@ -62,3 +62,17 @@ type Usage struct {
 	InputTokens  int
 	OutputTokens int
 }
+
+// InjectableAgent is an optional capability: hosts whose agent
+// supports mid-turn message injection (feeding a message INTO the
+// currently-streaming turn's context, distinct from queueing for
+// the next turn) implement it on their Agent type. The TUI checks
+// the capability with a type assertion when
+// Options.MidTurnInjectionMode == InjectIntoCurrent — without the
+// capability, the mode silently falls back to QueueForNext (no
+// runtime error).
+//
+// See R-CHAT-11 in requirements.md and design.md §3.3.
+type InjectableAgent interface {
+	Inject(message string) error
+}

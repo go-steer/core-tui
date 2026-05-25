@@ -306,10 +306,16 @@ func (m *Model) renderQueuePanel() string {
 
 // renderQueueRow renders a single queue entry with its state glyph
 // and color treatment. Failed entries append a truncated error tail.
+// Injected entries (R-CHAT-11 InjectIntoCurrent mode) get a dim
+// "(injected)" suffix so the operator can tell them apart from
+// queue-drained Done entries.
 func (m Model) renderQueueRow(e QueueEntry, width int) string {
 	glyph, style := m.queueRowStyle(e.State)
 	body := trimToolArg(e.Text, width-6)
 	row := "  " + glyph + " " + body
+	if e.Injected && e.State == QueueDone {
+		row += "  " + m.styles.Muted.Render("(injected)")
+	}
 	if e.State == QueueFailed && e.Err != "" {
 		row += "  " + m.styles.ErrorText.Render("("+trimToolArg(e.Err, 32)+")")
 	}
