@@ -35,6 +35,13 @@ type Options struct {
 	// restarts. Nil means the toggle stays session-local.
 	PersistStatusLayout func(StatusLayout) error
 
+	// PersistModelChoice is called when the operator picks a new
+	// model in the /model picker (R-MOD-3). Hosts persist the
+	// choice to their config + read it back on next launch so the
+	// preference survives restarts. Nil means the choice stays
+	// session-local.
+	PersistModelChoice func(modelID string) error
+
 	// PermissionMode wires the permission-mode chip (R-PERM-6 / R-PERM-7).
 	// Zero value hides the chip and disables Shift+Tab cycling.
 	PermissionMode PermissionModeWiring
