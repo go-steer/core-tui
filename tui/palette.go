@@ -58,6 +58,11 @@ type paletteItem struct {
 	// skipped by Enter / Tab (selecting one is a no-op + a system
 	// message).
 	Available bool
+
+	// IsDir flags directory entries in the file palette. Enter on
+	// a directory drills into it (palette re-walks with the dir
+	// path as the new filter prefix) instead of closing.
+	IsDir bool
 }
 
 // palette is the active palette overlay state. Nil = no palette open.
@@ -144,6 +149,12 @@ func scanFileItems(scope PathScope) []paletteItem {
 		"node_modules": true, "vendor": true,
 		"dist": true, "build": true, "target": true,
 		".agents": true, ".claude": true,
+		// Expanded set from internal/tui/files.go:20-34: language
+		// build/cache dirs that are almost never the right thing
+		// to reference.
+		".next": true, ".cache": true, ".venv": true,
+		"__pycache__": true, ".idea": true, ".vscode": true,
+		".terraform": true,
 	}
 	out := make([]paletteItem, 0, 64)
 	for _, root := range roots {
@@ -159,6 +170,22 @@ func scanFileItems(scope PathScope) []paletteItem {
 				if path != root && (skipDirs[name] || strings.HasPrefix(name, ".")) {
 					return filepath.SkipDir
 				}
+				if path == root {
+					return nil // don't add the root itself
+				}
+				rel, rerr := filepath.Rel(root, path)
+				if rerr != nil {
+					rel = path
+				}
+				rel = filepath.ToSlash(rel)
+				out = append(out, paletteItem{
+					Name:      rel + "/",
+					IsDir:     true,
+					Available: true,
+				})
+				if len(out) >= maxFilePaletteItems {
+					return filepath.SkipAll
+				}
 				return nil
 			}
 			if strings.HasPrefix(name, ".") {
@@ -171,6 +198,7 @@ func scanFileItems(scope PathScope) []paletteItem {
 			if rerr != nil {
 				rel = path
 			}
+			rel = filepath.ToSlash(rel)
 			size := ""
 			if info, ierr := d.Info(); ierr == nil {
 				size = formatFileSize(info.Size())

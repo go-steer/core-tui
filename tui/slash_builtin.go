@@ -20,6 +20,7 @@ import (
 	"sort"
 	"strconv"
 	"strings"
+	"time"
 
 	"charm.land/lipgloss/v2"
 	tea "charm.land/bubbletea/v2"
@@ -37,6 +38,21 @@ import (
 // the Agent via type assertion and degrade to a "not available"
 // system message when the host hasn't wired the capability.
 func (m Model) dispatchBuiltinSlash(name, args string) (bool, tea.Model, tea.Cmd) {
+	// Alias normalization so internal/tui muscle memory carries
+	// over: /models→/model, /perms→/permissions, /by-the-way→/btw,
+	// /sub→/subagent. /q, /exit, /int are handled in their dispatch
+	// cases below.
+	switch name {
+	case "models":
+		name = "model"
+	case "perms":
+		name = "permissions"
+	case "by-the-way":
+		name = "btw"
+	case "sub":
+		name = "subagent"
+	}
+
 	switch name {
 	case "help", "?":
 		m.history.Append(Message{Role: RoleSystem, Text: m.renderBuiltinHelp()})
@@ -78,7 +94,7 @@ func (m Model) dispatchBuiltinSlash(name, args string) (bool, tea.Model, tea.Cmd
 		return true, m, nil
 
 	case "stats":
-		m.history.Append(Message{Role: RoleSystem, Text: renderStats(m.opts.UsageTracker)})
+		m.history.Append(Message{Role: RoleSystem, Text: m.renderStats()})
 		m.input.Reset()
 		m.refreshViewport()
 		return true, m, nil
@@ -396,9 +412,17 @@ func (m Model) renderMemoryList(files []MemoryFile) string {
 		return "No memory files loaded. Drop AGENTS.md / CLAUDE.md / GEMINI.md in the project or user-home tree to surface them here."
 	}
 	var b strings.Builder
-	b.WriteString(fmt.Sprintf("Memory files (%d):\n\n", len(files)))
+	fmt.Fprintf(&b, "Memory files (%d):\n\n", len(files))
 	for i, f := range files {
-		fmt.Fprintf(&b, "  %s %s\n", GlyphCollapsed, m.itemNameStyle().Render(f.Path))
+		fmt.Fprintf(&b, "  %s %s", GlyphCollapsed, m.itemNameStyle().Render(f.Path))
+		if f.Bytes > 0 || f.Truncated {
+			annotation := formatFileSize(f.Bytes)
+			if f.Truncated {
+				annotation += ", truncated"
+			}
+			fmt.Fprintf(&b, "  %s", m.styles.Muted.Render("("+annotation+")"))
+		}
+		b.WriteByte('\n')
 		if f.Excerpt != "" {
 			fmt.Fprintf(&b, "      %s\n", strings.ReplaceAll(f.Excerpt, "\n", " "))
 		}
@@ -488,7 +512,13 @@ func (m Model) renderSkillList(skills []SkillInfo) string {
 	return strings.TrimRight(b.String(), "\n")
 }
 
-func renderStats(tracker UsageTracker) string {
+// renderStats expands internal/tui's /stats layout: turns +
+// session duration + per-direction tokens + cost + context fill +
+// model name. Each value falls back to "(unknown)" / "(unset)"
+// rather than zero so the operator can tell "we don't know" from
+// "the value is genuinely zero."
+func (m Model) renderStats() string {
+	tracker := m.opts.UsageTracker
 	if tracker == nil {
 		return "/stats: no UsageTracker wired (host did not pass Options.UsageTracker)"
 	}
@@ -497,17 +527,29 @@ func renderStats(tracker UsageTracker) string {
 	last, lastCost := tracker.LastTurn()
 	winUsed := tracker.ContextWindowUsed()
 	winSize := tracker.ContextWindowSize()
+	turns := tracker.SessionTurns()
+	dur := tracker.SessionDuration()
 
 	var b strings.Builder
-	b.WriteString("/stats:\n")
-	b.WriteString(fmt.Sprintf("  session  — %d in / %d out tokens · $%.4f\n", totals.InputTokens, totals.OutputTokens, cost))
-	b.WriteString(fmt.Sprintf("  last turn — %d in / %d out tokens · $%.4f\n", last.InputTokens, last.OutputTokens, lastCost))
-	if winSize > 0 {
-		b.WriteString(fmt.Sprintf("  context  — %d / %d tokens", winUsed, winSize))
-	} else {
-		b.WriteString("  context  — (unknown)")
+	b.WriteString("Session stats:\n")
+	if turns > 0 {
+		fmt.Fprintf(&b, "  Turns:      %d\n", turns)
 	}
-	return b.String()
+	if dur > 0 {
+		fmt.Fprintf(&b, "  Duration:   %s\n", dur.Round(time.Second))
+	}
+	fmt.Fprintf(&b, "  Tokens:     %d in / %d out\n", totals.InputTokens, totals.OutputTokens)
+	fmt.Fprintf(&b, "  Cost:       $%.4f\n", cost)
+	if winSize > 0 {
+		fmt.Fprintf(&b, "  Context:    %d / %d tokens (%d%%)\n", winUsed, winSize, (winUsed*100)/winSize)
+	} else {
+		b.WriteString("  Context:    (unknown)\n")
+	}
+	fmt.Fprintf(&b, "  Last turn:  %d in / %d out · $%.4f\n", last.InputTokens, last.OutputTokens, lastCost)
+	if model := m.displayModelName(); model != "" {
+		fmt.Fprintf(&b, "  Model:      %s\n", model)
+	}
+	return strings.TrimRight(b.String(), "\n")
 }
 
 // renderToolList renders the agent's tool catalog in alphabetical

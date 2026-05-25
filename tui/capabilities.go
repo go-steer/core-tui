@@ -60,8 +60,10 @@ type ReloadResult struct {
 
 // MemoryFile is one entry in the /memory display.
 type MemoryFile struct {
-	Path    string
-	Excerpt string // optional first few lines for the display
+	Path     string
+	Excerpt  string // optional first few lines for the display
+	Bytes    int64  // optional file size; 0 = not tracked
+	Truncated bool  // host reads only first N bytes when true
 }
 
 // MCPServerInfo is one entry in the /mcp display. Tools carries the
@@ -157,6 +159,7 @@ type StatusReporter interface {
 type Status struct {
 	ModelName string
 	State     string // "idle" / "running" / "deferred" / etc.
+	Provider  string // "gemini" / "anthropic" / "vertex" / etc. — optional
 }
 
 // UsageTracker is the read-only side of the host's per-turn /
@@ -164,11 +167,13 @@ type Status struct {
 // values on each turn end to render the per-turn footer and the
 // /stats output.
 type UsageTracker interface {
-	SessionTotals() Usage       // input + output tokens, cumulative
-	SessionCostUSD() float64    // accumulated dollar spend
-	LastTurn() (Usage, float64) // most-recent turn's usage + cost
-	ContextWindowSize() int     // 0 when unknown
-	ContextWindowUsed() int     // 0 when unknown
+	SessionTotals() Usage              // input + output tokens, cumulative
+	SessionCostUSD() float64           // accumulated dollar spend
+	LastTurn() (Usage, float64)        // most-recent turn's usage + cost
+	ContextWindowSize() int            // 0 when unknown
+	ContextWindowUsed() int            // 0 when unknown
+	SessionTurns() int                 // 0 when unknown
+	SessionDuration() time.Duration    // 0 when unknown
 }
 
 // PathScope is the list of roots that bound `@file` palette lookups

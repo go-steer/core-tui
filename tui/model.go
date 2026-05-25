@@ -17,7 +17,9 @@ package tui
 import (
 	"context"
 	"fmt"
+	"os"
 	"strconv"
+	"strings"
 	"time"
 
 	"charm.land/bubbles/v2/textarea"
@@ -204,20 +206,47 @@ func NewModel(opts Options) Model {
 }
 
 // thinkingPhrases / workingPhrases return the rotated verb pools
-// (R-CHAT-3). Falls back to a small built-in set when Options are
-// not set.
+// (R-CHAT-3). Falls back to internal/tui's pool when Options are
+// not set — "Thinking..." anchors the first tick so the affordance
+// is unambiguous before the rotator wanders into the AI / sci-fi /
+// CS jokes.
 func (m Model) thinkingPhrases() []string {
 	if len(m.opts.ThinkingPhrases) > 0 {
 		return m.opts.ThinkingPhrases
 	}
-	return []string{"Considering", "Drafting", "Reasoning", "Mulling", "Composing"}
+	return []string{
+		"Thinking...",
+		"Consulting the latent space...",
+		"Sampling from the distribution...",
+		"Reticulating splines...",
+		"Computing the answer to the ultimate question...",
+		"Spinning up the attention heads...",
+		"Asking Stack Overflow nicely...",
+		"Untangling pointer chains...",
+		"Bargaining with the loss function...",
+		"Compiling a thoughtful response...",
+		"Defragmenting cache lines...",
+		"Negotiating with the Vogons...",
+		"Brewing a fresh stack frame...",
+		"Plotting a hyperspace course...",
+		"Resolving promises...",
+		"Eval'ing your prompt...",
+	}
 }
 
 func (m Model) workingPhrases() []string {
 	if len(m.opts.WorkingPhrases) > 0 {
 		return m.opts.WorkingPhrases
 	}
-	return []string{"Working", "Running", "Reading", "Searching", "Editing"}
+	return []string{
+		"Working...",
+		"Running tools...",
+		"Reading the code...",
+		"Searching the haystack...",
+		"Editing in place...",
+		"Tracing call sites...",
+		"Cross-referencing...",
+	}
 }
 
 // ensureMarkdown returns the cached markdown renderer, rebuilding it
@@ -244,6 +273,31 @@ func (m Model) wordmark() string {
 		return m.opts.Branding.Wordmark
 	}
 	return "core-tui"
+}
+
+// displayCwd returns the operator's cwd, shortened with `~/` when
+// it sits under the home directory, for the status surface. Empty
+// when os.Getwd fails (no point displaying a stale or wrong path).
+func (m Model) displayCwd() string {
+	cwd, err := os.Getwd()
+	if err != nil {
+		return ""
+	}
+	if home, herr := os.UserHomeDir(); herr == nil && strings.HasPrefix(cwd, home) {
+		return "~" + cwd[len(home):]
+	}
+	return cwd
+}
+
+// displayProvider extracts the provider tag from the host's
+// StatusReporter when wired. Empty when the host doesn't surface
+// it (no capability or empty Provider field).
+func (m Model) displayProvider() string {
+	reporter, ok := m.opts.Agent.(StatusReporter)
+	if !ok {
+		return ""
+	}
+	return reporter.Status().Provider
 }
 
 // displayModelName picks the best model identifier to surface on the

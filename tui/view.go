@@ -42,6 +42,24 @@ func wordWrap(s string, width int) string {
 	return ansi.Wordwrap(s, width, " -")
 }
 
+// wordWrapIndent wraps s and prefixes continuation lines with indent
+// so wrapped text aligns past the role glyph (e.g. "  " for `❯ `
+// prefixed user messages, "   " for system/error rows). The first
+// line is rendered as-is so it sits flush under the prefix; only
+// the lines that ansi.Wordwrap created get the indent. Width <= 0
+// returns s unchanged (parity with internal/tui:477-490).
+func wordWrapIndent(s string, width int, indent string) string {
+	wrapped := wordWrap(s, width)
+	if indent == "" || !strings.Contains(wrapped, "\n") {
+		return wrapped
+	}
+	lines := strings.Split(wrapped, "\n")
+	for i := 1; i < len(lines); i++ {
+		lines[i] = indent + lines[i]
+	}
+	return strings.Join(lines, "\n")
+}
+
 // effectiveLayout returns the layout we'll actually render — falls
 // back from StatusSidebar to StatusHeader when the terminal is too
 // narrow to fit both the sidebar and a useful chat column.
@@ -389,7 +407,7 @@ func (m Model) renderMessage(msg Message) string {
 	switch msg.Role {
 	case RoleUser:
 		prefix := m.styles.UserPrefix.Render(GlyphUserPrompt)
-		body := wordWrap(msg.Display(), width-2)
+		body := wordWrapIndent(msg.Display(), width-2, "  ")
 		return prefix + " " + m.styles.UserText.Render(body)
 	case RoleAssistant:
 		// Display() returns the cached Glamour render (Rendered) when
@@ -408,9 +426,9 @@ func (m Model) renderMessage(msg Message) string {
 		}
 		return body
 	case RoleSystem:
-		return m.styles.SystemText.Render(wordWrap("ℹ  "+msg.Display(), width))
+		return m.styles.SystemText.Render(wordWrapIndent("ℹ  "+msg.Display(), width, "   "))
 	case RoleError:
-		return m.styles.ErrorText.Render(wordWrap(GlyphWarn+"  "+msg.Display(), width))
+		return m.styles.ErrorText.Render(wordWrapIndent(GlyphWarn+"  "+msg.Display(), width, "   "))
 	case RoleTool:
 		head := m.styles.ToolHead.Render(GlyphTool + " " + msg.ToolName)
 		if msg.ToolArgs != "" {
@@ -435,10 +453,22 @@ func (m Model) renderHeader() string {
 // than the bare "9% (19.3K)" which conflated context-fill % with
 // total tokens.
 func (m Model) renderStatusLine() string {
+	// Wordmark, cursor block, then identity glyph + model. The
+	// cursor block visually pins the brand line so the eye
+	// finds it even when the rest of the status drifts off the
+	// right edge on narrow terminals (parity with internal/
+	// tui:branding.go:48-54).
 	parts := []string{
 		m.styles.Wordmark.Render(m.wordmark()),
+		m.styles.Accent.Render(GlyphCursor),
 		m.sep(),
 		m.styles.AgentIdentity.Render(GlyphModel + " " + m.displayModelName()),
+	}
+	if prov := m.displayProvider(); prov != "" {
+		parts = append(parts, m.sep(), m.styles.Muted.Render("provider: "+prov))
+	}
+	if cwd := m.displayCwd(); cwd != "" {
+		parts = append(parts, m.sep(), m.styles.Muted.Render(cwd))
 	}
 	if m.permissionModeWired() {
 		parts = append(parts,
@@ -908,10 +938,19 @@ func (m *Model) renderElicitField(f ElicitField, focused bool, _ int) string {
 	}
 	value := m.formatElicitValue(f)
 	row := fmt.Sprintf("  %-16s %s", label+":", value)
+	rendered := m.styles.AssistantText.Render(row)
 	if focused {
-		return m.styles.Accent.Render("> " + strings.TrimPrefix(row, "  "))
+		rendered = m.styles.Accent.Render("> " + strings.TrimPrefix(row, "  "))
 	}
-	return m.styles.AssistantText.Render(row)
+	// Per-field description (when set) renders on the line below
+	// the value in muted text. Parity with internal/tui:191-195
+	// so MCP elicits with explanatory help text actually surface
+	// it to the operator.
+	if f.Description != "" {
+		desc := m.styles.Muted.Render("    " + strings.ReplaceAll(f.Description, "\n", " "))
+		return rendered + "\n" + desc
+	}
+	return rendered
 }
 
 // formatElicitValue renders the current value of a field for the

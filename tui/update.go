@@ -363,6 +363,22 @@ func (m Model) handleKey(msg tea.KeyPressMsg) (tea.Model, tea.Cmd) {
 		m.quitting = true
 		return m, tea.Quit
 
+	case "ctrl+l":
+		// Reset viewport scroll to the top. Mirrors the shell-style
+		// "redraw / clear screen" muscle memory without actually
+		// clearing history (use /clear for that).
+		m.viewport.GotoTop()
+		return m, nil
+
+	case "ctrl+u":
+		// Clear the input field + exit history navigation (shell-
+		// style "kill line back to start"). Doesn't touch history.
+		m.input.Reset()
+		m.historyCursor = -1
+		m.historyDraft = ""
+		m.refreshViewport()
+		return m, nil
+
 	case "ctrl+b":
 		if m.statusLayout == StatusHeader {
 			m.statusLayout = StatusSidebar
@@ -975,27 +991,58 @@ func sliceContains(xs []string, target string) bool {
 
 // dispatchPermission writes the operator's decision back to the
 // pending Prompter flow, invokes the host's AlwaysAllow callback
-// when the decision is DecisionAllowAlways, and clears the modal
-// state so the next inbound request can render.
+// when the decision is DecisionAllowAlways, echoes a system
+// message naming the decision, and clears the modal state.
+//
+// The system-message echo (parity with internal/tui:239) preserves
+// what the operator chose in the transcript / scroll history —
+// without it a fast-fingered approval leaves no trace and an
+// audit reader can't reconstruct why a tool was allowed.
 //
 // The AlwaysAllow callback lets the host persist the entry (e.g.
 // writing to permissions.allow or path_scope.allow in .agents/
 // config.json). Errors are surfaced inline so the operator knows
-// the allow-always didn't stick. Mirrors internal/tui:242-246.
+// the allow-always didn't stick.
 func (m *Model) dispatchPermission(d PermissionDecision) {
-	if d == DecisionAllowAlways && m.opts.AlwaysAllow != nil && m.pendingPermission != nil {
-		if err := m.opts.AlwaysAllow(*m.pendingPermission); err != nil {
+	req := m.pendingPermission
+	if d == DecisionAllowAlways && m.opts.AlwaysAllow != nil && req != nil {
+		if err := m.opts.AlwaysAllow(*req); err != nil {
 			m.history.Append(Message{
 				Role: RoleError,
 				Text: "allow-always persistence failed: " + err.Error(),
 			})
 		}
 	}
+	if req != nil {
+		m.history.Append(Message{
+			Role: RoleSystem,
+			Text: "Permission " + permissionDecisionLabel(d) + ": " + req.ToolName + " — " + truncate(req.Detail, 80),
+		})
+	}
 	if p, ok := m.opts.Prompter.(*Prompter); ok {
 		p.dispatchDecision(d)
 	}
 	m.pendingPermission = nil
 	m.refreshViewport()
+}
+
+// permissionDecisionLabel maps a decision to the short label used in
+// the transcript echo ("allow-once", "deny", "allow-session", etc.).
+func permissionDecisionLabel(d PermissionDecision) string {
+	switch d {
+	case DecisionAllowOnce:
+		return "allow-once"
+	case DecisionAllowSession:
+		return "allow-session"
+	case DecisionAllowSessionVerb:
+		return "allow-session-verb"
+	case DecisionAllowSessionTool:
+		return "allow-session-tool"
+	case DecisionAllowAlways:
+		return "allow-always"
+	default:
+		return "deny"
+	}
 }
 
 // dispatchElicit writes the operator's elicit result back to the
@@ -1245,8 +1292,13 @@ func trimToolArg(s string, max int) string {
 
 // paletteInsert replaces the typed trigger token with the selected
 // item's insert form and closes the palette (Enter while palette is
-// open). Unavailable items are skipped — closing the palette
-// silently — until a real slice surfaces a system-message hint.
+// open). Two exceptions:
+//
+//   - Directory entries in the file palette stay open after the
+//     insert so the operator drills into the dir without re-typing
+//     `@`. The palette re-filters to entries under the new prefix.
+//   - Unavailable items are skipped — closing the palette silently
+//     — until a real slice surfaces a system-message hint.
 func (m Model) paletteInsert() tea.Model {
 	if m.palette == nil {
 		return m
@@ -1263,12 +1315,21 @@ func (m Model) paletteInsert() tea.Model {
 		tokenEnd = len(value)
 	}
 	insertText := item.insertText(m.palette.kind)
-	if m.palette.kind == paletteFile {
+	// Directories don't get a trailing space — the prefix is meant
+	// to be extended by further palette selection or typing.
+	isDir := m.palette.kind == paletteFile && item.IsDir
+	if m.palette.kind == paletteFile && !isDir {
 		insertText += " "
 	}
 	newValue := value[:m.palette.triggerPos] + insertText + value[tokenEnd:]
 	m.input.SetValue(newValue)
-	m.palette = nil
-	m.resize()
+	if isDir {
+		// Keep the palette open and re-sync the filter to the new
+		// prefix so children of the picked directory surface.
+		m.refreshPalette()
+	} else {
+		m.palette = nil
+		m.resize()
+	}
 	return m
 }
