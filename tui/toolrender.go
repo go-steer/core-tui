@@ -36,12 +36,27 @@ import (
 // ToolRenderer is the contract for one tool's call/result
 // rendering. renderMessage feeds it the message, the styled head
 // (already glyph + bold name), and the available width; the
-// renderer returns the full styled string for the row.
+// renderer returns the full styled string for the row, including
+// any inline preview (diff for apply_patch / edit_file, etc.)
+// rendered as a block under the call line.
 //
 // Implementations should be stateless / value receivers so the
-// factory can hand out a single shared instance per tool.
+// factory can hand out a single shared instance per tool. The
+// preview block is shared across all renderers via withPreview;
+// per-tool renderers focus on the call-line layout only.
 type ToolRenderer interface {
 	RenderCall(msg Message, head string, width int, styles Styles) string
+}
+
+// withPreview appends msg.ToolPreview under the call line when
+// the preview is non-empty. Centralized here so every renderer
+// inherits the same behavior — adding a new tool-specific
+// renderer doesn't require remembering to wire previews.
+func withPreview(call string, msg Message) string {
+	if msg.ToolPreview == "" {
+		return call
+	}
+	return call + "\n" + msg.ToolPreview
 }
 
 // genericToolRenderer is the fallback used for any tool name not
@@ -51,10 +66,10 @@ type genericToolRenderer struct{}
 
 func (genericToolRenderer) RenderCall(msg Message, head string, width int, styles Styles) string {
 	if msg.ToolArgs == "" {
-		return head
+		return withPreview(head, msg)
 	}
 	body := wordWrap(msg.ToolArgs, width-lipgloss.Width(head)-1)
-	return head + " " + styles.ToolBody.Render(body)
+	return withPreview(head+" "+styles.ToolBody.Render(body), msg)
 }
 
 // bashToolRenderer styles bash invocations as `⚙ bash · $ <cmd>`.
@@ -66,10 +81,10 @@ type bashToolRenderer struct{}
 
 func (bashToolRenderer) RenderCall(msg Message, head string, width int, styles Styles) string {
 	if msg.ToolArgs == "" {
-		return head
+		return withPreview(head, msg)
 	}
 	body := wordWrap(msg.ToolArgs, width-lipgloss.Width(head)-1)
-	return head + " " + styles.Accent.Render(body)
+	return withPreview(head+" "+styles.Accent.Render(body), msg)
 }
 
 // fileToolRenderer styles file-touching tools (read_file,
@@ -80,13 +95,13 @@ type fileToolRenderer struct{}
 
 func (fileToolRenderer) RenderCall(msg Message, head string, width int, styles Styles) string {
 	if msg.ToolArgs == "" {
-		return head
+		return withPreview(head, msg)
 	}
 	body := wordWrap(msg.ToolArgs, width-lipgloss.Width(head)-1)
 	// Underlined path → reads as a "location" hint, parity with
 	// how IDEs highlight file references in tool output.
 	pathStyle := lipgloss.NewStyle().Foreground(styles.Theme.Info).Underline(true)
-	return head + " " + pathStyle.Render(body)
+	return withPreview(head+" "+pathStyle.Render(body), msg)
 }
 
 var (
