@@ -501,24 +501,26 @@ func (m Model) handleKey(msg tea.KeyPressMsg) (tea.Model, tea.Cmd) {
 		// streaming (R-CHAT-10): append to the prompt queue and clear
 		// the input; the queue drains one entry per turn-end.
 		text := strings.TrimSpace(m.input.Value())
-		if text == "" {
-			return m, nil
-		}
 		// /clear confirmation: the prior /clear submission armed
-		// confirmingClear. Any submit while armed is interpreted as
-		// the y/yes answer (anything else cancels). Disarms after
-		// the answer either way.
+		// confirmingClear. The prompt says "press enter for y/yes",
+		// so a bare Enter (empty text) counts as the y/yes answer;
+		// any typed text other than y/yes cancels. This branch
+		// runs BEFORE the empty-input early-return below so the
+		// bare-Enter path doesn't get swallowed.
 		if m.confirmingClear {
 			m.confirmingClear = false
 			m.input.Reset()
 			lower := strings.ToLower(text)
-			if lower == "y" || lower == "yes" {
+			if text == "" || lower == "y" || lower == "yes" {
 				m.history.Reset()
 				m.refreshViewport()
 				return m, nil
 			}
 			m.history.Append(Message{Role: RoleSystem, Text: "clear cancelled"})
 			m.refreshViewport()
+			return m, nil
+		}
+		if text == "" {
 			return m, nil
 		}
 		if m.state == stateStreaming {
