@@ -183,6 +183,15 @@ func (m Model) View() tea.View {
 	case m.pendingElicit != nil:
 		modal := m.renderElicitModal()
 		body = lipgloss.Place(m.width, m.height, lipgloss.Center, lipgloss.Center, modal)
+	case m.pendingForm != nil:
+		// Embedded huh.Form (e.g. /pricing set) takes priority
+		// over all other overlays — its keystrokes are routed
+		// in Update before any cascade runs (see Update). huh's
+		// View returns a string (not bubbletea v2's tea.View),
+		// so wrap directly.
+		formView := m.pendingForm.View()
+		framed := m.styles.ModalBorder.Padding(1, 2).Render(formView)
+		body = lipgloss.Place(m.width, m.height, lipgloss.Center, lipgloss.Center, framed)
 	case m.sideAnswer != nil:
 		modal := m.renderSideAnswer()
 		body = lipgloss.Place(m.width, m.height, lipgloss.Center, lipgloss.Center, modal)

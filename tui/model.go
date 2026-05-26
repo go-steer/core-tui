@@ -25,6 +25,7 @@ import (
 	"charm.land/bubbles/v2/textarea"
 	"charm.land/bubbles/v2/viewport"
 	tea "charm.land/bubbletea/v2"
+	"charm.land/huh/v2"
 	"charm.land/lipgloss/v2"
 )
 
@@ -217,6 +218,18 @@ type Model struct {
 	// for the thinking spinner (agentic-tui skill §7). Rebuilt
 	// on theme change (primary / secondary color update).
 	spinnerCache *spinnerFrameCache
+
+	// pendingForm is an embedded huh.Form (agentic-tui skill §12).
+	// When non-nil, Update routes every tea.Msg into the form
+	// first, intercepting all keystrokes; render shows it as a
+	// centered modal. Today only /pricing set populates it; a
+	// future PR migrates elicit forms here too once the
+	// channel-based dispatch is wrapped.
+	//
+	// Typed as *huh.Form (not tea.Model) because huh's Update
+	// returns its own compat.Model interface — not Bubble Tea
+	// v2's tea.Model — and View returns a string, not tea.View.
+	pendingForm *huh.Form
 }
 
 // NewModel constructs a Model from Options. SeedHistory entries are

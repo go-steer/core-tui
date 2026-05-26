@@ -46,6 +46,16 @@ func (m Model) Init() tea.Cmd {
 // handles window-resize, background-color, and a small keymap; later
 // slices add agent-event dispatch, modal forms, etc.
 func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
+	// Pending huh.Form intercepts EVERY tea.Msg (KeyPress,
+	// WindowSize, ticks) so the embedded form runs its own
+	// state machine. On completion / abort, updatePricingForm
+	// dispatches the result + clears m.pendingForm; the
+	// remaining Update cases run on the next msg.
+	if m.pendingForm != nil {
+		cmd := m.updatePricingForm(msg)
+		return m, cmd
+	}
+
 	switch msg := msg.(type) {
 
 	case tea.WindowSizeMsg:

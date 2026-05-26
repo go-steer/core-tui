@@ -372,15 +372,22 @@ func (m Model) handleAllowDeny(args, op string) string {
 	return "/" + op + ": added " + args
 }
 
-// handlePricing parses the /pricing subcommand and dispatches. Two
-// shapes:
+// handlePricing parses the /pricing subcommand and dispatches.
+// Three shapes:
 //
-//	/pricing refresh            → re-pull the upstream price table
-//	/pricing set <id> <in> <out> → override per-model rates in $/MTok
-func (m Model) handlePricing(ctrl PricingController, args string) string {
+//	/pricing refresh              → re-pull the upstream price table
+//	/pricing set                  → open the embedded huh.Form
+//	/pricing set <id> <in> <out>  → direct positional override
+//
+// The form path (no positional args) lets operators tab through
+// validated fields; the positional path keeps scripted / replay
+// flows fast. Returns the text to echo as a system message; for
+// the form path returns "" because the form takes over the
+// screen (its own completion handler dispatches the result).
+func (m *Model) handlePricing(ctrl PricingController, args string) string {
 	args = strings.TrimSpace(args)
 	if args == "" || args == "help" {
-		return "/pricing: usage — /pricing refresh OR /pricing set <model-id> <input-per-mtok> <output-per-mtok>"
+		return "/pricing: usage — /pricing refresh OR /pricing set (form) OR /pricing set <model-id> <input-per-mtok> <output-per-mtok>"
 	}
 	sub, rest, _ := strings.Cut(args, " ")
 	switch sub {
@@ -392,8 +399,15 @@ func (m Model) handlePricing(ctrl PricingController, args string) string {
 		return summary
 	case "set":
 		fields := strings.Fields(rest)
+		if len(fields) == 0 {
+			// No positional args → open the embedded huh form.
+			// updatePricingForm dispatches PricingController.Set
+			// on submit, so we don't echo anything from here.
+			m.pendingForm = newPricingForm(m.displayModelName())
+			return "/pricing: opening form (esc cancels)"
+		}
 		if len(fields) != 3 {
-			return "/pricing set: want <model-id> <input-per-mtok> <output-per-mtok>"
+			return "/pricing set: want <model-id> <input-per-mtok> <output-per-mtok>, or pass nothing to open the form"
 		}
 		in, err := strconv.ParseFloat(fields[1], 64)
 		if err != nil {
