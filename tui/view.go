@@ -318,6 +318,14 @@ func (m *Model) refreshViewport() {
 	// must not yank them back (parity with internal/tui:512).
 	atBottom := m.viewport.AtBottom()
 	m.viewport.SetContent(b.String())
+	// Defensively pin horizontal scroll to 0. The viewport supports
+	// xOffset (for terminals wider than the chat column), but the
+	// TUI never wants it — we wrap to chatWidth ourselves, so any
+	// non-zero xOffset would cut chars off the left of every line
+	// (`ansi.Cut` at viewport.go:362). Catching it here neutralizes
+	// any scroll that crept in via mouse wheel, palette key, or
+	// future bindings.
+	m.viewport.SetXOffset(0)
 	if atBottom {
 		m.viewport.GotoBottom()
 	}

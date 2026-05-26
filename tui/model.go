@@ -186,6 +186,20 @@ func NewModel(opts Options) Model {
 	_ = ta.Focus()
 
 	vp := viewport.New()
+	// The viewport's default KeyMap binds h/j/k/l + arrow keys for
+	// horizontal/vertical scrolling. Update forwards every keystroke
+	// to the viewport, so typing those letters into the input (or
+	// pressing Right inside the palette) would scroll the viewport
+	// — Right in particular sets xOffset, which then cuts chars off
+	// the LEFT of every rendered line (`ansi.Cut` at viewport.go:362).
+	// Strip the conflicting bindings so only PageUp/PageDown survive
+	// (mouse wheel handled separately).
+	vp.KeyMap = viewport.KeyMap{
+		PageDown:     vp.KeyMap.PageDown,
+		PageUp:       vp.KeyMap.PageUp,
+		HalfPageUp:   vp.KeyMap.HalfPageUp,
+		HalfPageDown: vp.KeyMap.HalfPageDown,
+	}
 
 	m := Model{
 		opts:          opts,
