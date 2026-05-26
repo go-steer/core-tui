@@ -592,7 +592,14 @@ func (m *Model) refreshPalette() {
 
 	if m.palette == nil {
 		if strings.HasPrefix(value, "/") {
-			m.palette = newSlashPalette(0)
+			// Merge agent-provided SlashProvider commands so /btw,
+			// /subagent, etc. are discoverable in the palette in
+			// addition to working when typed manually.
+			var provider SlashProvider
+			if p, ok := m.opts.Agent.(SlashProvider); ok {
+				provider = p
+			}
+			m.palette = newSlashPalette(0, provider)
 			m.palette.filter = value[1:]
 			m.resize()
 			return

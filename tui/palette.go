@@ -248,12 +248,30 @@ func formatFileSize(n int64) string {
 	}
 }
 
-// newSlashPalette opens a / palette at trigger position pos in the
-// current input. Cursor starts at 0.
-func newSlashPalette(pos int) *palette {
+// newSlashPalette opens a / palette at trigger position pos in
+// the current input. Items = TUI built-ins (builtinSlashItems)
+// + any agent-provided commands from SlashProvider so /btw,
+// /subagent, and other host extensions are discoverable, not
+// just executable-when-typed. Cursor starts at 0.
+func newSlashPalette(pos int, provider SlashProvider) *palette {
+	items := builtinSlashItems()
+	if provider != nil {
+		for _, spec := range provider.SlashCommands() {
+			display := "/" + spec.Name
+			for _, a := range spec.Aliases {
+				display += ", /" + a
+			}
+			items = append(items, paletteItem{
+				Name:        spec.Name,
+				Display:     display,
+				Description: spec.Description,
+				Available:   true,
+			})
+		}
+	}
 	return &palette{
 		kind:       paletteSlash,
-		items:      builtinSlashItems(),
+		items:      items,
 		triggerPos: pos,
 	}
 }
