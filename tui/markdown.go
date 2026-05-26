@@ -45,6 +45,11 @@ func newMarkdownRenderer(dark bool, width int) *markdownRenderer {
 	r, _ := glamour.NewTermRenderer(
 		glamour.WithStyles(tuiStyleConfig(dark)),
 		glamour.WithWordWrap(width),
+		// Route Chroma syntax highlighting through Lipgloss so code
+		// fences pick up the active color profile + future per-
+		// provider theme (agentic-tui skill §11.B). Without this,
+		// Chroma emits raw 24-bit ANSI that fights our palette.
+		glamour.WithChromaFormatter(chromaFormatterName),
 	)
 	return &markdownRenderer{r: r, dark: dark, width: width}
 }
