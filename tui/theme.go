@@ -64,6 +64,13 @@ type Theme struct {
 	// Borders + rules.
 	BorderActive color.Color // focused input / open dialog
 	BorderQuiet  color.Color // sidebar dividers, message rules
+
+	// Diff surfaces: dim tints used as backgrounds behind + / -
+	// lines in inline tool-display diffs. Foreground stays
+	// Success / Error; the bg makes the change region scannable
+	// at a glance the way `git diff --color` and GitHub render.
+	DiffAddBg color.Color
+	DiffDelBg color.Color
 }
 
 // DefaultTheme returns the canonical "core-tui" palette — the
@@ -90,6 +97,8 @@ func DefaultTheme(dark bool) Theme {
 		t.FgSubtle = lipgloss.Color("#6C6C6C")
 		t.BgElevated = lipgloss.Color("#1E1E1E")
 		t.BgOverlay = lipgloss.Color("#2A2A2A")
+		t.DiffAddBg = lipgloss.Color("#1B2D1B")
+		t.DiffDelBg = lipgloss.Color("#3A1E1E")
 	} else {
 		t.FgBase = lipgloss.Color("#1E1E1E")
 		t.FgMuted = lipgloss.Color("#5F5F5F")
@@ -97,6 +106,8 @@ func DefaultTheme(dark bool) Theme {
 		t.BgElevated = lipgloss.Color("#F0F0F0")
 		t.BgOverlay = lipgloss.Color("#E5E5E5")
 		t.BorderQuiet = lipgloss.Color("#D7D7D7")
+		t.DiffAddBg = lipgloss.Color("#E6FFE6")
+		t.DiffDelBg = lipgloss.Color("#FFE6E6")
 	}
 	return t
 }
