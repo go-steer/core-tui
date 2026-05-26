@@ -25,6 +25,7 @@ import (
 	"charm.land/bubbles/v2/textarea"
 	"charm.land/bubbles/v2/viewport"
 	tea "charm.land/bubbletea/v2"
+	"charm.land/lipgloss/v2"
 )
 
 // textareaMinHeight / textareaMaxHeight bound the auto-growing
@@ -379,7 +380,9 @@ func (m Model) usageSummaryOneLine() string {
 	sep := " " + GlyphSeparator + " "
 	out := formatKTokens(t.InputTokens) + " in" + sep + formatKTokens(t.OutputTokens) + " out" + sep + fmt.Sprintf("$%.4f", cost)
 	if size > 0 {
-		out += sep + formatKTokens(used) + " / " + formatKTokens(size)
+		out += sep + m.contextFillStyle(used, size).Render(
+			formatKTokens(used)+" / "+formatKTokens(size),
+		)
 	}
 	return out
 }
@@ -400,9 +403,30 @@ func (m Model) usageSummaryStacked() (string, string) {
 	line1 := formatKTokens(t.InputTokens) + " in" + sep + formatKTokens(t.OutputTokens) + " out"
 	line2 := fmt.Sprintf("$%.4f", cost)
 	if size > 0 {
-		line2 += sep + formatKTokens(used) + " / " + formatKTokens(size)
+		line2 += sep + m.contextFillStyle(used, size).Render(
+			formatKTokens(used)+" / "+formatKTokens(size),
+		)
 	}
 	return line1, line2
+}
+
+// contextFillStyle picks a fg style for the "<used> / <size>"
+// segment based on a 3-tier color ramp: green when below 60%,
+// yellow 60-85%, red above 85% (per agentic-tui skill §17.C).
+// Lets the operator see overflow risk before it bites.
+func (m Model) contextFillStyle(used, size int) lipgloss.Style {
+	if size <= 0 {
+		return m.styles.Muted
+	}
+	pct := (used * 100) / size
+	switch {
+	case pct >= 85:
+		return lipgloss.NewStyle().Foreground(lipgloss.Color("#FF5F5F")).Bold(true)
+	case pct >= 60:
+		return lipgloss.NewStyle().Foreground(lipgloss.Color("#FFD75F"))
+	default:
+		return lipgloss.NewStyle().Foreground(lipgloss.Color("#5FD787"))
+	}
 }
 
 // formatKTokens renders an integer token count in compact human form
