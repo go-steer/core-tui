@@ -49,6 +49,16 @@ type Message struct {
 	Model   string
 	Elapsed time.Duration
 	CostUSD float64
+
+	// ID is the stable identity History.Append assigns so the lazy-
+	// render cache (listcache.go) can key entries across refreshes.
+	// 0 until Append; preserved across SetRendered mutations.
+	ID uint64
+
+	// Version increments on every mutation that changes rendered
+	// output (currently SetRendered on resize). The lazy-render
+	// cache treats version mismatch as an invalidation signal.
+	Version uint64
 }
 
 // Display returns the renderable string for this message, preferring
@@ -63,10 +73,16 @@ func (m Message) Display() string {
 // History is the in-memory transcript backing the viewport.
 type History struct {
 	entries []Message
+	nextID  uint64 // monotonic Message.ID assigner
 }
 
-// Append adds an entry to the end.
+// Append adds an entry to the end. Assigns a fresh Message.ID
+// (preserved across SetRendered mutations) so the lazy-render
+// cache can key entries stably.
 func (h *History) Append(m Message) {
+	h.nextID++
+	m.ID = h.nextID
+	m.Version = 0
 	h.entries = append(h.entries, m)
 }
 
@@ -82,7 +98,8 @@ func (h *History) Reset() {
 	h.entries = nil
 }
 
-// SetRendered overwrites the cached Glamour render on entry i.
+// SetRendered overwrites the cached Glamour render on entry i and
+// bumps the entry's Version so the lazy-render cache invalidates.
 // Used by the resize path to refresh wrapping at the new width.
 // Out-of-range i is a silent no-op so callers can pass the
 // snapshot index without bounds-checking.
@@ -91,6 +108,7 @@ func (h *History) SetRendered(i int, rendered string) {
 		return
 	}
 	h.entries[i].Rendered = rendered
+	h.entries[i].Version++
 }
 
 // Len returns the entry count.

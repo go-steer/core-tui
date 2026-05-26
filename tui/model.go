@@ -124,6 +124,13 @@ type Model struct {
 	currentCost    float64 // most recent positive cost for this turn (USD)
 	currentModel   string  // model name for the in-progress message
 
+	// listCache memoizes the styled-string render of each history
+	// Message keyed by (Message.ID, viewport width, Message.Version).
+	// Without it every refreshViewport re-Glamour-renders every
+	// assistant message — visible as stutter on long sessions. See
+	// listcache.go for the cache contract.
+	listCache *listCache
+
 	// Incremental Glamour cache for the in-progress assistant
 	// stream. inProgressStablePrefix holds the portion of
 	// inProgressText up to the latest safe boundary (\n\n outside
@@ -237,6 +244,7 @@ func NewModel(opts Options) Model {
 		seenToolIDs:   make(map[string]bool),
 		historyCursor: -1,
 		startedAt:     time.Now(),
+		listCache:     newListCache(),
 	}
 	for _, msg := range opts.SeedHistory {
 		m.history.Append(msg)

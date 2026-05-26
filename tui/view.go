@@ -314,6 +314,7 @@ func (m *Model) refreshViewport() {
 	entries := m.history.Snapshot()
 	rule := m.styles.Rule.Render(strings.Repeat(GlyphRule, m.viewport.Width()))
 
+	width := m.viewport.Width()
 	for i, msg := range entries {
 		if i > 0 {
 			if msg.Role == RoleUser {
@@ -324,7 +325,16 @@ func (m *Model) refreshViewport() {
 				b.WriteString("\n\n")
 			}
 		}
-		b.WriteString(m.renderMessage(msg))
+		// Lazy-render cache (listcache.go) — skip the Glamour /
+		// word-wrap / lipgloss work for unchanged messages.
+		item := messageItem{msg: msg, idx: i, total: len(entries)}
+		if cached, ok := m.listCache.get(item, width); ok {
+			b.WriteString(cached)
+		} else {
+			rendered := m.renderMessage(msg)
+			m.listCache.put(item, width, rendered)
+			b.WriteString(rendered)
+		}
 	}
 
 	if inProgress := m.renderInProgress(); inProgress != "" {
