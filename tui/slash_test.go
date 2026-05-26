@@ -18,7 +18,10 @@ import (
 	"context"
 	"errors"
 	"iter"
+	"strings"
 	"testing"
+
+	tea "charm.land/bubbletea/v2"
 )
 
 // slashAgent is a stub Agent + SlashProvider for dispatch tests.
@@ -130,6 +133,94 @@ func TestDispatchSlash_AliasMatches(t *testing.T) {
 	}
 	if agent.invokedName != "by-the-way" {
 		t.Errorf("invoked name = %q, want %q", agent.invokedName, "by-the-way")
+	}
+}
+
+// TestSlashClear_BareEnterConfirms locks in the fix for the
+// /clear confirmation bug: the prompt promises "press enter for
+// y/yes" but the Enter handler used to short-circuit on empty
+// input before reaching the confirmingClear branch — pressing
+// Enter quietly did nothing. Now an empty Enter while armed
+// counts as the y/yes answer and wipes history.
+func TestSlashClear_BareEnterConfirms(t *testing.T) {
+	agent := &slashAgent{}
+	m := NewModel(Options{Agent: agent})
+	m.viewport.SetWidth(80)
+	// Seed some content so we can confirm the wipe.
+	m.history.Append(Message{Role: RoleUser, Text: "hello"})
+	m.history.Append(Message{Role: RoleAssistant, Text: "hi back"})
+
+	// Arm the confirmation.
+	out, _ := m.dispatchSlash("/clear")
+	m = out.(Model)
+	if !m.confirmingClear {
+		t.Fatalf("expected confirmingClear=true after /clear")
+	}
+	// Two existing rows + the "press enter" system prompt = 3.
+	if m.history.Len() != 3 {
+		t.Fatalf("expected 3 history entries before confirmation, got %d", m.history.Len())
+	}
+
+	// Bare Enter (empty input) MUST wipe history.
+	enter := tea.KeyPressMsg(tea.Key{Code: tea.KeyEnter})
+	out2, _ := m.Update(enter)
+	m = out2.(Model)
+	if m.confirmingClear {
+		t.Errorf("expected confirmingClear=false after bare-Enter confirmation")
+	}
+	if m.history.Len() != 0 {
+		t.Errorf("expected history.Len()==0 after bare-Enter confirm, got %d", m.history.Len())
+	}
+}
+
+// TestSlashClear_YesConfirms covers the typed-y/yes path so the
+// existing accept words still work alongside the new bare-Enter
+// shortcut.
+func TestSlashClear_YesConfirms(t *testing.T) {
+	agent := &slashAgent{}
+	m := NewModel(Options{Agent: agent})
+	m.viewport.SetWidth(80)
+	m.history.Append(Message{Role: RoleUser, Text: "hello"})
+
+	out, _ := m.dispatchSlash("/clear")
+	m = out.(Model)
+
+	m.input.SetValue("yes")
+	enter := tea.KeyPressMsg(tea.Key{Code: tea.KeyEnter})
+	out2, _ := m.Update(enter)
+	m = out2.(Model)
+	if m.history.Len() != 0 {
+		t.Errorf("expected history wiped after typed 'yes', got Len=%d", m.history.Len())
+	}
+}
+
+// TestSlashClear_OtherTextCancels: any non-y/yes text disarms
+// without clearing and leaves a "clear cancelled" system row.
+func TestSlashClear_OtherTextCancels(t *testing.T) {
+	agent := &slashAgent{}
+	m := NewModel(Options{Agent: agent})
+	m.viewport.SetWidth(80)
+	m.history.Append(Message{Role: RoleUser, Text: "hello"})
+
+	out, _ := m.dispatchSlash("/clear")
+	m = out.(Model)
+	armedLen := m.history.Len()
+
+	m.input.SetValue("nope")
+	enter := tea.KeyPressMsg(tea.Key{Code: tea.KeyEnter})
+	out2, _ := m.Update(enter)
+	m = out2.(Model)
+
+	if m.confirmingClear {
+		t.Errorf("expected confirmingClear=false after cancel")
+	}
+	// Original entries + arming prompt + "clear cancelled" = armedLen+1.
+	if m.history.Len() != armedLen+1 {
+		t.Errorf("expected armedLen+1 entries (cancel row added), got %d", m.history.Len())
+	}
+	last := m.history.Snapshot()[m.history.Len()-1]
+	if !strings.Contains(last.Text, "cancelled") {
+		t.Errorf("expected 'clear cancelled' system row, got %q", last.Text)
 	}
 }
 
