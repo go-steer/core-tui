@@ -493,10 +493,12 @@ func (m Model) queueRowStyle(s QueueState) (string, lipgloss.Style) {
 	}
 }
 
-// renderSpinnerLine renders the rotating cognition verb (R-CHAT-3).
-// Picks ThinkingPhrases when the model is generating and
-// WorkingPhrases after a tool call until the next text chunk.
-func (m Model) renderSpinnerLine() string {
+// renderSpinnerLine renders the rotating cognition verb (R-CHAT-3)
+// prefixed with a pre-rendered Braille spinner glyph cycling
+// through a 10-frame color ramp between theme.Primary and
+// theme.Secondary (agentic-tui skill §7). The glyph reads as
+// "alive" without distracting from the verb.
+func (m *Model) renderSpinnerLine() string {
 	pool := m.thinkingPhrases()
 	if m.toolActive {
 		pool = m.workingPhrases()
@@ -505,7 +507,12 @@ func (m Model) renderSpinnerLine() string {
 		return ""
 	}
 	verb := pool[m.thinkingIdx%len(pool)]
-	return m.styles.Muted.Italic(true).Render(verb + GlyphTruncate)
+	glyph := m.renderBrailleFrame(m.thinkingIdx)
+	body := m.styles.Muted.Italic(true).Render(verb + GlyphTruncate)
+	if glyph == "" {
+		return body
+	}
+	return glyph + " " + body
 }
 
 // renderMessage renders a single Message row with the correct glyph

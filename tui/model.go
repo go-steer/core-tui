@@ -212,6 +212,11 @@ type Model struct {
 	// hyperlinks, clipboard sequences, etc. Detected once at
 	// NewModel; hosts can override post-construction.
 	caps TerminalCapabilities
+
+	// spinnerCache holds the pre-rendered Braille frame strings
+	// for the thinking spinner (agentic-tui skill §7). Rebuilt
+	// on theme change (primary / secondary color update).
+	spinnerCache *spinnerFrameCache
 }
 
 // NewModel constructs a Model from Options. SeedHistory entries are
