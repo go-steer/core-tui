@@ -514,11 +514,20 @@ func (m Model) handleKey(msg tea.KeyPressMsg) (tea.Model, tea.Cmd) {
 		m.recordPrompt(text)
 		return m.submitTurn(text), spinnerTick()
 
-	case "shift+enter", "ctrl+j":
-		// Insert a newline (R-CHAT-1: Shift-Enter / Ctrl-J inserts
-		// newline). Synthesize an Enter KeyPressMsg with no modifier
-		// and forward to the textarea — that hits its InsertNewline
-		// binding.
+	case "shift+enter", "ctrl+j", "alt+enter":
+		// Insert a newline (R-CHAT-1). All three forms are accepted
+		// because terminals encode "modifier + enter" inconsistently:
+		//   - shift+enter — when the terminal sends a true CSI-u
+		//     sequence (kitty / wezterm / iTerm2 with the
+		//     keyboard-enhancement protocol on)
+		//   - ctrl+j    — ASCII 0x0a (LF) — works on most terminals
+		//                 unless VS Code / tmux binds Ctrl+J for
+		//                 something else
+		//   - alt+enter — VS Code's terminal-setup binding sends
+		//                 ESC + CR (\x1b\r) which bubbletea v2
+		//                 normalizes to "alt+enter"
+		// Synthesize a plain Enter and forward to the textarea so
+		// its default InsertNewline binding fires.
 		fakeEnter := tea.KeyPressMsg(tea.Key{Code: tea.KeyEnter})
 		var cmd tea.Cmd
 		m.input, cmd = m.input.Update(fakeEnter)
