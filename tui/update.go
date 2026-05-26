@@ -350,11 +350,17 @@ func (m Model) handleKey(msg tea.KeyPressMsg) (tea.Model, tea.Cmd) {
 			// Enter on a slash palette item: insert AND submit in one
 			// keystroke (mirrors internal/tui's UX so `/mcp ⏎` from
 			// the palette renders the catalog in one press, not two).
-			// File palette items still just insert — there's typically
-			// more text to type after the @path.
+			// Items marked NoAutoSubmit (compound commands needing
+			// more args, e.g. "/allow bundle:<name>") just insert.
+			// File palette items always just insert — there's
+			// typically more text to type after the @path.
 			kind := m.palette.kind
+			noAuto := false
+			if sel, ok := m.palette.selected(); ok {
+				noAuto = sel.NoAutoSubmit
+			}
 			m = m.paletteInsert().(Model)
-			if kind == paletteSlash {
+			if kind == paletteSlash && !noAuto {
 				text := strings.TrimSpace(m.input.Value())
 				if strings.HasPrefix(text, "/") {
 					return m.dispatchSlash(text)

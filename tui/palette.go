@@ -63,6 +63,14 @@ type paletteItem struct {
 	// a directory drills into it (palette re-walks with the dir
 	// path as the new filter prefix) instead of closing.
 	IsDir bool
+
+	// NoAutoSubmit blocks the slash-palette's insert+submit
+	// behavior on Enter — the item is inserted, palette closes,
+	// but dispatchSlash is NOT called. Use for compound commands
+	// that need the operator to type more (e.g. "/allow bundle:"
+	// needs the bundle name appended; submitting bare would
+	// error). Tab still inserts-without-submit either way.
+	NoAutoSubmit bool
 }
 
 // palette is the active palette overlay state. Nil = no palette open.
@@ -103,6 +111,7 @@ func builtinSlashItems() []paletteItem {
 	}
 	rest := []paletteItem{
 		{Name: "allow", Description: "add allow pattern (e.g. /allow bash:git *)", Available: true},
+		{Name: "allow bundle:", Display: "/allow bundle:<name>", Insert: "/allow bundle:", Description: "enable a built-in allow bundle (e.g. dev_tools)", Available: true, NoAutoSubmit: true},
 		{Name: "deny", Description: "add deny pattern", Available: true},
 		{Name: "interrupt", Display: "/interrupt, /int", Description: "cancel the in-flight turn", Available: true},
 		{Name: "mcp", Description: "configured MCP servers and tools", Available: true},
@@ -111,6 +120,8 @@ func builtinSlashItems() []paletteItem {
 		{Name: "mouse", Description: "toggle mouse capture (placeholder)", Available: true},
 		{Name: "permissions", Description: "review session approvals", Available: true},
 		{Name: "pricing", Description: "manage pricing (refresh / set)", Available: true},
+		{Name: "pricing refresh", Display: "/pricing refresh", Insert: "/pricing refresh", Description: "re-pull the upstream price table", Available: true},
+		{Name: "pricing set", Display: "/pricing set", Insert: "/pricing set", Description: "open form to override per-model rates", Available: true},
 		{Name: "reload", Description: "rebuild agent from disk", Available: true},
 		{Name: "resume", Description: "list / load a saved session transcript", Available: true},
 		{Name: "skills", Description: "loaded skill bundles", Available: true},
