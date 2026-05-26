@@ -174,6 +174,7 @@ func (m Model) dispatchBuiltinSlash(name, args string) (bool, tea.Model, tea.Cmd
 				m.history.Append(Message{Role: RoleError, Text: "/model: persist failed: " + perr.Error()})
 			}
 		}
+		m.refreshTheme()
 		m.input.Reset()
 		m.refreshAndScroll()
 		return true, m, nil

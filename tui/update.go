@@ -73,15 +73,11 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		return m, nil
 
 	case tea.BackgroundColorMsg:
-		m.styles = m.resolveStyles(msg.IsDark())
-		m.markdown = nil // force rebuild on next render
-		m.listCache.reset(m.viewport.Width())
-		// Rebuild textarea styles too — bubbles v2 textarea.New()
-		// hard-codes DefaultDarkStyles, so on light terminals the
-		// CursorLine background renders as solid black until we
-		// swap. Pass isDark through so the cursor-line tint
-		// matches the rest of the chrome.
-		m.input.SetStyles(textareaStyles(msg.IsDark()))
+		// Set Dark first so refreshTheme picks the right variant
+		// (refreshTheme reads m.styles.Dark for the dark/light
+		// branching inside resolveStyles + textareaStyles).
+		m.styles.Dark = msg.IsDark()
+		m.refreshTheme()
 		m.refreshViewport()
 		return m, nil
 
@@ -337,6 +333,7 @@ func (m Model) handleKey(msg tea.KeyPressMsg) (tea.Model, tea.Cmd) {
 					m.history.Append(Message{Role: RoleError, Text: "/model: persist failed: " + perr.Error()})
 				}
 			}
+			m.refreshTheme()
 			m.refreshViewport()
 			return m, nil
 		}

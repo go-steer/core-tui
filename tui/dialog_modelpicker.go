@@ -83,6 +83,11 @@ func (d *modelPickerDialog) HandleKey(stroke string, m *Model) DialogAction {
 				m.history.Append(Message{Role: RoleError, Text: "/model: persist failed: " + perr.Error()})
 			}
 		}
+		// Refresh the theme so per-provider palettes (when
+		// AutoProviderTheme is on) track the freshly-selected
+		// model's provider. No-op when AutoProviderTheme is off
+		// — resolveStyles returns the same DefaultTheme.
+		m.refreshTheme()
 		m.refreshViewport()
 		return DialogAction{Consumed: true, Close: true}
 	}

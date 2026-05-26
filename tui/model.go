@@ -434,6 +434,21 @@ func (m Model) displayProvider() string {
 	return reporter.Status().Provider
 }
 
+// refreshTheme re-resolves Styles (picking up the active provider
+// when AutoProviderTheme is on), invalidates the Glamour renderer
+// + list cache so the next render uses the new palette, and
+// rebuilds the textarea styles for the current dark/light mode.
+// Called after any event that could change which theme applies:
+// /model swap, dark/light flip, explicit theme reset.
+func (m *Model) refreshTheme() {
+	m.styles = m.resolveStyles(m.styles.Dark)
+	m.markdown = nil
+	if m.listCache != nil {
+		m.listCache.reset(m.viewport.Width())
+	}
+	m.input.SetStyles(textareaStyles(m.styles.Dark))
+}
+
 // resolveStyles builds the Styles bundle for the current dark/
 // light mode. When Options.AutoProviderTheme is true the
 // StatusReporter's Provider tag picks the per-provider theme
