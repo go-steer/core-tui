@@ -22,6 +22,7 @@ import (
 	"strings"
 	"time"
 
+	"charm.land/bubbles/v2/key"
 	"charm.land/bubbles/v2/textarea"
 	"charm.land/bubbles/v2/viewport"
 	tea "charm.land/bubbletea/v2"
@@ -275,19 +276,25 @@ func NewModel(opts Options) Model {
 	ta.SetStyles(textareaStyles(true))
 
 	vp := viewport.New()
-	// The viewport's default KeyMap binds h/j/k/l + arrow keys for
-	// horizontal/vertical scrolling. Update forwards every keystroke
-	// to the viewport, so typing those letters into the input (or
-	// pressing Right inside the palette) would scroll the viewport
-	// — Right in particular sets xOffset, which then cuts chars off
-	// the LEFT of every rendered line (`ansi.Cut` at viewport.go:362).
-	// Strip the conflicting bindings so only PageUp/PageDown survive
-	// (mouse wheel handled separately).
+	// The viewport's default KeyMap is full of vim conventions
+	// (h/j/k/l + arrows for scroll; b/f for page; space for page
+	// down; u/d for half-page; ctrl+u for half-page) — every one
+	// of those collides with normal text input. handleKey forwards
+	// every keystroke to the viewport at the end so typing "b"
+	// into the prompt would PgUp, " " into the prompt would PgDn,
+	// etc. We also can't rely on Right being safe: it sets
+	// xOffset which then cuts chars off the LEFT of every line
+	// (`ansi.Cut` at viewport.go:362).
+	//
+	// Override every binding with the non-letter form ONLY so the
+	// page keys still work for power users but text-input letters
+	// pass through cleanly. Mouse wheel is handled separately by
+	// MouseMode.
 	vp.KeyMap = viewport.KeyMap{
-		PageDown:     vp.KeyMap.PageDown,
-		PageUp:       vp.KeyMap.PageUp,
-		HalfPageUp:   vp.KeyMap.HalfPageUp,
-		HalfPageDown: vp.KeyMap.HalfPageDown,
+		PageDown:     newKeyBinding("pgdown"),
+		PageUp:       newKeyBinding("pgup"),
+		HalfPageDown: newKeyBinding("ctrl+d"),
+		HalfPageUp:   newKeyBinding("ctrl+u"),
 	}
 
 	m := Model{
@@ -384,6 +391,15 @@ func (m Model) wordmark() string {
 		return m.opts.Branding.Wordmark
 	}
 	return "core-tui"
+}
+
+// newKeyBinding is a tiny helper that builds a key.Binding from
+// a single literal key name. Used in NewModel to replace the
+// viewport's default KeyMap entries with non-letter-only forms
+// so vim conventions (h/j/k/l/b/f/space/u/d) don't fire on
+// every forwarded keystroke.
+func newKeyBinding(k string) key.Binding {
+	return key.NewBinding(key.WithKeys(k))
 }
 
 // defaultNewlineHint picks the most-likely-to-work newline
