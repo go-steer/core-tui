@@ -40,6 +40,18 @@ type toolCallMsg struct {
 	args map[string]any
 }
 
+// toolResultMsg carries one ToolResult event. ID correlates with
+// the originating toolCallMsg.id; Update looks up the Message
+// whose ToolCallID matches and updates its preview with the
+// rendered result. Adapters that don't surface tool results never
+// emit this — the TUI keeps the call-only preview unchanged.
+type toolResultMsg struct {
+	id       string
+	name     string
+	response map[string]any
+	err      string
+}
+
 // usageMsg snapshots the latest Usage from the agent. The TUI keeps
 // only the most recent value and reports it once at turn-end on the
 // finalized assistant message (R-USE-1). Cost / Model travel

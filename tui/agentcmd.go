@@ -211,6 +211,9 @@ func emitEvent(ctx context.Context, ch chan<- tea.Msg, ev Event) {
 	for _, tc := range ev.ToolCalls {
 		send(toolCallMsg{id: tc.ID, name: tc.Name, args: tc.Args})
 	}
+	for _, tr := range ev.ToolResults {
+		send(toolResultMsg{id: tr.ID, name: tr.Name, response: tr.Response, err: tr.Error})
+	}
 	if ev.Usage != nil {
 		send(usageMsg{usage: *ev.Usage, costUSD: ev.CostUSD, model: ev.Model})
 	} else if ev.Model != "" {

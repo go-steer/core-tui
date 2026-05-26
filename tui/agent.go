@@ -45,6 +45,15 @@ type Event struct {
 	// partial + committed echoes.
 	ToolCalls []ToolCall
 
+	// ToolResults lists tool completions delivered alongside or after
+	// the corresponding ToolCalls. ID matches the call's ID so the
+	// TUI can attach the result to the right tool row. A populated
+	// Error string indicates failure; a populated Response carries
+	// the structured payload (per-tool shape — `content` for
+	// read_file, `stdout`/`stderr` for bash, `bytes_written` for
+	// write_file, etc.). The renderer picks the relevant keys.
+	ToolResults []ToolResult
+
 	// Usage carries token counts. The TUI snapshots the most recent
 	// non-nil value and reports it at turn end.
 	Usage *Usage
@@ -68,6 +77,19 @@ type ToolCall struct {
 	ID   string
 	Name string
 	Args map[string]any
+}
+
+// ToolResult describes a single tool completion. ID correlates
+// with the originating ToolCall.ID. Error is non-empty iff the
+// tool failed; Response carries the per-tool structured payload
+// when the call succeeded. The TUI uses Name + Response in the
+// per-tool result renderer (renderToolResult) — adapters should
+// preserve the tool's native shape rather than pre-flattening.
+type ToolResult struct {
+	ID       string
+	Name     string
+	Response map[string]any
+	Error    string
 }
 
 // Usage carries token counts for a turn.

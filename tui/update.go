@@ -90,6 +90,9 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	case toolCallMsg:
 		m.applyToolCall(msg)
 		return m, m.eventListener()
+	case toolResultMsg:
+		m.applyToolResult(msg)
+		return m, m.eventListener()
 	case usageMsg:
 		// Empty Usage (zero in/out) is the model-only signal — adapters
 		// flag the live model on the first chunk before any real usage
@@ -835,9 +838,39 @@ func (m *Model) applyToolCall(msg toolCallMsg) {
 		ToolName:    msg.name,
 		ToolArgs:    hint,
 		ToolPreview: renderToolPreview(msg.name, msg.args, m.styles),
+		ToolCallID:  msg.id,
+		ToolArgsMap: msg.args,
 	})
 	m.activeToolID = m.history.LastID()
 	m.toolActive = true
+	m.refreshViewport()
+}
+
+// applyToolResult attaches a tool's completion (success result or
+// error) to the matching RoleTool row by wire-level ToolCallID.
+// Re-renders the row's ToolPreview through renderToolPreviewWithResult
+// so the operator sees both the original call info and the result
+// content (read_file body, bash stdout, error text, etc.) inline.
+//
+// Silently no-ops when the result has no ID or no matching call —
+// adapters that emit results out of order with retries shouldn't
+// crash the TUI; the worst outcome is a missed preview update.
+func (m *Model) applyToolResult(msg toolResultMsg) {
+	if msg.id == "" {
+		return
+	}
+	idx := m.history.FindByToolCallID(msg.id)
+	if idx < 0 {
+		return
+	}
+	snap := m.history.Snapshot()
+	if idx >= len(snap) {
+		return
+	}
+	preview := renderToolPreviewWithResult(
+		msg.name, snap[idx].ToolArgsMap, msg.response, msg.err, m.styles,
+	)
+	m.history.SetToolPreview(idx, preview)
 	m.refreshViewport()
 }
 
