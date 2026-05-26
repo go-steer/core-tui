@@ -52,9 +52,12 @@ const (
 
 // Styles bundles every resolved lipgloss style for the current
 // terminal background. NewStyles picks the variant for light vs dark
-// from BackgroundColorMsg.IsDark() at startup (R-MD-2).
+// from BackgroundColorMsg.IsDark() at startup (R-MD-2). Theme is
+// the semantic-token bundle every per-field style derives from
+// (agentic-tui skill §10).
 type Styles struct {
-	Dark bool
+	Dark  bool
+	Theme Theme
 
 	UserPrefix    lipgloss.Style
 	UserText      lipgloss.Style
@@ -85,64 +88,63 @@ type Styles struct {
 }
 
 // NewStyles assembles the style bundle for the given background
-// brightness, applying any Branding overrides.
+// brightness, applying any Branding overrides on top of the
+// DefaultTheme. Hosts that want per-provider tinting should pass
+// a theme via NewStylesWithTheme directly.
 func NewStyles(dark bool, brand Branding) Styles {
-	accent := BrandViolet
+	theme := DefaultTheme(dark)
 	if brand.AccentColor != "" {
-		accent = lipgloss.Color(brand.AccentColor)
+		c := lipgloss.Color(brand.AccentColor)
+		theme.Primary = c
+		theme.Accent = c
+		theme.BorderActive = c
 	}
-	secondary := BrandPink
 	if brand.SecondaryColor != "" {
-		secondary = lipgloss.Color(brand.SecondaryColor)
+		theme.Secondary = lipgloss.Color(brand.SecondaryColor)
 	}
+	return NewStylesWithTheme(dark, theme)
+}
 
-	var (
-		muted, fgUser, fgAssist, fgSystem, fgError color.Color
-		border, rule                               color.Color
-	)
+// NewStylesWithTheme is the per-token construction path: every
+// component style derives from the Theme so a palette swap is a
+// one-line change (no per-field updates). UserPrefix / UserText
+// keep an explicit blue tone — the user-bubble color is semantic
+// to the operator's voice and shouldn't shift with provider.
+func NewStylesWithTheme(dark bool, theme Theme) Styles {
+	var fgUser, border color.Color
 	if dark {
-		muted = lipgloss.Color("#9A9A9A")
 		fgUser = lipgloss.Color("#87AFFF")
-		fgAssist = lipgloss.Color("#D0D0D0")
-		fgSystem = lipgloss.Color("#A8A8A8")
-		fgError = lipgloss.Color("#FF5F5F")
 		border = lipgloss.Color("#5F5F5F")
-		rule = lipgloss.Color("#3A3A3A")
 	} else {
-		muted = lipgloss.Color("#6C6C6C")
 		fgUser = lipgloss.Color("#0050A0")
-		fgAssist = lipgloss.Color("#1E1E1E")
-		fgSystem = lipgloss.Color("#5F5F5F")
-		fgError = lipgloss.Color("#AF0000")
 		border = lipgloss.Color("#BCBCBC")
-		rule = lipgloss.Color("#D7D7D7")
 	}
-	warn := lipgloss.Color("#FFD75F")
-
+	muted := theme.FgMuted
 	return Styles{
 		Dark:             dark,
+		Theme:            theme,
 		UserPrefix:       lipgloss.NewStyle().Foreground(fgUser).Bold(true),
 		UserText:         lipgloss.NewStyle().Foreground(fgUser),
-		AssistantText:    lipgloss.NewStyle().Foreground(fgAssist),
-		SystemText:       lipgloss.NewStyle().Foreground(fgSystem).Italic(true),
-		ErrorText:        lipgloss.NewStyle().Foreground(fgError),
-		ToolHead:         lipgloss.NewStyle().Foreground(accent).Bold(true),
+		AssistantText:    lipgloss.NewStyle().Foreground(theme.FgBase),
+		SystemText:       lipgloss.NewStyle().Foreground(theme.Info).Italic(true),
+		ErrorText:        lipgloss.NewStyle().Foreground(theme.Error),
+		ToolHead:         lipgloss.NewStyle().Foreground(theme.Accent).Bold(true),
 		ToolBody:         lipgloss.NewStyle().Foreground(muted),
-		Wordmark:         lipgloss.NewStyle().Foreground(accent).Bold(true),
-		AgentIdentity:    lipgloss.NewStyle().Foreground(secondary).Bold(true),
-		Accent:           lipgloss.NewStyle().Foreground(accent).Bold(true),
+		Wordmark:         lipgloss.NewStyle().Foreground(theme.Primary).Bold(true),
+		AgentIdentity:    lipgloss.NewStyle().Foreground(theme.Secondary).Bold(true),
+		Accent:           lipgloss.NewStyle().Foreground(theme.Accent).Bold(true),
 		Muted:            lipgloss.NewStyle().Foreground(muted),
-		Rule:             lipgloss.NewStyle().Foreground(rule),
+		Rule:             lipgloss.NewStyle().Foreground(theme.BorderQuiet),
 		Border:           lipgloss.NewStyle().Foreground(border),
 		SidebarDivider:   lipgloss.NewStyle().Foreground(border),
 		SidebarHeading:   lipgloss.NewStyle().Foreground(muted).Bold(true),
 		InputBorderTop:   lipgloss.NewStyle().Foreground(border),
 		InputPlaceholder: lipgloss.NewStyle().Foreground(muted).Italic(true),
 		Footer:           lipgloss.NewStyle().Foreground(muted),
-		PermissionChip:   lipgloss.NewStyle().Foreground(accent),
-		PermissionWarn:   lipgloss.NewStyle().Foreground(warn).Bold(true),
-		ModalBorder:      lipgloss.NewStyle().Foreground(border),
-		ModalTitle:       lipgloss.NewStyle().Foreground(accent).Bold(true),
+		PermissionChip:   lipgloss.NewStyle().Foreground(theme.Accent),
+		PermissionWarn:   lipgloss.NewStyle().Foreground(theme.Warning).Bold(true),
+		ModalBorder:      lipgloss.NewStyle().Foreground(theme.BorderActive),
+		ModalTitle:       lipgloss.NewStyle().Foreground(theme.Accent).Bold(true),
 		ModalFooter:      lipgloss.NewStyle().Foreground(muted),
 	}
 }

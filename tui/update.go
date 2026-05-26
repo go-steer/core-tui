@@ -63,8 +63,9 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		return m, nil
 
 	case tea.BackgroundColorMsg:
-		m.styles = NewStyles(msg.IsDark(), m.opts.Branding)
+		m.styles = m.resolveStyles(msg.IsDark())
 		m.markdown = nil // force rebuild on next render
+		m.listCache.reset(m.viewport.Width())
 		m.refreshViewport()
 		return m, nil
 

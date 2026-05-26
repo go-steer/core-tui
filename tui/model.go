@@ -352,6 +352,28 @@ func (m Model) displayProvider() string {
 	return reporter.Status().Provider
 }
 
+// resolveStyles builds the Styles bundle for the current dark/
+// light mode + active provider. The provider tag (when wired via
+// StatusReporter) picks the per-provider theme so the brand
+// surface tints with the active model — Branding overrides
+// override the theme picks. Called from BackgroundColorMsg
+// (first-paint dark/light detect) and any time the active
+// provider could have changed (post-/model swap when we re-
+// resolve).
+func (m Model) resolveStyles(dark bool) Styles {
+	theme := ThemeForProvider(m.displayProvider(), dark)
+	if m.opts.Branding.AccentColor != "" {
+		c := lipgloss.Color(m.opts.Branding.AccentColor)
+		theme.Primary = c
+		theme.Accent = c
+		theme.BorderActive = c
+	}
+	if m.opts.Branding.SecondaryColor != "" {
+		theme.Secondary = lipgloss.Color(m.opts.Branding.SecondaryColor)
+	}
+	return NewStylesWithTheme(dark, theme)
+}
+
 // displayModelName picks the best model identifier to surface on the
 // status header/sidebar. Order:
 //
