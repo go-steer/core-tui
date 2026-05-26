@@ -42,6 +42,12 @@ import (
 // differently as Python vs Cucumber).
 var syntaxCache sync.Map
 
+// lexerCache memoizes the resolved + Coalesced chroma.Lexer per
+// language name so highlightLineUncached skips lexers.Get +
+// chroma.Coalesce on every call. Misses (unknown lang) are not
+// cached — they're pathological and re-resolution is cheap.
+var lexerCache sync.Map
+
 // chromaSyntaxStyle is the Chroma color theme used for inline
 // highlighting. github-light reads well on both light and dark
 // terminals — the foreground-only colors don't depend on the
@@ -97,16 +103,16 @@ func bgKey(bg color.Color) string {
 }
 
 // highlightLineUncached does the actual Chroma tokenize + format.
-// Coalesce merges adjacent same-type tokens so the output is
-// shorter (fewer ANSI runs); LipglossFormatter routes coloring
+// The lexer resolution + Coalesce wrap rides the lexerCache so
+// only the FIRST line for a given language pays for them; later
+// lines reuse the cached lexer. LipglossFormatter routes coloring
 // through the lipgloss color profile so 256-color / truecolor /
 // no-color terminals all get appropriate output.
 func highlightLineUncached(line, lang string, bg color.Color) string {
-	lexer := lexers.Get(lang)
+	lexer := getLexer(lang)
 	if lexer == nil {
 		return line
 	}
-	lexer = chroma.Coalesce(lexer)
 	it, err := lexer.Tokenise(nil, line)
 	if err != nil {
 		return line
@@ -118,4 +124,22 @@ func highlightLineUncached(line, lang string, bg color.Color) string {
 	// Chroma's tokenizer sometimes appends a trailing newline from
 	// the input line itself. Strip so callers get exactly one line.
 	return strings.TrimRight(buf.String(), "\n")
+}
+
+// getLexer returns the Coalesced Chroma lexer for lang, memoizing
+// the result so subsequent calls skip lexers.Get + chroma.Coalesce
+// entirely. Returns nil for unknown languages; nil results are
+// NOT cached (re-resolution is cheap and lets future Chroma
+// updates pick up newly added lexers without process restart).
+func getLexer(lang string) chroma.Lexer {
+	if v, ok := lexerCache.Load(lang); ok {
+		return v.(chroma.Lexer)
+	}
+	l := lexers.Get(lang)
+	if l == nil {
+		return nil
+	}
+	l = chroma.Coalesce(l)
+	lexerCache.Store(lang, l)
+	return l
 }

@@ -377,6 +377,51 @@ func TestRenderDiffInline_TruncatesLongLine(t *testing.T) {
 	}
 }
 
+func TestGetLexer_CachesInstance(t *testing.T) {
+	// Second call with the same lang must return the exact same
+	// lexer pointer — proves the cache short-circuits both
+	// lexers.Get and chroma.Coalesce.
+	first := getLexer("Go")
+	if first == nil {
+		t.Fatal("expected non-nil Go lexer")
+	}
+	second := getLexer("Go")
+	if first != second {
+		t.Errorf("expected cached lexer instance, got different pointer")
+	}
+}
+
+func TestGetLexer_UnknownLangReturnsNil(t *testing.T) {
+	if got := getLexer("definitely-not-a-language"); got != nil {
+		t.Errorf("expected nil for unknown lang, got %v", got)
+	}
+}
+
+func TestRenderDiffInline_GutterTintedDifferentlyOnChangedLines(t *testing.T) {
+	// + / - gutters should carry the DiffAddGutterBg / DiffDelGutterBg
+	// SGR (";48;2;...") so the gutter forms a visible "rail" next
+	// to the code bg. Smoke test: the bg colors used for the
+	// gutter MUST differ from the bg colors used for the body —
+	// otherwise the gutter is invisible.
+	diff := "@@ -1 +1 @@\n-old\n+new\n"
+	styles := NewStyles(true, Branding{})
+	got := renderDiffInline(diff, styles, 0, "")
+	// Body bg colors: DiffAddBg #1B2D1B = 27,45,27; DiffDelBg #3A1E1E = 58,30,30.
+	if !strings.Contains(got, "27;45;27") {
+		t.Errorf("expected DiffAddBg (27;45;27) in body, got:\n%q", got)
+	}
+	if !strings.Contains(got, "58;30;30") {
+		t.Errorf("expected DiffDelBg (58;30;30) in body, got:\n%q", got)
+	}
+	// Gutter bg colors: DiffAddGutterBg #102010 = 16,32,16; DiffDelGutterBg #2A1010 = 42,16,16.
+	if !strings.Contains(got, "16;32;16") {
+		t.Errorf("expected DiffAddGutterBg (16;32;16) for + gutter, got:\n%q", got)
+	}
+	if !strings.Contains(got, "42;16;16") {
+		t.Errorf("expected DiffDelGutterBg (42;16;16) for - gutter, got:\n%q", got)
+	}
+}
+
 func TestParseHunkHeader(t *testing.T) {
 	o, n, ok := parseHunkHeader("@@ -42,7 +84,9 @@")
 	if !ok || o != 42 || n != 84 {
