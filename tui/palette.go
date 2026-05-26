@@ -505,19 +505,23 @@ func (m Model) renderPaletteRow(it paletteItem, selected bool, width int) string
 		row := marker + display + strings.Repeat(" ", pad) + it.Description
 		return m.styles.Muted.Render(row)
 	case selected:
-		// Highlight the full row with a tinted background so the
-		// cursor row reads at a glance, not just the leading ">".
-		// Background fill spans the full width (pad already
-		// expands to width-2). The display text gets the theme
-		// accent + bold; the description rides muted on the same
-		// background tint so it stays subordinate but readable.
+		// Selected row: tinted background across the full width;
+		// command name in accent-bold (the FOCUS color) so the
+		// active row reads at a glance, description muted on the
+		// same tint so it stays subordinate.
 		hi := lipgloss.NewStyle().Background(m.styles.Theme.BgElevated)
-		mainText := hi.Foreground(m.styles.Theme.Accent).Bold(true).Render(marker + display)
-		descText := hi.Foreground(m.styles.Theme.FgMuted).Render(strings.Repeat(" ", pad) + it.Description)
-		return mainText + descText
+		nameStyle := hi.Foreground(m.styles.Theme.Accent).Bold(true)
+		descStyle := hi.Foreground(m.styles.Theme.FgMuted)
+		return nameStyle.Render(marker+display) +
+			descStyle.Render(strings.Repeat(" ", pad)+it.Description)
 	default:
-		row := marker + display + strings.Repeat(" ", pad) + it.Description
-		return m.styles.AssistantText.Render(row)
+		// Unselected: command name in bold pink (same identity as
+		// tool names in /tools) so the eye can scan straight down
+		// the command column without parsing the descriptions.
+		// Description stays muted to keep visual hierarchy.
+		return marker +
+			m.itemNameStyle().Render(display) +
+			m.styles.Muted.Render(strings.Repeat(" ", pad)+it.Description)
 	}
 }
 
