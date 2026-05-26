@@ -195,10 +195,17 @@ type Model struct {
 	// with the session-start instant.
 	startedAt time.Time
 
-	// modelPickerIdx is the currently-focused row in the
-	// overlayModelPicker overlay. Reset to 0 every time the picker
-	// opens; ↑/↓ adjust; Enter dispatches SwitchModel for the row.
+	// modelPickerIdx is preserved only for the inline (non-Dialog)
+	// legacy overlay render path that's still in renderOverlay's
+	// vestigial body. Real picker state now lives inside
+	// modelPickerDialog (see dialog_modelpicker.go).
 	modelPickerIdx int
+
+	// overlay is the dialog stack (agentic-tui skill §9). Model
+	// picker rides this stack; permission / elicit / sideAnswer
+	// still use their inline pendingX fields because the channel
+	// lifecycle hasn't been decoupled yet.
+	overlayStack Overlay
 }
 
 // NewModel constructs a Model from Options. SeedHistory entries are

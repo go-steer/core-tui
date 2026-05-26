@@ -186,6 +186,10 @@ func (m Model) View() tea.View {
 	case m.sideAnswer != nil:
 		modal := m.renderSideAnswer()
 		body = lipgloss.Place(m.width, m.height, lipgloss.Center, lipgloss.Center, modal)
+	case m.overlayStack.HasDialogs():
+		// Front-most Dialog wins over the vestigial enum overlay.
+		modal := m.overlayStack.Render(m.width, &m)
+		body = lipgloss.Place(m.width, m.height, lipgloss.Center, lipgloss.Center, modal)
 	case m.overlay != overlayNone:
 		modal := m.renderOverlay()
 		body = lipgloss.Place(m.width, m.height, lipgloss.Center, lipgloss.Center, modal)

@@ -146,11 +146,12 @@ func (m Model) dispatchBuiltinSlash(name, args string) (bool, tea.Model, tea.Cmd
 			return true, m, nil
 		}
 		if args == "" {
-			// No-arg form opens the interactive picker overlay
-			// (mirrors Ctrl+G). Avoids dumping a long model list
-			// into the chat when the operator wanted to choose.
-			m.overlay = overlayModelPicker
-			m.modelPickerIdx = 0
+			// No-arg form opens the interactive picker dialog
+			// (mirrors Ctrl+G). Singleton — re-open while
+			// already showing is a no-op.
+			if !m.overlayStack.HasID(modelPickerDialogID) {
+				m.overlayStack.Open(newModelPickerDialog())
+			}
 			m.input.Reset()
 			return true, m, nil
 		}

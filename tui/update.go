@@ -189,6 +189,12 @@ func (m Model) handleKey(msg tea.KeyPressMsg) (tea.Model, tea.Cmd) {
 			m.refreshViewport()
 			return m, nil
 		}
+		// Esc closes the front-most Dialog overlay (model picker).
+		if m.overlayStack.HasDialogs() {
+			m.overlayStack.CloseFront()
+			m.refreshViewport()
+			return m, nil
+		}
 		if m.overlay != overlayNone {
 			m.overlay = overlayNone
 			return m, nil
@@ -259,9 +265,20 @@ func (m Model) handleKey(msg tea.KeyPressMsg) (tea.Model, tea.Cmd) {
 		return m, nil
 	}
 
-	// Model picker overlay — exclusive while open. ↑/↓ navigate,
-	// Enter dispatches SwitchModel + PersistModelChoice, Esc cancels
-	// (handled in the Esc cascade above).
+	// Dialog overlay — front-most dialog gets every keystroke
+	// before the legacy modal cascade. Returns Consumed=true when
+	// the dialog handled it; we then return early so the key
+	// doesn't double-fire on textarea / viewport.
+	if m.overlayStack.HasDialogs() {
+		if m.overlayStack.HandleKey(stroke, &m) {
+			m.refreshViewport()
+			return m, nil
+		}
+	}
+
+	// Vestigial legacy model picker (no longer reachable — Ctrl+G
+	// + /model both go through the Dialog overlay now). Kept for
+	// transition safety; remove after next stable release.
 	if m.overlay == overlayModelPicker {
 		swapper, ok := m.opts.Agent.(ModelSwapper)
 		if !ok {
@@ -412,12 +429,11 @@ func (m Model) handleKey(msg tea.KeyPressMsg) (tea.Model, tea.Cmd) {
 		return m, nil
 
 	case "ctrl+g":
-		// Open the model picker. Only useful when the agent
-		// implements ModelSwapper; otherwise the overlay would
-		// render an empty list, so swallow the keystroke instead.
-		if _, ok := m.opts.Agent.(ModelSwapper); ok {
-			m.overlay = overlayModelPicker
-			m.modelPickerIdx = 0
+		// Open the model picker dialog. Singleton — re-press
+		// while open is a no-op (HasID check).
+		if _, ok := m.opts.Agent.(ModelSwapper); ok && !m.overlayStack.HasID(modelPickerDialogID) {
+			m.overlayStack.Open(newModelPickerDialog())
+			m.refreshViewport()
 		}
 		return m, nil
 
