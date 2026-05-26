@@ -122,8 +122,18 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		m.refreshViewport()
 		return m, spinnerTick()
 	case wakeMsg:
-		m.toast = "agent needs your attention"
+		// Transient toast says "something arrived"; permanent
+		// history entry says "this is what arrived + how to act".
+		// Wake signals are sourced from inbox pushes (subagent
+		// report_alert, etc.) — the inbox auto-drains on the
+		// next operator-initiated turn, so the only "action" is
+		// to continue working.
+		m.toast = "⚠ wake — alert in inbox · drains on next turn · /subagents for status"
 		m.toastSetAt = time.Now()
+		m.history.Append(Message{
+			Role: RoleSystem,
+			Text: "Wake signal received — an external alert (typically a background subagent's report) is waiting in the inbox. It will be prepended to the model's context on your next turn. Run /subagents to see which subagents have run recently.",
+		})
 		m.refreshViewport()
 		// Re-issue both the wake subscription (drain the next one)
 		// and a tick that auto-clears the toast after toastTTL.
