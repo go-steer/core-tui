@@ -135,7 +135,13 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	case permissionRequestMsg:
 		req := msg.req
 		m.pendingPermission = &req
-		m.refreshViewport()
+		// Inline permission layout: force-snap viewport to bottom
+		// so the prompt is visible (operator was likely watching
+		// the assistant text; the new prompt appears below it and
+		// we don't want them to miss it because they'd scrolled).
+		// Centered-overlay layout doesn't care about viewport
+		// scroll, so this is harmless either way.
+		m.refreshAndScroll()
 		return m, nil
 	case elicitRequestMsg:
 		r := msg.req

@@ -172,12 +172,13 @@ func (m Model) View() tea.View {
 		body = lipgloss.JoinVertical(lipgloss.Left, parts...)
 	}
 
-	// Overlay any active modal centered over the body. Precedence:
-	// permission > elicit > sideAnswer > demo modals. Permission and
-	// elicit gate real agent activity so they win the screen even
-	// over a /btw side-answer.
+	// Overlay any active modal centered over the body. Permission
+	// prompts render INLINE inside renderInProgress (chat flow)
+	// by default — preserves the assistant text + tool-call
+	// context the operator is approving. Hosts that prefer the
+	// centered modal flip Options.PermissionLayout = PermissionOverlay.
 	switch {
-	case m.pendingPermission != nil:
+	case m.pendingPermission != nil && m.opts.PermissionLayout == PermissionOverlay:
 		modal := m.renderPermissionModal()
 		body = lipgloss.Place(m.width, m.height, lipgloss.Center, lipgloss.Center, modal)
 	case m.pendingElicit != nil:
@@ -412,7 +413,15 @@ func (m *Model) renderInProgress() string {
 			m.inProgressStableRender = newRender
 			parts = append(parts, m.styles.AssistantText.Render(body))
 		}
-		parts = append(parts, m.renderSpinnerLine())
+		// Inline permission prompt (default layout): renders right
+		// under the streaming assistant text so the operator sees
+		// what's being approved in context. Suppresses the spinner
+		// because we're waiting on operator, not on model.
+		if m.pendingPermission != nil && m.opts.PermissionLayout == PermissionInline {
+			parts = append(parts, m.renderPermissionInline())
+		} else {
+			parts = append(parts, m.renderSpinnerLine())
+		}
 	}
 	if q := m.renderQueuePanel(); q != "" {
 		parts = append(parts, q)
@@ -912,6 +921,76 @@ func (m Model) renderToast(width int) string {
 		body += strings.Repeat(" ", width-w)
 	}
 	return m.styles.PermissionWarn.Render(body)
+}
+
+// renderPermissionInline renders the permission prompt as a
+// block inside the chat viewport flow (PermissionInline layout).
+// Uses a left rule (│) gutter to set it apart visually from the
+// surrounding chat while keeping the prompt in the natural scroll
+// position right under the tool call that triggered it.
+//
+// Same content as renderPermissionModal — header + detail + key
+// hints — but without the centered frame / dimmed surroundings.
+// Keystroke dispatch (y/n/s/v/t/a/esc) is shared; this is purely
+// the visual path.
+func (m *Model) renderPermissionInline() string {
+	req := m.pendingPermission
+	if req == nil {
+		return ""
+	}
+	width := m.viewport.Width()
+	if width <= 0 {
+		width = 80
+	}
+	const gutter = "│ "
+	bodyWidth := width - lipgloss.Width(gutter) - 1
+	if bodyWidth < 20 {
+		bodyWidth = 20
+	}
+
+	var lines []string
+	header := m.styles.Accent.Render("⚠ Permission required: " + req.ToolName)
+	lines = append(lines, header)
+	if req.Source != "" {
+		lines = append(lines, m.styles.Muted.Render("from sub-agent: "+req.Source))
+	}
+	if req.Verb != "" {
+		lines = append(lines, m.styles.Muted.Render("verb: "+req.Verb))
+	}
+	if req.Detail != "" {
+		lines = append(lines, "", m.renderPermissionDetail(req, bodyWidth))
+	}
+	keys := []string{
+		"y allow once",
+		"n deny",
+		"s allow session",
+	}
+	if req.Verb != "" {
+		keys = append(keys, "v allow verb")
+	}
+	keys = append(keys, "t allow tool", "a allow always", "esc deny")
+	lines = append(lines, "", m.styles.Muted.Render(strings.Join(keys, " "+GlyphSeparator+" ")))
+
+	// Prefix each line with the left-rule gutter (in accent so the
+	// block reads as a focused affordance, not a quiet quote).
+	rule := m.styles.Accent.Render("│ ")
+	var b strings.Builder
+	for i, line := range lines {
+		if i > 0 {
+			b.WriteByte('\n')
+		}
+		// Wrap each source line at bodyWidth so long shell commands
+		// fold cleanly under the gutter.
+		wrapped := strings.Split(wordWrap(line, bodyWidth), "\n")
+		for j, wl := range wrapped {
+			if j > 0 {
+				b.WriteByte('\n')
+			}
+			b.WriteString(rule)
+			b.WriteString(wl)
+		}
+	}
+	return b.String()
 }
 
 // renderPermissionModal renders the permission-approval prompt

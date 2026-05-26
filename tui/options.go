@@ -31,6 +31,15 @@ type Options struct {
 	// overrides still apply on top of whichever theme is picked.
 	AutoProviderTheme bool
 
+	// PermissionLayout picks how the permission prompt is rendered
+	// when the gate asks for approval (R-PERM-1). Zero value =
+	// PermissionInline: the prompt renders as a block inside the
+	// chat viewport flow, right under the tool call that triggered
+	// it, preserving the assistant context. PermissionOverlay
+	// renders a centered modal that dims the chat — more
+	// attention-grabbing, less context.
+	PermissionLayout PermissionLayout
+
 	// StatusLayout picks the status surface (R-USE-2). The initial
 	// value is whatever the host sets here; the user can flip it at
 	// runtime via Ctrl+B.
@@ -151,6 +160,21 @@ const (
 	StatusHeader StatusLayout = iota
 	// StatusSidebar places a fixed-width right-hand panel.
 	StatusSidebar
+)
+
+// PermissionLayout picks how permission prompts render (R-PERM-1).
+type PermissionLayout int
+
+const (
+	// PermissionInline (default) renders the prompt as a block
+	// inside the chat viewport flow — under the tool call that
+	// triggered it. Preserves context; the decision is part of
+	// the natural conversation scroll.
+	PermissionInline PermissionLayout = iota
+	// PermissionOverlay renders a centered modal that dims the
+	// chat. Most attention-grabbing; covers the surrounding
+	// context until the operator decides.
+	PermissionOverlay
 )
 
 // PermissionModeWiring backs the permission-mode chip (R-PERM-6 /
