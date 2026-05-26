@@ -13,9 +13,12 @@
 // limitations under the License.
 
 // Unified-diff rendering for the inline tool-display surface
-// (docs/inline-tool-display-design.md §3). Phase 1: parse +
-// render with plain Success/Error/Muted colors; syntax
-// highlighting + per-line cache land in Phase 2.
+// (docs/inline-tool-display-design.md §3). Phase 2: +/- prefixes
+// stay in flat Success/Error, hunk headers in muted italic, and
+// the BODY of each +/- line passes through the per-line syntax
+// cache when a language is detectable from the file path. Context
+// lines stay muted — syntax color on context would compete with
+// the +/- signal that actually matters.
 
 package tui
 
@@ -43,15 +46,21 @@ func computeUnifiedDiff(label, oldText, newText string) string {
 }
 
 // renderDiffInline styles a unified-diff string for inline display
-// under a tool row. Adds Success-colored `+` lines, Error-colored
-// `-` lines, Muted hunk headers, and a 4-space left indent on
+// under a tool row. Adds Success-colored `+` glyph, Error-colored
+// `-` glyph, Muted hunk headers, and a 4-space left indent on
 // every line so the block visually attaches to the tool name
 // above it.
+//
+// When `lang` is non-empty (a Chroma lexer name from detectLang),
+// the +/- BODY of each changed line passes through the per-line
+// syntax cache — the colored prefix glyph keeps diff legibility
+// while syntax tokens light up identifiers / keywords / strings.
+// Pass "" to disable highlighting entirely.
 //
 // `maxLines` caps the rendered output; lines beyond the cap are
 // dropped and replaced with a "… +N more" marker. Pass 0 for
 // no cap.
-func renderDiffInline(diff string, styles Styles, maxLines int) string {
+func renderDiffInline(diff string, styles Styles, maxLines int, lang string) string {
 	if diff == "" {
 		return ""
 	}
@@ -80,9 +89,9 @@ func renderDiffInline(diff string, styles Styles, maxLines int) string {
 		case strings.HasPrefix(line, "@@"):
 			out = append(out, indent+hunkStyle.Render(line))
 		case strings.HasPrefix(line, "+"):
-			out = append(out, indent+addStyle.Render(line))
+			out = append(out, indent+addStyle.Render("+")+highlightBody(line[1:], lang, addStyle))
 		case strings.HasPrefix(line, "-"):
-			out = append(out, indent+delStyle.Render(line))
+			out = append(out, indent+delStyle.Render("-")+highlightBody(line[1:], lang, delStyle))
 		default:
 			out = append(out, indent+ctxStyle.Render(line))
 		}
@@ -92,6 +101,18 @@ func renderDiffInline(diff string, styles Styles, maxLines int) string {
 		out = append(out, indent+styles.Muted.Render("… +"+itoa(remaining)+" more lines · ctrl+o to expand (todo)"))
 	}
 	return strings.Join(out, "\n")
+}
+
+// highlightBody returns the diff-line body styled for inline
+// display: when lang is set, route through the syntax cache so
+// keywords / strings / idents take Chroma colors; otherwise fall
+// back to the flat fallback style (Success for +, Error for -)
+// so the line still reads as a colored addition / deletion.
+func highlightBody(body, lang string, fallback lipgloss.Style) string {
+	if lang == "" {
+		return fallback.Render(body)
+	}
+	return highlightLine(body, lang)
 }
 
 // itoa is a tiny non-strconv helper so this file doesn't pull
