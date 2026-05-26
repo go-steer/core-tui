@@ -512,6 +512,19 @@ func (m Model) handleKey(msg tea.KeyPressMsg) (tea.Model, tea.Cmd) {
 	)
 	m.input, taCmd = m.input.Update(msg)
 	m.viewport, vpCmd = m.viewport.Update(msg)
+	// Auto-grow textarea: if typing (or pasting) bumped the line
+	// count, re-clamp the textarea height between min/max and
+	// re-resolve the layout so the viewport shrinks to make room.
+	// Re-snap the viewport to the bottom when the operator was
+	// already pinned there so they don't lose the in-flight tail.
+	if m.syncInputHeight() {
+		wasAtBottom := m.viewport.AtBottom()
+		m.resize()
+		m.refreshViewport()
+		if wasAtBottom {
+			m.viewport.GotoBottom()
+		}
+	}
 	// Refresh palette state from the updated input — opens a new
 	// palette on a fresh `/` or `@` trigger, closes the active one
 	// when the trigger is deleted, or updates the filter on any
@@ -661,6 +674,8 @@ func (m Model) submitTurn(text string) Model {
 	m.currentUsage = nil
 	m.currentCost = 0
 	m.currentModel = ""
+	m.inProgressStablePrefix = ""
+	m.inProgressStableRender = ""
 	m.toolActive = false
 	m.thinkingIdx = 0
 	m.spinnerActive = true
@@ -717,7 +732,8 @@ func (m *Model) applyToolCall(msg toolCallMsg) {
 	// before this tool call as its own finalized Message so the
 	// next stream chunks build up a fresh in-progress segment
 	// below the tool row. Glamour render is cached on the segment
-	// to match finalizeTurn's behavior.
+	// to match finalizeTurn's behavior. Also reset the
+	// incremental cache so the post-tool segment starts fresh.
 	if strings.TrimSpace(m.inProgressText) != "" {
 		mr := m.ensureMarkdown()
 		m.history.Append(Message{
@@ -726,6 +742,8 @@ func (m *Model) applyToolCall(msg toolCallMsg) {
 			Rendered: mr.renderMarkdown(m.inProgressText),
 		})
 		m.inProgressText = ""
+		m.inProgressStablePrefix = ""
+		m.inProgressStableRender = ""
 	}
 
 	hint := toolArgHint(msg.name, msg.args)
@@ -997,11 +1015,17 @@ func (m *Model) recallPrompt(delta int) {
 		m.historyCursor = -1
 		m.input.SetValue(m.historyDraft)
 		m.historyDraft = ""
+		if m.syncInputHeight() {
+			m.resize()
+		}
 		m.refreshViewport()
 		return
 	}
 	m.historyCursor = next
 	m.input.SetValue(m.promptHistory[next])
+	if m.syncInputHeight() {
+		m.resize()
+	}
 	m.refreshViewport()
 }
 

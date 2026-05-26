@@ -262,6 +262,29 @@ func (m *Model) resize() {
 	m.input.SetHeight(inputHeight)
 }
 
+// syncInputHeight clamps the textarea's height to its current line
+// count (between textareaMinHeight and textareaMaxHeight). Returns
+// true when the height changed so callers can trigger a layout
+// reconciliation (resize + refresh + bottom-snap if pinned).
+//
+// Called from every keystroke-forward + after any programmatic
+// input mutation so multi-line paste / typed newlines grow the
+// box visibly, and Ctrl+U / Esc-out-of-history shrinks it back.
+func (m *Model) syncInputHeight() bool {
+	desired := m.input.LineCount()
+	if desired < textareaMinHeight {
+		desired = textareaMinHeight
+	}
+	if desired > textareaMaxHeight {
+		desired = textareaMaxHeight
+	}
+	if m.input.Height() == desired {
+		return false
+	}
+	m.input.SetHeight(desired)
+	return true
+}
+
 // refreshViewport rebuilds the viewport's content from history plus
 // the in-progress assistant message (R-CHAT-4) and spinner verb
 // (R-CHAT-3). Called after any change that affects rendered text:
@@ -272,6 +295,13 @@ func (m *Model) resize() {
 // content even if they'd previously scrolled up. Autonomous paths
 // (stream chunks) use refreshViewport directly to preserve scroll.
 func (m *Model) refreshAndScroll() {
+	// Operator-initiated paths usually reset or replace the input
+	// (slash dispatch, history recall, palette insert) which can
+	// shrink the textarea back to MinHeight. Sync the height first
+	// so the viewport gets the freed-up rows in this same render.
+	if m.syncInputHeight() {
+		m.resize()
+	}
 	m.refreshViewport()
 	m.viewport.GotoBottom()
 }
@@ -344,7 +374,19 @@ func (m *Model) renderInProgress() string {
 	if m.state == stateStreaming {
 		if strings.TrimSpace(m.inProgressText) != "" {
 			mr := m.ensureMarkdown()
-			body := mr.renderMarkdown(m.inProgressText)
+			// Incremental Glamour: reuse the cached render of the
+			// stable prefix (everything up to the latest \n\n
+			// outside an open code fence) and only re-render the
+			// trailing partial on each chunk. Updates the cache
+			// fields in place so the next chunk can reuse the
+			// same stable render.
+			body, newPrefix, newRender := mr.renderIncremental(
+				m.inProgressText,
+				m.inProgressStablePrefix,
+				m.inProgressStableRender,
+			)
+			m.inProgressStablePrefix = newPrefix
+			m.inProgressStableRender = newRender
 			parts = append(parts, m.styles.AssistantText.Render(body))
 		}
 		parts = append(parts, m.renderSpinnerLine())

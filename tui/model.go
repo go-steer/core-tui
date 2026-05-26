@@ -27,6 +27,17 @@ import (
 	tea "charm.land/bubbletea/v2"
 )
 
+// textareaMinHeight / textareaMaxHeight bound the auto-growing
+// input box. The textarea starts at MinHeight and grows one row
+// per visual line until it hits MaxHeight, after which the
+// textarea's own internal scroll takes over. Layout reconciles
+// on every height change so the viewport shrinks to make room
+// (and re-scrolls if it was pinned to bottom).
+const (
+	textareaMinHeight = 3
+	textareaMaxHeight = 15
+)
+
 // turnState is the high-level activity bit the spinner and input
 // gating key off of.
 type turnState int
@@ -111,6 +122,19 @@ type Model struct {
 	currentUsage   *Usage  // most recent usage snapshot for this turn
 	currentCost    float64 // most recent positive cost for this turn (USD)
 	currentModel   string  // model name for the in-progress message
+
+	// Incremental Glamour cache for the in-progress assistant
+	// stream. inProgressStablePrefix holds the portion of
+	// inProgressText up to the latest safe boundary (\n\n outside
+	// an open code fence); inProgressStableRender holds its
+	// Glamour render. On each chunk, only the trailing partial
+	// is re-rendered + concatenated, avoiding a full re-parse of
+	// the accumulated text per token. Both reset when:
+	//   - turn finalizes (finalizeTurn)
+	//   - tool call segments the stream (applyToolCall)
+	//   - viewport width changes (ensureMarkdown rebuilds)
+	inProgressStablePrefix string
+	inProgressStableRender string
 	toolActive     bool   // true after a ToolCall; flips back on next Text
 	seenToolIDs    map[string]bool
 	thinkingIdx    int  // rotation index into ThinkingPhrases / WorkingPhrases
@@ -179,7 +203,7 @@ func NewModel(opts Options) Model {
 	}
 	ta.Prompt = ""
 	ta.ShowLineNumbers = false
-	ta.SetHeight(3)
+	ta.SetHeight(textareaMinHeight)
 	// Focus the textarea so KeyPressMsg events route to it. Focus()
 	// returns a blink Cmd we deliberately drop here — Init below
 	// returns textarea.Blink directly to start the cursor animation.
@@ -264,7 +288,10 @@ func (m Model) workingPhrases() []string {
 }
 
 // ensureMarkdown returns the cached markdown renderer, rebuilding it
-// when dark/light or width has changed since the last call.
+// when dark/light or width has changed since the last call. A rebuild
+// invalidates the incremental stream cache too, since cached prefix
+// renders are width-pinned (re-rendering them with the new width is
+// what makes resize keep the in-progress text readable).
 func (m *Model) ensureMarkdown() *markdownRenderer {
 	width := m.viewport.Width()
 	if width <= 0 {
@@ -272,6 +299,8 @@ func (m *Model) ensureMarkdown() *markdownRenderer {
 	}
 	if m.markdown == nil || m.markdown.dark != m.styles.Dark || m.markdown.width != width {
 		m.markdown = newMarkdownRenderer(m.styles.Dark, width)
+		m.inProgressStablePrefix = ""
+		m.inProgressStableRender = ""
 	}
 	return m.markdown
 }

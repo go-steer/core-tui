@@ -140,3 +140,67 @@ func (mr *markdownRenderer) renderMarkdown(text string) string {
 	}
 	return strings.TrimRight(out, "\n")
 }
+
+// splitAtSafeBoundary splits text into (stable, trailing) at the
+// latest \n\n boundary that sits OUTSIDE an open ``` code fence.
+// stable is the prefix safe to render and cache; trailing is the
+// in-flight chunk to re-render on every update. If no safe boundary
+// exists yet (mid-fence, first paragraph), returns ("", text) so
+// the caller falls back to whole-text rendering.
+//
+// Used by the incremental streaming render path so long assistant
+// responses don't re-parse + re-Glamour the entire accumulated
+// text on every token. See renderIncremental.
+func splitAtSafeBoundary(text string) (stable, trailing string) {
+	for i := strings.LastIndex(text, "\n\n"); i >= 0; {
+		candidate := text[:i+2]
+		if !insideOpenCodeFence(candidate) {
+			return candidate, text[i+2:]
+		}
+		// Earlier \n\n that might be outside the fence.
+		next := strings.LastIndex(text[:i], "\n\n")
+		if next < 0 {
+			break
+		}
+		i = next
+	}
+	return "", text
+}
+
+// insideOpenCodeFence reports whether s ends inside an unclosed
+// triple-backtick block (odd ``` count means open). Approximation:
+// indented-code blocks aren't counted; tilde-fenced blocks (~~~)
+// aren't counted. Both are rare in agent output — the stream's
+// worst case for those is one extra re-render at fence close.
+func insideOpenCodeFence(s string) bool {
+	return strings.Count(s, "```")%2 == 1
+}
+
+// renderIncremental renders text by reusing a cached render of the
+// stable prefix (everything up to the latest safe boundary) and
+// only re-Glamour-ing the trailing partial. cachedPrefix /
+// cachedRender hold the most recent stable cut; pass empty strings
+// on first call or after a width / cache reset. Returns the glued
+// result plus the new cache values so the caller can persist them.
+//
+// When no safe boundary exists yet (first paragraph mid-stream),
+// degrades to whole-text rendering each call (cache stays empty).
+func (mr *markdownRenderer) renderIncremental(text, cachedPrefix, cachedRender string) (out, newPrefix, newRender string) {
+	if mr == nil || mr.r == nil || text == "" {
+		return text, "", ""
+	}
+	stable, trailing := splitAtSafeBoundary(text)
+	if stable == "" {
+		// No safe boundary yet — render the whole thing as before.
+		return mr.renderMarkdown(text), "", ""
+	}
+	stableRender := cachedRender
+	if stable != cachedPrefix {
+		stableRender = mr.renderMarkdown(stable)
+	}
+	if trailing == "" {
+		return stableRender, stable, stableRender
+	}
+	trailingRender := mr.renderMarkdown(trailing)
+	return stableRender + "\n\n" + trailingRender, stable, stableRender
+}
