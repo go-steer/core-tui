@@ -40,13 +40,15 @@ const pricingFormKeyIn = "input"
 const pricingFormKeyOut = "output"
 
 // newPricingForm constructs the embedded huh.Form for /pricing
-// set. Three Input fields with inline validation; Enter on the
-// last field submits; Esc aborts.
-//
-// The form's theme is set to ThemeCharm — palette tweaks to
-// match per-provider theming live in a future PR (would require
-// translating Theme tokens into huh's separate theme struct).
-func newPricingForm(initialModel string) *huh.Form {
+// set at the given total form width (the modal frame caller adds
+// border + padding on top). Three Input fields with inline
+// validation; Enter on the last field submits; Esc aborts (we
+// intercept Esc before forwarding to the form — huh's default
+// Quit binding is ctrl+c only).
+func newPricingForm(initialModel string, width int) *huh.Form {
+	if width < 40 {
+		width = 40
+	}
 	form := huh.NewForm(
 		huh.NewGroup(
 			huh.NewInput().
@@ -71,7 +73,10 @@ func newPricingForm(initialModel string) *huh.Form {
 				Placeholder("e.g. 5.00").
 				Validate(validatePositiveFloat),
 		),
-	).WithShowHelp(false).WithTheme(huh.ThemeFunc(huh.ThemeCharm))
+	).
+		WithShowHelp(false).
+		WithTheme(huh.ThemeFunc(huh.ThemeCharm)).
+		WithWidth(width)
 	return form
 }
 
@@ -97,8 +102,20 @@ func validatePositiveFloat(s string) error {
 // + closes; on StateAborted: closes silently. The returned Cmd
 // is whatever huh.Form's Update emitted (typically a cursor
 // blink tick).
+//
+// Esc intercept: huh's default Quit binding is ctrl+c only and
+// individual fields don't bind Esc as an abort. We pre-empt the
+// Esc keystroke so the form behaves like every other TUI modal
+// (Esc cancels).
 func (m *Model) updatePricingForm(msg tea.Msg) tea.Cmd {
 	if m.pendingForm == nil {
+		return nil
+	}
+	if k, ok := msg.(tea.KeyPressMsg); ok && k.String() == "esc" {
+		m.pendingForm = nil
+		m.history.Append(Message{Role: RoleSystem, Text: "/pricing set: cancelled"})
+		m.resize()
+		m.refreshAndScroll()
 		return nil
 	}
 	updated, cmd := m.pendingForm.Update(msg)

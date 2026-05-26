@@ -403,7 +403,14 @@ func (m *Model) handlePricing(ctrl PricingController, args string) string {
 			// No positional args → open the embedded huh form.
 			// updatePricingForm dispatches PricingController.Set
 			// on submit, so we don't echo anything from here.
-			m.pendingForm = newPricingForm(m.displayModelName())
+			// Form width: clamp to a comfortable max but never
+			// wider than the modal can hold (border + padding eat
+			// ~6 cols).
+			formWidth := m.viewport.Width() - 8
+			if formWidth > 72 {
+				formWidth = 72
+			}
+			m.pendingForm = newPricingForm(m.displayModelName(), formWidth)
 			return "/pricing: opening form (esc cancels)"
 		}
 		if len(fields) != 3 {
