@@ -40,6 +40,12 @@ type Message struct {
 	// ToolName, ToolArgs populated when Role == RoleTool.
 	ToolName string
 	ToolArgs string
+	// ToolPreview is the multi-line block that renders under the
+	// tool row when the tool call has previewable content (unified
+	// diff for apply_patch / edit_file, future read metadata).
+	// Pre-computed at applyToolCall time so the lazy-list cache
+	// caches it as part of the row. Empty = no preview.
+	ToolPreview string
 
 	// Per-turn metadata populated by the TUI on the final assistant
 	// Message of each turn so the renderer can append a one-line

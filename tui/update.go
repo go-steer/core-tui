@@ -831,9 +831,10 @@ func (m *Model) applyToolCall(msg toolCallMsg) {
 		m.history.BumpVersion(m.activeToolID)
 	}
 	m.history.Append(Message{
-		Role:     RoleTool,
-		ToolName: msg.name,
-		ToolArgs: hint,
+		Role:        RoleTool,
+		ToolName:    msg.name,
+		ToolArgs:    hint,
+		ToolPreview: renderToolPreview(msg.name, msg.args, m.styles),
 	})
 	m.activeToolID = m.history.LastID()
 	m.toolActive = true
