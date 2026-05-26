@@ -55,11 +55,11 @@ func TestPalette_FilterFourTierFiles(t *testing.T) {
 	p := &palette{
 		kind: paletteFile,
 		items: []paletteItem{
-			{Name: "lib/domain.go"},              // tier 4: substring "main" inside "domain"
-			{Name: "cmd/main/run.go"},            // tier 3: path-segment "main"
-			{Name: "main_test.go"},               // tier 2: basename prefix "main"
-			{Name: "main.go"},                    // tier 1: exact basename "main" (well, "main.go" basename — not exact)
-			{Name: "main"},                       // tier 1: exact basename "main"
+			{Name: "lib/domain.go"},   // tier 4: substring "main" inside "domain"
+			{Name: "cmd/main/run.go"}, // tier 3: path-segment "main"
+			{Name: "main_test.go"},    // tier 2: basename prefix "main"
+			{Name: "main.go"},         // tier 1: exact basename "main" (well, "main.go" basename — not exact)
+			{Name: "main"},            // tier 1: exact basename "main"
 		},
 	}
 	p.filter = "main"

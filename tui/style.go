@@ -34,12 +34,12 @@ var (
 
 // Glyph vocabulary (style.md §2). One anchor glyph per row, ever.
 const (
-	GlyphModel       = "◇"
+	GlyphModel = "◇"
 	// GlyphTool is the inline marker for completed tool calls.
 	// Single-cell, text-class (not emoji-class) so terminals
 	// render it in the foreground color we asked for instead of
 	// the system emoji default.
-	GlyphTool        = "›"
+	GlyphTool = "›"
 	// GlyphToolActive is the inline marker for the in-flight
 	// tool call (the most recent RoleTool that hasn't been
 	// followed by any text yet). Solid right-pointer reads as

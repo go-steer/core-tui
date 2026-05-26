@@ -121,7 +121,7 @@ type Model struct {
 	state          turnState
 	cancelTurn     context.CancelFunc // non-nil while state == stateStreaming
 	turnStarted    time.Time
-	inProgressText string // accumulator for streamed tokens
+	inProgressText string  // accumulator for streamed tokens
 	currentUsage   *Usage  // most recent usage snapshot for this turn
 	currentCost    float64 // most recent positive cost for this turn (USD)
 	currentModel   string  // model name for the in-progress message
@@ -145,10 +145,10 @@ type Model struct {
 	//   - viewport width changes (ensureMarkdown rebuilds)
 	inProgressStablePrefix string
 	inProgressStableRender string
-	toolActive     bool   // true after a ToolCall; flips back on next Text
-	seenToolIDs    map[string]bool
-	thinkingIdx    int  // rotation index into ThinkingPhrases / WorkingPhrases
-	spinnerActive  bool // gates spinner tick scheduling
+	toolActive             bool // true after a ToolCall; flips back on next Text
+	seenToolIDs            map[string]bool
+	thinkingIdx            int  // rotation index into ThinkingPhrases / WorkingPhrases
+	spinnerActive          bool // gates spinner tick scheduling
 
 	// queue is the per-session prompt queue (R-CHAT-10). Each entry
 	// transitions through Queued → InFlight → Done / Failed and
@@ -188,9 +188,9 @@ type Model struct {
 	// matches the immediate previous entry). historyCursor walks
 	// the buffer when the operator presses ↑/↓ on an empty input.
 	// -1 = not navigating.
-	promptHistory  []string
-	historyCursor  int
-	historyDraft   string // user's in-flight input saved before navigation
+	promptHistory []string
+	historyCursor int
+	historyDraft  string // user's in-flight input saved before navigation
 
 	// startedAt is the wall-clock time the TUI launched. Used by
 	// the transcript-on-exit hook so saved files name themselves
