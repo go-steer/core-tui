@@ -325,8 +325,13 @@ func (m *Model) renderKeysDiagnostic() string {
 	}
 
 	b.WriteString("\nWhich one works depends on the terminal:\n")
-	b.WriteString("  • VS Code integrated terminal: alt+enter (run /terminal-setup once)\n")
-	b.WriteString("  • kitty / wezterm / iTerm2 with keyboard-enhancement: shift+enter\n")
+	b.WriteString("  • VS Code integrated terminal: alt+enter — requires a keybindings.json\n")
+	b.WriteString("    entry binding shift+enter to send `\\u001b\\r` when terminalFocus,\n")
+	b.WriteString("    e.g.:\n")
+	b.WriteString("        { \"key\": \"shift+enter\", \"command\": \"workbench.action.terminal.sendSequence\",\n")
+	b.WriteString("          \"args\": { \"text\": \"\\u001b\\r\" },\n")
+	b.WriteString("          \"when\": \"terminalFocus\" }\n")
+	b.WriteString("  • kitty / wezterm / iTerm2 with keyboard-enhancement: shift+enter works natively\n")
 	b.WriteString("  • everything else (gnome-terminal, alacritty, tmux): ctrl+j\n")
 	b.WriteString("\nTip: the footer hint auto-updates to the first combo you actually use.")
 	return strings.TrimRight(b.String(), "\n")
