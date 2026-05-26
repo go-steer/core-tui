@@ -26,6 +26,8 @@ package tui
 
 import (
 	"bytes"
+	"fmt"
+	"image/color"
 	"strings"
 	"sync"
 
@@ -64,20 +66,34 @@ func detectLang(label string) string {
 
 // highlightLine returns the syntax-highlighted form of line for
 // the given language, or line unchanged when lang is empty / the
-// lexer isn't found / highlighting errors. Caches every successful
-// render so subsequent calls with the same (lang, line) are a
-// single map lookup.
-func highlightLine(line, lang string) string {
+// lexer isn't found / highlighting errors. When bg is non-nil,
+// every token carries it as a background through the Lipgloss
+// formatter so adjacent tokens render as one continuous tinted
+// strip (used for + / - lines in inline diffs). Caches every
+// successful render so subsequent calls with the same
+// (lang, bg, line) are a single map lookup.
+func highlightLine(line, lang string, bg color.Color) string {
 	if lang == "" || line == "" {
 		return line
 	}
-	key := lang + "\x00" + line
+	key := lang + "\x00" + bgKey(bg) + "\x00" + line
 	if v, ok := syntaxCache.Load(key); ok {
 		return v.(string)
 	}
-	out := highlightLineUncached(line, lang)
+	out := highlightLineUncached(line, lang, bg)
 	syntaxCache.Store(key, out)
 	return out
+}
+
+// bgKey produces a stable cache-key fragment for a background
+// color. Lipgloss colors stringify to their hex form, so different
+// theme bgs (dark vs light, add vs del) bucket separately without
+// extra type assertions.
+func bgKey(bg color.Color) string {
+	if bg == nil {
+		return ""
+	}
+	return fmt.Sprintf("%v", bg)
 }
 
 // highlightLineUncached does the actual Chroma tokenize + format.
@@ -85,7 +101,7 @@ func highlightLine(line, lang string) string {
 // shorter (fewer ANSI runs); LipglossFormatter routes coloring
 // through the lipgloss color profile so 256-color / truecolor /
 // no-color terminals all get appropriate output.
-func highlightLineUncached(line, lang string) string {
+func highlightLineUncached(line, lang string, bg color.Color) string {
 	lexer := lexers.Get(lang)
 	if lexer == nil {
 		return line
@@ -96,7 +112,7 @@ func highlightLineUncached(line, lang string) string {
 		return line
 	}
 	var buf bytes.Buffer
-	if err := LipglossFormatter(nil).Format(&buf, chromaSyntaxStyle, it); err != nil {
+	if err := LipglossFormatter(bg).Format(&buf, chromaSyntaxStyle, it); err != nil {
 		return line
 	}
 	// Chroma's tokenizer sometimes appends a trailing newline from

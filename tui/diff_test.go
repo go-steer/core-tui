@@ -17,6 +17,8 @@ package tui
 import (
 	"strings"
 	"testing"
+
+	"charm.land/lipgloss/v2"
 )
 
 func TestComputeUnifiedDiff_NoChange(t *testing.T) {
@@ -141,7 +143,7 @@ func TestDetectLang_NoMatch(t *testing.T) {
 }
 
 func TestHighlightLine_EmptyLang(t *testing.T) {
-	got := highlightLine("func main() {}", "")
+	got := highlightLine("func main() {}", "", nil)
 	if got != "func main() {}" {
 		t.Errorf("expected unchanged line for empty lang, got %q", got)
 	}
@@ -151,7 +153,7 @@ func TestHighlightLine_KnownLang_DiffersFromInput(t *testing.T) {
 	// Smoke test: highlighted output must contain the original
 	// tokens but should differ in length (ANSI codes added).
 	in := "func main() {}"
-	got := highlightLine(in, "Go")
+	got := highlightLine(in, "Go", nil)
 	if got == in {
 		t.Errorf("expected highlighted output to differ from input for Go, got identical %q", got)
 	}
@@ -162,10 +164,21 @@ func TestHighlightLine_KnownLang_DiffersFromInput(t *testing.T) {
 
 func TestHighlightLine_CacheReturnsSameValue(t *testing.T) {
 	in := "x := 1"
-	first := highlightLine(in, "Go")
-	second := highlightLine(in, "Go")
+	first := highlightLine(in, "Go", nil)
+	second := highlightLine(in, "Go", nil)
 	if first != second {
 		t.Errorf("expected cache to return identical output for same (lang, line)")
+	}
+}
+
+func TestHighlightLine_DifferentBgsCacheSeparately(t *testing.T) {
+	// Different bg colors should produce different output (the bg
+	// SGR differs) and bucket as separate cache entries.
+	in := "x := 1"
+	noBg := highlightLine(in, "Go", nil)
+	withBg := highlightLine(in, "Go", lipgloss.Color("#1B2D1B"))
+	if noBg == withBg {
+		t.Errorf("expected different output for nil vs colored bg, both:\n%q", noBg)
 	}
 }
 
@@ -301,5 +314,80 @@ func TestRenderDiffInline_WithLang_HighlightsBody(t *testing.T) {
 	highlighted := renderDiffInline(diff, styles, 0, "Go")
 	if plain == highlighted {
 		t.Errorf("expected highlighted output to differ from plain, both:\n%q", plain)
+	}
+}
+
+func TestRenderDiffInline_HasLineNumbers(t *testing.T) {
+	// Hunk header @@ -42,1 +84,1 @@ should seed the gutter counters
+	// so the - line shows 42 and the + line shows 84.
+	diff := "@@ -42,1 +84,1 @@\n-old\n+new\n"
+	styles := NewStyles(true, Branding{})
+	got := renderDiffInline(diff, styles, 0, "")
+	if !strings.Contains(got, "42 │") {
+		t.Errorf("expected '-' line gutter '42 │', got:\n%q", got)
+	}
+	if !strings.Contains(got, "84 │") {
+		t.Errorf("expected '+' line gutter '84 │', got:\n%q", got)
+	}
+}
+
+func TestRenderDiffInline_ContextLineAdvancesBothCounters(t *testing.T) {
+	// Context lines bump both old and new counters; the next
+	// changed line should start at +1 from the hunk anchor.
+	diff := "@@ -10,2 +10,2 @@\n unchanged\n-old\n+new\n"
+	styles := NewStyles(true, Branding{})
+	got := renderDiffInline(diff, styles, 0, "")
+	// context line is 10; -old should be 11; +new should be 11
+	if !strings.Contains(got, "10 │") {
+		t.Errorf("expected context gutter '10 │', got:\n%q", got)
+	}
+	if !strings.Contains(got, "11 │") {
+		t.Errorf("expected changed-line gutter '11 │', got:\n%q", got)
+	}
+}
+
+func TestRenderDiffInline_AppliesBackgroundColor(t *testing.T) {
+	// + / - lines should carry the DiffAddBg / DiffDelBg as a
+	// bg SGR (";48;2;..."). Lipgloss compounds multiple SGRs
+	// into one escape (e.g. "\x1b[1;38;2;...;48;2;...m"), so we
+	// look for the bg parameter substring anywhere in output.
+	diff := "@@ -1 +1 @@\n-old\n+new\n"
+	styles := NewStyles(true, Branding{})
+	got := renderDiffInline(diff, styles, 0, "")
+	if !strings.Contains(got, ";48;2;") {
+		t.Errorf("expected background SGR (;48;2;...) in output, got:\n%q", got)
+	}
+}
+
+func TestRenderDiffInline_TruncatesLongLine(t *testing.T) {
+	// A single body line longer than perLineByteCap should
+	// truncate with "…" so a minified payload doesn't blow up
+	// the preview area.
+	longBody := strings.Repeat("x", perLineByteCap*2)
+	diff := "@@ -1 +1 @@\n-" + longBody + "\n+short\n"
+	styles := NewStyles(true, Branding{})
+	got := renderDiffInline(diff, styles, 0, "")
+	if !strings.Contains(got, "…") {
+		t.Errorf("expected truncation marker '…' on long body, got len=%d", len(got))
+	}
+	// And it should NOT contain the full repeated body in one
+	// contiguous run.
+	if strings.Contains(got, strings.Repeat("x", perLineByteCap+1)) {
+		t.Errorf("expected long body to be truncated, found full payload")
+	}
+}
+
+func TestParseHunkHeader(t *testing.T) {
+	o, n, ok := parseHunkHeader("@@ -42,7 +84,9 @@")
+	if !ok || o != 42 || n != 84 {
+		t.Errorf("expected (42, 84, true), got (%d, %d, %v)", o, n, ok)
+	}
+	o, n, ok = parseHunkHeader("@@ -1 +1 @@ func foo()")
+	if !ok || o != 1 || n != 1 {
+		t.Errorf("expected (1, 1, true) for single-line hunk, got (%d, %d, %v)", o, n, ok)
+	}
+	_, _, ok = parseHunkHeader("not a hunk")
+	if ok {
+		t.Errorf("expected ok=false for malformed header")
 	}
 }
