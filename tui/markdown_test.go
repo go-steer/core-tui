@@ -21,10 +21,10 @@ import "testing"
 // code fence; trailing is the in-flight chunk.
 func TestSplitAtSafeBoundary(t *testing.T) {
 	cases := []struct {
-		name             string
-		input            string
-		wantStable       string
-		wantTrailing     string
+		name         string
+		input        string
+		wantStable   string
+		wantTrailing string
 	}{
 		{
 			name:         "no boundary yet",

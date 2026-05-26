@@ -24,8 +24,8 @@ import (
 	"strings"
 	"time"
 
-	"charm.land/lipgloss/v2"
 	tea "charm.land/bubbletea/v2"
+	"charm.land/lipgloss/v2"
 )
 
 // dispatchBuiltinSlash handles every slash command the TUI owns

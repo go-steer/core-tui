@@ -300,10 +300,10 @@ func (p *palette) triggerRune() string {
 // filtered returns the subset of items matching filter, ranked
 // across four tiers (agentic-tui skill §8.B):
 //
-//	1. exact basename match           ("main" → "main.go")
-//	2. basename prefix match          ("main" → "main_test.go")
-//	3. path-segment exact match       ("main" → "cmd/main/run.go")
-//	4. fuzzy substring                ("main" → "models/main_factory.go")
+//  1. exact basename match           ("main" → "main.go")
+//  2. basename prefix match          ("main" → "main_test.go")
+//  3. path-segment exact match       ("main" → "cmd/main/run.go")
+//  4. fuzzy substring                ("main" → "models/main_factory.go")
 //
 // Ties are broken by shorter path (prefer items closer to repo
 // root). Empty filter returns items in original order. All matches
