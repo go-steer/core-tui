@@ -173,7 +173,7 @@ Threshold (tentative): **8 lines visible by default**.
 | Preview length | Default render | Operator escape hatch |
 |---|---|---|
 | 0-8 lines | Full preview inline | n/a |
-| 9-50 lines | First 6 lines + `… +N lines · tab to expand` | Tab on focused row (needs message-cursor; v1 = no expand, just truncate) |
+| 9-50 lines | First 6 lines + `… +N lines · ctrl+o to expand` | Ctrl+O on focused row (needs message-cursor; v1 = no expand, just truncate) |
 | 50+ lines | First 6 lines + `… +N lines · large preview suppressed` | `/diff <message-id>` slash command to dump in a system message (v2) |
 
 Each preview line is prefixed with the standard 4-space indent (matches
@@ -227,8 +227,11 @@ type Expandable interface {
 }
 ```
 
-When implemented, `Tab` on the focused message expands the preview.
-For v1 we skip this and use the 6/50-line truncation thresholds.
+When implemented, `Ctrl+O` on the focused message expands the
+preview (mirrors Claude Code's expand-collapsed-output binding;
+`Tab` is reserved for palette completion + huh form field nav, so
+it'd collide). For v1 we skip the expand entirely and use the
+6/50-line truncation thresholds.
 
 ## 10. Phasing
 
@@ -259,7 +262,7 @@ Three commits (~400 lines total):
 - Tool result rendering generally — agent events don't deliver tool
   RESULTS as separate events today; preview-on-call (what THIS design
   handles) is the visible win without that plumbing.
-- Mouse interaction (click to expand) — keyboard Tab is enough for v2.
+- Mouse interaction (click to expand) — keyboard Ctrl+O is enough for v2.
 - Streaming preview (showing the diff as the agent's tokens build it
   up) — adds substantial complexity for marginal gain.
 - `/diff <message-id>` slash for dumping a large preview as a system
