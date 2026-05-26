@@ -172,7 +172,7 @@ func renderGrepResult(response map[string]any, styles Styles) string {
 			if i > 0 {
 				b.WriteString("\n")
 			}
-			b.WriteString(indent + styles.Muted.Render(truncateBytes(m, perLineByteCap)))
+			b.WriteString(indent + styles.Muted.Render(truncateBytes(m)))
 		}
 		if len(matches) > resultLineCap {
 			b.WriteString("\n" + indent + styles.Muted.Render(fmt.Sprintf("… +%d more matches", len(matches)-resultLineCap)))
@@ -231,7 +231,7 @@ func renderBashResult(response map[string]any, styles Styles) string {
 		}
 		errStyle := lipgloss.NewStyle().Foreground(styles.Theme.Warning)
 		first := firstLine(stderr)
-		b.WriteString(indent + errStyle.Render("stderr: ") + styles.Muted.Render(truncateBytes(first, perLineByteCap)))
+		b.WriteString(indent + errStyle.Render("stderr: ") + styles.Muted.Render(truncateBytes(first)))
 	}
 	if exit, ok := intArg(response, "exit_code", "exit", "returncode"); ok && exit != 0 {
 		if b.Len() > 0 {
@@ -311,7 +311,7 @@ func renderCodeInline(content string, styles Styles, maxLines int, lang string) 
 			truncatedAt = i
 			break
 		}
-		body := truncateBytes(line, perLineByteCap)
+		body := truncateBytes(line)
 		if lang != "" {
 			body = highlightLine(body, lang, nil)
 		} else {

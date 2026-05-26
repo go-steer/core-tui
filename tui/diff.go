@@ -106,19 +106,19 @@ func renderDiffInline(diff string, styles Styles, maxLines int, lang string) str
 			}
 			out = append(out, indent+gutterStyle.Render(emptyGutter)+hunkStyle.Render(line))
 		case strings.HasPrefix(line, "+"):
-			body := truncateBytes(line[1:], perLineByteCap)
+			body := truncateBytes(line[1:])
 			rendered := highlightOrFlat(body, lang, addBg, addBodyFallback)
 			gutter := formatGutter(newNo)
 			out = append(out, indent+addGutterStyle.Render(gutter)+addPrefixStyle.Render("+")+rendered)
 			newNo++
 		case strings.HasPrefix(line, "-"):
-			body := truncateBytes(line[1:], perLineByteCap)
+			body := truncateBytes(line[1:])
 			rendered := highlightOrFlat(body, lang, delBg, delBodyFallback)
 			gutter := formatGutter(oldNo)
 			out = append(out, indent+delGutterStyle.Render(gutter)+delPrefixStyle.Render("-")+rendered)
 			oldNo++
 		default:
-			body := truncateBytes(line, perLineByteCap)
+			body := truncateBytes(line)
 			gutter := formatGutter(newNo)
 			out = append(out, indent+gutterStyle.Render(gutter)+ctxStyle.Render(body))
 			oldNo++
@@ -143,17 +143,17 @@ func highlightOrFlat(body, lang string, bg color.Color, fallback lipgloss.Style)
 	return highlightLine(body, lang, bg)
 }
 
-// truncateBytes shortens s to at most max bytes, appending "…"
-// when it had to trim. Operates on raw bytes (not runes) because
-// the cap exists to bound terminal damage from pathological
-// payloads (minified JS, encoded blobs) — a multi-byte boundary
-// split would be visually messy but not catastrophic, and the
-// cap should still hold.
-func truncateBytes(s string, max int) string {
-	if max <= 0 || len(s) <= max {
+// truncateBytes shortens s to at most perLineByteCap bytes,
+// appending "…" when it had to trim. Operates on raw bytes (not
+// runes) because the cap exists to bound terminal damage from
+// pathological payloads (minified JS, encoded blobs) — a multi-
+// byte boundary split would be visually messy but not
+// catastrophic, and the cap should still hold.
+func truncateBytes(s string) string {
+	if len(s) <= perLineByteCap {
 		return s
 	}
-	return s[:max] + "…"
+	return s[:perLineByteCap] + "…"
 }
 
 // formatGutter renders the 5-digit right-aligned line-number
