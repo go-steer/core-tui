@@ -112,6 +112,7 @@ func builtinSlashItems() []paletteItem {
 		{Name: "permissions", Description: "review session approvals", Available: true},
 		{Name: "pricing", Description: "manage pricing (refresh / set)", Available: true},
 		{Name: "reload", Description: "rebuild agent from disk", Available: true},
+		{Name: "resume", Description: "list / load a saved session transcript", Available: true},
 		{Name: "skills", Description: "loaded skill bundles", Available: true},
 		{Name: "stats", Description: "per-turn + session usage totals", Available: true},
 		{Name: "subagents", Description: "list background subagents", Available: true},

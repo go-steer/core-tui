@@ -31,6 +31,7 @@ import (
 	"io/fs"
 	"os"
 	"path/filepath"
+	"sort"
 	"strings"
 	"time"
 )
@@ -175,4 +176,112 @@ func roleString(r Role) string {
 		return "tool"
 	}
 	return "unknown"
+}
+
+// roleFromString is the inverse of roleString — used by
+// LoadTranscript to rebuild Message.Role from the on-disk
+// lowercase tag. Unknown tags become RoleSystem so they at
+// least render as something muted.
+func roleFromString(s string) Role {
+	switch s {
+	case "user":
+		return RoleUser
+	case "assistant":
+		return RoleAssistant
+	case "error":
+		return RoleError
+	case "tool":
+		return RoleTool
+	default:
+		return RoleSystem
+	}
+}
+
+// LoadTranscript reads a transcript JSON file from disk. Returns
+// the decoded Transcript ready for ApplyTranscript. Errors
+// propagate as-is so the caller (slash dispatcher) can surface
+// them inline.
+func LoadTranscript(path string) (Transcript, error) {
+	data, err := os.ReadFile(path)
+	if err != nil {
+		return Transcript{}, err
+	}
+	var t Transcript
+	if err := json.Unmarshal(data, &t); err != nil {
+		return Transcript{}, fmt.Errorf("transcript: parse %s: %w", path, err)
+	}
+	return t, nil
+}
+
+// ListTranscripts returns every transcript file under
+// <agentsDir>/sessions, most-recent first by modification time.
+// Empty agentsDir or missing dir returns ([], nil) — no error,
+// just no sessions to surface.
+func ListTranscripts(agentsDir string) ([]TranscriptInfo, error) {
+	if agentsDir == "" {
+		return nil, nil
+	}
+	dir := filepath.Join(agentsDir, transcriptSessionsDir)
+	entries, err := os.ReadDir(dir)
+	if err != nil {
+		if os.IsNotExist(err) {
+			return nil, nil
+		}
+		return nil, err
+	}
+	out := make([]TranscriptInfo, 0, len(entries))
+	for _, e := range entries {
+		if e.IsDir() || !strings.HasSuffix(e.Name(), ".json") {
+			continue
+		}
+		info, ierr := e.Info()
+		if ierr != nil {
+			continue
+		}
+		abs, _ := filepath.Abs(filepath.Join(dir, e.Name()))
+		out = append(out, TranscriptInfo{
+			Path:    abs,
+			Name:    e.Name(),
+			Size:    info.Size(),
+			ModTime: info.ModTime(),
+		})
+	}
+	sort.Slice(out, func(i, j int) bool {
+		return out[i].ModTime.After(out[j].ModTime)
+	})
+	return out, nil
+}
+
+// TranscriptInfo is one entry in the /resume picker.
+type TranscriptInfo struct {
+	Path    string
+	Name    string
+	Size    int64
+	ModTime time.Time
+}
+
+// ApplyTranscript replaces the model's history with the loaded
+// transcript's messages and re-renders any assistant markdown at
+// the current viewport width so wrapping is correct. The list
+// cache is reset so the next refreshViewport regenerates every
+// row from the new identities.
+//
+// Doesn't restore the in-flight turn, queue, or modal state — a
+// resumed session starts idle.
+func (m *Model) ApplyTranscript(t Transcript) {
+	m.history.Reset()
+	mr := m.ensureMarkdown()
+	for _, msg := range t.Messages {
+		role := roleFromString(msg.Role)
+		entry := Message{Role: role, Text: msg.Text}
+		if role == RoleAssistant && mr != nil && msg.Text != "" {
+			entry.Rendered = mr.renderMarkdown(msg.Text)
+		}
+		m.history.Append(entry)
+	}
+	// Width-keyed caches must drop so the new ID space gets
+	// fresh entries (old entries are pinned to pre-resume IDs).
+	if m.listCache != nil {
+		m.listCache.reset(m.viewport.Width())
+	}
 }

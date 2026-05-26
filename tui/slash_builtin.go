@@ -17,6 +17,8 @@ package tui
 import (
 	"context"
 	"fmt"
+	"os"
+	"path/filepath"
 	"sort"
 	"strconv"
 	"strings"
@@ -248,6 +250,13 @@ func (m Model) dispatchBuiltinSlash(name, args string) (bool, tea.Model, tea.Cmd
 		m.refreshAndScroll()
 		return true, m, nil
 
+	case "resume":
+		text := m.handleResume(args)
+		m.history.Append(Message{Role: RoleSystem, Text: text})
+		m.input.Reset()
+		m.refreshAndScroll()
+		return true, m, nil
+
 	case "allow":
 		text := m.handleAllowDeny(args, "allow")
 		m.history.Append(Message{Role: RoleSystem, Text: text})
@@ -264,6 +273,58 @@ func (m Model) dispatchBuiltinSlash(name, args string) (bool, tea.Model, tea.Cmd
 	}
 
 	return false, m, nil
+}
+
+// handleResume implements /resume:
+//
+//	/resume          → list recent transcripts under AgentsDir/sessions
+//	/resume <path>   → load that transcript into the current model
+//
+// Loading replaces history wholesale + re-renders assistant
+// markdown at the current viewport width (ApplyTranscript handles
+// the cache reset). Doesn't restore in-flight turn / queue /
+// modal state — a resumed session starts idle.
+func (m *Model) handleResume(args string) string {
+	args = strings.TrimSpace(args)
+	if m.opts.AgentsDir == "" {
+		return "/resume: no AgentsDir wired (host did not pass Options.AgentsDir)"
+	}
+	if args == "" {
+		infos, err := ListTranscripts(m.opts.AgentsDir)
+		if err != nil {
+			return "/resume: list failed: " + err.Error()
+		}
+		if len(infos) == 0 {
+			return "/resume: no saved sessions in " + m.opts.AgentsDir + "/sessions"
+		}
+		var b strings.Builder
+		fmt.Fprintf(&b, "Saved sessions (%d) — use /resume <path>:\n\n", len(infos))
+		for i, info := range infos {
+			if i >= 10 {
+				fmt.Fprintf(&b, "  %s and %d older\n", GlyphTruncate, len(infos)-10)
+				break
+			}
+			fmt.Fprintf(&b, "  %s %s  %s  %s\n",
+				GlyphCollapsed,
+				m.itemNameStyle().Render(info.Name),
+				m.styles.Muted.Render(formatFileSize(info.Size)),
+				m.styles.Muted.Render(info.ModTime.Format("2006-01-02 15:04")),
+			)
+		}
+		return strings.TrimRight(b.String(), "\n")
+	}
+	// Argument is a path. Accept absolute, relative-to-cwd, or a
+	// bare filename (resolved against AgentsDir/sessions).
+	path := args
+	if _, err := os.Stat(path); err != nil {
+		path = filepath.Join(m.opts.AgentsDir, transcriptSessionsDir, args)
+	}
+	t, err := LoadTranscript(path)
+	if err != nil {
+		return "/resume: " + err.Error()
+	}
+	m.ApplyTranscript(t)
+	return fmt.Sprintf("/resume: loaded %s (%d messages, model=%s)", filepath.Base(path), len(t.Messages), t.Model)
 }
 
 // handleAllowDeny dispatches /allow + /deny to the PermissionController
