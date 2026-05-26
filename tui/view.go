@@ -42,22 +42,57 @@ func wordWrap(s string, width int) string {
 	return ansi.Wordwrap(s, width, " -")
 }
 
-// wordWrapIndent wraps s and prefixes continuation lines with indent
-// so wrapped text aligns past the role glyph (e.g. "  " for `❯ `
-// prefixed user messages, "   " for system/error rows). The first
-// line is rendered as-is so it sits flush under the prefix; only
-// the lines that ansi.Wordwrap created get the indent. Width <= 0
-// returns s unchanged (parity with internal/tui:477-490).
+// wordWrapIndent wraps s line-by-line at width and prefixes each
+// non-first source line with indent. The wrap is hanging-aware:
+// wrap-introduced continuations inherit BOTH the role indent AND
+// the source line's own leading whitespace, so a "      long
+// description" that overflows wraps to a continuation also at
+// column 6 + role indent, not at column 0 + role indent.
+//
+// Width <= 0 returns s unchanged. Mirrors internal/tui's
+// wrapForChat (model.go:477-490).
 func wordWrapIndent(s string, width int, indent string) string {
-	wrapped := wordWrap(s, width)
-	if indent == "" || !strings.Contains(wrapped, "\n") {
-		return wrapped
+	if width <= 0 {
+		return s
 	}
-	lines := strings.Split(wrapped, "\n")
-	for i := 1; i < len(lines); i++ {
-		lines[i] = indent + lines[i]
+	sourceLines := strings.Split(s, "\n")
+	var out strings.Builder
+	for i, sl := range sourceLines {
+		if i > 0 {
+			out.WriteByte('\n')
+		}
+		// Pull the leading whitespace off this source line so we can
+		// reapply it as the hanging indent on wrap-introduced
+		// continuations. byte-iteration is fine — leading whitespace
+		// is ASCII space / tab, never multi-byte.
+		leading := ""
+		for j := 0; j < len(sl); j++ {
+			if sl[j] != ' ' && sl[j] != '\t' {
+				leading = sl[:j]
+				break
+			}
+		}
+		// Role indent applies to every source line after the first
+		// (the first sits flush under the role prefix; e.g. "ℹ  ").
+		roleIndent := indent
+		if i == 0 {
+			roleIndent = ""
+		}
+		prefixed := roleIndent + sl
+		wrapped := wordWrap(prefixed, width)
+		wlines := strings.Split(wrapped, "\n")
+		for k, wl := range wlines {
+			if k == 0 {
+				out.WriteString(wl)
+			} else {
+				out.WriteByte('\n')
+				out.WriteString(roleIndent)
+				out.WriteString(leading)
+				out.WriteString(wl)
+			}
+		}
 	}
-	return strings.Join(lines, "\n")
+	return out.String()
 }
 
 // effectiveLayout returns the layout we'll actually render — falls
