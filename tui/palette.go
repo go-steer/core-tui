@@ -500,13 +500,23 @@ func (m Model) renderPaletteRow(it paletteItem, selected bool, width int) string
 	if pad < 1 {
 		pad = 1
 	}
-	row := marker + display + strings.Repeat(" ", pad) + it.Description
 	switch {
 	case !it.Available:
+		row := marker + display + strings.Repeat(" ", pad) + it.Description
 		return m.styles.Muted.Render(row)
 	case selected:
-		return m.styles.AssistantText.Bold(true).Render(row)
+		// Highlight the full row with a tinted background so the
+		// cursor row reads at a glance, not just the leading ">".
+		// Background fill spans the full width (pad already
+		// expands to width-2). The display text gets the theme
+		// accent + bold; the description rides muted on the same
+		// background tint so it stays subordinate but readable.
+		hi := lipgloss.NewStyle().Background(m.styles.Theme.BgElevated)
+		mainText := hi.Foreground(m.styles.Theme.Accent).Bold(true).Render(marker + display)
+		descText := hi.Foreground(m.styles.Theme.FgMuted).Render(strings.Repeat(" ", pad) + it.Description)
+		return mainText + descText
 	default:
+		row := marker + display + strings.Repeat(" ", pad) + it.Description
 		return m.styles.AssistantText.Render(row)
 	}
 }
