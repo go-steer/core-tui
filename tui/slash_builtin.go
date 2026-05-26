@@ -37,6 +37,12 @@ import (
 // built-ins (/tools, /model, /reload, /permissions, /pricing) probe
 // the Agent via type assertion and degrade to a "not available"
 // system message when the host hasn't wired the capability.
+//
+// Operator-initiated: slash commands always GotoBottom after the
+// response renders so the operator sees the result even if they'd
+// scrolled up reading backlog (refreshViewport alone preserves
+// scroll position by design). The scroll lives in refreshAndScroll
+// — each case calls it explicitly instead of refreshViewport.
 func (m Model) dispatchBuiltinSlash(name, args string) (bool, tea.Model, tea.Cmd) {
 	// Alias normalization so internal/tui muscle memory carries
 	// over: /models→/model, /perms→/permissions, /by-the-way→/btw,
@@ -57,7 +63,7 @@ func (m Model) dispatchBuiltinSlash(name, args string) (bool, tea.Model, tea.Cmd
 	case "help", "?":
 		m.history.Append(Message{Role: RoleSystem, Text: m.renderBuiltinHelp()})
 		m.input.Reset()
-		m.refreshViewport()
+		m.refreshAndScroll()
 		return true, m, nil
 
 	case "clear":
@@ -68,7 +74,7 @@ func (m Model) dispatchBuiltinSlash(name, args string) (bool, tea.Model, tea.Cmd
 		m.confirmingClear = true
 		m.input.Reset()
 		m.history.Append(Message{Role: RoleSystem, Text: "clear chat history? press enter for y/yes — anything else cancels"})
-		m.refreshViewport()
+		m.refreshAndScroll()
 		return true, m, nil
 
 	case "quit", "exit", "q":
@@ -78,25 +84,25 @@ func (m Model) dispatchBuiltinSlash(name, args string) (bool, tea.Model, tea.Cmd
 	case "memory":
 		m.history.Append(Message{Role: RoleSystem, Text: m.renderMemoryList(m.opts.Memory)})
 		m.input.Reset()
-		m.refreshViewport()
+		m.refreshAndScroll()
 		return true, m, nil
 
 	case "mcp":
 		m.history.Append(Message{Role: RoleSystem, Text: m.renderMCPList(m.opts.MCPServers)})
 		m.input.Reset()
-		m.refreshViewport()
+		m.refreshAndScroll()
 		return true, m, nil
 
 	case "skills":
 		m.history.Append(Message{Role: RoleSystem, Text: m.renderSkillList(m.opts.Skills)})
 		m.input.Reset()
-		m.refreshViewport()
+		m.refreshAndScroll()
 		return true, m, nil
 
 	case "stats":
 		m.history.Append(Message{Role: RoleSystem, Text: m.renderStats()})
 		m.input.Reset()
-		m.refreshViewport()
+		m.refreshAndScroll()
 		return true, m, nil
 
 	case "mouse":
@@ -106,14 +112,14 @@ func (m Model) dispatchBuiltinSlash(name, args string) (bool, tea.Model, tea.Cmd
 		// silently dropped.
 		m.history.Append(Message{Role: RoleSystem, Text: "/mouse: mouse-capture toggle is not yet wired — the host program controls it at startup"})
 		m.input.Reset()
-		m.refreshViewport()
+		m.refreshAndScroll()
 		return true, m, nil
 
 	case "interrupt", "int":
 		if m.state != stateStreaming || m.cancelTurn == nil {
 			m.history.Append(Message{Role: RoleSystem, Text: "/interrupt: no turn in flight"})
 			m.input.Reset()
-			m.refreshViewport()
+			m.refreshAndScroll()
 			return true, m, nil
 		}
 		m.cancelTurn()
@@ -128,7 +134,7 @@ func (m Model) dispatchBuiltinSlash(name, args string) (bool, tea.Model, tea.Cmd
 			m.history.Append(Message{Role: RoleSystem, Text: m.renderToolList(lister.Tools())})
 		}
 		m.input.Reset()
-		m.refreshViewport()
+		m.refreshAndScroll()
 		return true, m, nil
 
 	case "model":
@@ -136,7 +142,7 @@ func (m Model) dispatchBuiltinSlash(name, args string) (bool, tea.Model, tea.Cmd
 		if !ok {
 			m.history.Append(Message{Role: RoleSystem, Text: "/model: agent doesn't implement ModelSwapper"})
 			m.input.Reset()
-			m.refreshViewport()
+			m.refreshAndScroll()
 			return true, m, nil
 		}
 		if args == "" {
@@ -155,7 +161,7 @@ func (m Model) dispatchBuiltinSlash(name, args string) (bool, tea.Model, tea.Cmd
 		if err != nil {
 			m.history.Append(Message{Role: RoleError, Text: "/model: switch failed: " + err.Error()})
 			m.input.Reset()
-			m.refreshViewport()
+			m.refreshAndScroll()
 			return true, m, nil
 		}
 		m.opts.Agent = newAgent
@@ -166,7 +172,7 @@ func (m Model) dispatchBuiltinSlash(name, args string) (bool, tea.Model, tea.Cmd
 			}
 		}
 		m.input.Reset()
-		m.refreshViewport()
+		m.refreshAndScroll()
 		return true, m, nil
 
 	case "reload":
@@ -174,14 +180,14 @@ func (m Model) dispatchBuiltinSlash(name, args string) (bool, tea.Model, tea.Cmd
 		if !ok {
 			m.history.Append(Message{Role: RoleSystem, Text: "/reload: agent doesn't implement Reloader"})
 			m.input.Reset()
-			m.refreshViewport()
+			m.refreshAndScroll()
 			return true, m, nil
 		}
 		res, err := reloader.Reload(context.Background())
 		if err != nil {
 			m.history.Append(Message{Role: RoleError, Text: "/reload: " + err.Error()})
 			m.input.Reset()
-			m.refreshViewport()
+			m.refreshAndScroll()
 			return true, m, nil
 		}
 		if res.Agent != nil {
@@ -202,7 +208,7 @@ func (m Model) dispatchBuiltinSlash(name, args string) (bool, tea.Model, tea.Cmd
 		}
 		m.history.Append(Message{Role: RoleSystem, Text: note})
 		m.input.Reset()
-		m.refreshViewport()
+		m.refreshAndScroll()
 		return true, m, nil
 
 	case "permissions":
@@ -213,7 +219,7 @@ func (m Model) dispatchBuiltinSlash(name, args string) (bool, tea.Model, tea.Cmd
 			m.history.Append(Message{Role: RoleSystem, Text: renderApprovalLog(ctrl.SessionApprovals())})
 		}
 		m.input.Reset()
-		m.refreshViewport()
+		m.refreshAndScroll()
 		return true, m, nil
 
 	case "pricing":
@@ -221,13 +227,13 @@ func (m Model) dispatchBuiltinSlash(name, args string) (bool, tea.Model, tea.Cmd
 		if !ok {
 			m.history.Append(Message{Role: RoleSystem, Text: "/pricing: agent doesn't implement PricingController"})
 			m.input.Reset()
-			m.refreshViewport()
+			m.refreshAndScroll()
 			return true, m, nil
 		}
 		text := m.handlePricing(ctrl, args)
 		m.history.Append(Message{Role: RoleSystem, Text: text})
 		m.input.Reset()
-		m.refreshViewport()
+		m.refreshAndScroll()
 		return true, m, nil
 
 	case "subagents":
@@ -238,21 +244,21 @@ func (m Model) dispatchBuiltinSlash(name, args string) (bool, tea.Model, tea.Cmd
 			m.history.Append(Message{Role: RoleSystem, Text: renderSubagentList(lister.Subagents())})
 		}
 		m.input.Reset()
-		m.refreshViewport()
+		m.refreshAndScroll()
 		return true, m, nil
 
 	case "allow":
 		text := m.handleAllowDeny(args, "allow")
 		m.history.Append(Message{Role: RoleSystem, Text: text})
 		m.input.Reset()
-		m.refreshViewport()
+		m.refreshAndScroll()
 		return true, m, nil
 
 	case "deny":
 		text := m.handleAllowDeny(args, "deny")
 		m.history.Append(Message{Role: RoleSystem, Text: text})
 		m.input.Reset()
-		m.refreshViewport()
+		m.refreshAndScroll()
 		return true, m, nil
 	}
 

@@ -231,6 +231,16 @@ func (m *Model) resize() {
 // the in-progress assistant message (R-CHAT-4) and spinner verb
 // (R-CHAT-3). Called after any change that affects rendered text:
 // resize, style change, new message, stream chunk, spinner tick.
+// refreshAndScroll rebuilds the viewport content AND forces a
+// scroll to the bottom — used by operator-initiated paths (slash
+// commands, submit) where the operator should always see the new
+// content even if they'd previously scrolled up. Autonomous paths
+// (stream chunks) use refreshViewport directly to preserve scroll.
+func (m *Model) refreshAndScroll() {
+	m.refreshViewport()
+	m.viewport.GotoBottom()
+}
+
 func (m *Model) refreshViewport() {
 	if m.width == 0 {
 		return
@@ -441,9 +451,16 @@ func (m Model) renderMessage(msg Message) string {
 }
 
 // renderHeader renders the StatusHeader layout's top line — status
-// row + a blank spacer row beneath it.
+// row + a blank spacer row beneath it. When the assembled line
+// overflows the terminal width, wordWrap breaks it onto additional
+// rows so segments don't run off-screen (the terminal's own
+// soft-wrap would split across ANSI escape boundaries and corrupt
+// the trailing chrome).
 func (m Model) renderHeader() string {
 	status := m.renderStatusLine()
+	if m.width > 0 {
+		status = wordWrap(status, m.width)
+	}
 	return status + "\n"
 }
 

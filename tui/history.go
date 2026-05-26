@@ -82,6 +82,17 @@ func (h *History) Reset() {
 	h.entries = nil
 }
 
+// SetRendered overwrites the cached Glamour render on entry i.
+// Used by the resize path to refresh wrapping at the new width.
+// Out-of-range i is a silent no-op so callers can pass the
+// snapshot index without bounds-checking.
+func (h *History) SetRendered(i int, rendered string) {
+	if i < 0 || i >= len(h.entries) {
+		return
+	}
+	h.entries[i].Rendered = rendered
+}
+
 // Len returns the entry count.
 func (h *History) Len() int {
 	return len(h.entries)

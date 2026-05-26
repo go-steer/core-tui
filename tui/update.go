@@ -51,6 +51,14 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	case tea.WindowSizeMsg:
 		m.width, m.height = msg.Width, msg.Height
 		m.resize()
+		// Cached Glamour Rendered text is width-pinned at the
+		// time of the render; when the viewport narrows the cached
+		// output is wider than the visible area and the terminal
+		// clips it (leading whitespace can vanish along with the
+		// first few content chars). Re-render every assistant
+		// message through the new-width Glamour so wrapping
+		// matches the current viewport.
+		m.rerenderHistoryMarkdown()
 		m.refreshViewport()
 		return m, nil
 
@@ -917,6 +925,26 @@ func (m Model) dispatchSlash(text string) (tea.Model, tea.Cmd) {
 	m.resize()
 	m.refreshViewport()
 	return m, nil
+}
+
+// rerenderHistoryMarkdown re-runs Glamour at the current viewport
+// width over every assistant message with a cached Rendered. Called
+// from the WindowSizeMsg path so a resize doesn't leave the
+// transcript displaying width-pinned output that the terminal then
+// clips. Cheap-enough — typical transcripts hold dozens of
+// messages, not thousands.
+func (m *Model) rerenderHistoryMarkdown() {
+	mr := m.ensureMarkdown()
+	if mr == nil {
+		return
+	}
+	snap := m.history.Snapshot()
+	for i, msg := range snap {
+		if msg.Role != RoleAssistant || msg.Text == "" {
+			continue
+		}
+		m.history.SetRendered(i, mr.renderMarkdown(msg.Text))
+	}
 }
 
 // promptHistoryCap bounds the shell-style recall buffer. 100 entries
