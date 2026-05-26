@@ -744,37 +744,14 @@ func (m Model) renderToolList(tools []ToolInfo) string {
 	return strings.TrimRight(b.String(), "\n")
 }
 
-func renderModelList(models []ModelInfo) string {
-	if len(models) == 0 {
-		return "/model: no models advertised by the agent"
-	}
-	var b strings.Builder
-	b.WriteString("/model: available — use `/model <id>` to switch\n")
-	for _, m := range models {
-		disp := m.Display
-		if disp == "" {
-			disp = m.ID
-		}
-		line := "  • " + disp
-		if m.ID != disp {
-			line += " (" + m.ID + ")"
-		}
-		if m.Description != "" {
-			line += " — " + truncate(m.Description, 60)
-		}
-		b.WriteString(line + "\n")
-	}
-	return strings.TrimRight(b.String(), "\n")
-}
-
 func renderApprovalLog(logs []ApprovalLog) string {
 	if len(logs) == 0 {
 		return "/permissions: no approvals recorded this session"
 	}
 	var b strings.Builder
-	b.WriteString(fmt.Sprintf("/permissions: %d decision(s) this session\n", len(logs)))
+	fmt.Fprintf(&b, "/permissions: %d decision(s) this session\n", len(logs))
 	for _, l := range logs {
-		b.WriteString(fmt.Sprintf("  • %s — %s [%s]\n", l.Tool, l.Key, l.Decision))
+		fmt.Fprintf(&b, "  • %s — %s [%s]\n", l.Tool, l.Key, l.Decision)
 	}
 	return strings.TrimRight(b.String(), "\n")
 }
@@ -784,7 +761,7 @@ func renderSubagentList(subs []SubagentInfo) string {
 		return "/subagents: none running"
 	}
 	var b strings.Builder
-	b.WriteString(fmt.Sprintf("/subagents: %d subagent(s)\n", len(subs)))
+	fmt.Fprintf(&b, "/subagents: %d subagent(s)\n", len(subs))
 	for _, s := range subs {
 		line := fmt.Sprintf("  • %s [%s]", s.Name, s.Status)
 		if !s.StartedAt.IsZero() {
