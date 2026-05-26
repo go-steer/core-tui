@@ -16,9 +16,12 @@
 // §3). Routes the tool name to a per-tool builder that returns a
 // multi-line string to attach under the tool row.
 //
-// Phase 1 covers diff-producing tools (apply_patch / patch /
-// edit_file / replace). read_* / grep / glob metadata previews
-// land in Phase 2.
+// Phase 1 covered diff-producing tools (apply_patch / patch /
+// edit_file / replace / str_replace). Phase 2 adds read_file /
+// read_many_files / grep / glob scope previews via
+// renderReadPreview, and routes the diff path through the
+// syntax cache by passing detectLang(label) into
+// renderDiffInline.
 
 package tui
 
@@ -38,8 +41,10 @@ func renderToolPreview(name string, args map[string]any, styles Styles) string {
 	}
 	switch name {
 	case "apply_patch", "patch":
-		// Args carry a pre-formed unified diff; just render.
-		return renderDiffInline(stringArg(args, "patch", "diff", "content"), styles, previewLineCap)
+		// Args carry a pre-formed unified diff; just render. The
+		// path arg (when present) seeds syntax highlighting.
+		label := stringArg(args, "path", "file", "filename")
+		return renderDiffInline(stringArg(args, "patch", "diff", "content"), styles, previewLineCap, detectLang(label))
 	case "edit_file", "replace", "str_replace":
 		// Args carry old + new text; compute the diff.
 		oldText := stringArg(args, "old_text", "old_string", "old", "search")
@@ -51,7 +56,9 @@ func renderToolPreview(name string, args map[string]any, styles Styles) string {
 		if label == "" {
 			label = "edit"
 		}
-		return renderDiffInline(computeUnifiedDiff(label, oldText, newText), styles, previewLineCap)
+		return renderDiffInline(computeUnifiedDiff(label, oldText, newText), styles, previewLineCap, detectLang(label))
+	case "read_file", "read_many_files", "grep", "glob":
+		return renderReadPreview(name, args, styles)
 	}
 	return ""
 }
