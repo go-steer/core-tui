@@ -970,26 +970,59 @@ func (m *Model) renderPermissionModal() string {
 	return m.styles.ModalBorder.Padding(0, 1).Width(width).Render(content)
 }
 
-// renderPermissionDetail renders the payload through Glamour with
-// the right code-fence language tag from req.DetailKind so the
-// diff / shell / http blocks get the expected styling.
+// renderPermissionDetail renders the payload styled per
+// DetailKind. Shell + JSON go through a plain bordered block
+// (Glamour adds document margins + code-fence frames that don't
+// compose cleanly inside the modal frame — the closing bar ends
+// up indented and pushed off the right). Diff still rides
+// Glamour because unified-diff syntax highlighting is the whole
+// point of the diff fence.
 func (m *Model) renderPermissionDetail(req *PermissionRequest, width int) string {
 	if req.Detail == "" {
 		return ""
 	}
-	mr := m.ensureMarkdown()
 	switch req.DetailKind {
 	case DetailDiff:
-		return mr.renderMarkdown("```diff\n" + req.Detail + "\n```")
+		mr := m.ensureMarkdown()
+		return strings.TrimSpace(mr.renderMarkdown("```diff\n" + req.Detail + "\n```"))
 	case DetailShell:
-		return mr.renderMarkdown("```bash\n" + req.Detail + "\n```")
+		return renderShellDetail(req.Detail, width, m.styles)
 	case DetailHTTP:
-		return mr.renderMarkdown("```http\n" + req.Detail + "\n```")
+		return renderShellDetail(req.Detail, width, m.styles)
 	case DetailArgs:
-		return mr.renderMarkdown("```json\n" + req.Detail + "\n```")
+		return renderArgsDetail(req.Detail, width, m.styles)
 	default:
 		return wordWrap(req.Detail, width)
 	}
+}
+
+// renderShellDetail formats a bash / HTTP command as `$ <cmd>`
+// in the accent color, word-wrapped to width with continuation
+// indent so multi-line commands stay aligned under the `$`.
+// Avoids Glamour's code-fence pipeline so the modal frame stays
+// composed cleanly.
+func renderShellDetail(text string, width int, styles Styles) string {
+	text = strings.TrimSpace(text)
+	if text == "" {
+		return ""
+	}
+	prefix := styles.Accent.Render("$ ")
+	// width-2 because of the "$ " prefix; continuation indent
+	// 2 spaces so wrapped lines hang under the start of the
+	// command.
+	body := wordWrapIndent(text, width-2, "  ")
+	return prefix + styles.AssistantText.Render(body)
+}
+
+// renderArgsDetail formats a JSON / key=value args blob plainly,
+// muted, word-wrapped. Same rationale as renderShellDetail —
+// keep the modal frame composition clean.
+func renderArgsDetail(text string, width int, styles Styles) string {
+	text = strings.TrimSpace(text)
+	if text == "" {
+		return ""
+	}
+	return styles.Muted.Render(wordWrap(text, width))
 }
 
 // renderElicitModal renders an MCP elicit request as either a form

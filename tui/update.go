@@ -76,6 +76,12 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		m.styles = m.resolveStyles(msg.IsDark())
 		m.markdown = nil // force rebuild on next render
 		m.listCache.reset(m.viewport.Width())
+		// Rebuild textarea styles too — bubbles v2 textarea.New()
+		// hard-codes DefaultDarkStyles, so on light terminals the
+		// CursorLine background renders as solid black until we
+		// swap. Pass isDark through so the cursor-line tint
+		// matches the rest of the chrome.
+		m.input.SetStyles(textareaStyles(msg.IsDark()))
 		m.refreshViewport()
 		return m, nil
 

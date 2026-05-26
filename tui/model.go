@@ -248,6 +248,15 @@ func NewModel(opts Options) Model {
 	// returns textarea.Blink directly to start the cursor animation.
 	_ = ta.Focus()
 
+	// Start the textarea with a transparent CursorLine style —
+	// bubbles v2 textarea.New() applies DefaultDarkStyles which
+	// paints the cursor line solid black; that's invisible on
+	// dark terminals and a screaming black block on light ones.
+	// We don't yet know dark/light (BackgroundColorMsg comes
+	// post-Init), so pick the "safer" no-tint default and let
+	// the BackgroundColorMsg handler swap in the right variant.
+	ta.SetStyles(textareaStyles(true))
+
 	vp := viewport.New()
 	// The viewport's default KeyMap binds h/j/k/l + arrow keys for
 	// horizontal/vertical scrolling. Update forwards every keystroke
