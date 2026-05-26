@@ -250,6 +250,12 @@ func (m Model) dispatchBuiltinSlash(name, args string) (bool, tea.Model, tea.Cmd
 		m.refreshAndScroll()
 		return true, m, nil
 
+	case "keys":
+		m.history.Append(Message{Role: RoleSystem, Text: m.renderKeysDiagnostic()})
+		m.input.Reset()
+		m.refreshAndScroll()
+		return true, m, nil
+
 	case "resume":
 		text := m.handleResume(args)
 		m.history.Append(Message{Role: RoleSystem, Text: text})
@@ -273,6 +279,57 @@ func (m Model) dispatchBuiltinSlash(name, args string) (bool, tea.Model, tea.Cmd
 	}
 
 	return false, m, nil
+}
+
+// renderKeysDiagnostic prints what the TUI knows about the
+// operator's terminal + its keyboard quirks: detected term
+// program, capability bits, and which newline keystroke we'd
+// recommend (with the observed-active one called out when the
+// operator has already used one). Operators reach for this when
+// shift+enter / ctrl+j don't work and they want to know what
+// to try.
+func (m *Model) renderKeysDiagnostic() string {
+	var b strings.Builder
+	b.WriteString("Terminal & keyboard diagnostic:\n\n")
+
+	term := m.caps.TermProgram
+	if term == "" {
+		term = "(unknown — TERM_PROGRAM not set)"
+	}
+	fmt.Fprintf(&b, "  %-22s %s\n", "Terminal program:", m.itemNameStyle().Render(term))
+	fmt.Fprintf(&b, "  %-22s %t\n", "True color:", m.caps.TrueColor)
+	fmt.Fprintf(&b, "  %-22s %t\n", "OSC 8 hyperlinks:", m.caps.Hyperlinks)
+	fmt.Fprintf(&b, "  %-22s %t\n", "OSC 52 clipboard:", m.caps.Clipboard)
+	fmt.Fprintf(&b, "  %-22s %t\n", "Kitty graphics:", m.caps.KittyGraphics)
+
+	b.WriteString("\nNewline keystroke:\n\n")
+	recommended := defaultNewlineHint(m.caps.TermProgram)
+	active := m.newlineHint
+	if active == "" {
+		active = recommended
+	}
+	fmt.Fprintf(&b, "  %-22s %s", "Recommended default:", m.itemNameStyle().Render(recommended))
+	if active != recommended {
+		b.WriteString(m.styles.Muted.Render("  (observed override)"))
+	}
+	b.WriteByte('\n')
+	fmt.Fprintf(&b, "  %-22s %s\n", "Currently in use:", m.itemNameStyle().Render(active))
+
+	b.WriteString("\nAll combos core-tui accepts for newline (try each if the others don't work):\n")
+	for _, combo := range []string{"shift+enter", "ctrl+j", "alt+enter"} {
+		marker := "  • "
+		if combo == active {
+			marker = "  " + m.styles.Accent.Render("▶ ")
+		}
+		fmt.Fprintf(&b, "%s%s\n", marker, m.itemNameStyle().Render(combo))
+	}
+
+	b.WriteString("\nWhich one works depends on the terminal:\n")
+	b.WriteString("  • VS Code integrated terminal: alt+enter (run /terminal-setup once)\n")
+	b.WriteString("  • kitty / wezterm / iTerm2 with keyboard-enhancement: shift+enter\n")
+	b.WriteString("  • everything else (gnome-terminal, alacritty, tmux): ctrl+j\n")
+	b.WriteString("\nTip: the footer hint auto-updates to the first combo you actually use.")
+	return strings.TrimRight(b.String(), "\n")
 }
 
 // handleResume implements /resume:

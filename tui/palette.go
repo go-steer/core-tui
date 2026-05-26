@@ -114,6 +114,7 @@ func builtinSlashItems() []paletteItem {
 		{Name: "allow bundle:", Display: "/allow bundle:<name>", Insert: "/allow bundle:", Description: "enable a built-in allow bundle (e.g. dev_tools)", Available: true, NoAutoSubmit: true},
 		{Name: "deny", Description: "add deny pattern", Available: true},
 		{Name: "interrupt", Display: "/interrupt, /int", Description: "cancel the in-flight turn", Available: true},
+		{Name: "keys", Description: "show terminal + newline-keystroke diagnostic", Available: true},
 		{Name: "mcp", Description: "configured MCP servers and tools", Available: true},
 		{Name: "memory", Description: "display loaded memory files", Available: true},
 		{Name: "model", Description: "open model picker / switch model", Available: true},

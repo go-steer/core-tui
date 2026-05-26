@@ -753,7 +753,11 @@ func (m Model) footerHint() string {
 		}
 		return "Slash" + sep + "↑↓ choose" + sep + "enter run" + sep + "tab insert" + sep + "esc cancel"
 	}
-	return "enter submit" + sep + "ctrl+j newline" + sep + "ctrl+c quit" + sep + "? for more"
+	hint := m.newlineHint
+	if hint == "" {
+		hint = "ctrl+j"
+	}
+	return "enter submit" + sep + hint + " newline" + sep + "ctrl+c quit" + sep + "? for more"
 }
 
 // renderOverlay renders the currently active enum-driven modal.

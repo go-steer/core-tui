@@ -231,6 +231,15 @@ type Model struct {
 	// v2's tea.Model — and View returns a string, not tea.View.
 	pendingForm *huh.Form
 
+	// newlineHint is the keystroke we display in the footer for
+	// "insert newline." Seeded from the detected terminal program
+	// (VS Code → alt+enter, kitty/wezterm/iTerm → shift+enter,
+	// everything else → ctrl+j) and overwritten the first time
+	// the operator uses one of the three accepted combos. Stops
+	// hints from lying when the user's terminal can't deliver the
+	// suggested key.
+	newlineHint string
+
 	// activeToolID is the Message.ID of the in-flight tool call:
 	// the most recent RoleTool message that hasn't been followed
 	// by any assistant text or another tool. 0 = no active tool.
@@ -294,6 +303,7 @@ func NewModel(opts Options) Model {
 		startedAt:     time.Now(),
 		listCache:     newListCache(),
 		caps:          DetectCapabilities(),
+		newlineHint:   defaultNewlineHint(DetectCapabilities().TermProgram),
 	}
 	for _, msg := range opts.SeedHistory {
 		m.history.Append(msg)
@@ -374,6 +384,29 @@ func (m Model) wordmark() string {
 		return m.opts.Branding.Wordmark
 	}
 	return "core-tui"
+}
+
+// defaultNewlineHint picks the most-likely-to-work newline
+// keystroke for the given terminal program, used to seed the
+// footer hint before the operator has actually pressed one.
+//
+//   - VS Code integrated terminal  → alt+enter (terminal-setup
+//     binds Shift+Enter → \x1b\r, which bubbletea normalizes
+//     to alt+enter)
+//   - kitty / wezterm / iTerm2     → shift+enter (likely have the
+//     keyboard-enhancement protocol enabled, so true shift+enter
+//     reaches the app)
+//   - everything else              → ctrl+j (ASCII LF, the most
+//     portable; works unless something steals the binding)
+func defaultNewlineHint(termProgram string) string {
+	switch termProgram {
+	case "vscode":
+		return "alt+enter"
+	case "kitty", "wezterm", "iterm.app", "iterm2", "ghostty":
+		return "shift+enter"
+	default:
+		return "ctrl+j"
+	}
 }
 
 // displayCwd returns the operator's cwd, shortened with `~/` when
