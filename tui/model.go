@@ -385,15 +385,21 @@ func (m Model) displayProvider() string {
 }
 
 // resolveStyles builds the Styles bundle for the current dark/
-// light mode + active provider. The provider tag (when wired via
-// StatusReporter) picks the per-provider theme so the brand
-// surface tints with the active model — Branding overrides
-// override the theme picks. Called from BackgroundColorMsg
-// (first-paint dark/light detect) and any time the active
-// provider could have changed (post-/model swap when we re-
-// resolve).
+// light mode. When Options.AutoProviderTheme is true the
+// StatusReporter's Provider tag picks the per-provider theme
+// (Anthropic clay / Gemini blue / OpenAI green); otherwise the
+// brand stays on DefaultTheme regardless of which model is
+// active. Branding overrides still apply on top of whichever
+// theme was picked. Called from BackgroundColorMsg (first-paint
+// dark/light detect) and any time the active provider could
+// have changed (post-/model swap).
 func (m Model) resolveStyles(dark bool) Styles {
-	theme := ThemeForProvider(m.displayProvider(), dark)
+	var theme Theme
+	if m.opts.AutoProviderTheme {
+		theme = ThemeForProvider(m.displayProvider(), dark)
+	} else {
+		theme = DefaultTheme(dark)
+	}
 	if m.opts.Branding.AccentColor != "" {
 		c := lipgloss.Color(m.opts.Branding.AccentColor)
 		theme.Primary = c

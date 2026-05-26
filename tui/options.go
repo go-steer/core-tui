@@ -23,6 +23,14 @@ type Options struct {
 	// R-BRAND-1. Zero value uses defaults.
 	Branding Branding
 
+	// AutoProviderTheme opts the host in to per-provider palette
+	// tinting (Anthropic clay / Gemini blue / OpenAI green) based
+	// on StatusReporter.Status().Provider. Defaults to false so
+	// the brand palette stays consistent across model swaps; hosts
+	// that prefer the per-provider identity flip it on. Branding
+	// overrides still apply on top of whichever theme is picked.
+	AutoProviderTheme bool
+
 	// StatusLayout picks the status surface (R-USE-2). The initial
 	// value is whatever the host sets here; the user can flip it at
 	// runtime via Ctrl+B.
