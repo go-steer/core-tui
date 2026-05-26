@@ -42,10 +42,24 @@ type Message struct {
 	ToolArgs string
 	// ToolPreview is the multi-line block that renders under the
 	// tool row when the tool call has previewable content (unified
-	// diff for apply_patch / edit_file, future read metadata).
-	// Pre-computed at applyToolCall time so the lazy-list cache
-	// caches it as part of the row. Empty = no preview.
+	// diff for apply_patch / edit_file, read scope summary,
+	// result content). Pre-computed at applyToolCall time so the
+	// lazy-list cache caches it as part of the row; re-computed at
+	// applyToolResult time so the same field carries both call-only
+	// and call+result variants. Empty = no preview.
 	ToolPreview string
+	// ToolCallID is the wire-level tool-call ID from the agent
+	// event (e.g. genai.FunctionCall.ID). Stored on RoleTool
+	// messages so applyToolResult can locate the matching row when
+	// a tool-result event arrives. Empty when the host doesn't
+	// emit per-call IDs.
+	ToolCallID string
+	// ToolArgsMap stashes the structured call-time args so
+	// applyToolResult can re-render ToolPreview with both original
+	// call info and the freshly-arrived result — renderToolPreview
+	// needs path / range to format result content sensibly
+	// (e.g. lang detection from the read_file path).
+	ToolArgsMap map[string]any
 
 	// Per-turn metadata populated by the TUI on the final assistant
 	// Message of each turn so the renderer can append a one-line
@@ -142,6 +156,34 @@ func (h *History) BumpVersion(id uint64) {
 			return
 		}
 	}
+}
+
+// FindByToolCallID locates the RoleTool entry whose wire-level
+// ToolCallID matches the given id and returns its slice index, or
+// -1 when no match exists. Used by applyToolResult to attach a
+// freshly-arrived result to the correct row.
+func (h *History) FindByToolCallID(callID string) int {
+	if callID == "" {
+		return -1
+	}
+	for i := range h.entries {
+		if h.entries[i].ToolCallID == callID {
+			return i
+		}
+	}
+	return -1
+}
+
+// SetToolPreview overwrites the cached tool preview on entry i and
+// bumps the entry's Version so the lazy-render cache invalidates.
+// Used by applyToolResult to swap the call-only preview for the
+// call+result preview. Out-of-range i is a silent no-op.
+func (h *History) SetToolPreview(i int, preview string) {
+	if i < 0 || i >= len(h.entries) {
+		return
+	}
+	h.entries[i].ToolPreview = preview
+	h.entries[i].Version++
 }
 
 // Len returns the entry count.
