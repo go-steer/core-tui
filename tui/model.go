@@ -206,6 +206,12 @@ type Model struct {
 	// still use their inline pendingX fields because the channel
 	// lifecycle hasn't been decoupled yet.
 	overlayStack Overlay
+
+	// caps holds the env-sniffed terminal capability bag
+	// (agentic-tui skill §18). Renderers consult this to gate
+	// hyperlinks, clipboard sequences, etc. Detected once at
+	// NewModel; hosts can override post-construction.
+	caps TerminalCapabilities
 }
 
 // NewModel constructs a Model from Options. SeedHistory entries are
@@ -252,6 +258,7 @@ func NewModel(opts Options) Model {
 		historyCursor: -1,
 		startedAt:     time.Now(),
 		listCache:     newListCache(),
+		caps:          DetectCapabilities(),
 	}
 	for _, msg := range opts.SeedHistory {
 		m.history.Append(msg)
