@@ -77,6 +77,8 @@ func renderDiffInline(diff string, styles Styles, maxLines int, lang string) str
 	hunkStyle := lipgloss.NewStyle().Foreground(styles.Theme.FgMuted).Italic(true)
 	ctxStyle := lipgloss.NewStyle().Foreground(styles.Theme.FgMuted)
 	gutterStyle := lipgloss.NewStyle().Foreground(styles.Theme.FgSubtle)
+	addGutterStyle := lipgloss.NewStyle().Foreground(styles.Theme.FgSubtle).Background(styles.Theme.DiffAddGutterBg)
+	delGutterStyle := lipgloss.NewStyle().Foreground(styles.Theme.FgSubtle).Background(styles.Theme.DiffDelGutterBg)
 
 	const indent = "    "
 	const emptyGutter = "       " // 7 spaces = " NNNN │ " width
@@ -107,13 +109,13 @@ func renderDiffInline(diff string, styles Styles, maxLines int, lang string) str
 			body := truncateBytes(line[1:], perLineByteCap)
 			rendered := highlightOrFlat(body, lang, addBg, addBodyFallback)
 			gutter := formatGutter(newNo)
-			out = append(out, indent+gutterStyle.Render(gutter)+addPrefixStyle.Render("+")+rendered)
+			out = append(out, indent+addGutterStyle.Render(gutter)+addPrefixStyle.Render("+")+rendered)
 			newNo++
 		case strings.HasPrefix(line, "-"):
 			body := truncateBytes(line[1:], perLineByteCap)
 			rendered := highlightOrFlat(body, lang, delBg, delBodyFallback)
 			gutter := formatGutter(oldNo)
-			out = append(out, indent+gutterStyle.Render(gutter)+delPrefixStyle.Render("-")+rendered)
+			out = append(out, indent+delGutterStyle.Render(gutter)+delPrefixStyle.Render("-")+rendered)
 			oldNo++
 		default:
 			body := truncateBytes(line, perLineByteCap)

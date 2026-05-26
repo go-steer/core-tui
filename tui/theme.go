@@ -69,8 +69,13 @@ type Theme struct {
 	// lines in inline tool-display diffs. Foreground stays
 	// Success / Error; the bg makes the change region scannable
 	// at a glance the way `git diff --color` and GitHub render.
-	DiffAddBg color.Color
-	DiffDelBg color.Color
+	// The *GutterBg variants are a step deeper than the code
+	// bg so the line-number column reads as a distinct "rail"
+	// next to the change region (pattern from docs/diffview.md §1).
+	DiffAddBg       color.Color
+	DiffDelBg       color.Color
+	DiffAddGutterBg color.Color
+	DiffDelGutterBg color.Color
 }
 
 // DefaultTheme returns the canonical "core-tui" palette — the
@@ -99,6 +104,8 @@ func DefaultTheme(dark bool) Theme {
 		t.BgOverlay = lipgloss.Color("#2A2A2A")
 		t.DiffAddBg = lipgloss.Color("#1B2D1B")
 		t.DiffDelBg = lipgloss.Color("#3A1E1E")
+		t.DiffAddGutterBg = lipgloss.Color("#102010")
+		t.DiffDelGutterBg = lipgloss.Color("#2A1010")
 	} else {
 		t.FgBase = lipgloss.Color("#1E1E1E")
 		t.FgMuted = lipgloss.Color("#5F5F5F")
@@ -108,6 +115,8 @@ func DefaultTheme(dark bool) Theme {
 		t.BorderQuiet = lipgloss.Color("#D7D7D7")
 		t.DiffAddBg = lipgloss.Color("#E6FFE6")
 		t.DiffDelBg = lipgloss.Color("#FFE6E6")
+		t.DiffAddGutterBg = lipgloss.Color("#C8F0C8")
+		t.DiffDelGutterBg = lipgloss.Color("#F0C8C8")
 	}
 	return t
 }
