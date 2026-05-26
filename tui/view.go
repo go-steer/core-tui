@@ -540,9 +540,35 @@ func (m Model) renderMessage(msg Message) string {
 	width := m.viewport.Width()
 	switch msg.Role {
 	case RoleUser:
-		prefix := m.styles.UserPrefix.Render(GlyphUserPrompt)
+		// User prompts render as a "card" so they stand out from
+		// assistant text and tool calls: full-width background
+		// tint on every wrapped line + bold body. The ❯ prefix
+		// stays in its UserPrefix style (bold blue) so the visual
+		// anchor is unchanged; everything else just gets brighter.
 		body := wordWrapIndent(msg.Display(), width-2, "  ")
-		return prefix + " " + m.styles.UserText.Render(body)
+		bodyStyle := m.styles.UserText.Bold(true)
+		bg := lipgloss.NewStyle().Background(m.styles.Theme.BgElevated)
+		prefixStyled := bg.Inherit(m.styles.UserPrefix).Render(GlyphUserPrompt + " ")
+		lines := strings.Split(body, "\n")
+		for i, line := range lines {
+			// Pad each line to full width so the background tint
+			// reads as a continuous strip across the chat column.
+			padTo := width
+			if i == 0 {
+				padTo = width - lipgloss.Width(prefixStyled)
+			}
+			pad := padTo - lipgloss.Width(line)
+			if pad < 0 {
+				pad = 0
+			}
+			styled := bg.Inherit(bodyStyle).Render(line + strings.Repeat(" ", pad))
+			if i == 0 {
+				lines[i] = prefixStyled + styled
+			} else {
+				lines[i] = styled
+			}
+		}
+		return strings.Join(lines, "\n")
 	case RoleAssistant:
 		// Display() returns the cached Glamour render (Rendered) when
 		// available; otherwise the raw text. We word-wrap only the
