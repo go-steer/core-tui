@@ -19,17 +19,18 @@ import (
 	"testing"
 )
 
-// TestPalette_FilterRanksPrefixThenSubstring pins R-PAL-3's ranking:
-// prefix matches come before substring matches, both case-insensitive,
-// each bucket alphabetized.
-func TestPalette_FilterRanksPrefixThenSubstring(t *testing.T) {
+// TestPalette_FilterRanksFourTier pins the 4-tier ranking
+// (agentic-tui skill §8.B): exact basename → basename prefix →
+// path-segment exact → fuzzy substring. Tiebreak by shorter
+// path. All matches case-insensitive.
+func TestPalette_FilterRanksFourTier(t *testing.T) {
 	p := &palette{
 		kind: paletteSlash,
 		items: []paletteItem{
 			{Name: "model", Available: true},     // substring "od"
-			{Name: "odd", Available: true},       // prefix "od"
+			{Name: "odd", Available: true},       // basename prefix "od" (shorter than Odyssey)
 			{Name: "code", Available: true},      // substring "od"
-			{Name: "Odyssey", Available: true},   // prefix "od" (case-insensitive)
+			{Name: "Odyssey", Available: true},   // basename prefix "od" (case-insensitive)
 			{Name: "unrelated", Available: true}, // no match
 		},
 	}
@@ -38,9 +39,41 @@ func TestPalette_FilterRanksPrefixThenSubstring(t *testing.T) {
 	if len(got) != 4 {
 		t.Fatalf("expected 4 matches for %q, got %d (%v)", p.filter, len(got), names(got))
 	}
-	// Prefix bucket (alphabetical): Odyssey, odd.
-	// Substring bucket (alphabetical): code, model.
-	want := []string{"Odyssey", "odd", "code", "model"}
+	// Tier 2 (basename prefix): odd (len 3) before Odyssey (len 7).
+	// Tier 4 (substring): code (len 4) before model (len 5).
+	want := []string{"odd", "Odyssey", "code", "model"}
+	for i, n := range want {
+		if got[i].Name != n {
+			t.Errorf("rank %d: got %q, want %q (full order: %v)", i, got[i].Name, n, names(got))
+		}
+	}
+}
+
+// TestPalette_FilterFourTierFiles exercises all four tiers
+// against file-like names so the per-tier ordering is visible.
+func TestPalette_FilterFourTierFiles(t *testing.T) {
+	p := &palette{
+		kind: paletteFile,
+		items: []paletteItem{
+			{Name: "lib/domain.go"},              // tier 4: substring "main" inside "domain"
+			{Name: "cmd/main/run.go"},            // tier 3: path-segment "main"
+			{Name: "main_test.go"},               // tier 2: basename prefix "main"
+			{Name: "main.go"},                    // tier 1: exact basename "main" (well, "main.go" basename — not exact)
+			{Name: "main"},                       // tier 1: exact basename "main"
+		},
+	}
+	p.filter = "main"
+	got := p.filtered()
+	want := []string{
+		"main",            // tier 1 exact
+		"main.go",         // tier 2 prefix (shorter than main_test.go)
+		"main_test.go",    // tier 2 prefix
+		"cmd/main/run.go", // tier 3 segment
+		"lib/domain.go",   // tier 4 substring
+	}
+	if len(got) != len(want) {
+		t.Fatalf("expected %d matches, got %d (%v)", len(want), len(got), names(got))
+	}
 	for i, n := range want {
 		if got[i].Name != n {
 			t.Errorf("rank %d: got %q, want %q (full order: %v)", i, got[i].Name, n, names(got))

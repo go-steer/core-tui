@@ -266,28 +266,79 @@ func (p *palette) triggerRune() string {
 	return "/"
 }
 
-// filtered returns the subset of items matching filter, ranked:
-// prefix matches first, then substring matches, both case-insensitive.
-// Empty filter returns all items in their original order.
+// filtered returns the subset of items matching filter, ranked
+// across four tiers (agentic-tui skill §8.B):
+//
+//	1. exact basename match           ("main" → "main.go")
+//	2. basename prefix match          ("main" → "main_test.go")
+//	3. path-segment exact match       ("main" → "cmd/main/run.go")
+//	4. fuzzy substring                ("main" → "models/main_factory.go")
+//
+// Ties are broken by shorter path (prefer items closer to repo
+// root). Empty filter returns items in original order. All matches
+// are case-insensitive.
 func (p *palette) filtered() []paletteItem {
 	if p.filter == "" {
 		return p.items
 	}
 	q := strings.ToLower(p.filter)
-	var prefix, substr []paletteItem
+
+	type ranked struct {
+		item paletteItem
+		tier int
+		path string // lowercased name for tiebreak
+	}
+	rs := make([]ranked, 0, len(p.items))
 	for _, item := range p.items {
 		name := strings.ToLower(item.Name)
+		// Treat the last path segment (after the final '/') as the
+		// basename. Slash commands have no '/' so the basename is
+		// the whole name.
+		base := name
+		if i := strings.LastIndex(name, "/"); i >= 0 {
+			base = name[i+1:]
+		}
 		switch {
-		case strings.HasPrefix(name, q):
-			prefix = append(prefix, item)
+		case base == q:
+			rs = append(rs, ranked{item, 1, name})
+		case strings.HasPrefix(base, q):
+			rs = append(rs, ranked{item, 2, name})
+		case segmentEquals(name, q):
+			rs = append(rs, ranked{item, 3, name})
 		case strings.Contains(name, q):
-			substr = append(substr, item)
+			rs = append(rs, ranked{item, 4, name})
 		}
 	}
-	// Stable-sort each bucket alphabetically for predictable ranking.
-	sort.SliceStable(prefix, func(i, j int) bool { return prefix[i].Name < prefix[j].Name })
-	sort.SliceStable(substr, func(i, j int) bool { return substr[i].Name < substr[j].Name })
-	return append(prefix, substr...)
+	sort.SliceStable(rs, func(i, j int) bool {
+		if rs[i].tier != rs[j].tier {
+			return rs[i].tier < rs[j].tier
+		}
+		// Tiebreak: shorter path wins (closer to repo root /
+		// fewer typed chars to confirm).
+		if len(rs[i].path) != len(rs[j].path) {
+			return len(rs[i].path) < len(rs[j].path)
+		}
+		return rs[i].path < rs[j].path
+	})
+	out := make([]paletteItem, len(rs))
+	for i, r := range rs {
+		out[i] = r.item
+	}
+	return out
+}
+
+// segmentEquals reports whether q appears as a full
+// slash-delimited segment anywhere in path. "main" matches
+// "cmd/main/run.go" (the middle segment) but NOT
+// "cmd/maintain/run.go" (segment "maintain" contains but doesn't
+// equal q).
+func segmentEquals(path, q string) bool {
+	for _, seg := range strings.Split(path, "/") {
+		if seg == q {
+			return true
+		}
+	}
+	return false
 }
 
 // moveCursor advances the cursor by delta with wrap-around.
