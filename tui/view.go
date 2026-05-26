@@ -535,11 +535,12 @@ func (m Model) renderMessage(msg Message) string {
 	case RoleError:
 		return m.styles.ErrorText.Render(wordWrapIndent(GlyphWarn+"  "+msg.Display(), width, "   "))
 	case RoleTool:
+		// Per-tool rendering strategy (toolrender.go). The factory
+		// dispatches by tool name; bash gets accent coloring, file
+		// tools get an underlined path, everything else falls back
+		// to the generic muted-args layout.
 		head := m.styles.ToolHead.Render(GlyphTool + " " + msg.ToolName)
-		if msg.ToolArgs != "" {
-			args := wordWrap(msg.ToolArgs, width-lipgloss.Width(head)-1)
-			return head + " " + m.styles.ToolBody.Render(args)
-		}
+		return toolRendererFor(msg.ToolName).RenderCall(msg, head, width, m.styles)
 		return head
 	}
 	return wordWrap(msg.Display(), width)
