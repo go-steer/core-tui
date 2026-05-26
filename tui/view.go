@@ -568,9 +568,23 @@ func (m Model) renderMessage(msg Message) string {
 		// dispatches by tool name; bash gets accent coloring, file
 		// tools get an underlined path, everything else falls back
 		// to the generic muted-args layout.
-		head := m.styles.ToolHead.Render(GlyphTool + " " + msg.ToolName)
+		//
+		// Glyph: ▶ (active) vs › (done). Active = this is the
+		// most-recent tool call that hasn't been followed by any
+		// text yet (m.activeToolID == msg.ID). Both glyphs are
+		// text-class so they take the foreground color cleanly
+		// — no emoji-default ovverride.
+		glyph := GlyphTool
+		nameStyle := m.styles.ToolHead
+		if msg.ID != 0 && msg.ID == m.activeToolID {
+			glyph = GlyphToolActive
+			// Active call: keep the same color as inactive but
+			// add italic so the row visually pulses without
+			// requiring per-frame ticks.
+			nameStyle = m.styles.ToolHead.Italic(true)
+		}
+		head := nameStyle.Render(glyph + " " + msg.ToolName)
 		return toolRendererFor(msg.ToolName).RenderCall(msg, head, width, m.styles)
-		return head
 	}
 	return wordWrap(msg.Display(), width)
 }
@@ -923,6 +937,33 @@ func (m Model) renderToast(width int) string {
 	return m.styles.PermissionWarn.Render(body)
 }
 
+// permissionKeyHint builds the "y allow once · n deny · …" key
+// legend for both permission renderers. Spaces WITHIN a key+action
+// pair are non-breaking (U+00A0) so wordWrap's space-break never
+// splits "a allow always" mid-pair onto two lines. The " · "
+// separator stays breakable so the legend wraps cleanly between
+// keys instead.
+func permissionKeyHint(verb string) string {
+	const nbsp = " "
+	pair := func(key, action string) string {
+		return key + nbsp + strings.ReplaceAll(action, " ", nbsp)
+	}
+	keys := []string{
+		pair("y", "allow once"),
+		pair("n", "deny"),
+		pair("s", "allow session"),
+	}
+	if verb != "" {
+		keys = append(keys, pair("v", "allow verb"))
+	}
+	keys = append(keys,
+		pair("t", "allow tool"),
+		pair("a", "allow always"),
+		pair("esc", "deny"),
+	)
+	return strings.Join(keys, " "+GlyphSeparator+" ")
+}
+
 // renderPermissionInline renders the permission prompt as a
 // block inside the chat viewport flow (PermissionInline layout).
 // Uses a left rule (│) gutter to set it apart visually from the
@@ -960,16 +1001,7 @@ func (m *Model) renderPermissionInline() string {
 	if req.Detail != "" {
 		lines = append(lines, "", m.renderPermissionDetail(req, bodyWidth))
 	}
-	keys := []string{
-		"y allow once",
-		"n deny",
-		"s allow session",
-	}
-	if req.Verb != "" {
-		keys = append(keys, "v allow verb")
-	}
-	keys = append(keys, "t allow tool", "a allow always", "esc deny")
-	lines = append(lines, "", m.styles.Muted.Render(strings.Join(keys, " "+GlyphSeparator+" ")))
+	lines = append(lines, "", m.styles.Muted.Render(permissionKeyHint(req.Verb)))
 
 	// Prefix each line with the left-rule gutter (in accent so the
 	// block reads as a focused affordance, not a quiet quote).
@@ -1026,16 +1058,7 @@ func (m *Model) renderPermissionModal() string {
 	}
 	body := strings.Join(lines, "\n")
 
-	keys := []string{
-		"y allow once",
-		"n deny",
-		"s allow session",
-	}
-	if req.Verb != "" {
-		keys = append(keys, "v allow verb")
-	}
-	keys = append(keys, "t allow tool", "a allow always", "esc deny")
-	footerLine := m.styles.ModalFooter.Render(strings.Join(keys, " "+GlyphSeparator+" "))
+	footerLine := m.styles.ModalFooter.Render(permissionKeyHint(req.Verb))
 	footerRule := m.styles.ModalBorder.Render(strings.Repeat(GlyphRule, nonNeg(width-2)))
 
 	content := lipgloss.JoinVertical(lipgloss.Left,

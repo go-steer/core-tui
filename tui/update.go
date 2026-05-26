@@ -753,6 +753,13 @@ func (m Model) submitTurn(text string) Model {
 // viewport so the user sees the in-progress message grow.
 func (m *Model) applyStreamChunk(msg streamChunkMsg) {
 	m.toolActive = false
+	// Stream chunk arriving after a tool call means that tool has
+	// finished — bump its Version so the lazy-render cache
+	// re-renders the row with the inactive glyph + dimmer color.
+	if m.activeToolID != 0 {
+		m.history.BumpVersion(m.activeToolID)
+		m.activeToolID = 0
+	}
 	if msg.partial {
 		m.inProgressText += msg.text
 	} else {
@@ -808,11 +815,19 @@ func (m *Model) applyToolCall(msg toolCallMsg) {
 			break
 		}
 	}
+	// A previous tool call had already transitioned to "active"
+	// — if a NEW tool call arrives without any intervening text,
+	// that older tool is also done. Bump its Version so it
+	// renders with the inactive glyph too.
+	if m.activeToolID != 0 {
+		m.history.BumpVersion(m.activeToolID)
+	}
 	m.history.Append(Message{
 		Role:     RoleTool,
 		ToolName: msg.name,
 		ToolArgs: hint,
 	})
+	m.activeToolID = m.history.LastID()
 	m.toolActive = true
 	m.refreshViewport()
 }

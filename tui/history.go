@@ -111,6 +111,33 @@ func (h *History) SetRendered(i int, rendered string) {
 	h.entries[i].Version++
 }
 
+// LastID returns the Message.ID of the most-recent entry, or 0
+// when the history is empty. Used by the tool-call lifecycle to
+// stash the active tool's identity right after Append.
+func (h *History) LastID() uint64 {
+	if len(h.entries) == 0 {
+		return 0
+	}
+	return h.entries[len(h.entries)-1].ID
+}
+
+// BumpVersion finds the entry with the given ID and bumps its
+// Version so the lazy-render cache invalidates the row. Used to
+// signal "active tool" transitions (active → done) without
+// touching the Message's content. No-op when id == 0 or no
+// matching entry.
+func (h *History) BumpVersion(id uint64) {
+	if id == 0 {
+		return
+	}
+	for i := range h.entries {
+		if h.entries[i].ID == id {
+			h.entries[i].Version++
+			return
+		}
+	}
+}
+
 // Len returns the entry count.
 func (h *History) Len() int {
 	return len(h.entries)

@@ -230,6 +230,14 @@ type Model struct {
 	// returns its own compat.Model interface — not Bubble Tea
 	// v2's tea.Model — and View returns a string, not tea.View.
 	pendingForm *huh.Form
+
+	// activeToolID is the Message.ID of the in-flight tool call:
+	// the most recent RoleTool message that hasn't been followed
+	// by any assistant text or another tool. 0 = no active tool.
+	// Renderer uses it to swap the tool glyph (▶ active vs › done)
+	// and brighten the row so the operator's eye lands on "what
+	// the model is doing RIGHT NOW" instead of scanning back.
+	activeToolID uint64
 }
 
 // NewModel constructs a Model from Options. SeedHistory entries are
