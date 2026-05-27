@@ -64,12 +64,31 @@ type QueueEntry struct {
 }
 
 // cullTTL is how long QueueDone / QueueFailed entries linger in the
-// panel before the next render drops them. Matches core-agent's
-// queue.go convention so operators get the same fade-out cadence.
-const cullTTL = 2 * time.Second
+// panel before the next render drops them. Bumped from 2s → 8s
+// (issue #8) — on fast-tier models the original two seconds had
+// the entry gone before the operator's eyes could verify the
+// queue actually processed anything. 8 seconds is comfortably above
+// average reading speed while staying short enough that the panel
+// doesn't clutter on a long working session.
+const cullTTL = 8 * time.Second
 
 // terminalState reports whether s is a leaf state (Done or Failed)
 // and therefore subject to the cull TTL.
 func (s QueueState) terminalState() bool {
 	return s == QueueDone || s == QueueFailed
+}
+
+// hasPendingQueueEntry reports whether the model's queue holds any
+// non-terminal entry (QueueQueued or QueueInFlight). Used by the
+// wakeMsg handler to tell apart "operator just typed during streaming"
+// from "subagent / external alert arrived" — the former produces a
+// queue entry the operator can already see in the panel and doesn't
+// need a redundant system-message about an inbox alert.
+func (m *Model) hasPendingQueueEntry() bool {
+	for _, e := range m.queue {
+		if !e.State.terminalState() {
+			return true
+		}
+	}
+	return false
 }

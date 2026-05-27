@@ -96,6 +96,101 @@ func TestUpdate_WakeMsgRaisesToast(t *testing.T) {
 	}
 }
 
+// TestUpdate_WakeMsg_SuppressedWhenQueuePending pins issue #7:
+// when the queue already shows a pending entry (operator typed
+// during streaming), the wakeMsg handler must NOT raise the
+// "background subagent" toast / system message — the queue panel
+// is already the right surface for that signal.
+func TestUpdate_WakeMsg_SuppressedWhenQueuePending(t *testing.T) {
+	agent := newWakingAgent()
+	m := NewModel(Options{Agent: agent})
+	m.viewport.SetWidth(80)
+	m.queue = []QueueEntry{
+		{Text: "queued by operator", State: QueueQueued, Created: time.Now()},
+	}
+
+	out, _ := m.Update(wakeMsg{})
+	got := out.(Model)
+
+	if got.toast != "" {
+		t.Errorf("expected empty toast when queue has pending entry, got %q", got.toast)
+	}
+	// No system message should have been appended — the queue panel
+	// is the operator's confirmation surface.
+	if got.history.Len() != 0 {
+		t.Errorf("expected zero history entries when queue has pending entry, got %d", got.history.Len())
+	}
+}
+
+// TestUpdate_WakeMsg_FiresWhenQueueEmpty pins the opposite: with
+// no pending queue entry, the wakeMsg handler still raises the
+// toast + system message (subagent / external-alert path).
+func TestUpdate_WakeMsg_FiresWhenQueueEmpty(t *testing.T) {
+	agent := newWakingAgent()
+	m := NewModel(Options{Agent: agent})
+	m.viewport.SetWidth(80)
+	// queue is empty by default
+
+	out, _ := m.Update(wakeMsg{})
+	got := out.(Model)
+
+	if got.toast == "" {
+		t.Errorf("expected non-empty toast when queue is empty (subagent path)")
+	}
+	if got.history.Len() == 0 {
+		t.Errorf("expected system message appended when queue is empty")
+	}
+}
+
+// TestUpdate_WakeMsg_SuppressedWithInFlightEntry covers the
+// QueueInFlight branch of hasPendingQueueEntry (the entry has been
+// drained from the queue and is the running turn).
+func TestUpdate_WakeMsg_SuppressedWithInFlightEntry(t *testing.T) {
+	agent := newWakingAgent()
+	m := NewModel(Options{Agent: agent})
+	m.viewport.SetWidth(80)
+	m.queue = []QueueEntry{
+		{Text: "in flight", State: QueueInFlight, Created: time.Now()},
+	}
+
+	out, _ := m.Update(wakeMsg{})
+	got := out.(Model)
+
+	if got.toast != "" {
+		t.Errorf("expected suppression for QueueInFlight, got toast %q", got.toast)
+	}
+}
+
+// TestUpdate_WakeMsg_FiresWhenAllQueueEntriesTerminal pins that
+// only non-terminal entries suppress — a queue full of Done /
+// Failed entries should NOT block the wake signal (those are
+// fading-out remnants, not active work).
+func TestUpdate_WakeMsg_FiresWhenAllQueueEntriesTerminal(t *testing.T) {
+	agent := newWakingAgent()
+	m := NewModel(Options{Agent: agent})
+	m.viewport.SetWidth(80)
+	m.queue = []QueueEntry{
+		{Text: "fading", State: QueueDone, Created: time.Now()},
+		{Text: "failed", State: QueueFailed, Created: time.Now()},
+	}
+
+	out, _ := m.Update(wakeMsg{})
+	got := out.(Model)
+
+	if got.toast == "" {
+		t.Errorf("expected toast when only terminal entries present (no active queue work)")
+	}
+}
+
+// TestCullTTL_LongerThan2s pins issue #8: the cull TTL must be
+// long enough for the operator to actually see a Done entry. The
+// fix bumps from 2s to something comfortably above reading speed.
+func TestCullTTL_LongerThan2s(t *testing.T) {
+	if cullTTL <= 2*time.Second {
+		t.Errorf("cullTTL = %v, expected > 2s so fast-tier model turns leave Done entries visible", cullTTL)
+	}
+}
+
 // TestRenderToast_RespectsTTL pins that a toast past its TTL renders
 // as empty (the cull check in renderToast is the secondary defense
 // behind the toastClearMsg timer).

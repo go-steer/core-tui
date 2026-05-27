@@ -116,3 +116,15 @@ type elicitRequestMsg struct {
 	serverName string
 	req        ElicitRequest
 }
+
+// slashResultMsg carries the eventual outcome of an
+// AsyncSlashProvider.InvokeSlashAsync call (issue #10). Posted
+// onto m.eventCh by a goroutine the dispatcher spawns, then
+// dispatched by Update like any other event so the modal /
+// system message / error path stays consistent with the
+// synchronous case.
+type slashResultMsg struct {
+	name string
+	res  SlashResult
+	err  error
+}

@@ -224,6 +224,100 @@ func TestSlashClear_OtherTextCancels(t *testing.T) {
 	}
 }
 
+// asyncSlashAgent stubs SlashProvider + AsyncSlashProvider so the
+// dispatch tests can exercise the non-blocking path (issue #10).
+// The channel is buffered + pre-loaded so the goroutine spawned by
+// invokeSlashAsync drains immediately and the test doesn't need to
+// orchestrate timing.
+type asyncSlashAgent struct {
+	specs []SlashCommandSpec
+	out   chan SlashResultOrErr
+	calls int
+}
+
+func (a *asyncSlashAgent) Run(_ context.Context, _ string) iter.Seq2[Event, error] {
+	return func(_ func(Event, error) bool) {}
+}
+func (a *asyncSlashAgent) SlashCommands() []SlashCommandSpec { return a.specs }
+func (a *asyncSlashAgent) InvokeSlash(_ context.Context, _, _ string) (SlashResult, error) {
+	a.calls++
+	return SlashResult{}, errors.New("should not be called when AsyncSlashProvider is satisfied")
+}
+func (a *asyncSlashAgent) InvokeSlashAsync(_ context.Context, _, _ string) <-chan SlashResultOrErr {
+	a.calls++
+	return a.out
+}
+
+func TestDispatchSlash_AsyncPathReturnsCmd(t *testing.T) {
+	// AsyncSlashProvider satisfied → dispatch must return a Cmd
+	// instead of resolving the result synchronously. The Cmd, when
+	// invoked, drains one value from the host's channel.
+	ch := make(chan SlashResultOrErr, 1)
+	ch <- SlashResultOrErr{Res: SlashResult{ModalAnswer: &SideAnswer{Question: "q?", Answer: "a."}}}
+	agent := &asyncSlashAgent{specs: []SlashCommandSpec{{Name: "btw"}}, out: ch}
+	m := NewModel(Options{Agent: agent})
+	m.input.SetValue("/btw hello")
+	m.viewport.SetWidth(80)
+
+	out, cmd := m.dispatchSlash("/btw hello")
+	if _, ok := out.(Model); !ok {
+		t.Fatalf("expected Model, got %T", out)
+	}
+	if cmd == nil {
+		t.Fatal("expected a Cmd for the async path, got nil")
+	}
+	// Run the Cmd; it should produce a slashResultMsg carrying the
+	// modal answer we pre-loaded.
+	msg := cmd()
+	r, ok := msg.(slashResultMsg)
+	if !ok {
+		t.Fatalf("expected slashResultMsg, got %T", msg)
+	}
+	if r.res.ModalAnswer == nil || r.res.ModalAnswer.Question != "q?" {
+		t.Errorf("expected pre-loaded modal answer, got %+v", r.res)
+	}
+}
+
+func TestDispatchSlash_AsyncPath_RoutesThroughApplySlashResult(t *testing.T) {
+	// Once the slashResultMsg lands, Update must route it through
+	// applySlashResult so the modal opens / system message appends.
+	ch := make(chan SlashResultOrErr, 1)
+	ch <- SlashResultOrErr{Res: SlashResult{ModalAnswer: &SideAnswer{Question: "q?", Answer: "a."}}}
+	agent := &asyncSlashAgent{specs: []SlashCommandSpec{{Name: "btw"}}, out: ch}
+	m := NewModel(Options{Agent: agent})
+	m.viewport.SetWidth(80)
+
+	// Hand-deliver the message (no goroutine race in the test).
+	out, _ := m.Update(slashResultMsg{name: "btw", res: SlashResult{ModalAnswer: &SideAnswer{Question: "q?", Answer: "a."}}})
+	got := out.(Model)
+	if got.sideAnswer == nil {
+		t.Fatalf("expected sideAnswer to be set after slashResultMsg")
+	}
+	if got.sideAnswer.Question != "q?" {
+		t.Errorf("question = %q, want %q", got.sideAnswer.Question, "q?")
+	}
+}
+
+func TestDispatchSlash_SyncFallbackWhenNoAsync(t *testing.T) {
+	// A plain SlashProvider (no AsyncSlashProvider) still resolves
+	// synchronously — backward compat with existing hosts.
+	agent := &slashAgent{
+		specs: []SlashCommandSpec{{Name: "btw"}},
+		res:   SlashResult{SystemMessage: "ok"},
+	}
+	m := NewModel(Options{Agent: agent})
+	m.viewport.SetWidth(80)
+
+	out, cmd := m.dispatchSlash("/btw ping")
+	if cmd != nil {
+		t.Errorf("sync path should return nil Cmd, got %T", cmd)
+	}
+	got := out.(Model)
+	if got.history.Len() == 0 {
+		t.Errorf("expected system message appended on sync path")
+	}
+}
+
 // TestDispatchSlash_UnknownCommand pins that an unknown slash logs a
 // helpful system row instead of failing silently or panicking.
 func TestDispatchSlash_UnknownCommand(t *testing.T) {
