@@ -126,6 +126,18 @@ type Model struct {
 	currentCost    float64 // most recent positive cost for this turn (USD)
 	currentModel   string  // model name for the in-progress message
 
+	// AsyncSlashProvider in-flight state (issue #13). The TUI used
+	// to dispatch /btw / /compact and sit silent for the entire 1-10s
+	// model call; inFlightSlash carries the running slash's name +
+	// start time so the toast surface and status-line segment can
+	// surface a "/<name> running…" indicator throughout. cancelSlash
+	// is the ctx cancel from invokeSlashAsync — fired from the Esc
+	// handler when set, mirroring how cancelTurn works for streaming
+	// turns. Nil/zero when no async slash is pending; reset on the
+	// slashResultMsg handler.
+	inFlightSlash *slashFlight
+	cancelSlash   context.CancelFunc
+
 	// listCache memoizes the styled-string render of each history
 	// Message keyed by (Message.ID, viewport width, Message.Version).
 	// Without it every refreshViewport re-Glamour-renders every

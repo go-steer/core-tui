@@ -20,6 +20,7 @@ import (
 	"iter"
 	"strings"
 	"testing"
+	"time"
 
 	tea "charm.land/bubbletea/v2"
 )
@@ -315,6 +316,169 @@ func TestDispatchSlash_SyncFallbackWhenNoAsync(t *testing.T) {
 	got := out.(Model)
 	if got.history.Len() == 0 {
 		t.Errorf("expected system message appended on sync path")
+	}
+}
+
+// blockingAsyncSlashAgent stubs AsyncSlashProvider with a channel
+// the test controls — useful for verifying the in-flight state
+// (issue #13) without racing the result back too quickly.
+type blockingAsyncSlashAgent struct {
+	specs []SlashCommandSpec
+	out   chan SlashResultOrErr
+	ctx   context.Context // captured at InvokeSlashAsync time
+}
+
+func (a *blockingAsyncSlashAgent) Run(_ context.Context, _ string) iter.Seq2[Event, error] {
+	return func(_ func(Event, error) bool) {}
+}
+func (a *blockingAsyncSlashAgent) SlashCommands() []SlashCommandSpec { return a.specs }
+func (a *blockingAsyncSlashAgent) InvokeSlash(_ context.Context, _, _ string) (SlashResult, error) {
+	return SlashResult{}, errors.New("should not be called")
+}
+func (a *blockingAsyncSlashAgent) InvokeSlashAsync(ctx context.Context, _, _ string) <-chan SlashResultOrErr {
+	a.ctx = ctx
+	return a.out
+}
+
+func TestDispatchSlash_Async_ArmsInFlightAndStickyToast(t *testing.T) {
+	agent := &blockingAsyncSlashAgent{
+		specs: []SlashCommandSpec{{Name: "compact"}},
+		out:   make(chan SlashResultOrErr, 1),
+	}
+	m := NewModel(Options{Agent: agent})
+	m.viewport.SetWidth(80)
+
+	out, cmd := m.dispatchSlash("/compact")
+	got := out.(Model)
+	if got.inFlightSlash == nil || got.inFlightSlash.name != "compact" {
+		t.Errorf("expected inFlightSlash{name=compact}, got %+v", got.inFlightSlash)
+	}
+	if got.cancelSlash == nil {
+		t.Error("expected cancelSlash set after async dispatch")
+	}
+	if !strings.Contains(got.toast, "compact") || !strings.Contains(got.toast, "running") {
+		t.Errorf("expected sticky toast with name + 'running', got %q", got.toast)
+	}
+	if cmd == nil {
+		t.Error("expected a Cmd for the async path")
+	}
+}
+
+func TestUpdate_ToastClearMsg_StickyWhenSlashInFlight(t *testing.T) {
+	// Set up a model with an in-flight slash. The toastClearMsg
+	// handler must NOT clear the toast while a slash is pending,
+	// regardless of how long ago the toast was set.
+	m := NewModel(Options{})
+	m.viewport.SetWidth(80)
+	m.inFlightSlash = &slashFlight{name: "compact", startedAt: time.Now().Add(-30 * time.Second)}
+	m.toast = "▸ /compact running…"
+	m.toastSetAt = time.Now().Add(-30 * time.Second) // way past TTL
+
+	out, _ := m.Update(toastClearMsg{})
+	got := out.(Model)
+	if got.toast == "" {
+		t.Errorf("expected toast to persist while slash in flight, got cleared")
+	}
+}
+
+func TestUpdate_SlashResultMsg_ClearsInFlightAndToast(t *testing.T) {
+	m := NewModel(Options{})
+	m.viewport.SetWidth(80)
+	m.inFlightSlash = &slashFlight{name: "btw", startedAt: time.Now()}
+	m.cancelSlash = func() {}
+	m.toast = "▸ /btw running…"
+
+	out, _ := m.Update(slashResultMsg{name: "btw", res: SlashResult{SystemMessage: "answer"}})
+	got := out.(Model)
+	if got.inFlightSlash != nil {
+		t.Errorf("expected inFlightSlash cleared on result, got %+v", got.inFlightSlash)
+	}
+	if got.cancelSlash != nil {
+		t.Errorf("expected cancelSlash cleared on result")
+	}
+	if got.toast != "" {
+		t.Errorf("expected toast cleared on result, got %q", got.toast)
+	}
+}
+
+func TestDispatchSlash_Async_RefusesConcurrent(t *testing.T) {
+	// First /compact arms the in-flight state. The follow-up /btw
+	// must be refused with a system note instead of dispatching.
+	agent := &blockingAsyncSlashAgent{
+		specs: []SlashCommandSpec{{Name: "compact"}, {Name: "btw"}},
+		out:   make(chan SlashResultOrErr, 1),
+	}
+	m := NewModel(Options{Agent: agent})
+	m.viewport.SetWidth(80)
+
+	out, _ := m.dispatchSlash("/compact")
+	m = out.(Model)
+	if m.inFlightSlash == nil {
+		t.Fatal("setup: expected first dispatch to arm inFlightSlash")
+	}
+
+	// Second slash while compact still in flight.
+	out2, cmd2 := m.dispatchSlash("/btw hi")
+	got := out2.(Model)
+	if cmd2 != nil {
+		t.Errorf("expected nil Cmd on refused concurrent slash, got %T", cmd2)
+	}
+	if got.history.Len() == 0 {
+		t.Fatal("expected refusal system message appended")
+	}
+	last := got.history.Snapshot()[got.history.Len()-1]
+	if last.Role != RoleSystem {
+		t.Errorf("expected RoleSystem refusal, got %v", last.Role)
+	}
+	if !strings.Contains(last.Text, "still running") {
+		t.Errorf("expected 'still running' in refusal text, got: %q", last.Text)
+	}
+}
+
+func TestUpdate_Esc_CancelsInFlightSlash(t *testing.T) {
+	cancelled := false
+	m := NewModel(Options{})
+	m.viewport.SetWidth(80)
+	m.inFlightSlash = &slashFlight{name: "compact", startedAt: time.Now()}
+	m.cancelSlash = func() { cancelled = true }
+
+	esc := tea.KeyPressMsg(tea.Key{Code: tea.KeyEsc})
+	out, _ := m.Update(esc)
+	got := out.(Model)
+	if !cancelled {
+		t.Error("expected Esc to fire cancelSlash")
+	}
+	if got.cancelSlash != nil {
+		t.Error("expected cancelSlash cleared after fire")
+	}
+	// inFlightSlash NOT cleared yet — that happens when the
+	// host's slashResultMsg lands. Toast switches to "cancelling…".
+	if got.inFlightSlash == nil {
+		t.Error("expected inFlightSlash to persist until slashResultMsg arrives")
+	}
+	if !strings.Contains(got.toast, "cancelling") {
+		t.Errorf("expected 'cancelling' toast after Esc, got %q", got.toast)
+	}
+}
+
+func TestRenderStatusLine_ShowsInFlightSlashSegment(t *testing.T) {
+	m := NewModel(Options{})
+	m.viewport.SetWidth(80)
+	m.inFlightSlash = &slashFlight{name: "compact", startedAt: time.Now()}
+
+	line := m.renderStatusLine()
+	if !strings.Contains(line, "/compact running") {
+		t.Errorf("expected status-line segment '/compact running', got: %q", line)
+	}
+}
+
+func TestRenderStatusLine_NoSegmentWhenIdle(t *testing.T) {
+	m := NewModel(Options{})
+	m.viewport.SetWidth(80)
+	// no inFlightSlash set
+	line := m.renderStatusLine()
+	if strings.Contains(line, "running") {
+		t.Errorf("expected no 'running' segment when idle, got: %q", line)
 	}
 }
 
