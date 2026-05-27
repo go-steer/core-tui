@@ -112,6 +112,29 @@ type InjectableAgent interface {
 	Inject(message string) error
 }
 
+// InboxDrainer is an optional capability for hosts whose agent
+// queues operator-injected messages in an internal inbox that's
+// distinct from the per-turn prompt. Combined with InjectableAgent
+// it gives core-tui the ability to drive an auto-continue loop on
+// hosts whose runner is opaque (ADK, anywhere the iterator-shaped
+// runner owns its own loop and doesn't expose mid-turn hooks).
+//
+// DrainInbox returns the currently queued messages AND removes
+// them from the inbox in one call — semantics matter, since the
+// TUI then formats + submits them as a synthetic turn. A nil /
+// empty return is the signal "nothing to auto-continue, idle."
+//
+// PendingInboxCount is a non-destructive peek used for sizing /
+// UI hints; it may return a coarse upper bound if the host can't
+// precisely count without mutating state.
+//
+// See issue #9 and Options.MidTurnInjectionMode ==
+// AutoContinueFromInbox.
+type InboxDrainer interface {
+	DrainInbox() []string
+	PendingInboxCount() int
+}
+
 // WakeRequester is an optional capability: hosts whose agent
 // emits "I need the operator's attention" signals (typically from
 // background sub-agents reporting completion or asking for input)

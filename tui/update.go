@@ -120,6 +120,13 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		return m, m.eventListener()
 	case turnDoneMsg:
 		m.finalizeTurn(msg.elapsed, "")
+		// Issue #9: AutoContinueFromInbox mode pulls the inbox
+		// and submits a synthetic auto-continue turn instead of
+		// draining one queue entry at a time. Falls through to
+		// maybeDrainQueue when not applicable.
+		if next, cmd, ok := m.maybeAutoContinue(); ok {
+			return next, cmd
+		}
 		return m.maybeDrainQueue()
 	case turnErrMsg:
 		m.finalizeTurn(0, msg.err.Error())
@@ -556,6 +563,9 @@ func (m Model) handleKey(msg tea.KeyPressMsg) (tea.Model, tea.Cmd) {
 		// ↑/↓ can recall it next time. recordPrompt dedupes
 		// consecutive duplicates + caps the ring at promptHistoryCap.
 		m.recordPrompt(text)
+		// Operator-initiated turn resets the auto-continue cap so
+		// the next streak gets the full budget. (Issue #9.)
+		m.consecutiveAutoContinues = 0
 		return m.submitTurn(text), spinnerTick()
 
 	case "shift+enter", "ctrl+j", "alt+enter":
@@ -1455,6 +1465,35 @@ func (m *Model) enqueueDuringStream(text string) {
 			return
 		}
 		// Agent doesn't support injection — fall back to QueueForNext.
+	}
+	if m.opts.MidTurnInjectionMode == AutoContinueFromInbox {
+		// Issue #9: best of both worlds — Inject feeds the host's
+		// inbox so DrainInbox at turn-end picks the entry up; the
+		// queue row stays Queued so the operator sees the entry
+		// is pending. maybeAutoContinue flips it to Done when the
+		// inbox drain returns it. Falls through to QueueForNext
+		// when either capability is missing.
+		if injector, ok := m.opts.Agent.(InjectableAgent); ok {
+			if _, isDrainer := m.opts.Agent.(InboxDrainer); isDrainer {
+				if err := injector.Inject(text); err != nil {
+					m.queue = append(m.queue, QueueEntry{
+						Text:     text,
+						State:    QueueFailed,
+						Err:      err.Error(),
+						Created:  time.Now(),
+						Injected: true,
+					})
+					return
+				}
+				m.queue = append(m.queue, QueueEntry{
+					Text:     text,
+					State:    QueueQueued,
+					Created:  time.Now(),
+					Injected: true,
+				})
+				return
+			}
+		}
 	}
 	m.queue = append(m.queue, QueueEntry{
 		Text:    text,

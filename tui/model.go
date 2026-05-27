@@ -156,6 +156,16 @@ type Model struct {
 	// the result. Drained one-at-a-time when finalizeTurn fires.
 	queue []QueueEntry
 
+	// consecutiveAutoContinues counts back-to-back auto-continue
+	// turns (Options.MidTurnInjectionMode == AutoContinueFromInbox)
+	// without an operator-initiated turn in between. Reset to 0
+	// whenever the operator types a fresh prompt; incremented on
+	// each auto-continue submission. The soft cap from
+	// Options.AutoContinueCap (default DefaultAutoContinueCap)
+	// halts the loop and logs a system note so the operator can
+	// reclaim control.
+	consecutiveAutoContinues int
+
 	// eventCh is the bridge between the agent dispatch goroutine and
 	// the Bubble Tea loop. eventListener drains it one message at a
 	// time. Buffered so a fast agent can't stall on a slow Update.
