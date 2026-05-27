@@ -108,11 +108,21 @@ func (m Model) dispatchBuiltinSlash(name, args string) (bool, tea.Model, tea.Cmd
 		return true, m, nil
 
 	case "mouse":
-		// Mouse capture is enabled by the program harness at startup
-		// (program.go); the TUI has no per-session toggle yet. Surface
-		// the limitation honestly so the operator knows the slash isn't
-		// silently dropped.
-		m.history.Append(Message{Role: RoleSystem, Text: "/mouse: mouse-capture toggle is not yet wired — the host program controls it at startup"})
+		// Runtime toggle. View() reads m.opts.Mouse every frame so
+		// flipping the pointer + refreshing is enough — bubble-tea
+		// picks up the new MouseMode on the next render. Initial
+		// state comes from Options.Mouse (default: enabled).
+		on := true
+		if m.opts.Mouse != nil {
+			on = *m.opts.Mouse
+		}
+		on = !on
+		m.opts.Mouse = &on
+		state := "off"
+		if on {
+			state = "on"
+		}
+		m.history.Append(Message{Role: RoleSystem, Text: "/mouse: capture " + state})
 		m.input.Reset()
 		m.refreshAndScroll()
 		return true, m, nil
@@ -518,7 +528,7 @@ func (m Model) renderBuiltinHelp() string {
 	b.WriteString("  /pricing refresh|set — manage cost rates\n")
 	b.WriteString("  /subagents           — list background subagents\n")
 	b.WriteString("  /interrupt, /int     — cancel the in-flight turn\n")
-	b.WriteString("  /mouse               — (placeholder)\n")
+	b.WriteString("  /mouse               — toggle terminal mouse capture\n")
 
 	if provider, ok := m.opts.Agent.(SlashProvider); ok {
 		specs := provider.SlashCommands()

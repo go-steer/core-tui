@@ -14,6 +14,16 @@
 
 package tui
 
+// ForceTheme values for Options.ForceTheme. "" (the zero value)
+// means "auto" — let core-tui's OSC-11 query decide. The strings
+// match what core-agent's UIConfig writes to JSON so hosts can
+// pass cfg.UI.Theme through unchanged.
+const (
+	ThemeAuto  = ""
+	ThemeDark  = "dark"
+	ThemeLight = "light"
+)
+
 // Options configures tui.Run.
 type Options struct {
 	// Agent is required.
@@ -30,6 +40,24 @@ type Options struct {
 	// that prefer the per-provider identity flip it on. Branding
 	// overrides still apply on top of whichever theme is picked.
 	AutoProviderTheme bool
+
+	// ForceTheme overrides core-tui's terminal-background auto-
+	// detection (OSC-11 → BackgroundColorMsg → m.styles.Dark). One
+	// of "" (auto, the default — query the terminal), "dark", or
+	// "light". Useful on terminals where the OSC-11 query is
+	// unreliable (some SSH stacks, tmux passthrough quirks). When
+	// set, BackgroundColorMsg is ignored so a stale or wrong
+	// response can't override the operator's explicit choice.
+	ForceTheme string
+
+	// Mouse toggles terminal mouse capture. nil (the default) keeps
+	// MouseModeCellMotion on so the wheel scrolls the viewport;
+	// *false disables capture entirely (MouseModeNone), restoring
+	// the terminal's native click-drag text-select. Operators on
+	// terminals that handle wheel scrolling natively, or who prefer
+	// text-select-without-Shift, flip this off. The /mouse slash
+	// flips it at runtime; this option is the startup default.
+	Mouse *bool
 
 	// PermissionLayout picks how the permission prompt is rendered
 	// when the gate asks for approval (R-PERM-1). Zero value =

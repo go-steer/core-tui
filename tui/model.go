@@ -297,9 +297,21 @@ func NewModel(opts Options) Model {
 		HalfPageUp:   newKeyBinding("ctrl+u"),
 	}
 
+	// Seed styles.Dark from ForceTheme up front when the host has
+	// chosen explicitly; otherwise start in dark mode (the most
+	// common terminal default) and let BackgroundColorMsg overwrite
+	// when the OSC-11 response arrives. The ForceTheme path skips
+	// that overwrite — see the BackgroundColorMsg handler.
+	initialDark := true
+	switch opts.ForceTheme {
+	case ThemeLight:
+		initialDark = false
+	case ThemeDark:
+		initialDark = true
+	}
 	m := Model{
 		opts:          opts,
-		styles:        NewStyles(true, opts.Branding), // overwritten on BackgroundColorMsg
+		styles:        NewStyles(initialDark, opts.Branding), // overwritten on BackgroundColorMsg unless ForceTheme is set
 		viewport:      vp,
 		input:         ta,
 		statusLayout:  opts.StatusLayout,
