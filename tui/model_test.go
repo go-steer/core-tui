@@ -93,14 +93,6 @@ func (lightColor) RGBA() (r, g, b, a uint32) {
 	return 0xFFFF, 0xFFFF, 0xFFFF, 0xFFFF
 }
 
-// darkColor is the inverse of lightColor — RGB near zero so
-// BackgroundColorMsg.IsDark() returns true.
-type darkColor struct{}
-
-func (darkColor) RGBA() (r, g, b, a uint32) {
-	return 0, 0, 0, 0xFFFF
-}
-
 func TestNewModel_ForceTheme_LightSeedsLightStyles(t *testing.T) {
 	m := NewModel(Options{ForceTheme: ThemeLight})
 	if m.styles.Dark {
