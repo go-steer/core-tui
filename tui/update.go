@@ -101,6 +101,8 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	case toolResultMsg:
 		m.applyToolResult(msg)
 		return m, m.eventListener()
+	case slashResultMsg:
+		return m.applySlashResult(msg.name, msg.res, msg.err)
 	case usageMsg:
 		// Empty Usage (zero in/out) is the model-only signal — adapters
 		// flag the live model on the first chunk before any real usage
@@ -133,6 +135,16 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		m.refreshViewport()
 		return m, spinnerTick()
 	case wakeMsg:
+		// Issue #7: the wake signal also fires whenever Inject() is
+		// called by the queue panel (operator typed during streaming).
+		// In that case the operator can already see the queued entry
+		// in the panel — surfacing a "background subagent's report"
+		// system message is both wrong and confusing. Suppress the
+		// noisy half (toast + system row) when the queue has a
+		// pending entry; the wake subscription itself still re-issues.
+		if m.hasPendingQueueEntry() {
+			return m, m.wakeListener()
+		}
 		// Transient toast says "something arrived"; permanent
 		// history entry says "this is what arrived + how to act".
 		// Wake signals are sourced from inbox pushes (subagent
@@ -1046,7 +1058,42 @@ func (m Model) dispatchSlash(text string) (tea.Model, tea.Cmd) {
 	}
 
 	m.input.Reset()
+	// Issue #10: hosts that implement AsyncSlashProvider get the
+	// non-blocking path so any network / file I/O the call needs
+	// runs off the Update goroutine. The TUI stays responsive
+	// (cursor blinks, spinner ticks, Ctrl+C lands) while the host
+	// works; the eventual result arrives via slashResultMsg and
+	// goes through the same modal/system-message/error machinery
+	// below.
+	if asyncProv, ok := provider.(AsyncSlashProvider); ok {
+		return m, m.invokeSlashAsync(asyncProv, name, args)
+	}
 	res, err := provider.InvokeSlash(context.Background(), name, args)
+	return m.applySlashResult(name, res, err)
+}
+
+// invokeSlashAsync launches the host's AsyncSlashProvider call in
+// a goroutine and returns a tea.Cmd that forwards the eventual
+// SlashResultOrErr as a slashResultMsg into the Update loop. The
+// goroutine reads ONE value from the host's channel and forwards
+// it; a host that closes the channel without sending counts as a
+// nil-error / empty-result no-op.
+func (m Model) invokeSlashAsync(prov AsyncSlashProvider, name, args string) tea.Cmd {
+	ctx := context.Background()
+	ch := prov.InvokeSlashAsync(ctx, name, args)
+	return func() tea.Msg {
+		out, ok := <-ch
+		if !ok {
+			return slashResultMsg{name: name}
+		}
+		return slashResultMsg{name: name, res: out.Res, err: out.Err}
+	}
+}
+
+// applySlashResult is the shared post-processing for both the
+// synchronous and async slash paths. Returns the new model + a
+// nil Cmd so callers can return directly.
+func (m Model) applySlashResult(name string, res SlashResult, err error) (tea.Model, tea.Cmd) {
 	if err != nil {
 		m.history.Append(Message{
 			Role: RoleError,

@@ -68,3 +68,35 @@ type SideAnswer struct {
 	Answer   string
 	Err      error
 }
+
+// AsyncSlashProvider is the non-blocking variant of SlashProvider
+// (issue #10). Hosts whose slash commands do network or file I/O
+// implement this so the dispatch runs off the Update goroutine
+// and the TUI stays responsive — every keystroke, render tick,
+// and toast continues processing while the host's call is in
+// flight.
+//
+// Implementation contract:
+//   - InvokeSlashAsync returns a receive-only channel; core-tui
+//     reads exactly one value and closes its tea.Cmd. Hosts must
+//     send exactly one SlashResultOrErr and then close (or just
+//     send + abandon — core-tui doesn't re-read).
+//   - The supplied ctx is cancellable; when the operator hits
+//     Ctrl+C / Esc, core-tui cancels it and the host should bail
+//     as fast as the underlying work allows. The eventual sent
+//     value is discarded.
+//   - A host satisfying BOTH SlashProvider and AsyncSlashProvider
+//     prefers the async path. Built-in slash commands are not
+//     routed here — they're synchronous-and-fast by design.
+type AsyncSlashProvider interface {
+	SlashCommands() []SlashCommandSpec
+	InvokeSlashAsync(ctx context.Context, name, args string) <-chan SlashResultOrErr
+}
+
+// SlashResultOrErr bundles the SlashResult + error pair that
+// InvokeSlashAsync's channel carries. Exactly one of Res / Err is
+// meaningful per send.
+type SlashResultOrErr struct {
+	Res SlashResult
+	Err error
+}
