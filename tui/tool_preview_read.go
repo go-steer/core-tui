@@ -29,7 +29,7 @@ func renderReadPreview(name string, args map[string]any, styles Styles) string {
 	if args == nil {
 		return ""
 	}
-	const indent = "    "
+	const indent = summaryIndent
 	switch name {
 	case "read_file":
 		return renderReadFilePreview(args, styles, indent)
@@ -70,7 +70,7 @@ func renderReadFilePreview(args map[string]any, styles Styles, indent string) st
 	if lang := detectLang(path); lang != "" {
 		parts = append(parts, strings.ToLower(lang))
 	}
-	return indent + styles.Muted.Render(strings.Join(parts, " · "))
+	return styles.Muted.Render(indent + strings.Join(parts, " · "))
 }
 
 // renderReadManyFilesPreview formats `N files · a, b, c, +K more`
@@ -86,10 +86,10 @@ func renderReadManyFilesPreview(args map[string]any, styles Styles, indent strin
 		if len(paths) > 3 {
 			body += ", +" + itoa(len(paths)-3) + " more"
 		}
-		return indent + styles.Muted.Render(body)
+		return styles.Muted.Render(indent + body)
 	}
 	if pattern := stringArg(args, "pattern", "glob"); pattern != "" {
-		return indent + styles.Muted.Render("pattern: \""+pattern+"\"")
+		return styles.Muted.Render(indent + "pattern: \"" + pattern + "\"")
 	}
 	return ""
 }
@@ -108,7 +108,7 @@ func renderSearchPreview(args map[string]any, styles Styles, indent string) stri
 	if len(parts) == 0 {
 		return ""
 	}
-	return indent + styles.Muted.Render(strings.Join(parts, " · "))
+	return styles.Muted.Render(indent + strings.Join(parts, " · "))
 }
 
 // intArg returns the first int-coercible value from args for any
