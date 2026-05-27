@@ -210,8 +210,14 @@ func (m Model) View() tea.View {
 	v.BackgroundColor = nil // respect the terminal's own background
 	// Cell-motion mouse capture so the wheel scrolls the viewport.
 	// Operators who want native terminal text-select hold Shift to
-	// bypass capture (matches internal/tui + Claude Code).
-	v.MouseMode = tea.MouseModeCellMotion
+	// bypass capture (matches internal/tui + Claude Code). Hosts
+	// can disable capture entirely via Options.Mouse (set to a
+	// pointer to false); the /mouse slash toggles it at runtime.
+	if m.opts.Mouse != nil && !*m.opts.Mouse {
+		v.MouseMode = tea.MouseModeNone
+	} else {
+		v.MouseMode = tea.MouseModeCellMotion
+	}
 	return v
 }
 

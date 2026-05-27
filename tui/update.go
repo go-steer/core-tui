@@ -73,6 +73,14 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		return m, nil
 
 	case tea.BackgroundColorMsg:
+		// When the host has set Options.ForceTheme, the operator's
+		// explicit choice wins over whatever the terminal reports
+		// — some SSH stacks / tmux passthroughs respond with the
+		// wrong color, and we'd otherwise flip them to the wrong
+		// variant on every redraw.
+		if m.opts.ForceTheme == ThemeDark || m.opts.ForceTheme == ThemeLight {
+			return m, nil
+		}
 		// Set Dark first so refreshTheme picks the right variant
 		// (refreshTheme reads m.styles.Dark for the dark/light
 		// branching inside resolveStyles + textareaStyles).
