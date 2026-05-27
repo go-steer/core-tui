@@ -682,6 +682,17 @@ func (m Model) renderStatusLine() string {
 			m.styles.Muted.Render(summary),
 		)
 	}
+	// Issue #13: persistent indicator for an in-flight async slash.
+	// Always visible on the status header so the operator can verify
+	// the slash dispatched and is still working — complements the
+	// transient toast banner above the chat (which may have already
+	// cleared by the time the eye reaches it on a long call).
+	if m.inFlightSlash != nil {
+		parts = append(parts,
+			m.sep(),
+			m.styles.Accent.Render("▸ /"+m.inFlightSlash.name+" running"),
+		)
+	}
 	return strings.Join(parts, "")
 }
 

@@ -14,7 +14,10 @@
 
 package tui
 
-import "context"
+import (
+	"context"
+	"time"
+)
 
 // SlashProvider is an optional Agent capability: hosts that implement
 // it on their Agent type can advertise additional slash commands the
@@ -99,4 +102,18 @@ type AsyncSlashProvider interface {
 type SlashResultOrErr struct {
 	Res SlashResult
 	Err error
+}
+
+// slashFlight tracks one pending AsyncSlashProvider call (issue #13).
+// Name carries the slash identifier so the toast + status-line
+// indicator can render "/<name> running…"; startedAt isn't read by
+// any indicator today but lets future "running 8s…" / progress
+// affordances ride the same struct without another model field.
+//
+// Lifecycle: created in dispatchSlash's async branch, cleared in
+// the slashResultMsg handler (success, error, OR cancel — every
+// path lands a slashResultMsg one way or another).
+type slashFlight struct {
+	name      string
+	startedAt time.Time
 }

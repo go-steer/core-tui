@@ -102,6 +102,14 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		m.applyToolResult(msg)
 		return m, m.eventListener()
 	case slashResultMsg:
+		// Issue #13: clear the in-flight indicators now that the
+		// host's call has completed (success, error, or cancel —
+		// all three land here). Drop the toast so the operator sees
+		// the result row that's about to be appended; release the
+		// cancel func so a stale Esc press doesn't double-cancel.
+		m.inFlightSlash = nil
+		m.cancelSlash = nil
+		m.toast = ""
 		return m.applySlashResult(msg.name, msg.res, msg.err)
 	case usageMsg:
 		// Empty Usage (zero in/out) is the model-only signal — adapters
@@ -193,6 +201,15 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		m.refreshViewport()
 		return m, nil
 	case toastClearMsg:
+		// Issue #13: the async-slash indicator uses the toast
+		// surface but must NOT auto-clear — a /compact that takes
+		// 10s would lose its indicator at the 4s TTL and the
+		// operator would be back in silence-land. Keep the toast
+		// alive as long as a slash is in flight; the slashResultMsg
+		// handler clears both.
+		if m.inFlightSlash != nil {
+			return m, nil
+		}
 		// Only clear if the same toast is still up (a fresh wake
 		// during the TTL window restarts the timer).
 		if time.Since(m.toastSetAt) >= toastTTL {
@@ -267,6 +284,23 @@ func (m Model) handleKey(msg tea.KeyPressMsg) (tea.Model, tea.Cmd) {
 			m.palette = nil
 			m.resize()
 			m.refreshViewport()
+			return m, nil
+		}
+		// Issue #13 bonus: Esc cancels an in-flight async slash
+		// via the cancellable ctx we stashed in dispatchSlash.
+		// Hosts that honor the AsyncSlashProvider ctx contract
+		// will bail and send a slashResultMsg with the ctx error;
+		// hosts that ignore ctx run to completion and the result
+		// still lands (cancel becomes a no-op). Either way the
+		// loop terminates cleanly.
+		if m.cancelSlash != nil {
+			m.cancelSlash()
+			m.cancelSlash = nil
+			if m.inFlightSlash != nil {
+				m.toast = "▸ /" + m.inFlightSlash.name + " cancelling…"
+				m.toastSetAt = time.Now()
+				m.refreshViewport()
+			}
 			return m, nil
 		}
 		if m.state == stateStreaming && m.cancelTurn != nil {
@@ -1076,7 +1110,31 @@ func (m Model) dispatchSlash(text string) (tea.Model, tea.Cmd) {
 	// goes through the same modal/system-message/error machinery
 	// below.
 	if asyncProv, ok := provider.(AsyncSlashProvider); ok {
-		return m, m.invokeSlashAsync(asyncProv, name, args)
+		// Issue #13 concurrent-slash policy: refuse a second async
+		// slash while one is already in flight. Two parallel async
+		// slashes would arrive out-of-order and the operator can't
+		// tell which result belongs to which call; serialize by
+		// rejecting with a clear system note instead.
+		if m.inFlightSlash != nil {
+			m.history.Append(Message{
+				Role: RoleSystem,
+				Text: "/" + name + " refused — /" + m.inFlightSlash.name + " is still running. Wait for it (or press Esc to cancel) then retry.",
+			})
+			m.refreshViewport()
+			return m, nil
+		}
+		// Cancellable ctx so the Esc handler can fire cancelSlash and
+		// the host can bail per the AsyncSlashProvider contract.
+		// Sticky toast + status-line segment land via m.inFlightSlash;
+		// the toastClearMsg handler honors the sticky bit so the
+		// indicator persists for the full duration of the call.
+		ctx, cancel := context.WithCancel(context.Background())
+		m.cancelSlash = cancel
+		m.inFlightSlash = &slashFlight{name: name, startedAt: time.Now()}
+		m.toast = "▸ /" + name + " running…"
+		m.toastSetAt = time.Now()
+		m.refreshViewport()
+		return m, m.invokeSlashAsync(asyncProv, ctx, name, args)
 	}
 	res, err := provider.InvokeSlash(context.Background(), name, args)
 	return m.applySlashResult(name, res, err)
@@ -1087,9 +1145,10 @@ func (m Model) dispatchSlash(text string) (tea.Model, tea.Cmd) {
 // SlashResultOrErr as a slashResultMsg into the Update loop. The
 // goroutine reads ONE value from the host's channel and forwards
 // it; a host that closes the channel without sending counts as a
-// nil-error / empty-result no-op.
-func (m Model) invokeSlashAsync(prov AsyncSlashProvider, name, args string) tea.Cmd {
-	ctx := context.Background()
+// nil-error / empty-result no-op. ctx is the cancellable context
+// owned by dispatchSlash so the Esc handler can fire cancelSlash
+// and the host can bail mid-call.
+func (m Model) invokeSlashAsync(prov AsyncSlashProvider, ctx context.Context, name, args string) tea.Cmd {
 	ch := prov.InvokeSlashAsync(ctx, name, args)
 	return func() tea.Msg {
 		out, ok := <-ch
