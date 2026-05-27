@@ -653,17 +653,30 @@ func (m Model) renderHeader() string {
 // than the bare "9% (19.3K)" which conflated context-fill % with
 // total tokens.
 func (m Model) renderStatusLine() string {
-	// Wordmark, cursor block, then identity glyph + model. The
-	// cursor block visually pins the brand line so the eye
-	// finds it even when the rest of the status drifts off the
-	// right edge on narrow terminals (parity with internal/
-	// tui:branding.go:48-54).
-	parts := []string{
-		m.styles.Wordmark.Render(m.wordmark()),
-		m.styles.Accent.Render(GlyphCursor),
-		m.sep(),
-		m.styles.AgentIdentity.Render(GlyphModel + " " + m.displayModelName()),
+	// Wordmark · [agent-identity ·] model. The cursor block that
+	// used to sit between wordmark and model is gone — the
+	// AsyncSlashProvider work added a sticky "running" segment
+	// on the right of the status line, which now carries the
+	// "alive, accepting input" affordance the cursor used to
+	// (and renders only when work is actually happening, which
+	// is the more useful signal).
+	//
+	// When Branding.AgentIdentity is set (typically from a host
+	// like core-agent's cfg.Agent.DisplayName) and differs from
+	// the wordmark, the identity sits between the wordmark and
+	// the model so the operator can tell which agent deployment
+	// they're talking to in multi-window setups.
+	parts := []string{m.styles.Wordmark.Render(m.wordmark())}
+	if id := m.opts.Branding.AgentIdentity; id != "" && id != m.wordmark() {
+		parts = append(parts,
+			m.sep(),
+			m.styles.AgentIdentity.Render(id),
+		)
 	}
+	parts = append(parts,
+		m.sep(),
+		m.styles.AgentIdentity.Render(GlyphModel+" "+m.displayModelName()),
+	)
 	if prov := m.displayProvider(); prov != "" {
 		parts = append(parts, m.sep(), m.styles.Muted.Render("provider: "+prov))
 	}

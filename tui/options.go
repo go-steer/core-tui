@@ -218,7 +218,15 @@ const DefaultAutoContinueCap = 10
 // Branding overrides the brand-line and chrome strings. Empty fields
 // fall back to the house defaults (style.md §1.1 + §8).
 type Branding struct {
-	Wordmark         string
+	Wordmark string
+	// AgentIdentity is the operator's per-deployment label for the
+	// running agent — typically `cfg.Agent.DisplayName` from the
+	// host's config. When set AND not equal to Wordmark, the
+	// status-line banner renders "<wordmark> · <identity> · …" so
+	// the operator can tell which agent they're talking to in
+	// multi-window setups (parity with core-agent's internal/tui).
+	// Empty falls back to the bare wordmark.
+	AgentIdentity    string
 	AccentColor      string
 	SecondaryColor   string
 	CursorColor      string
