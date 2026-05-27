@@ -551,10 +551,22 @@ func (m Model) renderMessage(msg Message) string {
 		// tint on every wrapped line + bold body. The ❯ prefix
 		// stays in its UserPrefix style (bold blue) so the visual
 		// anchor is unchanged; everything else just gets brighter.
+		//
+		// AutoContinue-synthesized turns (issue #9) get a distinct
+		// ↻ glyph and a muted body — same card shape so they line
+		// up with operator prompts, but visually quieter so the
+		// operator can scan for what THEY typed.
 		body := wordWrapIndent(msg.Display(), width-2, "  ")
 		bodyStyle := m.styles.UserText.Bold(true)
+		prefixStyle := m.styles.UserPrefix
+		glyph := GlyphUserPrompt
+		if msg.AutoContinue {
+			glyph = GlyphAutoContinue
+			bodyStyle = m.styles.Muted
+			prefixStyle = m.styles.Muted
+		}
 		bg := lipgloss.NewStyle().Background(m.styles.Theme.BgElevated)
-		prefixStyled := bg.Inherit(m.styles.UserPrefix).Render(GlyphUserPrompt + " ")
+		prefixStyled := bg.Inherit(prefixStyle).Render(glyph + " ")
 		lines := strings.Split(body, "\n")
 		for i, line := range lines {
 			// Pad each line to full width so the background tint

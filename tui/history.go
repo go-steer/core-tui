@@ -79,6 +79,15 @@ type Message struct {
 	// output (currently SetRendered on resize). The lazy-render
 	// cache treats version mismatch as an invalidation signal.
 	Version uint64
+
+	// AutoContinue marks a RoleUser message that was synthesized by
+	// the AutoContinueFromInbox loop (issue #9) rather than typed
+	// by the operator. The renderer swaps the usual ❯ prefix +
+	// brand-bg card for a muted ↻ prefix so operators can tell at
+	// a glance which turns they initiated. False (zero) on every
+	// other Message; the field is meaningless for non-RoleUser
+	// rows.
+	AutoContinue bool
 }
 
 // Display returns the renderable string for this message, preferring
@@ -184,6 +193,23 @@ func (h *History) SetToolPreview(i int, preview string) {
 	}
 	h.entries[i].ToolPreview = preview
 	h.entries[i].Version++
+}
+
+// MarkLastUserAutoContinue flips Message.AutoContinue=true on the
+// most-recently-appended RoleUser entry (and bumps its Version so
+// the lazy-render cache invalidates). Used by the AutoContinueFromInbox
+// loop (issue #9): submitTurn appends the RoleUser as an operator-
+// typed prompt; this helper retro-fits the synthesized marker so
+// the renderer picks the ↻ glyph + muted style on the next paint.
+// No-op when there's no RoleUser entry in history.
+func (h *History) MarkLastUserAutoContinue() {
+	for i := len(h.entries) - 1; i >= 0; i-- {
+		if h.entries[i].Role == RoleUser {
+			h.entries[i].AutoContinue = true
+			h.entries[i].Version++
+			return
+		}
+	}
 }
 
 // Len returns the entry count.

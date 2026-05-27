@@ -152,6 +152,30 @@ type Options struct {
 	// turn's context — falls back to `QueueForNext` when the agent
 	// doesn't satisfy `InjectableAgent`.
 	MidTurnInjectionMode MidTurnInjectionMode
+
+	// AutoContinueFormatter wraps the slice of drained inbox
+	// messages into a single prompt string for the synthetic
+	// auto-continue turn. Only consulted when MidTurnInjectionMode
+	// == AutoContinueFromInbox AND the agent satisfies
+	// InboxDrainer. Nil falls back to defaultAutoContinueFormatter
+	// (a bulleted "[Operator notes added during the previous task]"
+	// frame followed by a "Continue." instruction).
+	//
+	// Receives the same []string DrainInbox returned, in order,
+	// after the TUI has already removed empty strings. Return
+	// value becomes the prompt of a fresh turn.
+	AutoContinueFormatter func([]string) string
+
+	// AutoContinueCap is the soft limit on chained auto-continues
+	// between operator-initiated turns. After this many consecutive
+	// auto-continue turns without the operator typing a fresh
+	// prompt, the loop pauses and a system note tells the operator
+	// the remaining drained messages will land on their next
+	// submission. 0 (zero value) uses DefaultAutoContinueCap.
+	// Negative disables the cap entirely (use with care — a typo-
+	// fast operator can pile messages faster than the model
+	// answers).
+	AutoContinueCap int
 }
 
 // MidTurnInjectionMode controls operator-typed-during-streaming
@@ -166,7 +190,30 @@ const (
 	// lands in the running turn's context. The queue entry renders
 	// immediately as Done with an "injected" suffix.
 	InjectIntoCurrent
+	// AutoContinueFromInbox is the "opaque-runner" mode (issue #9):
+	// operator-typed-during-streaming entries call Inject AND stay
+	// Queued in the panel. On turn end, the TUI calls
+	// InboxDrainer.DrainInbox to pull all queued operator messages,
+	// formats them via Options.AutoContinueFormatter (or a default
+	// framing), and submits as a synthetic auto-continue turn —
+	// the resulting user-row renders with the ↻ glyph + muted
+	// style so the operator can tell which turns they typed and
+	// which came from the auto-continue. Matching queue entries
+	// flip Queued → Done.
+	//
+	// Falls back to QueueForNext when the agent doesn't satisfy
+	// InboxDrainer (no runtime error). Soft cap on consecutive
+	// auto-continues (Options.AutoContinueCap, default
+	// DefaultAutoContinueCap) prevents runaway loops.
+	AutoContinueFromInbox
 )
+
+// DefaultAutoContinueCap is the fallback consecutive-auto-continue
+// limit when Options.AutoContinueCap is unset. After this many
+// chained auto-continues without an operator-initiated turn in
+// between, the TUI logs a system note and stops — the next batch
+// of inbox messages will land on the operator's next prompt.
+const DefaultAutoContinueCap = 10
 
 // Branding overrides the brand-line and chrome strings. Empty fields
 // fall back to the house defaults (style.md §1.1 + §8).

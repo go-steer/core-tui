@@ -52,11 +52,16 @@ const (
 	GlyphExpanded    = "▾"
 	GlyphWarn        = "⚠"
 	GlyphUserPrompt  = "❯"
-	GlyphTruncate    = "…"
-	GlyphSeparator   = "·"
-	GlyphCursor      = "█"
-	GlyphRule        = "─"
-	GlyphColumn      = "│"
+	// GlyphAutoContinue marks RoleUser messages synthesized by the
+	// AutoContinueFromInbox loop (issue #9). Visually distinct
+	// from GlyphUserPrompt so operators can tell at a glance which
+	// turns they typed vs which came from the inbox-drain.
+	GlyphAutoContinue = "↻"
+	GlyphTruncate     = "…"
+	GlyphSeparator    = "·"
+	GlyphCursor       = "█"
+	GlyphRule         = "─"
+	GlyphColumn       = "│"
 )
 
 // Styles bundles every resolved lipgloss style for the current
