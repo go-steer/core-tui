@@ -207,6 +207,26 @@ func TestRenderReadPreview_ReadFile_Full(t *testing.T) {
 	}
 }
 
+func TestRenderReadPreview_ReadFile_ZeroBoundsTreatedAsFull(t *testing.T) {
+	// Some agents pass offset:0 / limit:0 / end_line:0 as the
+	// "no range" shape. We must NOT render those as L0-L0 — treat
+	// degenerate zeros as if the bound wasn't given.
+	cases := []map[string]any{
+		{"path": "main.go", "offset": float64(0), "end_line": float64(0)},
+		{"path": "main.go", "offset": float64(0), "limit": float64(0)},
+		{"path": "main.go", "start_line": float64(0), "end_line": float64(0)},
+	}
+	for _, args := range cases {
+		got := renderReadPreview("read_file", args, NewStyles(true, Branding{}))
+		if strings.Contains(got, "L0") {
+			t.Errorf("zero-bounds args should not render 'L0…', got: %q (args=%v)", got, args)
+		}
+		if !strings.Contains(got, "full") {
+			t.Errorf("zero-bounds args should render 'full', got: %q (args=%v)", got, args)
+		}
+	}
+}
+
 func TestRenderReadPreview_ReadFile_OffsetLimit(t *testing.T) {
 	args := map[string]any{
 		"path":   "main.go",

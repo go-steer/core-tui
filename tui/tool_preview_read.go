@@ -53,6 +53,19 @@ func renderReadFilePreview(args map[string]any, styles Styles, indent string) st
 	startLine, hasStart := intArg(args, "start_line", "offset", "start")
 	endLine, hasEnd := intArg(args, "end_line", "end")
 	limit, hasLimit := intArg(args, "limit", "count")
+	// Agents sometimes pass offset=0, limit=0 (or end_line=0) as the
+	// degenerate "no range" shape. Treat any combination where every
+	// supplied bound is 0 as "full" rather than rendering a nonsense
+	// L0-L0 / L0-L-1.
+	if hasStart && startLine == 0 {
+		hasStart = false
+	}
+	if hasEnd && endLine == 0 {
+		hasEnd = false
+	}
+	if hasLimit && limit == 0 {
+		hasLimit = false
+	}
 	var rangeStr string
 	switch {
 	case hasStart && hasEnd:
