@@ -422,6 +422,79 @@ func TestRenderDiffInline_GutterTintedDifferentlyOnChangedLines(t *testing.T) {
 	}
 }
 
+func TestCountDiffStats(t *testing.T) {
+	diff := "--- a\n+++ a\n@@ -1,3 +1,4 @@\n line one\n-line two\n+LINE TWO\n+inserted\n line three\n"
+	added, removed := countDiffStats(diff)
+	if added != 2 {
+		t.Errorf("expected 2 additions, got %d", added)
+	}
+	if removed != 1 {
+		t.Errorf("expected 1 removal, got %d", removed)
+	}
+}
+
+func TestCountDiffStats_IgnoresHeaders(t *testing.T) {
+	// The "+++" and "---" file headers must NOT count as additions /
+	// removals — they're metadata, not content lines.
+	diff := "--- a\n+++ b\n"
+	added, removed := countDiffStats(diff)
+	if added != 0 || removed != 0 {
+		t.Errorf("headers-only diff: expected (0,0), got (%d,%d)", added, removed)
+	}
+}
+
+func TestDiffPreviewWithSummary_PrependsTotalsAnchor(t *testing.T) {
+	// Eager summary at call time: "⎿  +N -M" with the tree-branch
+	// glyph anchoring the preview block under the call line.
+	args := map[string]any{
+		"path":     "src/foo.go",
+		"old_text": "hello\nworld\n",
+		"new_text": "hello\nWORLD\nextra\n",
+	}
+	styles := NewStyles(true, Branding{})
+	got := renderToolPreview("edit_file", args, styles)
+	if !strings.Contains(got, "⎿") {
+		t.Errorf("expected '⎿' summary anchor glyph, got:\n%q", got)
+	}
+	if !strings.Contains(got, "+2") {
+		t.Errorf("expected '+2' in eager totals (added WORLD + extra), got:\n%q", got)
+	}
+	if !strings.Contains(got, "-1") {
+		t.Errorf("expected '-1' in eager totals (removed world), got:\n%q", got)
+	}
+	// Summary is the first row; diff body comes after.
+	firstLine := strings.SplitN(got, "\n", 2)[0]
+	if !strings.Contains(firstLine, "⎿") {
+		t.Errorf("expected '⎿' on the FIRST row, got first row:\n%q", firstLine)
+	}
+}
+
+func TestDiffPreviewWithSummary_NoChangeReturnsEmpty(t *testing.T) {
+	args := map[string]any{
+		"path":     "src/foo.go",
+		"old_text": "same\n",
+		"new_text": "same\n",
+	}
+	got := renderToolPreview("edit_file", args, NewStyles(true, Branding{}))
+	if got != "" {
+		t.Errorf("no-op edit: expected empty preview, got:\n%q", got)
+	}
+}
+
+func TestRenderReadPreview_UsesTreeGlyph(t *testing.T) {
+	// Single-row read summaries should be anchored with the same
+	// '⎿' glyph as the diff summary — consistent visual language.
+	args := map[string]any{
+		"path":       "src/foo.go",
+		"start_line": float64(10),
+		"end_line":   float64(42),
+	}
+	got := renderReadPreview("read_file", args, NewStyles(true, Branding{}))
+	if !strings.Contains(got, "⎿") {
+		t.Errorf("expected '⎿' on read summary, got:\n%q", got)
+	}
+}
+
 func TestParseHunkHeader(t *testing.T) {
 	o, n, ok := parseHunkHeader("@@ -42,7 +84,9 @@")
 	if !ok || o != 42 || n != 84 {

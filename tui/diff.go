@@ -39,6 +39,41 @@ import (
 // line from blowing up the preview pane.
 const perLineByteCap = 200
 
+// summaryIndent is the 4-column prefix used on single-line tool
+// summary rows that attach under a tool call (read scope info,
+// diff totals, error rows). The "⎿" box-drawing glyph reads as
+// a tree-branch hint that "this row belongs to the call above" —
+// inspired by Claude Code / Anthropic's CLI display.
+//
+// Width arithmetic: 2 spaces + 1-cell "⎿" + 1 space = 4 cols, so
+// content after the prefix aligns with the 4-space body indent
+// used by diff lines below.
+const summaryIndent = "  ⎿ "
+
+// countDiffStats walks a unified diff and counts added vs removed
+// content lines. File headers (--- / +++) and hunk headers (@@) are
+// skipped — only the +/- prefixed BODY lines count. Used by
+// tool_preview to surface eager totals on the call line before
+// the result event arrives.
+func countDiffStats(diff string) (added, removed int) {
+	if diff == "" {
+		return 0, 0
+	}
+	for _, line := range strings.Split(diff, "\n") {
+		switch {
+		case strings.HasPrefix(line, "+++"):
+			// file header — ignore
+		case strings.HasPrefix(line, "---"):
+			// file header — ignore
+		case strings.HasPrefix(line, "+"):
+			added++
+		case strings.HasPrefix(line, "-"):
+			removed++
+		}
+	}
+	return added, removed
+}
+
 // computeUnifiedDiff returns a unified-diff string between old and
 // new content with the given label as both from/to filename. Used
 // by edit_file / replace tools whose args carry old_text + new_text

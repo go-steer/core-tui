@@ -90,7 +90,11 @@ func renderToolResult(name string, args, response map[string]any, err string, st
 	case "write_file":
 		return renderWriteFileResult(response, styles)
 	case "edit_file", "replace", "str_replace", "apply_patch", "patch":
-		return renderEditResultSummary(response, styles)
+		// Eager "⎿  +N -M" summary at call time already shows the
+		// magnitude — a post-result "applied: …" footer would
+		// duplicate it. Skip; the call→done visual flip is the
+		// "result arrived" signal.
+		return ""
 	}
 	return ""
 }
@@ -98,9 +102,10 @@ func renderToolResult(name string, args, response map[string]any, err string, st
 // renderResultError formats a tool failure as a red error row
 // under the tool name. Single line, truncated to the same byte
 // cap a diff line uses so a multi-page panic trace doesn't blow
-// up the preview area.
+// up the preview area. Uses summaryIndent + "⎿ " so the row
+// visually anchors to the call line above it, matching the
+// read-preview and diff-summary conventions.
 func renderResultError(err string, styles Styles) string {
-	const indent = "    "
 	const errCap = 200
 	errStyle := lipgloss.NewStyle().Foreground(styles.Theme.Error).Bold(true)
 	text := strings.TrimSpace(err)
@@ -110,7 +115,7 @@ func renderResultError(err string, styles Styles) string {
 	if len(text) > errCap {
 		text = text[:errCap] + "…"
 	}
-	return indent + errStyle.Render("✘ error: ") + styles.ErrorText.Render(text)
+	return styles.Muted.Render(summaryIndent) + errStyle.Render("✘ error: ") + styles.ErrorText.Render(text)
 }
 
 // renderReadFileResult shows the first resultLineCap lines of the
@@ -260,34 +265,6 @@ func renderWriteFileResult(response map[string]any, styles Styles) string {
 		return ""
 	}
 	return indent + styles.Muted.Render(strings.Join(parts, " · "))
-}
-
-// renderEditResultSummary surfaces an add/remove count summary
-// for tools that report it in their response (`lines_added`,
-// `lines_removed`). The call-time preview already carries the
-// diff itself; the result adds a totals line so the operator
-// sees confirmation of the apply.
-func renderEditResultSummary(response map[string]any, styles Styles) string {
-	const indent = "    "
-	add, hasAdd := intArg(response, "lines_added", "added")
-	del, hasDel := intArg(response, "lines_removed", "removed", "lines_deleted", "deleted")
-	if !hasAdd && !hasDel {
-		return ""
-	}
-	addStyle := lipgloss.NewStyle().Foreground(styles.Theme.Success).Bold(true)
-	delStyle := lipgloss.NewStyle().Foreground(styles.Theme.Error).Bold(true)
-	var b strings.Builder
-	b.WriteString(indent + styles.Muted.Render("applied: "))
-	if hasAdd {
-		b.WriteString(addStyle.Render(fmt.Sprintf("+%d", add)))
-	}
-	if hasAdd && hasDel {
-		b.WriteString(" ")
-	}
-	if hasDel {
-		b.WriteString(delStyle.Render(fmt.Sprintf("-%d", del)))
-	}
-	return b.String()
 }
 
 // renderCodeInline renders raw content (not a diff) as a capped,

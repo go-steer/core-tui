@@ -140,17 +140,18 @@ func TestRenderToolResult_WriteFileShowsBytes(t *testing.T) {
 	}
 }
 
-func TestRenderToolResult_EditAddedRemoved(t *testing.T) {
+func TestRenderToolResult_EditResultIsNoOp(t *testing.T) {
+	// The eager "⎿  +N -M" summary computed at call time already
+	// surfaces the magnitude; the result-side renderer for diff
+	// tools intentionally returns "" so the operator doesn't see
+	// duplicate totals.
 	response := map[string]any{
 		"lines_added":   float64(5),
 		"lines_removed": float64(2),
 	}
 	got := renderToolResult("edit_file", nil, response, "", NewStyles(true, Branding{}))
-	if !strings.Contains(got, "+5") || !strings.Contains(got, "-2") {
-		t.Errorf("expected '+5' and '-2' in edit summary, got:\n%q", got)
-	}
-	if !strings.Contains(got, "applied:") {
-		t.Errorf("expected 'applied:' label, got:\n%q", got)
+	if got != "" {
+		t.Errorf("expected empty result-row for diff tool (eager summary handles it), got:\n%q", got)
 	}
 }
 
