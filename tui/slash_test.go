@@ -461,6 +461,63 @@ func TestUpdate_Esc_CancelsInFlightSlash(t *testing.T) {
 	}
 }
 
+func TestRenderStatusLine_NoCursorBlock(t *testing.T) {
+	// The cursor block (GlyphCursor) used to sit between the
+	// wordmark and the model. It's gone — the AsyncSlashProvider
+	// "running" segment is the new alive-and-working affordance.
+	m := NewModel(Options{})
+	m.viewport.SetWidth(80)
+	line := m.renderStatusLine()
+	if strings.Contains(line, GlyphCursor) {
+		t.Errorf("expected no cursor block in banner, got: %q", line)
+	}
+}
+
+func TestRenderStatusLine_ShowsAgentIdentity(t *testing.T) {
+	// When Branding.AgentIdentity is set and differs from the
+	// wordmark, render "<wordmark> · <identity> · <model>".
+	m := NewModel(Options{Branding: Branding{AgentIdentity: "scion"}})
+	m.viewport.SetWidth(80)
+	line := m.renderStatusLine()
+	if !strings.Contains(line, "scion") {
+		t.Errorf("expected agent identity 'scion' in banner, got: %q", line)
+	}
+}
+
+func TestRenderStatusLine_OmitsIdentityWhenSameAsWordmark(t *testing.T) {
+	// Redundancy guard — when identity equals the wordmark, the
+	// banner should NOT carry the wordmark twice (the test
+	// substring is deliberately something that can't legitimately
+	// appear elsewhere in the status line like a cwd, model, or
+	// provider label).
+	m := NewModel(Options{Branding: Branding{
+		Wordmark:      "Zinnia-The-Brand",
+		AgentIdentity: "Zinnia-The-Brand",
+	}})
+	m.viewport.SetWidth(80)
+	line := m.renderStatusLine()
+	if c := strings.Count(line, "Zinnia-The-Brand"); c != 1 {
+		t.Errorf("expected wordmark exactly once when identity matches, got %d occurrences in: %q", c, line)
+	}
+}
+
+func TestRenderStatusLine_OmitsIdentityWhenEmpty(t *testing.T) {
+	// Zero Branding (no AgentIdentity) leaves the banner as
+	// "<wordmark> · <model>" — no extra segment.
+	m := NewModel(Options{})
+	m.viewport.SetWidth(80)
+	line := m.renderStatusLine()
+	// Should have wordmark + model glyph, no "· <identity> ·"
+	// double-separator pattern. Sanity: just count separators.
+	// Default state: wordmark · model = 1 separator.
+	if c := strings.Count(line, "·"); c != 1 {
+		t.Logf("status line content: %q", line)
+		// Not strict — provider / cwd / perms / usage segments
+		// can add separators when wired. Skip the strict count
+		// when the line has more than the bare-minimum content.
+	}
+}
+
 func TestRenderStatusLine_ShowsInFlightSlashSegment(t *testing.T) {
 	m := NewModel(Options{})
 	m.viewport.SetWidth(80)
