@@ -1102,26 +1102,38 @@ func (m Model) dispatchSlash(text string) (tea.Model, tea.Cmd) {
 	}
 
 	m.input.Reset()
-	// Issue #10: hosts that implement AsyncSlashProvider get the
-	// non-blocking path so any network / file I/O the call needs
-	// runs off the Update goroutine. The TUI stays responsive
-	// (cursor blinks, spinner ticks, Ctrl+C lands) while the host
-	// works; the eventual result arrives via slashResultMsg and
-	// goes through the same modal/system-message/error machinery
-	// below.
+	// Issue #10: hosts that implement AsyncSlashProvider (or the
+	// preamble variant from #16) get the non-blocking path so any
+	// network / file I/O the call needs runs off the Update
+	// goroutine. The TUI stays responsive (cursor blinks, spinner
+	// ticks, Ctrl+C lands) while the host works; the eventual
+	// result arrives via slashResultMsg and goes through the same
+	// modal/system-message/error machinery below.
+	//
+	// Issue #16 preamble variant takes precedence over the bare
+	// variant: hosts that want a chat-visible "running…" row at
+	// dispatch time implement AsyncSlashProviderWithPreamble; the
+	// preamble lands as a RoleSystem row BEFORE the goroutine is
+	// launched so the operator's eye picks it up next to the prompt.
+	if preProv, ok := provider.(AsyncSlashProviderWithPreamble); ok {
+		if refusal, refused := m.refuseConcurrentSlash(name); refused {
+			return refusal, nil
+		}
+		ctx, cancel := context.WithCancel(context.Background())
+		m.cancelSlash = cancel
+		m.inFlightSlash = &slashFlight{name: name, startedAt: time.Now()}
+		m.toast = "▸ /" + name + " running…"
+		m.toastSetAt = time.Now()
+		preamble, ch := preProv.InvokeSlashAsync(ctx, name, args)
+		if preamble != "" {
+			m.history.Append(Message{Role: RoleSystem, Text: preamble})
+		}
+		m.refreshViewport()
+		return m, awaitSlashChannel(name, ch)
+	}
 	if asyncProv, ok := provider.(AsyncSlashProvider); ok {
-		// Issue #13 concurrent-slash policy: refuse a second async
-		// slash while one is already in flight. Two parallel async
-		// slashes would arrive out-of-order and the operator can't
-		// tell which result belongs to which call; serialize by
-		// rejecting with a clear system note instead.
-		if m.inFlightSlash != nil {
-			m.history.Append(Message{
-				Role: RoleSystem,
-				Text: "/" + name + " refused — /" + m.inFlightSlash.name + " is still running. Wait for it (or press Esc to cancel) then retry.",
-			})
-			m.refreshViewport()
-			return m, nil
+		if refusal, refused := m.refuseConcurrentSlash(name); refused {
+			return refusal, nil
 		}
 		// Cancellable ctx so the Esc handler can fire cancelSlash and
 		// the host can bail per the AsyncSlashProvider contract.
@@ -1140,16 +1152,28 @@ func (m Model) dispatchSlash(text string) (tea.Model, tea.Cmd) {
 	return m.applySlashResult(name, res, err)
 }
 
-// invokeSlashAsync launches the host's AsyncSlashProvider call in
-// a goroutine and returns a tea.Cmd that forwards the eventual
-// SlashResultOrErr as a slashResultMsg into the Update loop. The
-// goroutine reads ONE value from the host's channel and forwards
-// it; a host that closes the channel without sending counts as a
-// nil-error / empty-result no-op. ctx is the cancellable context
-// owned by dispatchSlash so the Esc handler can fire cancelSlash
-// and the host can bail mid-call.
-func (m Model) invokeSlashAsync(prov AsyncSlashProvider, ctx context.Context, name, args string) tea.Cmd {
-	ch := prov.InvokeSlashAsync(ctx, name, args)
+// refuseConcurrentSlash applies issue #13's concurrent-slash policy:
+// when an async slash is already in flight, log a RoleSystem refusal
+// for the new dispatch and return refused=true. Shared by both the
+// preamble (#16) and bare async (#10) paths so the policy stays in
+// one place.
+func (m Model) refuseConcurrentSlash(name string) (Model, bool) {
+	if m.inFlightSlash == nil {
+		return m, false
+	}
+	m.history.Append(Message{
+		Role: RoleSystem,
+		Text: "/" + name + " refused — /" + m.inFlightSlash.name + " is still running. Wait for it (or press Esc to cancel) then retry.",
+	})
+	m.refreshViewport()
+	return m, true
+}
+
+// awaitSlashChannel returns a tea.Cmd that drains exactly one value
+// from the host's result channel and forwards it as a slashResultMsg.
+// Shared by both async dispatch paths so the channel-draining shape
+// stays in one place.
+func awaitSlashChannel(name string, ch <-chan SlashResultOrErr) tea.Cmd {
 	return func() tea.Msg {
 		out, ok := <-ch
 		if !ok {
@@ -1157,6 +1181,19 @@ func (m Model) invokeSlashAsync(prov AsyncSlashProvider, ctx context.Context, na
 		}
 		return slashResultMsg{name: name, res: out.Res, err: out.Err}
 	}
+}
+
+// invokeSlashAsync launches the host's AsyncSlashProvider call in
+// a goroutine and returns a tea.Cmd that forwards the eventual
+// SlashResultOrErr as a slashResultMsg into the Update loop. ctx is
+// the cancellable context owned by dispatchSlash so the Esc handler
+// can fire cancelSlash and the host can bail mid-call.
+//
+// Single-shot semantics + channel-draining are delegated to
+// awaitSlashChannel so the preamble variant (#16) and the bare
+// variant (#10) share one implementation.
+func (m Model) invokeSlashAsync(prov AsyncSlashProvider, ctx context.Context, name, args string) tea.Cmd {
+	return awaitSlashChannel(name, prov.InvokeSlashAsync(ctx, name, args))
 }
 
 // applySlashResult is the shared post-processing for both the

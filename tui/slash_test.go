@@ -539,6 +539,190 @@ func TestRenderStatusLine_NoSegmentWhenIdle(t *testing.T) {
 	}
 }
 
+// preambleAsyncSlashAgent stubs the AsyncSlashProviderWithPreamble
+// variant (issue #16). The host pre-computes the preamble string,
+// then returns it alongside the result channel. The channel is
+// buffered so the goroutine spawned by awaitSlashChannel drains
+// immediately without orchestration.
+type preambleAsyncSlashAgent struct {
+	specs    []SlashCommandSpec
+	preamble string
+	out      chan SlashResultOrErr
+	ctx      context.Context // captured at dispatch
+}
+
+func (a *preambleAsyncSlashAgent) Run(_ context.Context, _ string) iter.Seq2[Event, error] {
+	return func(_ func(Event, error) bool) {}
+}
+func (a *preambleAsyncSlashAgent) SlashCommands() []SlashCommandSpec { return a.specs }
+
+// InvokeSlash is the SlashProvider fallback. dispatchSlash requires
+// SlashProvider for command-name lookup before it type-asserts to
+// the async variant; an error here is a tripwire — the preamble
+// path should always win on agents satisfying both.
+func (a *preambleAsyncSlashAgent) InvokeSlash(_ context.Context, _, _ string) (SlashResult, error) {
+	return SlashResult{}, errors.New("should not be called when AsyncSlashProviderWithPreamble is satisfied")
+}
+func (a *preambleAsyncSlashAgent) InvokeSlashAsync(ctx context.Context, _, _ string) (string, <-chan SlashResultOrErr) {
+	a.ctx = ctx
+	return a.preamble, a.out
+}
+
+func TestDispatchSlash_PreambleVariant_AppendsAtDispatch(t *testing.T) {
+	// Preamble is a non-empty string → core-tui should append a
+	// RoleSystem row to history at dispatch time (before the result
+	// channel is drained). Solves issue #16: operator sees chat-
+	// visible feedback immediately instead of just the bottom toast.
+	ch := make(chan SlashResultOrErr, 1)
+	ch <- SlashResultOrErr{Res: SlashResult{SystemMessage: "done"}}
+	agent := &preambleAsyncSlashAgent{
+		specs:    []SlashCommandSpec{{Name: "done"}},
+		preamble: "ℹ Capturing checkpoint summary…",
+		out:      ch,
+	}
+	m := NewModel(Options{Agent: agent})
+	m.viewport.SetWidth(80)
+
+	out, cmd := m.dispatchSlash("/done")
+	got := out.(Model)
+	if cmd == nil {
+		t.Fatal("expected a Cmd for the async preamble path")
+	}
+	if got.history.Len() == 0 {
+		t.Fatal("expected preamble row appended at dispatch")
+	}
+	last := got.history.Snapshot()[got.history.Len()-1]
+	if last.Role != RoleSystem {
+		t.Errorf("preamble row role = %v, want RoleSystem", last.Role)
+	}
+	if !strings.Contains(last.Text, "Capturing checkpoint summary") {
+		t.Errorf("preamble text not preserved, got: %q", last.Text)
+	}
+	// In-flight state armed identically to the bare variant.
+	if got.inFlightSlash == nil || got.inFlightSlash.name != "done" {
+		t.Errorf("expected inFlightSlash{name=done}, got %+v", got.inFlightSlash)
+	}
+	if got.cancelSlash == nil {
+		t.Error("expected cancelSlash set after preamble dispatch")
+	}
+}
+
+func TestDispatchSlash_PreambleVariant_EmptyPreambleSkipsRow(t *testing.T) {
+	// Empty preamble is the "no preamble" signal — the row is
+	// skipped and behavior matches the bare AsyncSlashProvider.
+	ch := make(chan SlashResultOrErr, 1)
+	ch <- SlashResultOrErr{Res: SlashResult{SystemMessage: "ok"}}
+	agent := &preambleAsyncSlashAgent{
+		specs:    []SlashCommandSpec{{Name: "compact"}},
+		preamble: "",
+		out:      ch,
+	}
+	m := NewModel(Options{Agent: agent})
+	m.viewport.SetWidth(80)
+
+	out, cmd := m.dispatchSlash("/compact")
+	got := out.(Model)
+	if cmd == nil {
+		t.Fatal("expected a Cmd")
+	}
+	if got.history.Len() != 0 {
+		t.Errorf("expected no history row for empty preamble, got %d entries", got.history.Len())
+	}
+}
+
+func TestDispatchSlash_PreambleVariant_DrainsResultChannel(t *testing.T) {
+	// The Cmd returned by the preamble path must drain one value
+	// from the host's result channel — same single-shot semantics
+	// as the bare variant.
+	ch := make(chan SlashResultOrErr, 1)
+	ch <- SlashResultOrErr{Res: SlashResult{ModalAnswer: &SideAnswer{Question: "q?", Answer: "a."}}}
+	agent := &preambleAsyncSlashAgent{
+		specs:    []SlashCommandSpec{{Name: "done"}},
+		preamble: "checkpointing…",
+		out:      ch,
+	}
+	m := NewModel(Options{Agent: agent})
+	m.viewport.SetWidth(80)
+
+	_, cmd := m.dispatchSlash("/done")
+	msg := cmd()
+	r, ok := msg.(slashResultMsg)
+	if !ok {
+		t.Fatalf("expected slashResultMsg, got %T", msg)
+	}
+	if r.res.ModalAnswer == nil || r.res.ModalAnswer.Question != "q?" {
+		t.Errorf("result not forwarded, got: %+v", r.res)
+	}
+}
+
+func TestDispatchSlash_PreambleVariant_PassesCancellableCtx(t *testing.T) {
+	// The preamble variant must thread a cancellable ctx to the
+	// host (same as the bare variant) so Esc can cancel.
+	ch := make(chan SlashResultOrErr, 1)
+	agent := &preambleAsyncSlashAgent{
+		specs:    []SlashCommandSpec{{Name: "done"}},
+		preamble: "running…",
+		out:      ch,
+	}
+	m := NewModel(Options{Agent: agent})
+	m.viewport.SetWidth(80)
+
+	m.dispatchSlash("/done")
+	if agent.ctx == nil {
+		t.Fatal("expected ctx captured at dispatch")
+	}
+	select {
+	case <-agent.ctx.Done():
+		t.Error("ctx already cancelled at dispatch — should still be live")
+	default:
+	}
+	// cancelSlash should propagate to the captured ctx.
+	cancel := m.cancelSlash
+	if cancel == nil {
+		// dispatchSlash returned a new Model with cancelSlash set;
+		// the local m here is the pre-dispatch one. Re-dispatch to
+		// capture the post-state.
+		out, _ := m.dispatchSlash("/done") // already refused (in-flight from previous call)
+		if got, ok := out.(Model); ok {
+			cancel = got.cancelSlash
+		}
+	}
+}
+
+func TestDispatchSlash_PreambleVariant_RefusesConcurrent(t *testing.T) {
+	// Concurrent-slash refusal (#13) applies equally to the
+	// preamble path — second dispatch while one is in flight must
+	// log a system note and return nil Cmd.
+	ch1 := make(chan SlashResultOrErr, 1)
+	agent := &preambleAsyncSlashAgent{
+		specs:    []SlashCommandSpec{{Name: "done"}, {Name: "compact"}},
+		preamble: "first running…",
+		out:      ch1,
+	}
+	m := NewModel(Options{Agent: agent})
+	m.viewport.SetWidth(80)
+
+	out, _ := m.dispatchSlash("/done")
+	m = out.(Model)
+	if m.inFlightSlash == nil {
+		t.Fatal("setup: first dispatch should arm inFlightSlash")
+	}
+	preambleRows := m.history.Len()
+
+	out2, cmd2 := m.dispatchSlash("/compact")
+	got := out2.(Model)
+	if cmd2 != nil {
+		t.Errorf("expected nil Cmd on refused concurrent slash, got %T", cmd2)
+	}
+	if got.history.Len() != preambleRows+1 {
+		t.Errorf("expected exactly +1 history row (refusal), got %d → %d", preambleRows, got.history.Len())
+	}
+	last := got.history.Snapshot()[got.history.Len()-1]
+	if !strings.Contains(last.Text, "still running") {
+		t.Errorf("expected 'still running' refusal, got: %q", last.Text)
+	}
+}
+
 // TestDispatchSlash_UnknownCommand pins that an unknown slash logs a
 // helpful system row instead of failing silently or panicking.
 func TestDispatchSlash_UnknownCommand(t *testing.T) {

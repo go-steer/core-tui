@@ -104,6 +104,40 @@ type SlashResultOrErr struct {
 	Err error
 }
 
+// AsyncSlashProviderWithPreamble is the variant of AsyncSlashProvider
+// for slashes whose work takes long enough that the operator wants a
+// chat-visible "this is running" row at dispatch time (issue #16).
+// The bottom-bar toast that AsyncSlashProvider relies on is easy to
+// miss on a 5–15s call (/done writing a checkpoint, /compact writing
+// a summary); the preamble lands directly in the chat flow so the
+// operator's eye picks it up next to the prompt they just typed.
+//
+// Contract:
+//   - InvokeSlashAsync returns (preamble, results). The preamble is
+//     computed synchronously and appended to history as a RoleSystem
+//     row BEFORE the goroutine that drains `results` is launched.
+//     Empty preamble is the "no preamble" signal — the row is
+//     skipped and behavior matches the bare AsyncSlashProvider.
+//   - results follows the same single-shot contract as
+//     AsyncSlashProvider.InvokeSlashAsync: send exactly one
+//     SlashResultOrErr and close (or just send + abandon).
+//   - ctx is cancellable, same semantics as AsyncSlashProvider:
+//     core-tui cancels it on Esc; hosts honoring ctx bail.
+//   - A host satisfying BOTH AsyncSlashProvider and
+//     AsyncSlashProviderWithPreamble prefers the preamble variant.
+//     A host satisfying only the preamble variant works fine; one
+//     satisfying only the bare variant also works fine. Both can
+//     coexist in the same host on different commands.
+//
+// Method name matches AsyncSlashProvider's `InvokeSlashAsync` but
+// the return signature differs, so a single Go type can satisfy
+// only one of the two — pick the variant that fits per-host. The
+// dispatch path type-asserts the preamble variant first.
+type AsyncSlashProviderWithPreamble interface {
+	SlashCommands() []SlashCommandSpec
+	InvokeSlashAsync(ctx context.Context, name, args string) (preamble string, results <-chan SlashResultOrErr)
+}
+
 // slashFlight tracks one pending AsyncSlashProvider call (issue #13).
 // Name carries the slash identifier so the toast + status-line
 // indicator can render "/<name> running…"; startedAt isn't read by
