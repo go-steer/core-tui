@@ -176,6 +176,36 @@ type UsageTracker interface {
 	SessionDuration() time.Duration // 0 when unknown
 }
 
+// ModelTotals is the per-model usage row surfaced by the optional
+// SessionByModelTracker capability (issue #18). One entry per
+// distinct model the session has routed work to — useful when the
+// host routes subtasks to a cheaper tier (e.g. parent on
+// gemini-3.1-pro, subtasks on gemini-2.5-flash) and the operator
+// wants to see the cost-efficiency split in /stats.
+type ModelTotals struct {
+	Turns        int
+	InputTokens  int
+	OutputTokens int
+	CostUSD      float64
+}
+
+// SessionByModelTracker is an optional capability on UsageTracker:
+// hosts that track usage per-model can satisfy it so /stats
+// surfaces a per-model breakdown under the existing aggregate
+// rows. core-tui does a duck-typed assertion at render time, so
+// trackers that don't implement it keep working unchanged.
+//
+// Contract:
+//   - Map key is the model name (host-defined; should match what
+//     StatusReporter.Status().ModelName / displayModelName render).
+//   - Empty map OR single entry → /stats skips the breakdown row
+//     (single entry would just restate SessionTotals).
+//   - Hosts can include zero-cost entries; /stats decides what to
+//     show. Sorting / formatting lives entirely on the TUI side.
+type SessionByModelTracker interface {
+	SessionByModel() map[string]ModelTotals
+}
+
 // PathScope is the list of roots that bound `@file` palette lookups
 // (R-SCOPE-1 / R-SCOPE-2). Empty list = no scope filtering.
 type PathScope struct {
