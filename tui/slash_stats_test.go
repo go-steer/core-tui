@@ -115,7 +115,7 @@ func TestRenderStats_SortByCostDescending(t *testing.T) {
 	iCostly := strings.Index(got, "costly")
 	iMid := strings.Index(got, "mid")
 	iCheap := strings.Index(got, "cheap")
-	if !(iCostly < iMid && iMid < iCheap) {
+	if iCostly >= iMid || iMid >= iCheap {
 		t.Errorf("expected costly < mid < cheap by appearance, got positions costly=%d mid=%d cheap=%d in:\n%s",
 			iCostly, iMid, iCheap, got)
 	}
