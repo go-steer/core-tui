@@ -657,7 +657,9 @@ func TestDispatchSlash_PreambleVariant_DrainsResultChannel(t *testing.T) {
 
 func TestDispatchSlash_PreambleVariant_PassesCancellableCtx(t *testing.T) {
 	// The preamble variant must thread a cancellable ctx to the
-	// host (same as the bare variant) so Esc can cancel.
+	// host (same as the bare variant) so Esc can cancel — and
+	// the post-dispatch Model's cancelSlash, when fired, must
+	// propagate cancellation to that ctx.
 	ch := make(chan SlashResultOrErr, 1)
 	agent := &preambleAsyncSlashAgent{
 		specs:    []SlashCommandSpec{{Name: "done"}},
@@ -667,25 +669,25 @@ func TestDispatchSlash_PreambleVariant_PassesCancellableCtx(t *testing.T) {
 	m := NewModel(Options{Agent: agent})
 	m.viewport.SetWidth(80)
 
-	m.dispatchSlash("/done")
+	out, _ := m.dispatchSlash("/done")
+	got := out.(Model)
 	if agent.ctx == nil {
 		t.Fatal("expected ctx captured at dispatch")
 	}
 	select {
 	case <-agent.ctx.Done():
-		t.Error("ctx already cancelled at dispatch — should still be live")
+		t.Fatal("ctx already cancelled at dispatch — should still be live")
 	default:
 	}
-	// cancelSlash should propagate to the captured ctx.
-	cancel := m.cancelSlash
-	if cancel == nil {
-		// dispatchSlash returned a new Model with cancelSlash set;
-		// the local m here is the pre-dispatch one. Re-dispatch to
-		// capture the post-state.
-		out, _ := m.dispatchSlash("/done") // already refused (in-flight from previous call)
-		if got, ok := out.(Model); ok {
-			cancel = got.cancelSlash
-		}
+	if got.cancelSlash == nil {
+		t.Fatal("expected cancelSlash set on post-dispatch Model")
+	}
+	got.cancelSlash()
+	select {
+	case <-agent.ctx.Done():
+		// expected
+	default:
+		t.Error("expected captured ctx to be Done after cancelSlash fired")
 	}
 }
 
