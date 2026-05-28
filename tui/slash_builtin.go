@@ -711,7 +711,52 @@ func (m Model) renderStats() string {
 	if model := m.displayModelName(); model != "" {
 		fmt.Fprintf(&b, "  Model:      %s\n", model)
 	}
+	// Issue #18: when the tracker implements SessionByModelTracker
+	// AND has used more than one model, render a Models: breakdown
+	// row so the operator can see cost split by tier (e.g. parent
+	// on Pro vs subtasks on Flash). Single-entry / empty maps
+	// would just restate the aggregate above; skipped.
+	if mt, ok := tracker.(SessionByModelTracker); ok {
+		if breakdown := mt.SessionByModel(); len(breakdown) > 1 {
+			b.WriteString(formatModelBreakdown(breakdown))
+		}
+	}
 	return strings.TrimRight(b.String(), "\n")
+}
+
+// formatModelBreakdown renders the SessionByModel map as a
+// "Models:" block under /stats. Entries are sorted by descending
+// CostUSD (priciest first) so the operator's eye lands on the
+// dominant tier; ties broken by descending output tokens, then
+// by model name for stable order.
+func formatModelBreakdown(breakdown map[string]ModelTotals) string {
+	type modelRow struct {
+		name string
+		ModelTotals
+	}
+	rows := make([]modelRow, 0, len(breakdown))
+	for name, t := range breakdown {
+		rows = append(rows, modelRow{name: name, ModelTotals: t})
+	}
+	sort.Slice(rows, func(i, j int) bool {
+		if rows[i].CostUSD != rows[j].CostUSD {
+			return rows[i].CostUSD > rows[j].CostUSD
+		}
+		if rows[i].OutputTokens != rows[j].OutputTokens {
+			return rows[i].OutputTokens > rows[j].OutputTokens
+		}
+		return rows[i].name < rows[j].name
+	})
+	var b strings.Builder
+	for i, r := range rows {
+		prefix := "  Models:     "
+		if i > 0 {
+			prefix = "              + "
+		}
+		fmt.Fprintf(&b, "%s%s (%d turn%s, %d in / %d out, $%.4f)\n",
+			prefix, r.name, r.Turns, plural(r.Turns), r.InputTokens, r.OutputTokens, r.CostUSD)
+	}
+	return b.String()
 }
 
 // renderToolList renders the agent's tool catalog in alphabetical
