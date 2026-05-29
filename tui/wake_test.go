@@ -204,6 +204,41 @@ func TestRenderToast_RespectsTTL(t *testing.T) {
 	}
 }
 
+// TestRenderToast_StickyWhenSlashInFlight pins the fix: when an
+// async slash is in flight, the render-time TTL backstop must NOT
+// hide the toast even if toastSetAt is stale. Mirrors what
+// toastClearMsg already does — without this bypass, a slash that
+// runs longer than toastTTL (4s) loses the "/<name> running…"
+// indicator at the secondary check despite the slash still
+// pending.
+func TestRenderToast_StickyWhenSlashInFlight(t *testing.T) {
+	m := NewModel(Options{})
+	m.viewport.SetWidth(80)
+	m.toast = "▸ /compact running…"
+	m.toastSetAt = time.Now().Add(-2 * toastTTL) // way past TTL
+	m.inFlightSlash = &slashFlight{name: "compact", startedAt: time.Now().Add(-2 * toastTTL)}
+
+	if got := m.renderToast(80); got == "" {
+		t.Errorf("renderToast should keep sticky toast visible while slash in flight, got empty")
+	}
+}
+
+// TestRenderToast_NoLongerStickyAfterSlashClears pins that the
+// bypass is properly gated: once inFlightSlash is nil (e.g. result
+// arrived) the TTL backstop takes over and the toast hides as
+// expected.
+func TestRenderToast_NoLongerStickyAfterSlashClears(t *testing.T) {
+	m := NewModel(Options{})
+	m.viewport.SetWidth(80)
+	m.toast = "stale"
+	m.toastSetAt = time.Now().Add(-2 * toastTTL)
+	m.inFlightSlash = nil // slash result landed
+
+	if got := m.renderToast(80); got != "" {
+		t.Errorf("renderToast without inFlightSlash should respect TTL, got %q", got)
+	}
+}
+
 // nilWakeAgent satisfies WakeRequester but returns nil — exercises
 // the defensive nil-channel branch in wakeListener.
 type nilWakeAgent struct{}

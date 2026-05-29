@@ -995,11 +995,19 @@ func (m *Model) renderSideAnswer() string {
 // active or its TTL has elapsed; the on-render TTL check is the
 // secondary defense behind toastClearMsg in case the timer Cmd was
 // dropped.
+//
+// Sticky exception (issue #13): when an async slash is in flight
+// the toast is the operator's only in-chat "still running" signal,
+// so the render-time TTL check is bypassed. Mirrors the
+// toastClearMsg handler's sticky guard — without this bypass, a
+// >4s slash would lose the toast at the secondary check even
+// though the slash hasn't completed and toastClearMsg correctly
+// left the field set.
 func (m Model) renderToast(width int) string {
 	if m.toast == "" || width <= 0 {
 		return ""
 	}
-	if time.Since(m.toastSetAt) > toastTTL {
+	if m.inFlightSlash == nil && time.Since(m.toastSetAt) > toastTTL {
 		return ""
 	}
 	body := "  " + GlyphWarn + "  " + m.toast
