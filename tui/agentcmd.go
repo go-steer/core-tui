@@ -194,6 +194,50 @@ func (m Model) startAgentTurn(agent Agent, prompt string) context.CancelFunc {
 	return cancel
 }
 
+// startLiveStream launches the single long-lived goroutine that
+// drains a LiveAgent (issue #22). Returns the cancel func for the
+// stream's context so Esc / shutdown paths can stop it (today
+// Esc is a no-op for the live stream by design; this hook exists
+// for future "force reconnect" affordances and for clean shutdown
+// in tests).
+//
+// The goroutine ranges over agent.Events(ctx) and:
+//   - on each (ev, nil): fan out via emitEvent like the Run path
+//   - on each (zero, err): forward liveStreamErrMsg and KEEP
+//     draining — the implementation decides whether to keep
+//     yielding
+//   - on iterator return: forward liveStreamEndedMsg ONCE and exit
+//
+// ctx cancellation stops the loop without yielding a final error
+// (per the LiveAgent semantics).
+func (m Model) startLiveStream(agent LiveAgent) context.CancelFunc {
+	ctx, cancel := context.WithCancel(context.Background())
+	go func() {
+		for ev, err := range agent.Events(ctx) {
+			if ctx.Err() != nil {
+				return
+			}
+			if err != nil {
+				select {
+				case m.eventCh <- liveStreamErrMsg{err: err}:
+				case <-ctx.Done():
+					return
+				}
+				continue
+			}
+			emitEvent(ctx, m.eventCh, ev)
+		}
+		// Iterator returned cleanly (or stopped yielding). Tell the
+		// TUI so the "Disconnected" banner can render.
+		select {
+		case m.eventCh <- liveStreamEndedMsg{}:
+		case <-time.After(time.Second):
+			// listener gone; drop quietly.
+		}
+	}()
+	return cancel
+}
+
 // emitEvent splits a single agent Event into one or more tea.Msgs
 // pushed onto the channel. Send is best-effort against ctx
 // cancellation so the goroutine doesn't block forever if the listener

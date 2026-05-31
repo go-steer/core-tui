@@ -128,3 +128,28 @@ type slashResultMsg struct {
 	res  SlashResult
 	err  error
 }
+
+// liveStreamStartedMsg fires once at startup after the LiveAgent
+// drain goroutine launches; carries the cancel func so the
+// Update handler can stash it on the model's cancelLiveStream
+// field (Init has a value receiver and can't mutate). Also
+// triggers the one-time "Attached as observer" system row so the
+// operator knows they're in LiveAgent mode.
+type liveStreamStartedMsg struct {
+	cancel func()
+}
+
+// liveStreamErrMsg carries a non-nil error yielded by a
+// LiveAgent.Events iterator (issue #22). The drain goroutine
+// surfaces it as a RoleError row and keeps draining — the
+// iterator decides whether to keep yielding events.
+type liveStreamErrMsg struct {
+	err error
+}
+
+// liveStreamEndedMsg fires when a LiveAgent.Events iterator
+// returns / stops yielding (issue #22). core-tui renders a
+// "Disconnected — Ctrl+C to quit" system row and keeps the
+// program alive so the operator can read scrollback. No
+// auto-reconnect; the LiveAgent implementation owns that.
+type liveStreamEndedMsg struct{}
