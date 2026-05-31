@@ -218,7 +218,7 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		//   - per-turn (Run): m.state == stateStreaming
 		//   - LiveAgent (#22): m.spinnerActive driven by
 		//     applyStreamChunk's partial-vs-commit logic
-		if m.state != stateStreaming && !(m.liveMode && m.spinnerActive) {
+		if m.state != stateStreaming && (!m.liveMode || !m.spinnerActive) {
 			return m, nil
 		}
 		m.thinkingIdx++
