@@ -32,14 +32,43 @@ import (
 // implements WakeRequester) subscribes to the wake channel for
 // transient toast banners (R-WAKE-1).
 func (m Model) Init() tea.Cmd {
-	return tea.Batch(
+	cmds := []tea.Cmd{
 		tea.RequestBackgroundColor,
 		textarea.Blink,
 		m.eventListener(),
 		m.wakeListener(),
 		m.promptListener(),
 		m.elicitListener(),
-	)
+	}
+	// Issue #22: LiveAgent mode spawns the single long-lived drain
+	// goroutine at startup so autonomous activity reaches the
+	// chat view even before the operator types anything. The
+	// returned cancel func lives on the model so the test harness
+	// + future force-reconnect paths can stop it; Esc does NOT
+	// fire it (cancelling the only event source via Esc would be
+	// a foot-gun).
+	if m.liveMode {
+		if liveAgent, ok := m.opts.Agent.(LiveAgent); ok {
+			// Init has a value receiver — we can't mutate m here.
+			// startLiveStream's cancel needs to live somewhere
+			// addressable; stash via a tea.Cmd that returns a
+			// liveStreamStartedMsg carrying the cancel func.
+			cmds = append(cmds, m.spawnLiveStreamCmd(liveAgent))
+		}
+	}
+	return tea.Batch(cmds...)
+}
+
+// spawnLiveStreamCmd is the bridge that lets Init() (value
+// receiver) hand the eventually-mutating cancelLiveStream onto
+// the model: returns a Cmd that starts the drain goroutine and
+// reports back via liveStreamStartedMsg so the Update handler
+// can stash the cancel on the pointer it owns.
+func (m Model) spawnLiveStreamCmd(agent LiveAgent) tea.Cmd {
+	return func() tea.Msg {
+		cancel := m.startLiveStream(agent)
+		return liveStreamStartedMsg{cancel: cancel}
+	}
 }
 
 // Update is the Bubble Tea dispatcher. The visual-preview slice
@@ -93,7 +122,17 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		return m.handleKey(msg)
 
 	case streamChunkMsg:
+		needSpinner := m.liveMode && msg.partial && !m.spinnerActive
 		m.applyStreamChunk(msg)
+		// In LiveAgent mode the spinner tick isn't scheduled by
+		// any submitTurn — kick it off when the first partial
+		// chunk after an idle stretch arrives. applyStreamChunk
+		// flips m.spinnerActive=true in that case; needSpinner
+		// is captured BEFORE the call so we only spawn a single
+		// tick per active stretch.
+		if needSpinner {
+			return m, tea.Batch(m.eventListener(), spinnerTick())
+		}
 		return m, m.eventListener()
 	case toolCallMsg:
 		m.applyToolCall(msg)
@@ -111,6 +150,38 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		m.cancelSlash = nil
 		m.toast = ""
 		return m.applySlashResult(msg.name, msg.res, msg.err)
+	case liveStreamStartedMsg:
+		// Issue #22: stash the cancel func; log the one-time
+		// "Attached as observer" system row so the operator knows
+		// they're in LiveAgent mode (and that typing without
+		// InjectableAgent is read-only).
+		m.cancelLiveStream = msg.cancel
+		m.history.Append(Message{
+			Role: RoleSystem,
+			Text: "Attached as observer — agent runs autonomously; events stream below.",
+		})
+		m.refreshViewport()
+		return m, nil
+	case liveStreamErrMsg:
+		// Surface as an Error row and keep draining. The iterator
+		// itself decides whether to keep yielding events.
+		m.history.Append(Message{
+			Role: RoleError,
+			Text: "live stream error: " + msg.err.Error(),
+		})
+		m.refreshViewport()
+		return m, nil
+	case liveStreamEndedMsg:
+		// Iterator returned. Flip the disconnected bit so the
+		// banner can render; keep the program alive so the
+		// operator can read scrollback and choose to quit.
+		m.liveDisconnected = true
+		m.history.Append(Message{
+			Role: RoleSystem,
+			Text: "Disconnected from live stream. Press Ctrl+C to quit.",
+		})
+		m.refreshViewport()
+		return m, nil
 	case usageMsg:
 		// Empty Usage (zero in/out) is the model-only signal — adapters
 		// flag the live model on the first chunk before any real usage
@@ -143,7 +214,11 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		m.finalizeTurn(0, "(interrupted)")
 		return m.maybeDrainQueue()
 	case spinnerTickMsg:
-		if m.state != stateStreaming {
+		// Two gating paths:
+		//   - per-turn (Run): m.state == stateStreaming
+		//   - LiveAgent (#22): m.spinnerActive driven by
+		//     applyStreamChunk's partial-vs-commit logic
+		if !((m.state == stateStreaming) || (m.liveMode && m.spinnerActive)) {
 			return m, nil
 		}
 		m.thinkingIdx++
@@ -593,6 +668,41 @@ func (m Model) handleKey(msg tea.KeyPressMsg) (tea.Model, tea.Cmd) {
 		if strings.HasPrefix(text, "/") {
 			return m.dispatchSlash(text)
 		}
+		// Issue #22 — LiveAgent mode bypasses the per-turn Run
+		// path entirely. Operator submissions flow through
+		// InjectableAgent.Inject when available; otherwise the
+		// TUI logs a one-time "read-only view" system note and
+		// discards the typed text (the issue's "no-op" branch,
+		// surfaced explicitly so the operator knows why nothing
+		// happened).
+		if m.liveMode {
+			m.recordPrompt(text)
+			m.input.Reset()
+			if injector, ok := m.opts.Agent.(InjectableAgent); ok {
+				// Inject feeds the host's stream; events flow back
+				// through the same Events(ctx) iterator and land
+				// in scrollback like everything else.
+				if err := injector.Inject(text); err != nil {
+					m.history.Append(Message{Role: RoleError, Text: "inject failed: " + err.Error()})
+				} else {
+					// Render the typed prompt as a normal user row
+					// so the operator sees what they sent — the
+					// host's event stream may not echo it back.
+					m.history.Append(Message{Role: RoleUser, Text: text})
+				}
+				m.refreshViewport()
+				return m, nil
+			}
+			if !m.liveReadOnlyNoted {
+				m.liveReadOnlyNoted = true
+				m.history.Append(Message{
+					Role: RoleSystem,
+					Text: "Read-only view — this LiveAgent host doesn't implement Inject(), so typing is disabled. Use Ctrl+C to quit.",
+				})
+				m.refreshViewport()
+			}
+			return m, nil
+		}
 		// Record the non-slash, non-empty prompt in history so
 		// ↑/↓ can recall it next time. recordPrompt dedupes
 		// consecutive duplicates + caps the ring at promptHistoryCap.
@@ -843,6 +953,36 @@ func (m *Model) applyStreamChunk(msg streamChunkMsg) {
 		// Committed full text — overwrite (some agents echo the
 		// full message at turn-end).
 		m.inProgressText = msg.text
+	}
+	// Issue #22: LiveAgent mode has no turnDoneMsg — Partial=false
+	// IS the commit signal, so we drive spinner state + finalize
+	// the in-progress assistant row from here.
+	if m.liveMode {
+		if msg.partial {
+			m.liveLastPartialAt = time.Now()
+			// Spinner active while tokens flow.
+			if !m.spinnerActive {
+				m.spinnerActive = true
+				m.thinkingIdx = 0
+			}
+		} else {
+			m.liveLastCommitAt = time.Now()
+			// Commit: freeze the Glamour render on the just-
+			// finalized assistant row (mirrors finalizeTurn's
+			// commit path) and stop the spinner.
+			if strings.TrimSpace(m.inProgressText) != "" {
+				mr := m.ensureMarkdown()
+				m.history.Append(Message{
+					Role:     RoleAssistant,
+					Text:     m.inProgressText,
+					Rendered: mr.renderMarkdown(m.inProgressText),
+				})
+				m.inProgressText = ""
+				m.inProgressStablePrefix = ""
+				m.inProgressStableRender = ""
+			}
+			m.spinnerActive = false
+		}
 	}
 	m.refreshViewport()
 }

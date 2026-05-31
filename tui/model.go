@@ -178,6 +178,27 @@ type Model struct {
 	// reclaim control.
 	consecutiveAutoContinues int
 
+	// LiveAgent capability state (issue #22). liveMode is set
+	// once at NewModel time when opts.Agent satisfies LiveAgent;
+	// cancelLiveStream is the cancel func from startLiveStream
+	// (held so a future force-reconnect / shutdown path can fire
+	// it). liveDisconnected flips true when the stream ends and
+	// gates the "Disconnected" banner. liveReadOnlyNoted prevents
+	// the read-only-view system note from logging on every
+	// keystroke when a LiveAgent host doesn't implement Inject.
+	liveMode          bool
+	cancelLiveStream  context.CancelFunc
+	liveDisconnected  bool
+	liveReadOnlyNoted bool
+	// liveLastPartialAt + liveLastCommitAt drive the spinner in
+	// LiveAgent mode: spinner is active whenever the most recent
+	// partial Text arrived AFTER the most recent commit Text
+	// (tokens are in flight). Both stay zero in non-LiveAgent
+	// runs — the existing m.state == stateStreaming gate
+	// continues to drive the spinner there.
+	liveLastPartialAt time.Time
+	liveLastCommitAt  time.Time
+
 	// eventCh is the bridge between the agent dispatch goroutine and
 	// the Bubble Tea loop. eventListener drains it one message at a
 	// time. Buffered so a fast agent can't stall on a slow Update.
@@ -345,6 +366,15 @@ func NewModel(opts Options) Model {
 		listCache:     newListCache(),
 		caps:          DetectCapabilities(),
 		newlineHint:   defaultNewlineHint(DetectCapabilities().TermProgram),
+	}
+	// LiveAgent precedence (issue #22): when the host satisfies
+	// LiveAgent, the per-turn Run path is bypassed entirely and a
+	// single drain goroutine pumps Events(ctx) through m.eventCh.
+	// Init() spawns the goroutine after NewModel returns so the
+	// channel is ready and Update can dispatch events as soon as
+	// they arrive.
+	if _, ok := opts.Agent.(LiveAgent); ok {
+		m.liveMode = true
 	}
 	for _, msg := range opts.SeedHistory {
 		m.history.Append(msg)

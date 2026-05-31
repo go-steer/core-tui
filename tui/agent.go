@@ -112,6 +112,48 @@ type InjectableAgent interface {
 	Inject(message string) error
 }
 
+// LiveAgent is an optional capability for hosts whose agent isn't
+// driven by per-turn Run calls — remote-attached daemons running
+// autonomously, observer-mode TUIs watching MCP-server-triggered
+// activity, etc. (issue #22). When implemented, core-tui spawns a
+// single long-lived goroutine at startup that ranges over
+// Events(ctx) and feeds the chat view from every event,
+// regardless of whether the operator typed.
+//
+// Precedence: LiveAgent WINS over the per-turn Run path. Hosts
+// satisfying both interfaces have Run silently skipped — operator
+// submissions flow through InjectableAgent.Inject when available,
+// otherwise the TUI logs a one-time "read-only view" system note
+// and discards the typed text.
+//
+// Semantics (locked during PR review):
+//   - ctx cancellation mid-iter: implementations stop yielding;
+//     no final (zero, ctx.Err()) yield is required.
+//   - Transient errors (non-nil err): core-tui surfaces them in
+//     the chat as a RoleError row and KEEPS draining. The
+//     iterator decides whether to keep yielding events.
+//   - Iterator end (Events returns / stops yielding): core-tui
+//     renders a "Disconnected — Ctrl+C to quit" system row and
+//     keeps the program alive so the operator can read scrollback.
+//   - Reconnect: implementation-internal. core-tui calls Events
+//     exactly once at startup and trusts the iterator to handle
+//     its own reconnection / replay semantics.
+//   - Turn-end commit: Event{Text: ..., Partial: false} commits
+//     the accumulated in-progress assistant text (matches the
+//     existing Run-path convention). Hosts that forget to flush
+//     a non-partial close cause a slightly-laggy commit — never
+//     corruption.
+//   - Spinner: active whenever the most recent partial Text
+//     arrived AFTER the most recent commit Text (i.e. tokens are
+//     in flight). Idle when committed and idle, even though the
+//     event stream itself is "always live".
+//
+// See docs/remote-tui-observer-mode.md (in the core-agent repo)
+// for the architectural motivation + adapter sketch.
+type LiveAgent interface {
+	Events(ctx context.Context) iter.Seq2[Event, error]
+}
+
 // InboxDrainer is an optional capability for hosts whose agent
 // queues operator-injected messages in an internal inbox that's
 // distinct from the per-turn prompt. Combined with InjectableAgent
