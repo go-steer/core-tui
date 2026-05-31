@@ -33,8 +33,6 @@ import (
 type liveAgentStub struct {
 	events    chan eventOrErr
 	runCalled bool
-	// optional Inject implementation; absent → host is read-only.
-	injects chan string // nil = not injectable
 }
 
 type eventOrErr struct {
