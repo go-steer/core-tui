@@ -153,3 +153,17 @@ type liveStreamErrMsg struct {
 // program alive so the operator can read scrollback. No
 // auto-reconnect; the LiveAgent implementation owns that.
 type liveStreamEndedMsg struct{}
+
+// forceRenderMsg is a no-op msg used to force a fresh Update →
+// View cycle (issue #24). Bubble-tea v2 occasionally defers the
+// next paint when an Update returns (m, nil) in a "quiet window"
+// — no other Cmds in flight, no inbound keypresses, no spinner
+// ticks. Listener handlers that need to surface a modal in that
+// quiet window (permission prompt arriving from a remote bridge,
+// elicit request landing between turns, the live-stream
+// disconnect banner) return a forceRenderTick alongside their
+// state mutation so a forceRenderMsg arrives ~1ms later and
+// guarantees the paint. The handler for this msg is a deliberate
+// no-op + nil Cmd; the value is in the fact that it WAS
+// processed.
+type forceRenderMsg struct{}
