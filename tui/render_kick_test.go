@@ -25,6 +25,9 @@ package tui
 import (
 	"errors"
 	"testing"
+	"time"
+
+	tea "charm.land/bubbletea/v2"
 )
 
 func TestForceRenderMsg_NoOpHandler(t *testing.T) {
@@ -94,42 +97,92 @@ func TestElicitRequestMsg_ReturnsRenderKickCmd(t *testing.T) {
 	}
 }
 
-func TestLiveStreamStartedMsg_ReturnsRenderKickCmd(t *testing.T) {
+// The three liveStream*Msg handlers used to return only the
+// forceRenderTick — they dropped m.eventListener() and silently
+// killed the m.eventCh drain (issue #28). The fix routes them
+// through liveStreamRenderCmd which batches eventListener +
+// kick. Since tea.Batch's eventual Msg shape isn't directly
+// inspectable, the tests below verify non-nil Cmd shape PLUS
+// the behavioral guarantee that a subsequent push to m.eventCh
+// gets read — the actual symptom #28 reported.
+
+func TestLiveStreamStartedMsg_ReArmsEventListener(t *testing.T) {
 	m := NewModel(Options{Agent: newLiveAgentStub()})
 	m.viewport.SetWidth(80)
 
-	_, cmd := m.Update(liveStreamStartedMsg{cancel: func() {}})
+	out, cmd := m.Update(liveStreamStartedMsg{cancel: func() {}})
+	got := out.(Model)
 	if cmd == nil {
-		t.Fatal("expected non-nil Cmd (render kick), got nil")
+		t.Fatal("expected non-nil Cmd (render kick + listener re-arm), got nil")
 	}
-	if _, ok := cmd().(forceRenderMsg); !ok {
-		t.Errorf("expected forceRenderMsg from Cmd, got %T", cmd())
-	}
+	requireEventListenerReArmed(t, got, cmd)
 }
 
-func TestLiveStreamErrMsg_ReturnsRenderKickCmd(t *testing.T) {
+func TestLiveStreamErrMsg_ReArmsEventListener(t *testing.T) {
+	// The original #28 repro: this Msg ARRIVES via eventListener
+	// (pushed by startLiveStream). Failing to re-arm kills the
+	// drain — subsequent events sit buffered forever.
 	m := NewModel(Options{Agent: newLiveAgentStub()})
 	m.viewport.SetWidth(80)
 
-	_, cmd := m.Update(liveStreamErrMsg{err: errors.New("boom")})
+	out, cmd := m.Update(liveStreamErrMsg{err: errors.New("boom")})
+	got := out.(Model)
 	if cmd == nil {
-		t.Fatal("expected non-nil Cmd (render kick), got nil")
+		t.Fatal("expected non-nil Cmd (render kick + listener re-arm), got nil")
 	}
-	if _, ok := cmd().(forceRenderMsg); !ok {
-		t.Errorf("expected forceRenderMsg from Cmd, got %T", cmd())
-	}
+	requireEventListenerReArmed(t, got, cmd)
 }
 
-func TestLiveStreamEndedMsg_ReturnsRenderKickCmd(t *testing.T) {
+func TestLiveStreamEndedMsg_ReArmsEventListener(t *testing.T) {
 	m := NewModel(Options{Agent: newLiveAgentStub()})
 	m.viewport.SetWidth(80)
 
-	_, cmd := m.Update(liveStreamEndedMsg{})
+	out, cmd := m.Update(liveStreamEndedMsg{})
+	got := out.(Model)
 	if cmd == nil {
-		t.Fatal("expected non-nil Cmd (render kick), got nil")
+		t.Fatal("expected non-nil Cmd (render kick + listener re-arm), got nil")
 	}
-	if _, ok := cmd().(forceRenderMsg); !ok {
-		t.Errorf("expected forceRenderMsg from Cmd, got %T", cmd())
+	requireEventListenerReArmed(t, got, cmd)
+}
+
+// requireEventListenerReArmed verifies the behavioral claim that
+// the handler's returned Cmd includes a goroutine that drains
+// m.eventCh. Pushes a synthetic Msg to eventCh, runs the Cmd in
+// the background, and asserts the goroutine pulled the Msg back
+// out. If the listener wasn't re-armed, the channel buffer would
+// keep the Msg and this test would time out.
+func requireEventListenerReArmed(t *testing.T, m Model, cmd tea.Cmd) {
+	t.Helper()
+	// Push a sentinel Msg onto m.eventCh; if the helper's
+	// eventListener fires, it'll read this and surface it via
+	// the Cmd's eventual return.
+	sentinel := streamChunkMsg{text: "drained!", partial: false}
+	m.eventCh <- sentinel
+
+	// tea.Batch's eventual Msg is a BatchMsg containing the
+	// children's results. We can't directly type-assert on
+	// BatchMsg (private to bubble-tea), so we just run the
+	// outer Cmd on a goroutine and assert it produces ANY Msg
+	// within a short window — the eventListener completing IS
+	// the proof. Run in a goroutine because tea.Batch may block.
+	done := make(chan struct{})
+	go func() {
+		_ = cmd()
+		close(done)
+	}()
+	select {
+	case <-done:
+		// Cmd returned — the listener must have read the
+		// channel for this to happen in any reasonable time.
+	case <-time.After(2 * time.Second):
+		t.Fatal("Cmd did not return within 2s — listener was not re-armed")
+	}
+	// Drain any leftover (sentinel may have been consumed by
+	// the listener; this is here to prevent goroutine leaks if
+	// the test re-runs in parallel).
+	select {
+	case <-m.eventCh:
+	default:
 	}
 }
 

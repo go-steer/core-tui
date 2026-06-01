@@ -171,11 +171,14 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			Text: "Attached as observer — agent runs autonomously; events stream below.",
 		})
 		m.refreshViewport()
-		// Issue #24: render kick — the attached-note may land
-		// before any other events flow, especially against a
-		// quiet remote agent. Without the kick the operator sees
-		// a blank scrollback until something else hits Update.
-		return m, forceRenderTick()
+		// Issue #28: route through liveStreamRenderCmd so the
+		// eventListener stays armed. This Msg actually arrives
+		// via the spawnLiveStreamCmd Cmd-result path (not
+		// eventCh) so dropping the listener wouldn't kill the
+		// drain in itself, but routing through the helper keeps
+		// every LiveAgent handler consistent — and the render
+		// kick (#24) comes along for free.
+		return m, m.liveStreamRenderCmd()
 	case liveStreamErrMsg:
 		// Surface as an Error row and keep draining. The iterator
 		// itself decides whether to keep yielding events.
@@ -184,10 +187,14 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			Text: "live stream error: " + msg.err.Error(),
 		})
 		m.refreshViewport()
-		// Issue #24: render kick — an error mid-stream may be the
-		// only Msg in flight for a long stretch (e.g. transient
-		// reconnect retry that the impl handles internally).
-		return m, forceRenderTick()
+		// Issue #28: this Msg ARRIVED via eventListener (it was
+		// pushed onto m.eventCh by startLiveStream's drain
+		// goroutine). Returning only the kick would leave nothing
+		// reading m.eventCh — subsequent events (reconnect
+		// notices, post-error frames) would sit buffered until
+		// some other path happens to re-issue eventListener.
+		// liveStreamRenderCmd batches eventListener + render kick.
+		return m, m.liveStreamRenderCmd()
 	case liveStreamEndedMsg:
 		// Iterator returned. Flip the disconnected bit so the
 		// banner can render; keep the program alive so the
@@ -198,10 +205,13 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			Text: "Disconnected from live stream. Press Ctrl+C to quit.",
 		})
 		m.refreshViewport()
-		// Issue #24: render kick — by definition no more Events
-		// are coming, so the disconnect banner WILL otherwise
-		// wait for the operator's next keypress to appear.
-		return m, forceRenderTick()
+		// Issue #28: same root cause as liveStreamErrMsg. Even
+		// though the iterator has stopped pushing new events,
+		// m.eventCh may still carry events that were buffered
+		// before the iterator returned — without re-arming the
+		// listener those would be lost. One extra listener that
+		// eventually blocks forever (no more pushes) is harmless.
+		return m, m.liveStreamRenderCmd()
 	case forceRenderMsg:
 		// Issue #24: no-op handler. The value is the fact that
 		// bubble-tea processed a Msg → ran Update → triggered
