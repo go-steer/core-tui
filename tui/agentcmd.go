@@ -49,6 +49,17 @@ func toastTick() tea.Cmd {
 	})
 }
 
+// forceRenderTick schedules a forceRenderMsg ~1ms into the future
+// to guarantee a fresh Update → View cycle after handlers that
+// would otherwise return a nil Cmd in a quiet window (issue #24).
+// See the forceRenderMsg doc comment for the underlying scheduler
+// quirk this works around.
+func forceRenderTick() tea.Cmd {
+	return tea.Tick(time.Millisecond, func(time.Time) tea.Msg {
+		return forceRenderMsg{}
+	})
+}
+
 // pendingExitTick schedules a pendingExitClearMsg ctrlCExitTTL into
 // the future so the warn-then-exit one-shot disarms if the operator
 // doesn't follow through.

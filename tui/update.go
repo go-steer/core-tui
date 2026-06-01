@@ -161,7 +161,11 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			Text: "Attached as observer — agent runs autonomously; events stream below.",
 		})
 		m.refreshViewport()
-		return m, nil
+		// Issue #24: render kick — the attached-note may land
+		// before any other events flow, especially against a
+		// quiet remote agent. Without the kick the operator sees
+		// a blank scrollback until something else hits Update.
+		return m, forceRenderTick()
 	case liveStreamErrMsg:
 		// Surface as an Error row and keep draining. The iterator
 		// itself decides whether to keep yielding events.
@@ -170,7 +174,10 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			Text: "live stream error: " + msg.err.Error(),
 		})
 		m.refreshViewport()
-		return m, nil
+		// Issue #24: render kick — an error mid-stream may be the
+		// only Msg in flight for a long stretch (e.g. transient
+		// reconnect retry that the impl handles internally).
+		return m, forceRenderTick()
 	case liveStreamEndedMsg:
 		// Iterator returned. Flip the disconnected bit so the
 		// banner can render; keep the program alive so the
@@ -181,6 +188,16 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			Text: "Disconnected from live stream. Press Ctrl+C to quit.",
 		})
 		m.refreshViewport()
+		// Issue #24: render kick — by definition no more Events
+		// are coming, so the disconnect banner WILL otherwise
+		// wait for the operator's next keypress to appear.
+		return m, forceRenderTick()
+	case forceRenderMsg:
+		// Issue #24: no-op handler. The value is the fact that
+		// bubble-tea processed a Msg → ran Update → triggered
+		// the View pass that the modal-setting handler above
+		// needed. Do not change model state here — this msg
+		// must stay a paint-only hint.
 		return m, nil
 	case usageMsg:
 		// Empty Usage (zero in/out) is the model-only signal — adapters
@@ -261,7 +278,11 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		// Centered-overlay layout doesn't care about viewport
 		// scroll, so this is harmless either way.
 		m.refreshAndScroll()
-		return m, nil
+		// Issue #24: hosts delivering prompts from a quiet window
+		// (remote bridge, scheduled callback) need the render
+		// kick so the modal actually paints without waiting for
+		// the operator's next keypress.
+		return m, forceRenderTick()
 	case elicitRequestMsg:
 		r := msg.req
 		m.pendingElicit = &r
@@ -274,7 +295,10 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			}
 		}
 		m.refreshViewport()
-		return m, nil
+		// Issue #24: same render-kick rationale as permissionRequestMsg
+		// — hosts that deliver elicit requests from a remote bridge
+		// or background goroutine need the kick so the form paints.
+		return m, forceRenderTick()
 	case toastClearMsg:
 		// Issue #13: the async-slash indicator uses the toast
 		// surface but must NOT auto-clear — a /compact that takes
