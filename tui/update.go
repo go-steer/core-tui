@@ -130,16 +130,26 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		// flips m.spinnerActive=true in that case; needSpinner
 		// is captured BEFORE the call so we only spawn a single
 		// tick per active stretch.
+		//
+		// Issue #26: also fold in the LiveAgent render kick so a
+		// single non-partial chat-content chunk arriving in a
+		// quiet window paints without waiting for a keypress.
+		// liveStreamRenderCmd handles the conditional batching.
 		if needSpinner {
-			return m, tea.Batch(m.eventListener(), spinnerTick())
+			return m, m.liveStreamRenderCmd(spinnerTick())
 		}
-		return m, m.eventListener()
+		return m, m.liveStreamRenderCmd()
 	case toolCallMsg:
 		m.applyToolCall(msg)
-		return m, m.eventListener()
+		// Issue #26: render kick in LiveAgent mode — a solo
+		// autonomous tool call could otherwise sit invisible
+		// until the next operator keypress.
+		return m, m.liveStreamRenderCmd()
 	case toolResultMsg:
 		m.applyToolResult(msg)
-		return m, m.eventListener()
+		// Issue #26: same — a result event landing without other
+		// Msgs in flight needs the kick.
+		return m, m.liveStreamRenderCmd()
 	case slashResultMsg:
 		// Issue #13: clear the in-flight indicators now that the
 		// host's call has completed (success, error, or cancel —
@@ -213,7 +223,10 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		if msg.model != "" {
 			m.currentModel = msg.model
 		}
-		return m, m.eventListener()
+		// Issue #26: render kick in LiveAgent mode — a standalone
+		// usage update (per-turn cost, model swap, etc.) can land
+		// without other Msgs in flight.
+		return m, m.liveStreamRenderCmd()
 	case turnDoneMsg:
 		m.finalizeTurn(msg.elapsed, "")
 		// Issue #9: AutoContinueFromInbox mode pulls the inbox

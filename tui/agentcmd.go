@@ -60,6 +60,32 @@ func forceRenderTick() tea.Cmd {
 	})
 }
 
+// liveStreamRenderCmd returns the Cmd that chat-content Msg
+// handlers (streamChunkMsg, toolCallMsg, toolResultMsg, usageMsg)
+// should yield after applying their state change (issue #26).
+//
+// In Run mode it's just the bare eventListener — the per-turn
+// iterator keeps the program loop busy with concurrent Msgs.
+//
+// In LiveAgent mode it batches the eventListener with a
+// forceRenderTick so a single non-partial chunk arriving in a
+// quiet window (single-shot model reply, solo autonomous tool
+// call) paints without waiting for the operator's next keypress.
+// The extras parameter folds in additional concurrent Cmds the
+// handler may need (e.g. spinnerTick for the partial-text path).
+func (m Model) liveStreamRenderCmd(extras ...tea.Cmd) tea.Cmd {
+	cmds := make([]tea.Cmd, 0, len(extras)+2)
+	cmds = append(cmds, m.eventListener())
+	cmds = append(cmds, extras...)
+	if m.liveMode {
+		cmds = append(cmds, forceRenderTick())
+	}
+	if len(cmds) == 1 {
+		return cmds[0]
+	}
+	return tea.Batch(cmds...)
+}
+
 // pendingExitTick schedules a pendingExitClearMsg ctrlCExitTTL into
 // the future so the warn-then-exit one-shot disarms if the operator
 // doesn't follow through.
