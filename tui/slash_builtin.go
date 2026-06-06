@@ -53,6 +53,8 @@ func (m Model) dispatchBuiltinSlash(name, args string) (bool, tea.Model, tea.Cmd
 	switch name {
 	case "models":
 		name = "model"
+	case "themes":
+		name = "theme"
 	case "perms":
 		name = "permissions"
 	case "by-the-way":
@@ -187,6 +189,55 @@ func (m Model) dispatchBuiltinSlash(name, args string) (bool, tea.Model, tea.Cmd
 		m.refreshTheme()
 		m.input.Reset()
 		m.refreshAndScroll()
+		return true, m, nil
+
+	case "theme":
+		if args == "" {
+			// No-arg form opens the interactive picker dialog.
+			// Singleton — re-opening while already showing is
+			// a no-op.
+			if !m.overlayStack.HasID(themePickerDialogID) {
+				m.overlayStack.Open(newThemePickerDialog(m.themeName))
+			}
+			m.input.Reset()
+			return true, m, nil
+		}
+		// `/theme <name>` switches without opening a picker —
+		// useful for scripted / replay flows. Unknown names fall
+		// through to DefaultTheme via ThemeByName; we surface that
+		// via a system message instead of erroring so a typo is
+		// recoverable in one keystroke.
+		name := strings.TrimSpace(args)
+		known := false
+		for _, bt := range BuiltinThemes() {
+			if strings.EqualFold(bt.Name, name) {
+				name = bt.Name // canonicalize casing
+				known = true
+				break
+			}
+		}
+		m.applyNamedTheme(name)
+		if known {
+			m.history.Append(Message{Role: RoleSystem, Text: "/theme: switched to " + name})
+			// Callback persistence (mirrors PersistModelChoice).
+			// Only fires on a KNOWN name — fallback-to-default on
+			// a typo isn't worth persisting.
+			if m.opts.PersistThemeChoice != nil {
+				if perr := m.opts.PersistThemeChoice(name); perr != nil {
+					m.history.Append(Message{Role: RoleError, Text: "/theme: persist failed: " + perr.Error()})
+				}
+			}
+		} else {
+			m.history.Append(Message{Role: RoleSystem, Text: "/theme: unknown theme " + name + " — falling back to default. Try /theme to see the list."})
+		}
+		m.input.Reset()
+		m.refreshAndScroll()
+		// Also emit ThemeChangedMsg — hosts can use either the
+		// callback OR observe the msg.
+		if known {
+			canonical := name
+			return true, m, func() tea.Msg { return ThemeChangedMsg{Name: canonical} }
+		}
 		return true, m, nil
 
 	case "reload":
@@ -523,6 +574,7 @@ func (m Model) renderBuiltinHelp() string {
 	b.WriteString("  /stats               — per-turn + session usage totals\n")
 	b.WriteString("  /tools               — list tools and gate state\n")
 	b.WriteString("  /model [<id>]        — list models or switch to <id>\n")
+	b.WriteString("  /theme [<name>]      — pick a theme (default, google, gopher, …)\n")
 	b.WriteString("  /reload              — rebuild agent from disk\n")
 	b.WriteString("  /permissions         — review session approvals\n")
 	b.WriteString("  /pricing refresh|set — manage cost rates\n")

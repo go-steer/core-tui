@@ -666,7 +666,7 @@ func (m Model) renderStatusLine() string {
 	// the wordmark, the identity sits between the wordmark and
 	// the model so the operator can tell which agent deployment
 	// they're talking to in multi-window setups.
-	parts := []string{m.styles.Wordmark.Render(m.wordmark())}
+	parts := []string{m.styles.RenderWordmark(m.wordmark())}
 	if id := m.opts.Branding.AgentIdentity; id != "" && id != m.wordmark() {
 		parts = append(parts,
 			m.sep(),

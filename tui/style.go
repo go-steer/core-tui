@@ -16,6 +16,7 @@ package tui
 
 import (
 	"image/color"
+	"strings"
 
 	"charm.land/lipgloss/v2"
 )
@@ -161,4 +162,28 @@ func NewStylesWithTheme(dark bool, theme Theme) Styles {
 		ModalTitle:       lipgloss.NewStyle().Foreground(theme.Accent).Bold(true),
 		ModalFooter:      lipgloss.NewStyle().Foreground(muted),
 	}
+}
+
+// RenderWordmark paints the brand wordmark. When the active
+// Theme defines a WordmarkSequence, one color per rune is
+// applied (cycling the sequence over chars longer than the
+// sequence). This is the hook the Google theme uses to mimic
+// the iconic B-R-Y-B-G-R logo sequence; other themes leave the
+// sequence nil and fall through to the single-color path.
+//
+// Bold is preserved in both paths so the wordmark keeps its
+// chrome weight regardless of which path runs.
+func (s Styles) RenderWordmark(text string) string {
+	if len(s.Theme.WordmarkSequence) == 0 {
+		return s.Wordmark.Render(text)
+	}
+	seq := s.Theme.WordmarkSequence
+	var b strings.Builder
+	i := 0
+	for _, r := range text {
+		c := seq[i%len(seq)]
+		b.WriteString(lipgloss.NewStyle().Foreground(c).Bold(true).Render(string(r)))
+		i++
+	}
+	return b.String()
 }
