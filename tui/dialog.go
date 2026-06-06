@@ -29,6 +29,7 @@ package tui
 import (
 	"strings"
 
+	tea "charm.land/bubbletea/v2"
 	"charm.land/lipgloss/v2"
 )
 
@@ -53,7 +54,8 @@ type Dialog interface {
 }
 
 // DialogAction is the return shape of HandleKey. Composite so
-// dialogs can signal both "consume key" + "close me" in one go.
+// dialogs can signal "consume key" + "close me" + "emit a Cmd"
+// (e.g. ThemeChangedMsg from the theme picker) in one go.
 type DialogAction struct {
 	// Consumed reports whether the dialog handled the key. When
 	// false, the Overlay lets the key fall through to the rest of
@@ -63,6 +65,11 @@ type DialogAction struct {
 	// frame renders. Pair with Consumed=true to also stop the
 	// key from falling through.
 	Close bool
+	// Cmd is an optional tea.Cmd to dispatch alongside the
+	// state mutation — used by dialogs that need to notify the
+	// host of a commit (e.g. ThemeChangedMsg). Nil for the
+	// common case where the dialog just mutates Model.
+	Cmd tea.Cmd
 }
 
 // Overlay is the modal z-order stack. Open() pushes onto the top;
@@ -124,17 +131,19 @@ func (o *Overlay) Front() Dialog {
 
 // HandleKey routes the keystroke to the front-most dialog and
 // applies the returned action. Returns Consumed so the caller
-// (handleKey) can decide whether to fall through.
-func (o *Overlay) HandleKey(stroke string, m *Model) (consumed bool) {
+// (handleKey) can decide whether to fall through, plus an
+// optional Cmd for dialogs that need to emit a msg (e.g. the
+// theme picker firing ThemeChangedMsg on commit).
+func (o *Overlay) HandleKey(stroke string, m *Model) (consumed bool, cmd tea.Cmd) {
 	front := o.Front()
 	if front == nil {
-		return false
+		return false, nil
 	}
 	act := front.HandleKey(stroke, m)
 	if act.Close {
 		o.CloseFront()
 	}
-	return act.Consumed
+	return act.Consumed, act.Cmd
 }
 
 // Render iterates the stack and returns the front-most dialog's

@@ -33,10 +33,19 @@ import (
 
 // textareaStyles returns the styles bundle for the chat prompter.
 // Starts from textarea.DefaultStyles(isDark) so the per-mode
-// foreground / placeholder palette is correct, then clears the
-// CursorLine background so the focused row doesn't paint a tinted
-// block under the prompt.
-func textareaStyles(isDark bool) textarea.Styles {
+// foreground / placeholder palette is correct, then:
+//
+//   - clears the CursorLine background so the focused row doesn't
+//     paint a tinted block under the prompt;
+//   - colors the prompt glyph (set in NewModel to "▎ ") with the
+//     theme's BorderActive when focused, FgMuted when blurred —
+//     this is the visible "focus rail" on the textarea since
+//     bubbles v2 doesn't draw a rectangular border around the
+//     input by default.
+//
+// Caller is responsible for setting `ta.Prompt` itself (the glyph
+// string lives on the textarea, not the Styles bundle).
+func textareaStyles(isDark bool, theme Theme) textarea.Styles {
 	s := textarea.DefaultStyles(isDark)
 	// Both Focused and Blurred states: drop the cursor-line tint
 	// inherited from the code-editor defaults. The chat prompter
@@ -46,5 +55,9 @@ func textareaStyles(isDark bool) textarea.Styles {
 	s.Focused.CursorLineNumber = lipgloss.NewStyle()
 	s.Blurred.CursorLine = lipgloss.NewStyle()
 	s.Blurred.CursorLineNumber = lipgloss.NewStyle()
+	// Prompt rail. Focused = active accent; blurred = muted so
+	// the rail doesn't shout when the input isn't taking input.
+	s.Focused.Prompt = lipgloss.NewStyle().Foreground(theme.BorderActive)
+	s.Blurred.Prompt = lipgloss.NewStyle().Foreground(theme.FgMuted)
 	return s
 }

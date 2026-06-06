@@ -167,3 +167,23 @@ type liveStreamEndedMsg struct{}
 // no-op + nil Cmd; the value is in the fact that it WAS
 // processed.
 type forceRenderMsg struct{}
+
+// ThemeChangedMsg is emitted by the /theme picker (and `/theme
+// <name>` with a known name) when the operator commits a new
+// theme. Hosts have two equivalent ways to persist:
+//
+//   - Set Options.PersistThemeChoice — a callback the picker
+//     invokes inline (mirrors PersistModelChoice). Less host
+//     code; no Update-loop intercept needed.
+//   - Observe ThemeChangedMsg in the host's Update loop. Useful
+//     when the host already has a custom Update wrapper or
+//     wants to react to theme changes beyond persistence (e.g.
+//     emit telemetry).
+//
+// Both fire on every committed change — pick one or both,
+// whichever fits the host's architecture. On next launch, hosts
+// seed the persisted name via Options.InitialThemeName.
+//
+// Exported (capital M) because it crosses the package boundary
+// — unlike most msgs in this file, which are tui-internal.
+type ThemeChangedMsg struct{ Name string }

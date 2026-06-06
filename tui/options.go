@@ -50,6 +50,14 @@ type Options struct {
 	// response can't override the operator's explicit choice.
 	ForceTheme string
 
+	// InitialThemeName seeds the named theme at startup. Resolved
+	// case-insensitively against tui.BuiltinThemes; unknown names
+	// fall through to DefaultTheme. Set this when the host has
+	// persisted a previous /theme pick (observed via
+	// ThemeChangedMsg). Empty leaves the theme on the auto /
+	// per-provider path (see AutoProviderTheme).
+	InitialThemeName string
+
 	// Mouse toggles terminal mouse capture. nil (the default) keeps
 	// MouseModeCellMotion on so the wheel scrolls the viewport;
 	// *false disables capture entirely (MouseModeNone), restoring
@@ -86,6 +94,17 @@ type Options struct {
 	// preference survives restarts. Nil means the choice stays
 	// session-local.
 	PersistModelChoice func(modelID string) error
+
+	// PersistThemeChoice is called when the operator picks a new
+	// theme via the /theme picker (or `/theme <name>` with a
+	// known name). Mirrors PersistModelChoice: hosts persist the
+	// name to their config + seed it back via InitialThemeName on
+	// next launch. Nil means the theme stays session-local. Hosts
+	// can ALSO observe ThemeChangedMsg in their Update loop for
+	// the same notification — pick whichever pattern fits the
+	// host's architecture (callback = less code; msg = no
+	// Options field needed).
+	PersistThemeChoice func(name string) error
 
 	// PermissionMode wires the permission-mode chip (R-PERM-6 / R-PERM-7).
 	// Zero value hides the chip and disables Shift+Tab cycling.
