@@ -80,6 +80,15 @@ type Model struct {
 	permMode     PermissionMode
 	overlay      overlay
 
+	// themeName holds the operator's explicit named-theme pick
+	// (seeded from Options.InitialThemeName, mutated by the
+	// /theme picker via applyNamedTheme). Empty (zero value)
+	// means "no explicit pick" — resolveStyles then falls through
+	// to the auto / per-provider path. Resolved case-insensitively
+	// via ThemeByName, so a stale persisted name never strands
+	// the operator on a half-painted UI.
+	themeName string
+
 	// helpOpen toggles the bottom-anchored stacked help panel
 	// (`?` to open / close). When open, the chat viewport shrinks
 	// to make room above the input.
@@ -301,7 +310,16 @@ func NewModel(opts Options) Model {
 	if opts.Branding.InputPlaceholder != "" {
 		ta.Placeholder = opts.Branding.InputPlaceholder
 	}
-	ta.Prompt = ""
+	// Prompt rail: a thin vertical bar to the left of every
+	// input row, colored by the active theme's BorderActive
+	// (see textareaStyles). Gives the input a persistent,
+	// theme-aware focus marker — bubbles v2's textarea draws no
+	// border of its own, so this rail is the operator's visual
+	// anchor for "this is where input goes." Themes that have a
+	// signature glyph (e.g. GKE's ⎈ helm) override via
+	// Theme.PromptGlyph; refreshTheme applies the override on
+	// theme swap.
+	ta.Prompt = DefaultPromptGlyph
 	ta.ShowLineNumbers = false
 	ta.SetHeight(textareaMinHeight)
 	// Focus the textarea so KeyPressMsg events route to it. Focus()
@@ -316,7 +334,9 @@ func NewModel(opts Options) Model {
 	// We don't yet know dark/light (BackgroundColorMsg comes
 	// post-Init), so pick the "safer" no-tint default and let
 	// the BackgroundColorMsg handler swap in the right variant.
-	ta.SetStyles(textareaStyles(true))
+	// Use DefaultTheme(true) here; refreshTheme rebuilds with the
+	// resolved theme once BackgroundColorMsg lands.
+	ta.SetStyles(textareaStyles(true, DefaultTheme(true)))
 
 	vp := viewport.New()
 	// The viewport's default KeyMap is full of vim conventions
@@ -359,6 +379,7 @@ func NewModel(opts Options) Model {
 		input:         ta,
 		statusLayout:  opts.StatusLayout,
 		permMode:      opts.PermissionMode.Initial,
+		themeName:     opts.InitialThemeName,
 		eventCh:       make(chan tea.Msg, 32),
 		seenToolIDs:   make(map[string]bool),
 		historyCursor: -1,
@@ -526,23 +547,50 @@ func (m *Model) refreshTheme() {
 	if m.listCache != nil {
 		m.listCache.reset(m.viewport.Width())
 	}
-	m.input.SetStyles(textareaStyles(m.styles.Dark))
+	m.input.SetStyles(textareaStyles(m.styles.Dark, m.styles.Theme))
+	// Apply the theme's prompt glyph (or fall back to the house
+	// default). Themes that don't customize the glyph leave
+	// Theme.PromptGlyph empty.
+	if glyph := m.styles.Theme.PromptGlyph; glyph != "" {
+		m.input.Prompt = glyph
+	} else {
+		m.input.Prompt = DefaultPromptGlyph
+	}
+}
+
+// applyNamedTheme switches the active theme to the named entry
+// and re-renders. Called by the /theme picker dialog on cursor
+// (live preview), restore-on-cancel (esc), and commit (enter),
+// and by the `/theme <name>` slash form. Unknown names fall
+// through to DefaultTheme via ThemeByName so a typo is safe.
+func (m *Model) applyNamedTheme(name string) {
+	m.themeName = name
+	m.refreshTheme()
+	m.refreshViewport()
 }
 
 // resolveStyles builds the Styles bundle for the current dark/
-// light mode. When Options.AutoProviderTheme is true the
-// StatusReporter's Provider tag picks the per-provider theme
-// (Anthropic clay / Gemini blue / OpenAI green); otherwise the
-// brand stays on DefaultTheme regardless of which model is
-// active. Branding overrides still apply on top of whichever
-// theme was picked. Called from BackgroundColorMsg (first-paint
-// dark/light detect) and any time the active provider could
-// have changed (post-/model swap).
+// light mode. Precedence is:
+//
+//  1. m.themeName (set by /theme picker or Options.InitialThemeName)
+//     — wins over everything else; the operator's explicit pick.
+//  2. Options.AutoProviderTheme — StatusReporter's Provider tag
+//     picks the per-provider theme (Anthropic clay / Gemini blue /
+//     OpenAI green).
+//  3. DefaultTheme — brand stays consistent regardless of model.
+//
+// Branding overrides still apply on top of whichever theme was
+// picked. Called from BackgroundColorMsg (first-paint dark/light
+// detect) and any time the active provider could have changed
+// (post-/model swap) or the operator switched themes.
 func (m Model) resolveStyles(dark bool) Styles {
 	var theme Theme
-	if m.opts.AutoProviderTheme {
+	switch {
+	case m.themeName != "":
+		theme = ThemeByName(m.themeName, dark)
+	case m.opts.AutoProviderTheme:
 		theme = ThemeForProvider(m.displayProvider(), dark)
-	} else {
+	default:
 		theme = DefaultTheme(dark)
 	}
 	if m.opts.Branding.AccentColor != "" {

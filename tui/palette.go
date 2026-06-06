@@ -128,6 +128,7 @@ func builtinSlashItems() []paletteItem {
 		{Name: "skills", Description: "loaded skill bundles", Available: true},
 		{Name: "stats", Description: "per-turn + session usage totals", Available: true},
 		{Name: "subagents", Description: "list background subagents", Available: true},
+		{Name: "theme", Description: "open theme picker / switch theme", Available: true},
 		{Name: "tools", Description: "list tools and gate state", Available: true},
 	}
 	sort.SliceStable(rest, func(i, j int) bool { return rest[i].Name < rest[j].Name })

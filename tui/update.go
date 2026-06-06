@@ -482,11 +482,13 @@ func (m Model) handleKey(msg tea.KeyPressMsg) (tea.Model, tea.Cmd) {
 	// Dialog overlay — front-most dialog gets every keystroke
 	// before the legacy modal cascade. Returns Consumed=true when
 	// the dialog handled it; we then return early so the key
-	// doesn't double-fire on textarea / viewport.
+	// doesn't double-fire on textarea / viewport. The optional
+	// Cmd is dialogs' channel for emitting outbound msgs (e.g.
+	// theme picker fires ThemeChangedMsg here on commit).
 	if m.overlayStack.HasDialogs() {
-		if m.overlayStack.HandleKey(stroke, &m) {
+		if consumed, cmd := m.overlayStack.HandleKey(stroke, &m); consumed {
 			m.refreshViewport()
-			return m, nil
+			return m, cmd
 		}
 	}
 
