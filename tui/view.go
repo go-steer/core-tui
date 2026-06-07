@@ -605,6 +605,12 @@ func (m Model) renderMessage(msg Message) string {
 		return body
 	case RoleSystem:
 		return m.styles.SystemText.Render(wordWrapIndent("ℹ  "+msg.Display(), width, "   "))
+	case RoleNotice:
+		// Host-initiated row (issue #30). ◇ glyph + NoticeText
+		// (muted, non-italic). Distinct from RoleSystem's ℹ +
+		// italic so operators glance-tell "framework speaking"
+		// from "agent system response."
+		return m.styles.NoticeText.Render(wordWrapIndent("◇  "+msg.Display(), width, "   "))
 	case RoleError:
 		return m.styles.ErrorText.Render(wordWrapIndent(GlyphWarn+"  "+msg.Display(), width, "   "))
 	case RoleTool:

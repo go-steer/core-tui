@@ -121,6 +121,28 @@ func (m Model) promptListener() tea.Cmd {
 	}
 }
 
+// notifyListener returns a Cmd that blocks on the host-supplied
+// Notifier's channel and forwards each inbound notice as a
+// noticeMsg (issue #30). Re-issued by Update after every notice
+// so the loop drains continuously. Returns nil when no Notifier
+// is wired (the common case — Notifier is opt-in).
+func (m Model) notifyListener() tea.Cmd {
+	if m.opts.Notifier == nil {
+		return nil
+	}
+	ch := m.opts.Notifier.ch
+	return func() tea.Msg {
+		env, ok := <-ch
+		if !ok {
+			return nil // channel closed; subscription ends
+		}
+		// Direct conversion — noticeEnvelope and noticeMsg have
+		// identical fields by design (the listener is just a
+		// channel-to-msg bridge). Keep them in sync if either grows.
+		return noticeMsg(env)
+	}
+}
+
 // elicitListener returns a Cmd that blocks on the elicitor's
 // request channel and forwards each inbound request as an
 // elicitRequestMsg (R-ELIC-1). Same drain-loop pattern as
