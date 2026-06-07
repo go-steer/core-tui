@@ -39,6 +39,7 @@ func (m Model) Init() tea.Cmd {
 		m.wakeListener(),
 		m.promptListener(),
 		m.elicitListener(),
+		m.notifyListener(),
 	}
 	// Issue #22: LiveAgent mode spawns the single long-lived drain
 	// goroutine at startup so autonomous activity reaches the
@@ -322,6 +323,24 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		// — hosts that deliver elicit requests from a remote bridge
 		// or background goroutine need the kick so the form paints.
 		return m, forceRenderTick()
+	case noticeMsg:
+		// Issue #30: host-initiated chat row, drained from
+		// Options.Notifier. Append as RoleNotice (distinct from
+		// RoleSystem so operators can tell framework speech from
+		// agent system response). Coalesced-drop count is
+		// surfaced inline so a notice flood doesn't get silently
+		// lost — the operator sees "(+N dropped)" appended.
+		text := msg.text
+		if msg.dropped > 0 {
+			text = fmt.Sprintf("%s  (+%d dropped)", text, msg.dropped)
+		}
+		m.history.Append(Message{Role: RoleNotice, Text: text})
+		m.refreshAndScroll()
+		// Re-issue the listener (drain the next one) AND kick a
+		// render — Notifier callers are typically background
+		// goroutines landing in quiet windows; same rationale as
+		// permission / elicit handlers above.
+		return m, tea.Batch(m.notifyListener(), forceRenderTick())
 	case toastClearMsg:
 		// Issue #13: the async-slash indicator uses the toast
 		// surface but must NOT auto-clear — a /compact that takes

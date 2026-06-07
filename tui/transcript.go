@@ -174,6 +174,8 @@ func roleString(r Role) string {
 		return "error"
 	case RoleTool:
 		return "tool"
+	case RoleNotice:
+		return "notice"
 	}
 	return "unknown"
 }
@@ -192,6 +194,8 @@ func roleFromString(s string) Role {
 		return RoleError
 	case "tool":
 		return RoleTool
+	case "notice":
+		return RoleNotice
 	default:
 		return RoleSystem
 	}

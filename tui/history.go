@@ -26,6 +26,15 @@ const (
 	RoleSystem
 	RoleError
 	RoleTool
+	// RoleNotice tags rows pushed by the HOST via Options.Notifier
+	// (issue #30) — framework-initiated content that doesn't belong
+	// to the agent event stream. Visually distinct from RoleSystem
+	// so operators can tell "framework speaking" (reconnect notice,
+	// multi-attach signal, version mismatch) from "agent system
+	// response" (slash result, permission outcome, /clear armed).
+	// Renders with a ◇ glyph + theme.Info muted color (no italic —
+	// italic is RoleSystem's tier).
+	RoleNotice
 )
 
 // Message is one entry in the rolling chat log.
