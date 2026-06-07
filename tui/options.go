@@ -133,6 +133,19 @@ type Options struct {
 	// (R-ELIC-1). Construct via tui.NewElicitor().
 	Elicitor Elicitor
 
+	// Notifier is the host-facing side channel for chat rows
+	// that don't belong to the agent event stream (issue #30):
+	// reconnect notices, host-shutdown warnings, multi-attach
+	// signals, version-mismatch errors, etc. Construct via
+	// tui.NewNotifier(); call Notifier.Notify(text) from any
+	// goroutine. The TUI drains the channel and renders each
+	// notice as a RoleNotice row (◇ glyph + muted color) —
+	// visually distinct from RoleSystem so operators can tell
+	// "framework speaking" from "agent system response". Nil
+	// (the default) disables the side channel; existing
+	// "yield-through-agent-stream" workarounds keep working.
+	Notifier *Notifier
+
 	// AlwaysAllow is invoked when the operator picks
 	// DecisionAllowAlways in the permission modal (R-PERM-3). The
 	// host persists the entry to its allowlist; on nil callback the

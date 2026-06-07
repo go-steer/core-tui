@@ -168,6 +168,15 @@ type liveStreamEndedMsg struct{}
 // processed.
 type forceRenderMsg struct{}
 
+// noticeMsg carries one host-initiated notice from the
+// Options.Notifier channel through to the Update loop. Internal
+// type — hosts push via Notifier.Notify(text), they don't
+// construct this directly.
+type noticeMsg struct {
+	text    string
+	dropped int // coalesced drop count; appended to rendered text as "(+N dropped)"
+}
+
 // ThemeChangedMsg is emitted by the /theme picker (and `/theme
 // <name>` with a known name) when the operator commits a new
 // theme. Hosts have two equivalent ways to persist:

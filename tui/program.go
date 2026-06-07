@@ -45,6 +45,13 @@ func Run(ctx context.Context, opts Options) error {
 	// Mouse mode is set declaratively on the View (see view.go); no
 	// Program-level option needed in bubbletea v2.
 	p := tea.NewProgram(m, tea.WithContext(ctx))
+	// Issue #30: close the Notifier on exit so the notifyListener
+	// goroutine returns cleanly (channel send returns ok=false).
+	// Notify after exit silently drops via the closed-flag guard
+	// — hosts don't have to track TUI lifecycle.
+	if opts.Notifier != nil {
+		defer opts.Notifier.close()
+	}
 	finalModel, err := p.Run()
 
 	// Persist transcript on exit. Done after p.Run() returns so the
