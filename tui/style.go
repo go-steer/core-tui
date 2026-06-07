@@ -137,18 +137,18 @@ func NewStylesWithTheme(dark bool, theme Theme) Styles {
 	}
 	muted := theme.FgMuted
 	return Styles{
-		Dark:             dark,
-		Theme:            theme,
-		UserPrefix:       lipgloss.NewStyle().Foreground(fgUser).Bold(true),
-		UserText:         lipgloss.NewStyle().Foreground(fgUser),
-		AssistantText:    lipgloss.NewStyle().Foreground(theme.FgBase),
-		SystemText:       lipgloss.NewStyle().Foreground(theme.Info).Italic(true),
+		Dark:          dark,
+		Theme:         theme,
+		UserPrefix:    lipgloss.NewStyle().Foreground(fgUser).Bold(true),
+		UserText:      lipgloss.NewStyle().Foreground(fgUser),
+		AssistantText: lipgloss.NewStyle().Foreground(theme.FgBase),
+		SystemText:    lipgloss.NewStyle().Foreground(theme.Info).Italic(true),
 		// NoticeText is theme.Info too but NOT italic — italic is
 		// RoleSystem's tier (slash result, permission outcome).
 		// Same muted color keeps notices in the same visual
 		// volume; the dropped italic + the ◇ glyph (set in
 		// renderMessage) carry the distinction.
-		NoticeText: lipgloss.NewStyle().Foreground(theme.Info),
+		NoticeText:       lipgloss.NewStyle().Foreground(theme.Info),
 		ErrorText:        lipgloss.NewStyle().Foreground(theme.Error),
 		ToolHead:         lipgloss.NewStyle().Foreground(theme.Accent).Bold(true),
 		ToolBody:         lipgloss.NewStyle().Foreground(muted),
