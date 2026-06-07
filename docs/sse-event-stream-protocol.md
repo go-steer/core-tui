@@ -4,7 +4,7 @@ The wire-format contract between core-tui (consumer) and any server (producer �
 
 **Status:** Phase 1 — additive-only. See [core-tui #40](https://github.com/go-steer/core-tui/issues/40) and [core-agent #115](https://github.com/go-steer/core-agent/issues/115) for the phased-rollout context.
 
-**Protocol version:** `1.0.0`. Bumped on breaking changes per the [Versioning](#versioning) rules below.
+**Protocol version:** `1.1.0`. Bumped on changes per the [Versioning](#versioning) rules below.
 
 ---
 
@@ -40,14 +40,14 @@ Six event types are defined in this protocol version. Each section specifies: wh
 | Field | Type | Required | Description |
 |---|---|---|---|
 | `protocol_version` | string (semver) | yes | Version the server speaks. Clients compare against the version they implement; see [Versioning](#versioning). |
-| `event_types` | array of strings | yes | Names of event types the server emits on this stream. Clients MUST tolerate unknown names (forward-compat). |
+| `event_types` | array of strings | yes | Names of event types the server emits on this stream. Clients MUST tolerate unknown names (forward-compat). Servers MAY also list **logical** sub-types that ride on a multiplexed event name (e.g. `stream-chunk` / `tool-call` / `tool-result` carried on the legacy `agent` wire event) so clients can detect capability without inspecting frame internals. |
 | `server` | string | no | Free-form server identifier (e.g. `"core-agent/0.4.2"`). Diagnostic only. |
 
 Example:
 
 ```json
 {
-  "protocol_version": "1.0.0",
+  "protocol_version": "1.1.0",
   "event_types": ["status-update", "usage-update", "inbox", "turn-complete", "turn-error", "stream-chunk", "tool-call", "tool-result"],
   "server": "core-agent/0.4.2"
 }
@@ -151,10 +151,14 @@ Example:
 | `model` | string | yes | Model that completed this turn. |
 | `tokens_in` | integer | yes | Turn input tokens. |
 | `tokens_out` | integer | yes | Turn output tokens. |
-| `cost_usd` | number | yes | Turn cost in USD. |
+| `cost_usd` | number | **no** | Turn cost in USD. **See note on cost below.** |
 | `latency_ms` | integer | yes | Wall-clock time from turn start to last token. |
 
-Example:
+**Note on `cost_usd`** (clarified in protocol v1.1.0): some server architectures compute cost in a separate pricing module that runs asynchronously after the turn finalizes (e.g. core-agent's `pkg/agent` doesn't know about `internal/pricing`). Such servers MAY omit `cost_usd` from `turn-complete` and rely on the immediately-following `usage-update` event to carry authoritative cost — both cumulative session cost and the new turn's delta. Clients that need per-turn cost SHOULD correlate `turn-complete` with the next `usage-update` via `prompt_id` (or by ordering: `turn-complete` precedes its matching `usage-update`). Clients MUST handle absence of `cost_usd` on `turn-complete` without crashing — render `0`, `"—"`, or defer to the `usage-update`-derived value per local preference.
+
+Servers that DO have pricing in-band SHOULD populate `cost_usd` for client convenience.
+
+Example (server with pricing in-band):
 
 ```json
 {
@@ -163,6 +167,18 @@ Example:
   "tokens_in": 2806,
   "tokens_out": 87,
   "cost_usd": 0.0067,
+  "latency_ms": 4521
+}
+```
+
+Example (server that defers cost to the following `usage-update`):
+
+```json
+{
+  "prompt_id": "p-9c4a",
+  "model": "gemini-2.5-pro",
+  "tokens_in": 2806,
+  "tokens_out": 87,
   "latency_ms": 4521
 }
 ```
@@ -216,6 +232,7 @@ The protocol follows [SemVer](https://semver.org/) at the `protocol_version` fie
 - New event types
 - New OPTIONAL fields on existing events
 - New enum values on existing fields (clients are already required to tolerate unknown values per §2)
+- **Demoting a required field to optional**, when the demoted field carries documented fallback semantics (e.g. "value MAY be derived from another event in the stream"). Producers gain flexibility; consumers must already handle the field's absence going forward. Spec MUST document the fallback in the same revision.
 
 **Breaking changes are MAJOR:**
 - Removing event types
@@ -251,7 +268,7 @@ A complete representative session, viewed from the client side reading the SSE s
 
 ```
 event: capabilities
-data: {"protocol_version":"1.0.0","event_types":["status-update","usage-update","inbox","turn-complete","turn-error","stream-chunk","tool-call","tool-result"],"server":"core-agent/0.4.2"}
+data: {"protocol_version":"1.1.0","event_types":["status-update","usage-update","inbox","turn-complete","turn-error","stream-chunk","tool-call","tool-result"],"server":"core-agent/0.4.2"}
 
 event: status-update
 data: {"model":"gemini-2.5-pro","provider":"vertex","perm_mode":"default","turn_state":"idle","context_pct":3}
@@ -324,4 +341,5 @@ The following are deliberately NOT specified here:
 
 | Version | Date | Change |
 |---|---|---|
+| 1.1.0 | 2026-06-07 | **MINOR.** `turn-complete.cost_usd` demoted from required → optional with documented fallback to the immediately-following `usage-update` (servers with pricing out-of-band can omit it). §2.1 `capabilities.event_types` clarified to permit listing logical sub-types that ride on multiplexed wire events. §3 evolution rules extended with the required→optional demotion clause that governed this change. |
 | 1.0.0 | 2026-06-07 | Initial spec — `capabilities`, `status-update`, `usage-update`, `inbox`, `turn-complete`, `turn-error`. |
