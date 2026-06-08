@@ -168,6 +168,51 @@ type liveStreamEndedMsg struct{}
 // processed.
 type forceRenderMsg struct{}
 
+// Push-mode SSE event-stream msgs (issue #40, spec v1.1.0).
+// One per spec event type; emitEvent in agentcmd.go emits the
+// matching msg when an Event carries the corresponding optional
+// payload field. Internal types — host adapters populate the
+// exported Event fields, they don't construct these directly.
+
+// statusUpdateMsg carries the spec §2.2 status-update payload
+// through to the Update loop. Merge semantics: handler applies
+// non-empty fields onto model state and leaves the rest unchanged.
+type statusUpdateMsg struct {
+	status StatusUpdate
+}
+
+// usageUpdateMsg carries the spec §2.3 usage-update payload —
+// cumulative session totals + optional per-model breakdown. Replaces
+// the current snapshot rather than merging (the wire payload always
+// carries totals, not deltas).
+type usageUpdateMsg struct {
+	update UsageUpdate
+}
+
+// inboxStateMsg carries the spec §2.4 inbox payload — operator-
+// typed prompt queued/dequeued state change.
+type inboxStateMsg struct {
+	event InboxEvent
+}
+
+// turnSummaryMsg carries the spec §2.5 turn-complete payload —
+// per-turn token + cost + latency metrics. Snapshots into the
+// per-turn footer fields (currentUsage, currentCost, etc.) so the
+// rendered footer reads the same values regardless of which path
+// produced them (legacy usageMsg vs push-mode turnSummaryMsg).
+type turnSummaryMsg struct {
+	summary TurnSummary
+}
+
+// turnErrorMsg carries the spec §2.6 turn-error payload — a
+// structured pipeline failure that should be rendered as a styled
+// block in the chat. Handler appends a RoleError Message with the
+// structured payload attached so the renderer can pick out kind /
+// hint / retryable for richer presentation than a flat text row.
+type turnErrorMsg struct {
+	turnError TurnError
+}
+
 // noticeMsg carries one host-initiated notice from the
 // Options.Notifier channel through to the Update loop. Internal
 // type — hosts push via Notifier.Notify(text), they don't

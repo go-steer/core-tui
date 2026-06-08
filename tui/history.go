@@ -97,6 +97,14 @@ type Message struct {
 	// other Message; the field is meaningless for non-RoleUser
 	// rows.
 	AutoContinue bool
+
+	// TurnError, when non-nil, carries the structured payload from
+	// a push-mode turn-error event (spec §2.6 / issue #40) so the
+	// renderer can paint a richer "kind · message · hint" block
+	// than a bare text RoleError row. Only set on RoleError
+	// messages produced by the turnErrorMsg handler in Update;
+	// legacy error rows leave it nil and render as plain text.
+	TurnError *TurnError
 }
 
 // Display returns the renderable string for this message, preferring

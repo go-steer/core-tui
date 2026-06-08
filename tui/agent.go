@@ -70,6 +70,24 @@ type Event struct {
 	// · in · out · $X · 4s") and status sidebar can reflect the live
 	// agent. Empty events leave m.currentModel unchanged.
 	Model string
+
+	// Push-mode fields (issue #40, SSE event-stream spec v1.1.0 at
+	// docs/sse-event-stream-protocol.md). Host adapters that
+	// consume push events from a server (currently core-agent's
+	// SSE /events stream) populate exactly one of these per Event
+	// to carry the corresponding spec payload through to the TUI's
+	// Update loop. All optional — legacy hosts that don't consume
+	// push events leave them nil and the per-turn-inferred state
+	// (via Usage / Model on this struct) keeps working unchanged.
+	//
+	// At most one of these is non-nil per Event in normal usage
+	// (one SSE wire event → one Event), though multi-population
+	// is tolerated — handlers fire independently.
+	StatusUpdate *StatusUpdate
+	UsageUpdate  *UsageUpdate
+	Inbox        *InboxEvent
+	TurnComplete *TurnSummary
+	TurnError    *TurnError
 }
 
 // ToolCall describes a single tool invocation.
