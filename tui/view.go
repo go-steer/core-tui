@@ -78,18 +78,24 @@ func wordWrapIndent(s string, width int, indent string) string {
 		if i == 0 {
 			roleIndent = ""
 		}
-		prefixed := roleIndent + sl
-		wrapped := wordWrap(prefixed, width)
-		wlines := strings.Split(wrapped, "\n")
-		for k, wl := range wlines {
-			if k == 0 {
-				out.WriteString(wl)
-			} else {
+		// Wrap to (width - prefix) so each emitted line — prefix +
+		// wrapped chunk — fits within width. The prior version wrapped
+		// the full prefixed line to width, then re-prepended prefix to
+		// continuations, overflowing the terminal by len(prefix) cols
+		// and causing mid-word hard-wraps in /tools descriptions.
+		prefix := roleIndent + leading
+		wrapWidth := width - len(prefix)
+		if wrapWidth <= 0 {
+			wrapWidth = width
+		}
+		stripped := sl[len(leading):]
+		wrapped := wordWrap(stripped, wrapWidth)
+		for k, wl := range strings.Split(wrapped, "\n") {
+			if k > 0 {
 				out.WriteByte('\n')
-				out.WriteString(roleIndent)
-				out.WriteString(leading)
-				out.WriteString(wl)
 			}
+			out.WriteString(prefix)
+			out.WriteString(wl)
 		}
 	}
 	return out.String()
