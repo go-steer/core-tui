@@ -162,3 +162,129 @@ func TestRenderStats_NoTracker_GracefulMessage(t *testing.T) {
 		t.Errorf("expected helpful 'no UsageTracker' message, got: %q", got)
 	}
 }
+
+// Push-path coverage (issue #38): m.sessionUsage.ByModel — populated
+// by the usageUpdateMsg handler from SSE usage-update events —
+// must produce the same Models: breakdown the pull-path tracker
+// produces, and follow the same skip rules for single-entry / nil.
+
+func TestRenderStats_PushSessionUsage_MultiEntry_RendersBreakdown(t *testing.T) {
+	m := NewModel(Options{UsageTracker: &bareTracker{
+		totals: Usage{InputTokens: 1200, OutputTokens: 200},
+		cost:   0.012,
+	}})
+	// Simulate a usage-update event having landed.
+	m.sessionUsage = &UsageUpdate{
+		TokensInTotal:  1200,
+		TokensOutTotal: 200,
+		CostUSDTotal:   0.012,
+		TurnsTotal:     7,
+		ByModel: map[string]UsageByModel{
+			"gemini-3.1-pro":   {Turns: 5, TokensIn: 1000, TokensOut: 150, CostUSD: 0.010},
+			"gemini-2.5-flash": {Turns: 2, TokensIn: 200, TokensOut: 50, CostUSD: 0.002},
+		},
+	}
+	got := m.renderStats()
+	if !strings.Contains(got, "Models:") {
+		t.Fatalf("expected Models: row from push path, got:\n%s", got)
+	}
+	if !strings.Contains(got, "gemini-3.1-pro") || !strings.Contains(got, "gemini-2.5-flash") {
+		t.Errorf("expected both model names in push breakdown, got:\n%s", got)
+	}
+	// Same sort — priciest first.
+	if idxPro, idxFlash := strings.Index(got, "gemini-3.1-pro"), strings.Index(got, "gemini-2.5-flash"); idxPro > idxFlash {
+		t.Errorf("expected priciest model first (pro before flash), got pro at %d flash at %d:\n%s", idxPro, idxFlash, got)
+	}
+	// Per-row turn counts should match what UsageByModel.Turns carried.
+	if !strings.Contains(got, "5 turns") || !strings.Contains(got, "2 turns") {
+		t.Errorf("expected per-row turn counts in breakdown, got:\n%s", got)
+	}
+}
+
+func TestRenderStats_PushSessionUsage_SingleEntry_NoRow(t *testing.T) {
+	// Single-entry push breakdown duplicates the aggregate — skip
+	// (same rule as the pull path).
+	m := NewModel(Options{UsageTracker: &bareTracker{
+		totals: Usage{InputTokens: 100, OutputTokens: 50}, cost: 0.01,
+	}})
+	m.sessionUsage = &UsageUpdate{
+		TokensInTotal:  100,
+		TokensOutTotal: 50,
+		CostUSDTotal:   0.01,
+		TurnsTotal:     1,
+		ByModel: map[string]UsageByModel{
+			"only-model": {Turns: 1, TokensIn: 100, TokensOut: 50, CostUSD: 0.01},
+		},
+	}
+	got := m.renderStats()
+	if strings.Contains(got, "Models:") {
+		t.Errorf("single-entry push breakdown: no row expected, got:\n%s", got)
+	}
+}
+
+func TestRenderStats_PushWinsOverPull_WhenBothPopulated(t *testing.T) {
+	// In remote/attach mode both sources may have data (the local
+	// pull tracker may keep its own per-model totals from observed
+	// usageMsg events). Push must win because it reflects the
+	// daemon's own tracker — the authoritative source.
+	pullTracker := &modelAwareTracker{
+		bareTracker: bareTracker{totals: Usage{InputTokens: 100, OutputTokens: 50}, cost: 0.01},
+		byModel: map[string]ModelTotals{
+			"pull-only-model-A": {Turns: 1, InputTokens: 50, OutputTokens: 25, CostUSD: 0.005},
+			"pull-only-model-B": {Turns: 1, InputTokens: 50, OutputTokens: 25, CostUSD: 0.005},
+		},
+	}
+	m := NewModel(Options{UsageTracker: pullTracker})
+	m.sessionUsage = &UsageUpdate{
+		TokensInTotal:  100,
+		TokensOutTotal: 50,
+		CostUSDTotal:   0.01,
+		TurnsTotal:     2,
+		ByModel: map[string]UsageByModel{
+			"push-model-X": {Turns: 1, TokensIn: 60, TokensOut: 30, CostUSD: 0.006},
+			"push-model-Y": {Turns: 1, TokensIn: 40, TokensOut: 20, CostUSD: 0.004},
+		},
+	}
+	got := m.renderStats()
+	if !strings.Contains(got, "push-model-X") || !strings.Contains(got, "push-model-Y") {
+		t.Errorf("expected push-source models in breakdown, got:\n%s", got)
+	}
+	if strings.Contains(got, "pull-only-model-A") || strings.Contains(got, "pull-only-model-B") {
+		t.Errorf("push must win over pull when both populated — pull names should NOT appear, got:\n%s", got)
+	}
+}
+
+func TestRenderStats_PullPathStillWorks_WhenPushAbsent(t *testing.T) {
+	// Regression: the pre-#38 pull path must keep working when
+	// sessionUsage is nil (embedded mode with no push events).
+	pullTracker := &modelAwareTracker{
+		bareTracker: bareTracker{totals: Usage{InputTokens: 1200, OutputTokens: 200}, cost: 0.012},
+		byModel: map[string]ModelTotals{
+			"gemini-3.1-pro":   {Turns: 5, InputTokens: 1000, OutputTokens: 150, CostUSD: 0.010},
+			"gemini-2.5-flash": {Turns: 2, InputTokens: 200, OutputTokens: 50, CostUSD: 0.002},
+		},
+	}
+	m := NewModel(Options{UsageTracker: pullTracker})
+	// sessionUsage stays nil — embedded-mode shape.
+	got := m.renderStats()
+	if !strings.Contains(got, "Models:") {
+		t.Fatalf("expected pull-path Models: row when sessionUsage nil, got:\n%s", got)
+	}
+	if !strings.Contains(got, "gemini-3.1-pro") || !strings.Contains(got, "gemini-2.5-flash") {
+		t.Errorf("expected both pull-source model names, got:\n%s", got)
+	}
+}
+
+func TestUsageByModelToTotals_FieldMapping(t *testing.T) {
+	in := map[string]UsageByModel{
+		"m1": {Turns: 3, TokensIn: 100, TokensOut: 40, CostUSD: 0.005},
+	}
+	out := usageByModelToTotals(in)
+	if len(out) != 1 {
+		t.Fatalf("expected 1 entry, got %d", len(out))
+	}
+	got := out["m1"]
+	if got.Turns != 3 || got.InputTokens != 100 || got.OutputTokens != 40 || got.CostUSD != 0.005 {
+		t.Errorf("field mapping mismatch: got %+v", got)
+	}
+}
