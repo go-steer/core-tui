@@ -38,7 +38,15 @@ import (
 
 // TranscriptSchemaVersion is the on-disk schema version. Bump when
 // the JSON shape changes in a non-backwards-compatible way.
-const TranscriptSchemaVersion = 1
+//
+// v2 (2026-06-09): TranscriptMsg gained optional tool-call fields
+// (tool_name, tool_args, tool_preview, tool_call_id). Backwards-
+// compatible: v1 files load fine (the new fields default to empty)
+// and v2 files written by newer code load fine in older readers
+// (json.Unmarshal silently drops unknown fields). The version bump
+// is a signal to consumers that tool rows now carry their structured
+// data instead of serializing as {role: "tool", text: ""}.
+const TranscriptSchemaVersion = 2
 
 // Transcript is the on-disk session record.
 type Transcript struct {
@@ -51,11 +59,40 @@ type Transcript struct {
 }
 
 // TranscriptMsg is one entry in the chat. Role uses the lowercase
-// string form ("user" / "assistant" / "system" / "error" / "tool")
-// so consumers don't have to import the package's enum.
+// string form ("user" / "assistant" / "system" / "error" / "tool" /
+// "notice") so consumers don't have to import the package's enum.
+//
+// Tool-call fields (ToolName, ToolArgs, ToolPreview, ToolCallID) are
+// populated only when Role == "tool". For other roles they're empty
+// and omitted from the JSON via omitempty. Text is intentionally
+// empty for tool rows — the in-memory renderer assembles the visible
+// row from ToolName/ToolArgs/ToolPreview rather than a single string,
+// and that structure is preserved here.
 type TranscriptMsg struct {
 	Role string `json:"role"`
 	Text string `json:"text"`
+
+	// ToolName is the tool's canonical name (e.g. "read_file",
+	// "mcp.gke.list_clusters"). Populated when Role == "tool".
+	ToolName string `json:"tool_name,omitempty"`
+
+	// ToolArgs is the JSON-serialized call arguments (or a
+	// human-readable rendering when JSON serialization isn't
+	// available). Populated when Role == "tool".
+	ToolArgs string `json:"tool_args,omitempty"`
+
+	// ToolPreview is the pre-rendered multi-line block the renderer
+	// shows under the tool row — a unified diff for edit_file, a
+	// read-scope summary, a result excerpt, etc. Populated when
+	// Role == "tool"; empty when the tool call has no preview yet
+	// (call-only row, before the result arrived).
+	ToolPreview string `json:"tool_preview,omitempty"`
+
+	// ToolCallID is the wire-level identifier the host emitted for
+	// this call (e.g. genai.FunctionCall.ID). Populated when
+	// Role == "tool" and the host supplied an ID. Useful for
+	// cross-referencing the transcript against the host's audit log.
+	ToolCallID string `json:"tool_call_id,omitempty"`
 }
 
 // TranscriptUsage mirrors the host UsageTracker's session totals.
@@ -138,11 +175,26 @@ func atomicWriteTranscript(path string, data []byte, mode fs.FileMode) error {
 // buildTranscript projects the model's chat history + usage totals
 // into the on-disk shape. Pure / side-effect-free so the caller
 // can decide whether (and where) to persist.
+//
+// Tool rows: Message.Text is intentionally empty in-memory (the
+// renderer assembles the visible row from ToolName/ToolArgs/
+// ToolPreview), so prior to v2 schema tool rows persisted as
+// {role: "tool", text: ""} — useless for post-mortems. v2 preserves
+// the structured fields alongside the empty Text so post-mortem
+// readers can see what each tool was actually called with and what
+// it returned.
 func buildTranscript(m *Model) Transcript {
 	msgs := m.history.Snapshot()
 	out := make([]TranscriptMsg, 0, len(msgs))
 	for _, msg := range msgs {
-		out = append(out, TranscriptMsg{Role: roleString(msg.Role), Text: msg.Text})
+		entry := TranscriptMsg{Role: roleString(msg.Role), Text: msg.Text}
+		if msg.Role == RoleTool {
+			entry.ToolName = msg.ToolName
+			entry.ToolArgs = msg.ToolArgs
+			entry.ToolPreview = msg.ToolPreview
+			entry.ToolCallID = msg.ToolCallID
+		}
+		out = append(out, entry)
 	}
 	tot := TranscriptUsage{}
 	if m.opts.UsageTracker != nil {
@@ -280,6 +332,17 @@ func (m *Model) ApplyTranscript(t Transcript) {
 		entry := Message{Role: role, Text: msg.Text}
 		if role == RoleAssistant && mr != nil && msg.Text != "" {
 			entry.Rendered = mr.renderMarkdown(msg.Text)
+		}
+		if role == RoleTool {
+			// Restore the structured tool fields written by v2
+			// schema. v1 transcripts will have these empty; tool
+			// rows from a v1 file will render as bare "tool" entries
+			// (lossy, matching the information that was actually
+			// persisted at v1).
+			entry.ToolName = msg.ToolName
+			entry.ToolArgs = msg.ToolArgs
+			entry.ToolPreview = msg.ToolPreview
+			entry.ToolCallID = msg.ToolCallID
 		}
 		m.history.Append(entry)
 	}

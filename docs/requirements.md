@@ -403,9 +403,15 @@ listed in `/help`:
 - **R-TR-1** On clean exit, if `Options.AgentsDir` is non-empty, write
   a transcript to `<AgentsDir>/sessions/<RFC3339>.json` atomically
   (temp + rename).
-- **R-TR-2** Transcript schema is versioned (v1), contains: started_at,
-  model name, messages `[{role, text}]` (role lowercased), and usage
-  totals.
+- **R-TR-2** Transcript schema is versioned (v2 as of 2026-06-09;
+  v1 still loads). Contains: started_at, model name, messages, and
+  usage totals. Each message carries `{role, text}` (role lowercased)
+  plus — when `role == "tool"` — optional `tool_name`, `tool_args`,
+  `tool_preview`, `tool_call_id` fields preserving the structured
+  call/result data the renderer assembles tool rows from. v1 readers
+  ignore the v2 tool fields cleanly (unknown JSON fields are
+  silently dropped); v2 readers handle v1 tool rows by leaving the
+  new fields empty (no data to recover).
 - **R-TR-3** Transcript save failures are non-fatal and reported to
   stderr after the alt-screen is torn down.
 
