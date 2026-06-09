@@ -618,6 +618,15 @@ func (m Model) renderMessage(msg Message) string {
 		// from "agent system response."
 		return m.styles.NoticeText.Render(wordWrapIndent("◇  "+msg.Display(), width, "   "))
 	case RoleError:
+		// Push-mode structured error (issue #40 / spec §2.6): when
+		// a turn-error event lands, the handler attaches a TurnError
+		// payload to the Message so we can render the richer
+		// "header / message / hint / retryable" block instead of a
+		// flat text row. Legacy error rows (TurnError nil) keep the
+		// simple "⚠ <text>" rendering.
+		if msg.TurnError != nil {
+			return m.renderTurnErrorBlock(*msg.TurnError, width)
+		}
 		return m.styles.ErrorText.Render(wordWrapIndent(GlyphWarn+"  "+msg.Display(), width, "   "))
 	case RoleTool:
 		// Per-tool rendering strategy (toolrender.go). The factory
@@ -1420,6 +1429,40 @@ func (m Model) renderHelpPanel(width int) string {
 		}
 	}
 	lines = append(lines, rule)
+	return strings.Join(lines, "\n")
+}
+
+// renderTurnErrorBlock paints a structured turn-error from a
+// push-mode SSE event (spec §2.6 / issue #40). Multi-line block:
+//
+//	⚠ <kind> · <code-if-present>
+//	   <message>
+//	   hint: <hint-if-present>
+//	   ↻ retryable
+//
+// Header (kind line) is bold-error. Body lines indented to match
+// other multi-line block renders (RoleSystem, RoleNotice).
+func (m Model) renderTurnErrorBlock(te TurnError, width int) string {
+	kind := te.Kind
+	if kind == "" {
+		kind = TurnErrorUnknown
+	}
+	headerParts := []string{GlyphWarn + "  " + kind}
+	if te.Code != "" {
+		headerParts = append(headerParts, GlyphSeparator+" "+te.Code)
+	}
+	header := m.styles.ErrorText.Render(strings.Join(headerParts, " "))
+
+	lines := []string{header}
+	if te.Message != "" {
+		lines = append(lines, m.styles.ErrorText.Render(wordWrapIndent("   "+te.Message, width, "   ")))
+	}
+	if te.Hint != "" {
+		lines = append(lines, m.styles.Muted.Render(wordWrapIndent("   hint: "+te.Hint, width, "         ")))
+	}
+	if te.Retryable {
+		lines = append(lines, m.styles.Muted.Render("   ↻ retryable"))
+	}
 	return strings.Join(lines, "\n")
 }
 

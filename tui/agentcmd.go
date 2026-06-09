@@ -326,4 +326,24 @@ func emitEvent(ctx context.Context, ch chan<- tea.Msg, ev Event) {
 		// renders the model name from the first event onward.
 		send(usageMsg{model: ev.Model})
 	}
+	// Push-mode SSE payloads (issue #40, spec v1.1.0). One emit
+	// per populated optional field. All independent — a single
+	// Event MAY carry multiple (rare but tolerated) and they fan
+	// out as separate msgs. Hosts that aren't speaking push leave
+	// these nil and the cases below are no-ops.
+	if ev.StatusUpdate != nil {
+		send(statusUpdateMsg{status: *ev.StatusUpdate})
+	}
+	if ev.UsageUpdate != nil {
+		send(usageUpdateMsg{update: *ev.UsageUpdate})
+	}
+	if ev.Inbox != nil {
+		send(inboxStateMsg{event: *ev.Inbox})
+	}
+	if ev.TurnComplete != nil {
+		send(turnSummaryMsg{summary: *ev.TurnComplete})
+	}
+	if ev.TurnError != nil {
+		send(turnErrorMsg{turnError: *ev.TurnError})
+	}
 }

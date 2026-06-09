@@ -135,6 +135,17 @@ type Model struct {
 	currentCost    float64 // most recent positive cost for this turn (USD)
 	currentModel   string  // model name for the in-progress message
 
+	// Push-mode state (issue #40 / spec v1.1.0). Populated by the
+	// Update handlers for statusUpdateMsg / usageUpdateMsg, read
+	// by displayProvider() + the /stats renderer when the host
+	// adapter is feeding push events. Nil/zero values mean the
+	// host hasn't pushed any state via this path yet (poll-mode
+	// hosts never touch these — they keep flowing through the
+	// existing StatusReporter / per-turn snapshot paths).
+	pushedProvider   string       // most recent push-status provider tag
+	pushedContextPct *int         // most recent push-status context-pct (pointer so 0 ≠ absent)
+	sessionUsage     *UsageUpdate // most recent cumulative usage snapshot from a usage-update event
+
 	// AsyncSlashProvider in-flight state (issue #13). The TUI used
 	// to dispatch /btw / /compact and sit silent for the entire 1-10s
 	// model call; inFlightSlash carries the running slash's name +
@@ -524,10 +535,15 @@ func (m Model) displayCwd() string {
 	return cwd
 }
 
-// displayProvider extracts the provider tag from the host's
-// StatusReporter when wired. Empty when the host doesn't surface
-// it (no capability or empty Provider field).
+// displayProvider extracts the provider tag from the host. Push-
+// mode (issue #40) takes precedence — when a status-update event
+// has populated m.pushedProvider, that wins over the legacy
+// StatusReporter pull. Otherwise falls back to the StatusReporter
+// capability, or empty when neither path has surfaced a provider.
 func (m Model) displayProvider() string {
+	if m.pushedProvider != "" {
+		return m.pushedProvider
+	}
 	reporter, ok := m.opts.Agent.(StatusReporter)
 	if !ok {
 		return ""

@@ -238,6 +238,98 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		// usage update (per-turn cost, model swap, etc.) can land
 		// without other Msgs in flight.
 		return m, m.liveStreamRenderCmd()
+
+	// Push-mode SSE handlers (issue #40, spec v1.1.0). Each
+	// applies its payload onto model state and re-renders. All
+	// safe to fire without an in-flight turn (push mode is
+	// architecturally "the server sends state whenever it
+	// changes" — not gated on Run lifecycle).
+	case statusUpdateMsg:
+		// Merge semantics per spec §2.2 — non-empty fields apply,
+		// empty fields leave existing state unchanged.
+		if msg.status.Model != "" {
+			m.currentModel = msg.status.Model
+		}
+		if msg.status.Provider != "" {
+			m.pushedProvider = msg.status.Provider
+			// Provider change can flip per-provider themes when
+			// AutoProviderTheme is on; resolveStyles consults
+			// displayProvider() which now reads from pushedProvider.
+			m.refreshTheme()
+		}
+		if msg.status.ContextPct != nil {
+			v := *msg.status.ContextPct
+			m.pushedContextPct = &v
+		}
+		// PermMode + TurnState fields land here too but don't
+		// drive any v1 rendering — the existing in-band turn
+		// lifecycle (state field, spinnerActive flag) is the
+		// source of truth for those today. Reserved for follow-up
+		// work that unifies push + in-band turn state.
+		return m, m.liveStreamRenderCmd()
+	case usageUpdateMsg:
+		// Snapshot the cumulative session payload. Renderers that
+		// surface session-level usage (/stats, status sidebar)
+		// can read from m.sessionUsage as a richer source than
+		// the per-turn currentUsage / currentCost fields.
+		u := msg.update
+		m.sessionUsage = &u
+		return m, m.liveStreamRenderCmd()
+	case inboxStateMsg:
+		// Queued: brief toast so the operator sees "your prompt
+		// reached the server." Dequeued: drop the toast (the
+		// streaming turn that follows is the visible signal that
+		// processing started). Future iteration can polish this
+		// into a richer indicator (e.g. inline ✉ chip on the
+		// user-prompt row) — v1 keeps it cheap and visible.
+		switch msg.event.State {
+		case InboxStateQueued:
+			m.toast = "✉ prompt queued"
+			m.toastSetAt = time.Now()
+			return m, tea.Batch(m.liveStreamRenderCmd(), toastTick())
+		case InboxStateDequeued:
+			if m.toast == "✉ prompt queued" {
+				m.toast = ""
+			}
+			return m, m.liveStreamRenderCmd()
+		}
+		// Unknown state per spec — tolerated as no-op.
+		return m, nil
+	case turnSummaryMsg:
+		// Per-turn metrics from the spec's turn-complete event.
+		// Snapshot into the same currentUsage / currentCost /
+		// currentModel fields the existing renderTurnFooter
+		// reads, so per-turn footers paint identically regardless
+		// of which path fed them (legacy usageMsg vs push-mode
+		// turnSummaryMsg). CostUSD may be 0 in v1.1.0 spec —
+		// authoritative cost arrives on the immediately-following
+		// usageUpdateMsg.
+		if msg.summary.TokensIn != 0 || msg.summary.TokensOut != 0 {
+			m.currentUsage = &Usage{
+				InputTokens:  msg.summary.TokensIn,
+				OutputTokens: msg.summary.TokensOut,
+			}
+		}
+		if msg.summary.CostUSD > 0 {
+			m.currentCost = msg.summary.CostUSD
+		}
+		if msg.summary.Model != "" {
+			m.currentModel = msg.summary.Model
+		}
+		return m, m.liveStreamRenderCmd()
+	case turnErrorMsg:
+		// Append a styled error row carrying the structured
+		// payload. Renderer (renderMessage) checks for a
+		// non-nil Message.TurnError and renders the richer
+		// "kind · message · hint" block instead of bare text.
+		te := msg.turnError
+		m.history.Append(Message{
+			Role:      RoleError,
+			Text:      te.Message,
+			TurnError: &te,
+		})
+		m.refreshAndScroll()
+		return m, m.liveStreamRenderCmd()
 	case turnDoneMsg:
 		m.finalizeTurn(msg.elapsed, "")
 		// Issue #9: AutoContinueFromInbox mode pulls the inbox
