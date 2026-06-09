@@ -763,17 +763,51 @@ func (m Model) renderStats() string {
 	if model := m.displayModelName(); model != "" {
 		fmt.Fprintf(&b, "  Model:      %s\n", model)
 	}
-	// Issue #18: when the tracker implements SessionByModelTracker
-	// AND has used more than one model, render a Models: breakdown
-	// row so the operator can see cost split by tier (e.g. parent
-	// on Pro vs subtasks on Flash). Single-entry / empty maps
-	// would just restate the aggregate above; skipped.
-	if mt, ok := tracker.(SessionByModelTracker); ok {
-		if breakdown := mt.SessionByModel(); len(breakdown) > 1 {
-			b.WriteString(formatModelBreakdown(breakdown))
+	// Per-model breakdown rows. Two sources, push wins (issue #38):
+	//
+	//  1. m.sessionUsage.ByModel — populated by push-mode SSE
+	//     usage-update events from a remote daemon (v0.9.0+).
+	//     Authoritative in remote/attach mode because it reflects
+	//     the daemon's own tracker, which the local UsageTracker
+	//     can't observe directly.
+	//  2. tracker.SessionByModel() — local tracker implementing
+	//     SessionByModelTracker (issue #18 path). Used in embedded
+	//     mode where the local tracker IS the source of truth,
+	//     and as fallback when the push path hasn't populated
+	//     sessionUsage yet.
+	//
+	// Single-entry / empty maps in either source are skipped — the
+	// breakdown row would just restate SessionTotals.
+	switch {
+	case m.sessionUsage != nil && len(m.sessionUsage.ByModel) > 1:
+		b.WriteString(formatModelBreakdown(usageByModelToTotals(m.sessionUsage.ByModel)))
+	default:
+		if mt, ok := tracker.(SessionByModelTracker); ok {
+			if breakdown := mt.SessionByModel(); len(breakdown) > 1 {
+				b.WriteString(formatModelBreakdown(breakdown))
+			}
 		}
 	}
 	return strings.TrimRight(b.String(), "\n")
+}
+
+// usageByModelToTotals converts a push-mode UsageByModel map
+// (the SSE usage-update payload's per-model breakdown) to the
+// pull-mode ModelTotals map so formatModelBreakdown can render
+// both sources through the same code path. Field mapping is
+// direct (TokensIn→InputTokens, TokensOut→OutputTokens; Turns +
+// CostUSD identical).
+func usageByModelToTotals(byModel map[string]UsageByModel) map[string]ModelTotals {
+	out := make(map[string]ModelTotals, len(byModel))
+	for name, u := range byModel {
+		out[name] = ModelTotals{
+			Turns:        u.Turns,
+			InputTokens:  u.TokensIn,
+			OutputTokens: u.TokensOut,
+			CostUSD:      u.CostUSD,
+		}
+	}
+	return out
 }
 
 // formatModelBreakdown renders the SessionByModel map as a
