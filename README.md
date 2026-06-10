@@ -17,11 +17,17 @@ own agent types to the interface in
 
 ## Status
 
-Pre-v0.1. The repo currently ships only the design docs — implementation
-is in progress. The library is consolidating the duplicated TUI code
-from [`go-steer/cogo`](https://github.com/go-steer/cogo) and
-[`go-steer/core-agent`](https://github.com/go-steer/core-agent); both
-will migrate to depend on it.
+Latest release: [v0.9.1](https://github.com/go-steer/core-tui/releases/latest).
+Pre-1.0 — public API is largely stable but minor breaking changes can
+ship in 0.X minor bumps; see the
+[release notes](https://github.com/go-steer/core-tui/releases) for
+what's in each version.
+
+The reference host is
+[`go-steer/core-agent`](https://github.com/go-steer/core-agent), which
+tracks the latest release and exercises the full capability surface:
+theme picker, `Notifier` side channel, SSE push-mode subscriber, and
+the v2 transcript schema.
 
 ## Documentation
 
@@ -75,8 +81,16 @@ func main() {
 
 See [`docs/design.md`](./docs/design.md) §3 for the full interface set
 and §6 for the host-adapter recipe. Worked examples live under
-`examples/` (`local`, `permissions`, `cogo`, `core-agent`) once the
-implementation lands.
+[`examples/`](./examples/):
+
+- [`examples/local`](./examples/local) — visual-preview binary running
+  against a scripted test agent; exercises every renderer path (chat,
+  tool calls, slash palette, modal forms, theme picker, status surfaces).
+- [`examples/notifier-smoke`](./examples/notifier-smoke) — standalone
+  harness for the [`Notifier`](./tui/notifier.go) capability: a
+  producer goroutine pushes realistic notices on a rotation (plus a
+  periodic burst to demonstrate the drop-with-coalescence backpressure
+  marker).
 
 ## Contributing
 
