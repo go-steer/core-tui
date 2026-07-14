@@ -42,21 +42,93 @@ type SlashCommandSpec struct {
 	Description string
 }
 
-// SlashResult is what InvokeSlash returns. Exactly one of the fields
-// should typically be non-zero:
+// SlashResult is what InvokeSlash returns. Any subset of the fields
+// may be populated:
 //
 //   - SystemMessage — a one-line confirmation that renders as a dim
 //     italic system row in the chat history.
 //   - ModalAnswer — a richer Q+A overlay rendered as a dismissable
 //     Glamour-formatted modal. Used by /btw-style side questions
 //     whose answer shouldn't pollute the persistent chat history.
+//   - SwitchTo — instructs the TUI to detach from the current Agent
+//     and reattach to the supplied one (issue #48). Non-nil triggers
+//     a mid-run session swap through applySwitchTarget. Any
+//     SystemMessage / ModalAnswer set on the same result is applied
+//     against the OUTGOING session's chat (i.e. before the wipe)
+//     unless the host prefers to surface post-switch context via
+//     SwitchTarget.Note.
 //
-// Both may be empty (the call ran but had nothing visible to say).
-// When both are non-zero, the modal renders first; the system
-// message lands behind it.
+// When SwitchTo is nil and both SystemMessage / ModalAnswer are
+// empty, the call ran but had nothing visible to say. When
+// SystemMessage + ModalAnswer are both set, the modal renders first
+// and the system message lands behind it.
 type SlashResult struct {
 	SystemMessage string
 	ModalAnswer   *SideAnswer
+	SwitchTo      *SwitchTarget
+}
+
+// SwitchTarget instructs the TUI to detach the current Agent's
+// local subscriptions and attach to Agent (issue #48). Fields other
+// than Agent are optional — non-nil / non-empty values REPLACE the
+// corresponding Options field, nil / zero values leave the existing
+// value in place (Memory / Skills / MCPServers: nil = keep, non-nil
+// including empty = replace with the supplied slice).
+//
+// Lifecycle contract:
+//
+//   - Agent is required. SwitchTo with a nil Agent is rejected with a
+//     RoleError row; the current session stays attached.
+//   - Core-tui does NOT close, Detach, or otherwise touch the
+//     OUTGOING Agent. The host owns its lifecycle — if teardown is
+//     needed (closing a socket, releasing a bearer token) do it
+//     inside SwitchToSession() before returning the new
+//     SwitchTarget, or from the host's own slash handler before
+//     returning the SlashResult.
+//   - Core-tui cancels the LOCAL contexts it owns (streaming turn,
+//     async slash, LiveAgent Events). Server-side sessions are
+//     unaffected — a remote daemon observes a dropped reader and
+//     keeps the session ticking per its own reattach policy. This
+//     is a detach, NOT a kill.
+//   - History wipes; the new session paints on a blank canvas.
+//   - Chrome (theme, terminal size, permission mode, overlay stack
+//     minus any open session picker) survives.
+//
+// See design.md §3.3 and issues #48 / #53.
+type SwitchTarget struct {
+	// Agent is the incoming Agent. Required.
+	Agent Agent
+
+	// UsageTracker replaces Options.UsageTracker when non-nil.
+	// Typical: a fresh per-session tracker so /stats and the
+	// status header reflect the new session's totals.
+	UsageTracker UsageTracker
+
+	// Prompter / Elicitor / Notifier replace the corresponding
+	// Options fields when non-nil. Nil = keep the existing
+	// subscriber so cross-session permission / elicit / notice
+	// pipes keep working. Hosts that want to fully sever those
+	// channels supply fresh instances here.
+	Prompter PermissionPrompter
+	Elicitor Elicitor
+	Notifier *Notifier
+
+	// Memory / Skills / MCPServers replace the corresponding
+	// Options fields when non-nil (nil-vs-empty matters: an empty
+	// non-nil slice CLEARS the display).
+	Memory     []MemoryFile
+	Skills     []SkillInfo
+	MCPServers []MCPServerInfo
+
+	// Branding replaces Options.Branding wholesale when non-nil.
+	// Nil = keep existing (common; the chrome is per-operator,
+	// not per-session).
+	Branding *Branding
+
+	// Note is appended as a RoleSystem row after the switch
+	// completes so the operator sees which session they landed
+	// on (e.g. "Attached to session <sid>"). Empty = no row.
+	Note string
 }
 
 // SideAnswer carries the operator's question + the agent's response

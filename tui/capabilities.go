@@ -42,6 +42,32 @@ type ModelInfo struct {
 	Description string // optional dim subtitle
 }
 
+// SessionSwitcher backs the /switch built-in (issue #53) and lets
+// hosts that manage multiple sessions (e.g. a remote daemon with
+// per-caller bearer auth) offer a first-class in-run session picker.
+// Hosts that don't implement this capability can still ship a
+// /switch by registering an AsyncSlashProvider command that returns
+// a SlashResult with SwitchTo populated — /switch falls through to
+// the SlashProvider path when the capability is absent.
+//
+// SwitchToSession returns a SwitchTarget the TUI applies via
+// applySwitchTarget: local detach from the outgoing Agent + attach
+// to the incoming one. See SwitchTarget's godoc for the lifecycle
+// contract (host owns old-Agent teardown; core-tui only cancels
+// LOCAL contexts, does not touch server-side sessions).
+type SessionSwitcher interface {
+	Sessions() []SessionInfo
+	SwitchToSession(id string) (SwitchTarget, error)
+}
+
+// SessionInfo is one row in the /switch picker.
+type SessionInfo struct {
+	ID          string
+	Display     string // optional; defaults to ID when empty
+	Description string // optional dim subtitle
+	Current     bool   // marks the currently-attached row
+}
+
 // Reloader backs /reload (R-RELOAD-1 / R-RELOAD-2).
 type Reloader interface {
 	Reload(ctx context.Context) (ReloadResult, error)

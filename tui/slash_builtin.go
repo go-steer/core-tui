@@ -61,6 +61,8 @@ func (m Model) dispatchBuiltinSlash(name, args string) (bool, tea.Model, tea.Cmd
 		name = "btw"
 	case "sub":
 		name = "subagent"
+	case "sess":
+		name = "switch"
 	}
 
 	switch name {
@@ -190,6 +192,41 @@ func (m Model) dispatchBuiltinSlash(name, args string) (bool, tea.Model, tea.Cmd
 		m.input.Reset()
 		m.refreshAndScroll()
 		return true, m, nil
+
+	case "switch":
+		// SessionSwitcher (issues #48 / #53) is optional. When
+		// absent we return handled=false so a host-provided
+		// AsyncSlashProvider that registers "switch" still gets
+		// dispatched via the SlashProvider path — hosts can ship
+		// their own picker without core-tui knowing the
+		// enumeration shape.
+		switcher, ok := m.opts.Agent.(SessionSwitcher)
+		if !ok {
+			return false, m, nil
+		}
+		if args == "" {
+			if !m.overlayStack.HasID(sessionPickerDialogID) {
+				m.overlayStack.Open(newSessionPickerDialog())
+			}
+			m.input.Reset()
+			return true, m, nil
+		}
+		// `/switch <id>` — scripted / muscle-memory direct-jump.
+		tgt, err := switcher.SwitchToSession(args)
+		if err != nil {
+			m.history.Append(Message{Role: RoleError, Text: "/switch: " + err.Error()})
+			m.input.Reset()
+			m.refreshAndScroll()
+			return true, m, nil
+		}
+		if tgt.Agent == nil {
+			m.history.Append(Message{Role: RoleError, Text: "/switch: SessionSwitcher returned nil Agent"})
+			m.input.Reset()
+			m.refreshAndScroll()
+			return true, m, nil
+		}
+		m.input.Reset()
+		return true, m, m.applySwitchTarget(&tgt)
 
 	case "theme":
 		if args == "" {
@@ -574,6 +611,7 @@ func (m Model) renderBuiltinHelp() string {
 	b.WriteString("  /stats               — per-turn + session usage totals\n")
 	b.WriteString("  /tools               — list tools and gate state\n")
 	b.WriteString("  /model [<id>]        — list models or switch to <id>\n")
+	b.WriteString("  /switch [<id>]       — pick another session (in-place)\n")
 	b.WriteString("  /theme [<name>]      — pick a theme (default, google, gopher, …)\n")
 	b.WriteString("  /reload              — rebuild agent from disk\n")
 	b.WriteString("  /permissions         — review session approvals\n")

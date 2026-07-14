@@ -66,9 +66,13 @@ func (m Model) Init() tea.Cmd {
 // reports back via liveStreamStartedMsg so the Update handler
 // can stash the cancel on the pointer it owns.
 func (m Model) spawnLiveStreamCmd(agent LiveAgent) tea.Cmd {
+	// Capture the current sessionGen at Cmd-construction time so
+	// the returned liveStreamStartedMsg is discarded if
+	// applySwitchTarget bumps m.sessionGen before it lands.
+	gen := m.sessionGen
 	return func() tea.Msg {
 		cancel := m.startLiveStream(agent)
-		return liveStreamStartedMsg{cancel: cancel}
+		return liveStreamStartedMsg{gen: gen, cancel: cancel}
 	}
 }
 
@@ -123,6 +127,12 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		return m.handleKey(msg)
 
 	case streamChunkMsg:
+		// Straggler from an outgoing session (issue #48 / #53) —
+		// don't let it bleed into the new session's assistant
+		// buffer during the switch race window.
+		if msg.gen != m.sessionGen {
+			return m, m.eventListener()
+		}
 		needSpinner := m.liveMode && msg.partial && !m.spinnerActive
 		m.applyStreamChunk(msg)
 		// In LiveAgent mode the spinner tick isn't scheduled by
@@ -141,12 +151,18 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		}
 		return m, m.liveStreamRenderCmd()
 	case toolCallMsg:
+		if msg.gen != m.sessionGen {
+			return m, m.eventListener()
+		}
 		m.applyToolCall(msg)
 		// Issue #26: render kick in LiveAgent mode — a solo
 		// autonomous tool call could otherwise sit invisible
 		// until the next operator keypress.
 		return m, m.liveStreamRenderCmd()
 	case toolResultMsg:
+		if msg.gen != m.sessionGen {
+			return m, m.eventListener()
+		}
 		m.applyToolResult(msg)
 		// Issue #26: same — a result event landing without other
 		// Msgs in flight needs the kick.
@@ -162,6 +178,16 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		m.toast = ""
 		return m.applySlashResult(msg.name, msg.res, msg.err)
 	case liveStreamStartedMsg:
+		// Issue #48: a switch away from a LiveAgent host may have
+		// bumped m.sessionGen before this msg landed — the
+		// previous drain's cancel is meaningless to us now. Fire
+		// it defensively and drop.
+		if msg.gen != m.sessionGen {
+			if msg.cancel != nil {
+				msg.cancel()
+			}
+			return m, nil
+		}
 		// Issue #22: stash the cancel func; log the one-time
 		// "Attached as observer" system row so the operator knows
 		// they're in LiveAgent mode (and that typing without
@@ -181,6 +207,9 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		// kick (#24) comes along for free.
 		return m, m.liveStreamRenderCmd()
 	case liveStreamErrMsg:
+		if msg.gen != m.sessionGen {
+			return m, m.eventListener()
+		}
 		// Surface as an Error row and keep draining. The iterator
 		// itself decides whether to keep yielding events.
 		m.history.Append(Message{
@@ -197,6 +226,9 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		// liveStreamRenderCmd batches eventListener + render kick.
 		return m, m.liveStreamRenderCmd()
 	case liveStreamEndedMsg:
+		if msg.gen != m.sessionGen {
+			return m, m.eventListener()
+		}
 		// Iterator returned. Flip the disconnected bit so the
 		// banner can render; keep the program alive so the
 		// operator can read scrollback and choose to quit.
@@ -221,6 +253,9 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		// must stay a paint-only hint.
 		return m, nil
 	case usageMsg:
+		if msg.gen != m.sessionGen {
+			return m, m.eventListener()
+		}
 		// Empty Usage (zero in/out) is the model-only signal — adapters
 		// flag the live model on the first chunk before any real usage
 		// has been computed. Don't clobber an existing currentUsage in
@@ -245,6 +280,9 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	// architecturally "the server sends state whenever it
 	// changes" — not gated on Run lifecycle).
 	case statusUpdateMsg:
+		if msg.gen != m.sessionGen {
+			return m, m.eventListener()
+		}
 		// Merge semantics per spec §2.2 — non-empty fields apply,
 		// empty fields leave existing state unchanged.
 		if msg.status.Model != "" {
@@ -268,6 +306,9 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		// work that unifies push + in-band turn state.
 		return m, m.liveStreamRenderCmd()
 	case usageUpdateMsg:
+		if msg.gen != m.sessionGen {
+			return m, m.eventListener()
+		}
 		// Snapshot the cumulative session payload. Renderers that
 		// surface session-level usage (/stats, status sidebar)
 		// can read from m.sessionUsage as a richer source than
@@ -276,6 +317,9 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		m.sessionUsage = &u
 		return m, m.liveStreamRenderCmd()
 	case inboxStateMsg:
+		if msg.gen != m.sessionGen {
+			return m, m.eventListener()
+		}
 		// Queued: brief toast so the operator sees "your prompt
 		// reached the server." Dequeued: drop the toast (the
 		// streaming turn that follows is the visible signal that
@@ -296,6 +340,9 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		// Unknown state per spec — tolerated as no-op.
 		return m, nil
 	case turnSummaryMsg:
+		if msg.gen != m.sessionGen {
+			return m, m.eventListener()
+		}
 		// Per-turn metrics from the spec's turn-complete event.
 		// Snapshot into the same currentUsage / currentCost /
 		// currentModel fields the existing renderTurnFooter
@@ -318,6 +365,9 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		}
 		return m, m.liveStreamRenderCmd()
 	case turnErrorMsg:
+		if msg.gen != m.sessionGen {
+			return m, m.eventListener()
+		}
 		// Append a styled error row carrying the structured
 		// payload. Renderer (renderMessage) checks for a
 		// non-nil Message.TurnError and renders the richer
@@ -331,6 +381,9 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		m.refreshAndScroll()
 		return m, m.liveStreamRenderCmd()
 	case turnDoneMsg:
+		if msg.gen != m.sessionGen {
+			return m, m.eventListener()
+		}
 		m.finalizeTurn(msg.elapsed, "")
 		// Issue #9: AutoContinueFromInbox mode pulls the inbox
 		// and submits a synthetic auto-continue turn instead of
@@ -341,9 +394,15 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		}
 		return m.maybeDrainQueue()
 	case turnErrMsg:
+		if msg.gen != m.sessionGen {
+			return m, m.eventListener()
+		}
 		m.finalizeTurn(0, msg.err.Error())
 		return m.maybeDrainQueue()
 	case turnCancelledMsg:
+		if msg.gen != m.sessionGen {
+			return m, m.eventListener()
+		}
 		m.finalizeTurn(0, "(interrupted)")
 		return m.maybeDrainQueue()
 	case spinnerTickMsg:
@@ -1498,7 +1557,8 @@ func (m Model) invokeSlashAsync(prov AsyncSlashProvider, ctx context.Context, na
 
 // applySlashResult is the shared post-processing for both the
 // synchronous and async slash paths. Returns the new model + a
-// nil Cmd so callers can return directly.
+// Cmd (typically nil, or a listener batch when SwitchTo triggers
+// a session swap).
 func (m Model) applySlashResult(name string, res SlashResult, err error) (tea.Model, tea.Cmd) {
 	if err != nil {
 		m.history.Append(Message{
@@ -1516,7 +1576,181 @@ func (m Model) applySlashResult(name string, res SlashResult, err error) (tea.Mo
 	}
 	m.resize()
 	m.refreshViewport()
+
+	// Issue #48: SwitchTo requests a mid-run detach + attach. Any
+	// SystemMessage / ModalAnswer above has already landed against
+	// the OUTGOING session (documented in SlashResult godoc);
+	// applySwitchTarget wipes history and repaints against the
+	// incoming Agent.
+	if res.SwitchTo != nil {
+		if res.SwitchTo.Agent == nil {
+			m.history.Append(Message{
+				Role: RoleError,
+				Text: "/" + name + ": SwitchTo has nil Agent — ignored",
+			})
+			m.refreshViewport()
+			return m, nil
+		}
+		return m, m.applySwitchTarget(res.SwitchTo)
+	}
 	return m, nil
+}
+
+// applySwitchTarget detaches the current Agent's local subscriptions
+// and attaches to tgt.Agent (issues #48 / #53). Bumps sessionGen so
+// stragglers from the outgoing session are dropped by the guards in
+// Update; cancels the local ctxs we own (releasing SSE sockets /
+// halting embedded model calls); resets streaming + modal + queue +
+// history state; swaps non-nil Options fields; re-detects LiveAgent
+// on the new Agent; returns a fresh listener Cmd batch (plus a live-
+// stream spawn Cmd when applicable).
+//
+// The outgoing Agent handle is NOT touched — host owns its lifecycle
+// (see SwitchTarget godoc). Server-side sessions are unaffected;
+// detach is local only.
+func (m *Model) applySwitchTarget(tgt *SwitchTarget) tea.Cmd {
+	m.sessionGen++
+
+	// Step 1 — release local subscriptions on the outgoing Agent.
+	// These cancels close SSE sockets / halt embedded model calls;
+	// remote daemons observe a dropped reader and keep the session
+	// running per their own reattach policy.
+	if m.cancelTurn != nil {
+		m.cancelTurn()
+		m.cancelTurn = nil
+	}
+	if m.cancelSlash != nil {
+		m.cancelSlash()
+		m.cancelSlash = nil
+	}
+	if m.cancelLiveStream != nil {
+		m.cancelLiveStream()
+		m.cancelLiveStream = nil
+	}
+
+	// Step 2 — reset per-session state so the new Agent paints on
+	// a blank canvas. Chrome (theme, size, permMode) survives; the
+	// overlay stack survives too so a picker dialog can close
+	// itself normally after returning the switch Cmd.
+	m.state = stateIdle
+	m.spinnerActive = false
+	m.inProgressText = ""
+	m.inProgressStablePrefix = ""
+	m.inProgressStableRender = ""
+	m.currentUsage = nil
+	m.currentCost = 0
+	m.currentModel = ""
+	m.toolActive = false
+	m.activeToolID = 0
+	for k := range m.seenToolIDs {
+		delete(m.seenToolIDs, k)
+	}
+	m.queue = nil
+	m.pendingPermission = nil
+	m.pendingElicit = nil
+	m.pendingElicitSrv = ""
+	m.elicitFieldIdx = 0
+	m.elicitValues = nil
+	m.sideAnswer = nil
+	m.pendingForm = nil
+	m.palette = nil
+	m.consecutiveAutoContinues = 0
+	m.sessionUsage = nil
+	m.pushedProvider = ""
+	m.pushedContextPct = nil
+	m.liveDisconnected = false
+	m.liveReadOnlyNoted = false
+	m.liveLastPartialAt = time.Time{}
+	m.liveLastCommitAt = time.Time{}
+	m.pendingExit = false
+	m.confirmingClear = false
+	m.inFlightSlash = nil
+	m.toast = ""
+
+	// Step 3 — wipe history + list cache.
+	m.history.Reset()
+	if m.listCache != nil {
+		m.listCache.reset(m.viewport.Width())
+	}
+
+	// Step 4 — swap opts fields per SwitchTarget contract
+	// (non-nil / non-zero replaces; nil / zero keeps).
+	m.opts.Agent = tgt.Agent
+	if tgt.UsageTracker != nil {
+		m.opts.UsageTracker = tgt.UsageTracker
+	}
+	if tgt.Prompter != nil {
+		m.opts.Prompter = tgt.Prompter
+	}
+	if tgt.Elicitor != nil {
+		m.opts.Elicitor = tgt.Elicitor
+	}
+	if tgt.Notifier != nil {
+		m.opts.Notifier = tgt.Notifier
+	}
+	if tgt.Memory != nil {
+		m.opts.Memory = tgt.Memory
+	}
+	if tgt.Skills != nil {
+		m.opts.Skills = tgt.Skills
+	}
+	if tgt.MCPServers != nil {
+		m.opts.MCPServers = tgt.MCPServers
+	}
+	if tgt.Branding != nil {
+		m.opts.Branding = *tgt.Branding
+	}
+
+	// Step 5 — re-detect LiveAgent capability on the new Agent.
+	_, m.liveMode = m.opts.Agent.(LiveAgent)
+
+	// Step 6 — refresh theme (new Agent may report a different
+	// provider under AutoProviderTheme) + re-focus the input so
+	// the operator can type into the new session immediately.
+	m.refreshTheme()
+	_ = m.input.Focus()
+
+	// Step 7 — optional post-switch system row so the operator
+	// sees which session they landed on.
+	if tgt.Note != "" {
+		m.history.Append(Message{Role: RoleSystem, Text: tgt.Note})
+	}
+
+	m.refreshViewport()
+	m.viewport.GotoBottom()
+
+	// Step 8 — return fresh listener Cmds. Old blocked listener
+	// goroutines that were reading from replaced channels are
+	// harmless leaks (no future traffic → GC on program exit;
+	// same pattern accepted for LiveAgent teardown).
+	cmds := make([]tea.Cmd, 0, 6)
+	if c := m.eventListener(); c != nil {
+		cmds = append(cmds, c)
+	}
+	if c := m.promptListener(); c != nil {
+		cmds = append(cmds, c)
+	}
+	if c := m.elicitListener(); c != nil {
+		cmds = append(cmds, c)
+	}
+	if c := m.notifyListener(); c != nil {
+		cmds = append(cmds, c)
+	}
+	if c := m.wakeListener(); c != nil {
+		cmds = append(cmds, c)
+	}
+	if m.liveMode {
+		if la, ok := m.opts.Agent.(LiveAgent); ok {
+			cmds = append(cmds, m.spawnLiveStreamCmd(la))
+		}
+	}
+	if len(cmds) == 0 {
+		return nil
+	}
+	if len(cmds) == 1 {
+		return cmds[0]
+	}
+	return tea.Batch(cmds...)
 }
 
 // rerenderHistoryMarkdown re-runs Glamour at the current viewport

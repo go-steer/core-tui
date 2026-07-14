@@ -233,6 +233,39 @@ type ReloadResult struct {
     Note       string          // optional system-message line
 }
 
+// SessionSwitcher backs /switch (issues #48 / #53). Hosts that
+// manage multiple sessions (e.g. a remote daemon with per-caller
+// bearer auth) implement it so operators can hop between sessions
+// mid-run without exiting. SwitchToSession returns a SwitchTarget
+// the TUI applies via a local detach + attach — see the
+// SwitchTarget doc for the lifecycle contract (host owns the
+// outgoing Agent; core-tui only cancels LOCAL contexts, does not
+// touch server-side sessions).
+type SessionSwitcher interface {
+    Sessions() []SessionInfo
+    SwitchToSession(id string) (SwitchTarget, error)
+}
+type SessionInfo struct {
+    ID, Display, Description string
+    Current                  bool
+}
+
+// SwitchTarget is also reachable via SlashResult.SwitchTo, so any
+// SlashProvider / AsyncSlashProvider can request an Agent swap
+// alongside its normal system-message / modal-answer output:
+type SwitchTarget struct {
+    Agent        Agent               // required
+    UsageTracker UsageTracker        // nil = keep existing
+    Prompter     PermissionPrompter  // nil = keep
+    Elicitor     Elicitor            // nil = keep
+    Notifier     *Notifier           // nil = keep
+    Memory       []MemoryFile        // nil = keep; non-nil replaces
+    Skills       []SkillInfo         // nil = keep; non-nil replaces
+    MCPServers   []MCPServerInfo     // nil = keep; non-nil replaces
+    Branding     *Branding           // nil = keep; non-nil replaces
+    Note         string              // optional post-switch system row
+}
+
 // PermissionController backs /permissions, /allow, /deny, persistence
 // of allow-always decisions.
 type PermissionController interface {
