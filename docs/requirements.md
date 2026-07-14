@@ -309,6 +309,38 @@ listed in `/help`:
 - **R-MOD-4** Switch errors are non-fatal: the prior model stays
   active, a system error message is rendered, and input re-enables.
 
+### 3.8a Session switch (must) — issues #48 / #53
+
+- **R-SWITCH-1** `/switch` opens a picker of sessions returned by
+  `SessionSwitcher.Sessions()`; the currently-attached row is marked
+  `(current)`. ↑/↓ + Enter attach; Esc cancels without swap. `/sess`
+  is an alias.
+- **R-SWITCH-2** `/switch <id>` attaches directly, no picker.
+- **R-SWITCH-3** Any `SlashProvider` / `AsyncSlashProvider` /
+  `AsyncSlashProviderWithPreamble` return value MAY populate
+  `SlashResult.SwitchTo` to trigger the same detach + attach.
+- **R-SWITCH-4** Applying a switch: wipe history, reset streaming /
+  modal / queue state, cancel LOCAL contexts on turn / async slash /
+  live stream (releases sockets / halts in-process model calls), swap
+  non-nil `SwitchTarget` fields onto `Options`, re-detect `LiveAgent`
+  and spawn a fresh drain if applicable, re-issue every listener.
+- **R-SWITCH-5** Server-side session lifecycle is NOT core-tui's
+  concern. A remote daemon observes a dropped reader and keeps the
+  session running per its own policy — operators can `/switch` back
+  and see continued transcript.
+- **R-SWITCH-6** The outgoing `Agent` handle is the host's
+  responsibility. Core-tui drops its reference and does not call
+  `Close` / `Detach` on it. Hosts that need teardown do it inside
+  `SwitchToSession()` before returning.
+- **R-SWITCH-7** Straggler msgs from the outgoing session (a
+  buffered `streamChunkMsg`, a late `turnDoneMsg`) MUST NOT leak
+  content or state changes into the incoming session. A session-
+  generation counter stamped by the emitter + guarded by Update
+  drops them.
+- **R-SWITCH-8** Switch errors (`SwitchToSession` returned err,
+  `SwitchTarget.Agent == nil`) are non-fatal — a `RoleError` row
+  is rendered and the current session stays attached.
+
 ### 3.9 MCP elicitation modal (must)
 
 - **R-ELIC-1** When an MCP server requests user input via

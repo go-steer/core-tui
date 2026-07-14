@@ -24,10 +24,19 @@ import "time"
 // — each branch handles one concern (text accumulation, tool call
 // dedup, usage snapshot, turn lifecycle).
 
+// Chat-content + terminal msgs carry a `gen` field stamped by the
+// emitter (startAgentTurn / startLiveStream / emitEvent) with the
+// Model's sessionGen at goroutine start. Update's cases guard
+// `if msg.gen != m.sessionGen { drop }` so a mid-run applySwitchTarget
+// (issue #48 / #53) invalidates every in-flight msg from the outgoing
+// Agent without needing to swap m.eventCh or wait for cancellation
+// to propagate.
+
 // streamChunkMsg carries one Text event from the agent. Partial is
 // true while the model is still streaming; false on the committed
 // full-text event some agents emit at turn-end.
 type streamChunkMsg struct {
+	gen     uint64
 	text    string
 	partial bool
 }
@@ -35,6 +44,7 @@ type streamChunkMsg struct {
 // toolCallMsg carries one ToolCall event. ID enables dedup against
 // partial+committed echoes (R-CHAT-5).
 type toolCallMsg struct {
+	gen  uint64
 	id   string
 	name string
 	args map[string]any
@@ -46,6 +56,7 @@ type toolCallMsg struct {
 // rendered result. Adapters that don't surface tool results never
 // emit this — the TUI keeps the call-only preview unchanged.
 type toolResultMsg struct {
+	gen      uint64
 	id       string
 	name     string
 	response map[string]any
@@ -59,6 +70,7 @@ type toolResultMsg struct {
 // it without an extra round-trip; zero values suppress the
 // respective footer/sidebar segments.
 type usageMsg struct {
+	gen     uint64
 	usage   Usage
 	costUSD float64
 	model   string
@@ -67,18 +79,20 @@ type usageMsg struct {
 // turnDoneMsg signals clean turn completion. Populated with the
 // elapsed wall-clock time so the per-turn footer can render it.
 type turnDoneMsg struct {
+	gen     uint64
 	elapsed time.Duration
 }
 
 // turnErrMsg signals turn failure. The error is rendered as an Error
 // row in the chat; the TUI stays interactive (no auto-quit per §4.2).
 type turnErrMsg struct {
+	gen uint64
 	err error
 }
 
 // turnCancelledMsg signals Esc-interrupt (R-CHAT-6). The TUI emits an
 // "(interrupted)" notice instead of an error banner.
-type turnCancelledMsg struct{}
+type turnCancelledMsg struct{ gen uint64 }
 
 // spinnerTickMsg fires every spinnerCadence to rotate the
 // thinking/working verb (R-CHAT-3).
@@ -136,6 +150,7 @@ type slashResultMsg struct {
 // triggers the one-time "Attached as observer" system row so the
 // operator knows they're in LiveAgent mode.
 type liveStreamStartedMsg struct {
+	gen    uint64
 	cancel func()
 }
 
@@ -144,6 +159,7 @@ type liveStreamStartedMsg struct {
 // surfaces it as a RoleError row and keeps draining — the
 // iterator decides whether to keep yielding events.
 type liveStreamErrMsg struct {
+	gen uint64
 	err error
 }
 
@@ -152,7 +168,7 @@ type liveStreamErrMsg struct {
 // "Disconnected — Ctrl+C to quit" system row and keeps the
 // program alive so the operator can read scrollback. No
 // auto-reconnect; the LiveAgent implementation owns that.
-type liveStreamEndedMsg struct{}
+type liveStreamEndedMsg struct{ gen uint64 }
 
 // forceRenderMsg is a no-op msg used to force a fresh Update →
 // View cycle (issue #24). Bubble-tea v2 occasionally defers the
@@ -178,6 +194,7 @@ type forceRenderMsg struct{}
 // through to the Update loop. Merge semantics: handler applies
 // non-empty fields onto model state and leaves the rest unchanged.
 type statusUpdateMsg struct {
+	gen    uint64
 	status StatusUpdate
 }
 
@@ -186,12 +203,14 @@ type statusUpdateMsg struct {
 // the current snapshot rather than merging (the wire payload always
 // carries totals, not deltas).
 type usageUpdateMsg struct {
+	gen    uint64
 	update UsageUpdate
 }
 
 // inboxStateMsg carries the spec §2.4 inbox payload — operator-
 // typed prompt queued/dequeued state change.
 type inboxStateMsg struct {
+	gen   uint64
 	event InboxEvent
 }
 
@@ -201,6 +220,7 @@ type inboxStateMsg struct {
 // rendered footer reads the same values regardless of which path
 // produced them (legacy usageMsg vs push-mode turnSummaryMsg).
 type turnSummaryMsg struct {
+	gen     uint64
 	summary TurnSummary
 }
 
@@ -210,6 +230,7 @@ type turnSummaryMsg struct {
 // structured payload attached so the renderer can pick out kind /
 // hint / retryable for richer presentation than a flat text row.
 type turnErrorMsg struct {
+	gen       uint64
 	turnError TurnError
 }
 

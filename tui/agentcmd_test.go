@@ -27,7 +27,7 @@ import (
 // streamChunkMsg with the right partial flag.
 func TestEmitEvent_TextOnly(t *testing.T) {
 	ch := make(chan tea.Msg, 4)
-	emitEvent(context.Background(), ch, Event{Text: "hello", Partial: true})
+	emitEvent(context.Background(), ch, 0, Event{Text: "hello", Partial: true})
 	got := drain(ch)
 	if len(got) != 1 {
 		t.Fatalf("expected 1 msg, got %d", len(got))
@@ -45,7 +45,7 @@ func TestEmitEvent_TextOnly(t *testing.T) {
 // one msg per field (text + tool call + usage = 3 msgs).
 func TestEmitEvent_MultiFanOut(t *testing.T) {
 	ch := make(chan tea.Msg, 8)
-	emitEvent(context.Background(), ch, Event{
+	emitEvent(context.Background(), ch, 0, Event{
 		Text:      "explaining",
 		Partial:   true,
 		ToolCalls: []ToolCall{{ID: "t1", Name: "Read"}},

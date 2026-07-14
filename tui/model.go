@@ -311,6 +311,17 @@ type Model struct {
 	// and brighten the row so the operator's eye lands on "what
 	// the model is doing RIGHT NOW" instead of scanning back.
 	activeToolID uint64
+
+	// sessionGen is bumped by applySwitchTarget on every mid-run
+	// Agent swap (issue #48 / #53). Async goroutines started under
+	// the previous gen (startAgentTurn, startLiveStream, emitEvent)
+	// stamp every msg they emit with the gen they captured; Update
+	// guards its handlers with `if msg.gen != m.sessionGen { drop }`
+	// so a terminal msg from the OUTGOING session can't leak an
+	// "(interrupted)" row into the incoming session's transcript,
+	// and a straggler stream chunk can't bleed into the new
+	// session's assistant buffer during the race window.
+	sessionGen uint64
 }
 
 // NewModel constructs a Model from Options. SeedHistory entries are

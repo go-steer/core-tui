@@ -221,6 +221,12 @@ func (m Model) wakeListener() tea.Cmd {
 func (m Model) startAgentTurn(agent Agent, prompt string) context.CancelFunc {
 	ctx, cancel := context.WithCancel(context.Background())
 	started := time.Now()
+	// Snapshot the session generation at goroutine start so any
+	// terminal msg we emit later carries the gen of the Agent that
+	// owned this turn — Update drops it if applySwitchTarget has
+	// since bumped m.sessionGen (see model.go). Same rationale for
+	// per-event chat msgs; emitEvent takes gen as an argument.
+	gen := m.sessionGen
 
 	go func() {
 		var fail error
@@ -229,19 +235,19 @@ func (m Model) startAgentTurn(agent Agent, prompt string) context.CancelFunc {
 				fail = err
 				break
 			}
-			emitEvent(ctx, m.eventCh, ev)
+			emitEvent(ctx, m.eventCh, gen, ev)
 		}
 
 		var terminal tea.Msg
 		switch {
 		case fail != nil && errors.Is(fail, context.Canceled):
-			terminal = turnCancelledMsg{}
+			terminal = turnCancelledMsg{gen: gen}
 		case ctx.Err() != nil:
-			terminal = turnCancelledMsg{}
+			terminal = turnCancelledMsg{gen: gen}
 		case fail != nil:
-			terminal = turnErrMsg{err: fail}
+			terminal = turnErrMsg{gen: gen, err: fail}
 		default:
-			terminal = turnDoneMsg{elapsed: time.Since(started)}
+			terminal = turnDoneMsg{gen: gen, elapsed: time.Since(started)}
 		}
 		select {
 		case m.eventCh <- terminal:
@@ -271,6 +277,10 @@ func (m Model) startAgentTurn(agent Agent, prompt string) context.CancelFunc {
 // (per the LiveAgent semantics).
 func (m Model) startLiveStream(agent LiveAgent) context.CancelFunc {
 	ctx, cancel := context.WithCancel(context.Background())
+	// Snapshot the session generation at goroutine start; every
+	// msg emitted from this drain carries it so a subsequent
+	// applySwitchTarget invalidates the stale stream cleanly.
+	gen := m.sessionGen
 	go func() {
 		for ev, err := range agent.Events(ctx) {
 			if ctx.Err() != nil {
@@ -278,18 +288,18 @@ func (m Model) startLiveStream(agent LiveAgent) context.CancelFunc {
 			}
 			if err != nil {
 				select {
-				case m.eventCh <- liveStreamErrMsg{err: err}:
+				case m.eventCh <- liveStreamErrMsg{gen: gen, err: err}:
 				case <-ctx.Done():
 					return
 				}
 				continue
 			}
-			emitEvent(ctx, m.eventCh, ev)
+			emitEvent(ctx, m.eventCh, gen, ev)
 		}
 		// Iterator returned cleanly (or stopped yielding). Tell the
 		// TUI so the "Disconnected" banner can render.
 		select {
-		case m.eventCh <- liveStreamEndedMsg{}:
+		case m.eventCh <- liveStreamEndedMsg{gen: gen}:
 		case <-time.After(time.Second):
 			// listener gone; drop quietly.
 		}
@@ -300,8 +310,10 @@ func (m Model) startLiveStream(agent LiveAgent) context.CancelFunc {
 // emitEvent splits a single agent Event into one or more tea.Msgs
 // pushed onto the channel. Send is best-effort against ctx
 // cancellation so the goroutine doesn't block forever if the listener
-// has gone away.
-func emitEvent(ctx context.Context, ch chan<- tea.Msg, ev Event) {
+// has gone away. gen is the sessionGen the caller (startAgentTurn /
+// startLiveStream) captured at goroutine start; every emitted msg
+// carries it so Update can drop stragglers from an outgoing session.
+func emitEvent(ctx context.Context, ch chan<- tea.Msg, gen uint64, ev Event) {
 	send := func(msg tea.Msg) {
 		select {
 		case ch <- msg:
@@ -309,22 +321,22 @@ func emitEvent(ctx context.Context, ch chan<- tea.Msg, ev Event) {
 		}
 	}
 	if ev.Text != "" {
-		send(streamChunkMsg{text: ev.Text, partial: ev.Partial})
+		send(streamChunkMsg{gen: gen, text: ev.Text, partial: ev.Partial})
 	}
 	for _, tc := range ev.ToolCalls {
-		send(toolCallMsg{id: tc.ID, name: tc.Name, args: tc.Args})
+		send(toolCallMsg{gen: gen, id: tc.ID, name: tc.Name, args: tc.Args})
 	}
 	for _, tr := range ev.ToolResults {
-		send(toolResultMsg{id: tr.ID, name: tr.Name, response: tr.Response, err: tr.Error})
+		send(toolResultMsg{gen: gen, id: tr.ID, name: tr.Name, response: tr.Response, err: tr.Error})
 	}
 	if ev.Usage != nil {
-		send(usageMsg{usage: *ev.Usage, costUSD: ev.CostUSD, model: ev.Model})
+		send(usageMsg{gen: gen, usage: *ev.Usage, costUSD: ev.CostUSD, model: ev.Model})
 	} else if ev.Model != "" {
 		// Adapters that emit a model identifier on a usage-less
 		// event (e.g. the first stream chunk) still feed
 		// m.currentModel via this msg so the per-turn footer
 		// renders the model name from the first event onward.
-		send(usageMsg{model: ev.Model})
+		send(usageMsg{gen: gen, model: ev.Model})
 	}
 	// Push-mode SSE payloads (issue #40, spec v1.1.0). One emit
 	// per populated optional field. All independent — a single
@@ -332,18 +344,18 @@ func emitEvent(ctx context.Context, ch chan<- tea.Msg, ev Event) {
 	// out as separate msgs. Hosts that aren't speaking push leave
 	// these nil and the cases below are no-ops.
 	if ev.StatusUpdate != nil {
-		send(statusUpdateMsg{status: *ev.StatusUpdate})
+		send(statusUpdateMsg{gen: gen, status: *ev.StatusUpdate})
 	}
 	if ev.UsageUpdate != nil {
-		send(usageUpdateMsg{update: *ev.UsageUpdate})
+		send(usageUpdateMsg{gen: gen, update: *ev.UsageUpdate})
 	}
 	if ev.Inbox != nil {
-		send(inboxStateMsg{event: *ev.Inbox})
+		send(inboxStateMsg{gen: gen, event: *ev.Inbox})
 	}
 	if ev.TurnComplete != nil {
-		send(turnSummaryMsg{summary: *ev.TurnComplete})
+		send(turnSummaryMsg{gen: gen, summary: *ev.TurnComplete})
 	}
 	if ev.TurnError != nil {
-		send(turnErrorMsg{turnError: *ev.TurnError})
+		send(turnErrorMsg{gen: gen, turnError: *ev.TurnError})
 	}
 }
