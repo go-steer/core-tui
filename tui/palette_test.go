@@ -103,6 +103,24 @@ func TestPalette_FilterEmptyReturnsAll(t *testing.T) {
 	}
 }
 
+// TestPalette_ContainsSwitch pins that /switch (issue #53) is
+// discoverable when the operator types `/` to open the palette.
+// v0.10.0 shipped the dispatcher + /help entry but forgot the
+// palette row, so operators who didn't already know the name
+// couldn't find it.
+func TestPalette_ContainsSwitch(t *testing.T) {
+	items := builtinSlashItems()
+	for _, it := range items {
+		if it.Name == "switch" {
+			if !it.Available {
+				t.Errorf("/switch palette row should be Available=true")
+			}
+			return
+		}
+	}
+	t.Fatalf("builtinSlashItems() does not contain /switch — the slash palette won't advertise it")
+}
+
 // TestPalette_CursorWrapsAround pins ↑/↓ wrap behavior.
 func TestPalette_CursorWrapsAround(t *testing.T) {
 	p := &palette{
