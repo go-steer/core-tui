@@ -315,6 +315,30 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		// the per-turn currentUsage / currentCost fields.
 		u := msg.update
 		m.sessionUsage = &u
+		// Issue #57: usage-update's LastTurn (spec v1.1.1) carries
+		// authoritative per-turn cost — server-side pricing has
+		// already applied cache-discount + operator overrides. In
+		// observer mode this is the only in-band path that yields
+		// cost, since turn-complete's CostUSD is 0 for servers that
+		// compute cost out-of-band (core-agent). Update current* +
+		// back-annotate the tail assistant Message. When LastTurn is
+		// nil (pre-#249 servers), current* and the footer stamp stay
+		// on whatever turnSummaryMsg / usageMsg populated.
+		if lt := u.LastTurn; lt != nil {
+			if lt.CostUSD > 0 {
+				m.currentCost = lt.CostUSD
+			}
+			if lt.Model != "" {
+				m.currentModel = lt.Model
+			}
+			if lt.TokensIn != 0 || lt.TokensOut != 0 {
+				m.currentUsage = &Usage{
+					InputTokens:  lt.TokensIn,
+					OutputTokens: lt.TokensOut,
+				}
+			}
+			m.history.StampLatestAssistantFooter(lt.Model, m.currentUsage, lt.CostUSD, 0)
+		}
 		return m, m.liveStreamRenderCmd()
 	case inboxStateMsg:
 		if msg.gen != m.sessionGen {
@@ -363,6 +387,15 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		if msg.summary.Model != "" {
 			m.currentModel = msg.summary.Model
 		}
+		// Issue #57: observer mode never calls finalizeTurn, so stamp
+		// the tail assistant Message with what we know from
+		// turn-complete (tokens + model + latency). Cost lands on the
+		// immediately-following usageUpdateMsg via its LastTurn
+		// field. No-op for chat-mode operators — finalizeTurn already
+		// stamped the fields; StampLatestAssistantFooter only fills
+		// currently-zero fields.
+		elapsed := time.Duration(msg.summary.LatencyMs) * time.Millisecond
+		m.history.StampLatestAssistantFooter(msg.summary.Model, m.currentUsage, msg.summary.CostUSD, elapsed)
 		return m, m.liveStreamRenderCmd()
 	case turnErrorMsg:
 		if msg.gen != m.sessionGen {
@@ -1189,13 +1222,29 @@ func (m *Model) applyStreamChunk(msg streamChunkMsg) {
 			// Commit: freeze the Glamour render on the just-
 			// finalized assistant row (mirrors finalizeTurn's
 			// commit path) and stop the spinner.
+			//
+			// Issue #57: stamp current* fields onto the Message so
+			// renderTurnFooter has something to show even in observer
+			// mode (LiveAgent has no turnDoneMsg → finalizeTurn never
+			// fires → footer stays blank otherwise). current* fields
+			// are populated by usageMsg (per-event, when the adapter
+			// emits ev.Usage) and turnSummaryMsg (turn-complete);
+			// they may be zero here when turn-complete lands AFTER
+			// this commit — the turnSummaryMsg / usageUpdateMsg
+			// handlers back-annotate via StampLatestAssistantFooter
+			// in that case, so both orderings converge on a stamped
+			// footer.
 			if strings.TrimSpace(m.inProgressText) != "" {
 				mr := m.ensureMarkdown()
-				m.history.Append(Message{
+				msg := Message{
 					Role:     RoleAssistant,
 					Text:     m.inProgressText,
 					Rendered: mr.renderMarkdown(m.inProgressText),
-				})
+					Model:    m.currentModel,
+					Usage:    m.currentUsage,
+					CostUSD:  m.currentCost,
+				}
+				m.history.Append(msg)
 				m.inProgressText = ""
 				m.inProgressStablePrefix = ""
 				m.inProgressStableRender = ""
