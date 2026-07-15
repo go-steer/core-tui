@@ -233,3 +233,59 @@ func (h *History) MarkLastUserAutoContinue() {
 func (h *History) Len() int {
 	return len(h.entries)
 }
+
+// StampLatestAssistantFooter walks backward for the most-recent
+// RoleAssistant entry and fills in per-turn footer fields
+// (Model/Usage/CostUSD/Elapsed) that are currently unset. Bumps the
+// entry's Version so the lazy-render cache re-renders the row with
+// the footer. Missing / zero args leave the corresponding field
+// alone; each field is stamped independently so the same helper can
+// be called from multiple back-annotation sites (turnSummaryMsg
+// carries tokens+model+latency; usageUpdateMsg carries authoritative
+// cost via LastTurn).
+//
+// Only-stamp-if-currently-unset semantics protect against clobbering
+// finalizeTurn's canonical stamp when both paths fire (they don't
+// today — LiveAgent has no turnDoneMsg — but the guard is cheap
+// insurance for future modes). Returns true iff the row was found
+// and any field was updated; false when the tail isn't an assistant
+// (e.g. right after a tool row) or when everything was already set.
+//
+// Issue #57 (observer-mode footer) — the primary caller.
+func (h *History) StampLatestAssistantFooter(model string, usage *Usage, cost float64, elapsed time.Duration) bool {
+	if len(h.entries) == 0 {
+		return false
+	}
+	i := len(h.entries) - 1
+	if h.entries[i].Role != RoleAssistant {
+		// Tail isn't assistant — likely a tool / system row landed
+		// after the assistant text (e.g. autonomous tool call,
+		// notice). Stamping the wrong row would misattribute; bail.
+		// If a fresher assistant Message hasn't landed yet the
+		// summary just doesn't render until the next commit picks
+		// up current* fields.
+		return false
+	}
+	changed := false
+	if model != "" && h.entries[i].Model == "" {
+		h.entries[i].Model = model
+		changed = true
+	}
+	if usage != nil && h.entries[i].Usage == nil {
+		u := *usage
+		h.entries[i].Usage = &u
+		changed = true
+	}
+	if cost > 0 && h.entries[i].CostUSD == 0 {
+		h.entries[i].CostUSD = cost
+		changed = true
+	}
+	if elapsed > 0 && h.entries[i].Elapsed == 0 {
+		h.entries[i].Elapsed = elapsed
+		changed = true
+	}
+	if changed {
+		h.entries[i].Version++
+	}
+	return changed
+}

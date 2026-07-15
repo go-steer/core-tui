@@ -62,12 +62,36 @@ const (
 // per-model breakdown is the data side of #38 (the rendering side
 // in /stats reads from a parallel local field that this update
 // snapshots into).
+//
+// LastTurn (spec v1.1.1 addition, issue #57) carries authoritative
+// per-turn tokens + cost for the just-completed turn. Optional —
+// pre-v1.1.1 servers omit it; consumers back-annotate the tail
+// assistant Message's footer when present so observer-mode
+// (LiveAgent) sessions render the per-turn footer without needing
+// finalizeTurn (which only fires on turnDoneMsg from the per-turn
+// Run path).
 type UsageUpdate struct {
 	TokensInTotal  int                     `json:"tokens_in_total"`
 	TokensOutTotal int                     `json:"tokens_out_total"`
 	CostUSDTotal   float64                 `json:"cost_usd_total"`
 	TurnsTotal     int                     `json:"turns_total"`
 	ByModel        map[string]UsageByModel `json:"by_model,omitempty"`
+	LastTurn       *UsageLastTurn          `json:"last_turn,omitempty"`
+}
+
+// UsageLastTurn is the per-turn payload attached to UsageUpdate.
+// Cost is authoritative (server-side pricing layer, includes
+// cache-discount + operator overrides). TokensInCached is optional —
+// servers with cache-attribution wired (core-agent post-#248)
+// populate it; older servers omit and consumers ignore.
+//
+// Issue #57 / spec v1.1.1.
+type UsageLastTurn struct {
+	TokensIn       int     `json:"tokens_in"`
+	TokensInCached int     `json:"tokens_in_cached,omitempty"`
+	TokensOut      int     `json:"tokens_out"`
+	CostUSD        float64 `json:"cost_usd"`
+	Model          string  `json:"model,omitempty"`
 }
 
 // UsageByModel is one entry in UsageUpdate.ByModel — per-model
