@@ -195,6 +195,28 @@ func TestUpdate_LiveStreamStartedMsg_LogsAttachedNote(t *testing.T) {
 	}
 }
 
+// Issue #50: hosts that implement InjectableAgent alongside LiveAgent
+// have operator typing feed the running stream — the "observer" framing
+// is wrong for them. The banner text must branch on the capability.
+func TestUpdate_LiveStreamStartedMsg_InjectableAgent_DropsObserverFraming(t *testing.T) {
+	agent := &injectableLiveAgentStub{liveAgentStub: newLiveAgentStub(), injectsOut: make(chan string, 1)}
+	m := NewModel(Options{Agent: agent})
+	m.viewport.SetWidth(80)
+
+	out, _ := m.Update(liveStreamStartedMsg{cancel: func() {}})
+	got := out.(Model)
+	if got.history.Len() == 0 {
+		t.Fatal("expected banner system row")
+	}
+	last := got.history.Snapshot()[got.history.Len()-1]
+	if strings.Contains(last.Text, "observer") {
+		t.Errorf("InjectableAgent host should not see 'observer' framing, got: %q", last.Text)
+	}
+	if !strings.Contains(last.Text, "Live session") {
+		t.Errorf("expected 'Live session' framing for InjectableAgent host, got: %q", last.Text)
+	}
+}
+
 func TestUpdate_LiveStreamEndedMsg_FlipsDisconnectedAndLogs(t *testing.T) {
 	m := NewModel(Options{Agent: newLiveAgentStub()})
 	m.viewport.SetWidth(80)

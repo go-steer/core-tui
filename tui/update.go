@@ -189,14 +189,20 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			return m, nil
 		}
 		// Issue #22: stash the cancel func; log the one-time
-		// "Attached as observer" system row so the operator knows
-		// they're in LiveAgent mode (and that typing without
-		// InjectableAgent is read-only).
+		// system row announcing LiveAgent mode.
+		//
+		// Issue #50: banner text branches on InjectableAgent
+		// capability. When the host also implements Inject the
+		// operator IS driving (their typing feeds the running
+		// stream via InjectableAgent.Inject) — the "observer"
+		// framing is misleading. Pure-observer hosts (LiveAgent
+		// without Inject) keep the original read-only wording.
 		m.cancelLiveStream = msg.cancel
-		m.history.Append(Message{
-			Role: RoleSystem,
-			Text: "Attached as observer — agent runs autonomously; events stream below.",
-		})
+		bannerText := "Attached as observer — agent runs autonomously; events stream below."
+		if _, ok := m.opts.Agent.(InjectableAgent); ok {
+			bannerText = "Live session — your messages drive the agent; events stream as they happen."
+		}
+		m.history.Append(Message{Role: RoleSystem, Text: bannerText})
 		m.refreshViewport()
 		// Issue #28: route through liveStreamRenderCmd so the
 		// eventListener stays armed. This Msg actually arrives
