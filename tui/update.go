@@ -216,11 +216,25 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		if msg.gen != m.sessionGen {
 			return m, m.eventListener()
 		}
+		// Issue #51: classify the error. Permanent conditions (session
+		// gone, auth revoked) don't recover on retry — surface a
+		// distinct row and flip the disconnected bit so the operator
+		// can read scrollback and quit. Everything else keeps draining
+		// via the eventListener path.
+		if isPermanentStreamErr(msg.err) {
+			m.liveDisconnected = true
+			m.history.Append(Message{
+				Role: RoleError,
+				Text: "session unavailable: " + msg.err.Error() + " — relaunch to start a fresh session",
+			})
+			m.refreshViewport()
+			return m, nil
+		}
 		// Surface as an Error row and keep draining. The iterator
 		// itself decides whether to keep yielding events.
 		m.history.Append(Message{
 			Role: RoleError,
-			Text: "live stream error: " + msg.err.Error(),
+			Text: "live stream error: " + msg.err.Error() + " — waiting to reconnect",
 		})
 		m.refreshViewport()
 		// Issue #28: this Msg ARRIVED via eventListener (it was
