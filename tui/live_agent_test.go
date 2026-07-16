@@ -300,8 +300,8 @@ func TestUpdate_LiveStreamErrMsg_PermanentStatuses_StopRetrying(t *testing.T) {
 // their own typed errors bypass the substring heuristic.
 type permErr struct{ msg string }
 
-func (e *permErr) Error() string             { return e.msg }
-func (e *permErr) PermanentStreamErr() bool  { return true }
+func (e *permErr) Error() string            { return e.msg }
+func (e *permErr) PermanentStreamErr() bool { return true }
 
 func TestUpdate_LiveStreamErrMsg_PermanentStreamErrorInterface(t *testing.T) {
 	m := NewModel(Options{Agent: newLiveAgentStub()})
