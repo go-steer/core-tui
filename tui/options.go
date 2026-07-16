@@ -198,6 +198,22 @@ type Options struct {
 	// value becomes the prompt of a fresh turn.
 	AutoContinueFormatter func([]string) string
 
+	// ToolDetailVerbose opts the operator in to the "show me
+	// everything" tool-call rendering (core-tui #52 tier 2). When
+	// true, every tool row's compact preview is followed by a full
+	// pretty-printed args + response dump — the same content the
+	// Ctrl+X detail overlay shows on demand, but inline in the
+	// transcript. Off by default so the transcript stays readable;
+	// hosts flip it on for CI / debug runs where operators want
+	// every byte in the log stream instead of hunting through the
+	// SSE events.
+	//
+	// Composes with core-tui #52 tier 1 (expand-single overlay,
+	// Ctrl+X) — the overlay works regardless of this flag; verbose
+	// mode just skips the "open a modal" step by rendering the
+	// same content inline for every call.
+	ToolDetailVerbose bool
+
 	// AutoContinueCap is the soft limit on chained auto-continues
 	// between operator-initiated turns. After this many consecutive
 	// auto-continue turns without the operator typing a fresh

@@ -1398,6 +1398,7 @@ func (m Model) renderHelpPanel(width int) string {
 		}},
 		{"Modals", [][2]string{
 			{"ctrl+g", "model picker (when ModelSwapper is wired)"},
+			{"ctrl+x", "expand a tool call (args + response detail)"},
 			{"esc", "close / cancel any open modal"},
 		}},
 		{"Interrupt / quit", [][2]string{
