@@ -70,6 +70,17 @@ type Message struct {
 	// (e.g. lang detection from the read_file path).
 	ToolArgsMap map[string]any
 
+	// ToolResponseMap / ToolError stash the raw result payload so
+	// the expand-single detail overlay (dialog_toolcall.go, core-tui
+	// #52 tier 1) can re-render the full args + response for any
+	// past tool call in the session on demand. ToolPreview stores
+	// the compact rendered form which loses fidelity — this pair
+	// preserves the structured data. Both remain nil / "" on
+	// RoleTool rows whose result hasn't landed yet, and on non-Tool
+	// rows.
+	ToolResponseMap map[string]any
+	ToolError       string
+
 	// Per-turn metadata populated by the TUI on the final assistant
 	// Message of each turn so the renderer can append a one-line
 	// `◇ Model · 8.4K in · 2.1K out · $0.012 · 4s` footer (R-USE-1).
@@ -209,6 +220,20 @@ func (h *History) SetToolPreview(i int, preview string) {
 		return
 	}
 	h.entries[i].ToolPreview = preview
+	h.entries[i].Version++
+}
+
+// SetToolResult stashes the raw response payload + error string on
+// the tool row at index i so the expand-single detail overlay
+// (dialog_toolcall.go) can re-render the full args + response later
+// on demand. Bumps Version so any renderer that consults these
+// fields invalidates its cache. Out-of-range i is a silent no-op.
+func (h *History) SetToolResult(i int, response map[string]any, errStr string) {
+	if i < 0 || i >= len(h.entries) {
+		return
+	}
+	h.entries[i].ToolResponseMap = response
+	h.entries[i].ToolError = errStr
 	h.entries[i].Version++
 }
 

@@ -883,6 +883,20 @@ func (m Model) handleKey(msg tea.KeyPressMsg) (tea.Model, tea.Cmd) {
 		}
 		return m, nil
 
+	case "ctrl+x":
+		// Open the expand-single tool-call detail dialog (core-tui
+		// #52 tier 1). No-op when there are no tool calls in the
+		// session yet — nothing useful to show. Singleton via
+		// HasID so re-press while open doesn't stack duplicates.
+		if !m.overlayStack.HasID(toolCallDialogID) {
+			tools := collectToolCalls(m.history.Snapshot())
+			if len(tools) > 0 {
+				m.overlayStack.Open(newToolCallDialog(len(tools)))
+				m.refreshViewport()
+			}
+		}
+		return m, nil
+
 	case "up":
 		// Shell-style history recall when the input is empty:
 		// step backward through the promptHistory ring. When non-
@@ -1364,7 +1378,19 @@ func (m *Model) applyToolResult(msg toolResultMsg) {
 	preview := renderToolPreviewWithResult(
 		msg.name, snap[idx].ToolArgsMap, msg.response, msg.err, m.styles,
 	)
+	if m.opts.ToolDetailVerbose {
+		// Tier 2 (core-tui #52): append the full args + response
+		// dump under the compact preview when the operator has opted
+		// in. Compact stays useful as a quick summary; verbose gives
+		// operators the raw data without hunting through the SSE
+		// stream. Skipped when the detail block is empty (unknown
+		// tools with no args/response and no error).
+		if detail := renderToolDetail(snap[idx].ToolArgsMap, msg.response, msg.err, m.styles); detail != "" {
+			preview = preview + "\n" + detail
+		}
+	}
 	m.history.SetToolPreview(idx, preview)
+	m.history.SetToolResult(idx, msg.response, msg.err)
 	m.refreshViewport()
 }
 

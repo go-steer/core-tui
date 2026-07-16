@@ -97,16 +97,39 @@ func CodingDemo() []Step {
 		{Wait: 1500 * time.Millisecond, Event: tui.Event{ToolCalls: []tui.ToolCall{
 			{ID: "t1", Name: "Read", Args: map[string]any{"path": "db/schema/users.sql"}},
 		}}},
-		{Wait: 1800 * time.Millisecond, Event: tui.Event{Text: "The `email` column is currently `VARCHAR(255)` ", Partial: true}},
+		// Result for t1 arrives shortly after the call — a realistic
+		// MCP round-trip. Populated so the expand-single detail
+		// overlay (core-tui #52 tier 1) and the ToolDetailVerbose
+		// inline mode (tier 2) both show real content when driven
+		// against this demo.
+		{Wait: 400 * time.Millisecond, Event: tui.Event{ToolResults: []tui.ToolResult{
+			{ID: "t1", Name: "Read", Response: map[string]any{
+				"content": "CREATE TABLE users (\n  id BIGSERIAL PRIMARY KEY,\n  email VARCHAR(255),\n  created_at TIMESTAMPTZ NOT NULL DEFAULT NOW()\n);\n",
+			}},
+		}}},
+		{Wait: 1400 * time.Millisecond, Event: tui.Event{Text: "The `email` column is currently `VARCHAR(255)` ", Partial: true}},
 		{Wait: chunk, Event: tui.Event{Text: "with no constraint. I'll add a migration that ", Partial: true}},
 		{Wait: chunk, Event: tui.Event{Text: "backfills NULLs to empty strings and then adds NOT NULL.\n\n", Partial: true}},
 		{Wait: 1200 * time.Millisecond, Event: tui.Event{ToolCalls: []tui.ToolCall{
 			{ID: "t2", Name: "Write", Args: map[string]any{"path": "db/migrations/0042_users_email_not_null.sql"}},
 		}}},
-		{Wait: 1600 * time.Millisecond, Event: tui.Event{ToolCalls: []tui.ToolCall{
+		{Wait: 300 * time.Millisecond, Event: tui.Event{ToolResults: []tui.ToolResult{
+			{ID: "t2", Name: "Write", Response: map[string]any{
+				"path":          "db/migrations/0042_users_email_not_null.sql",
+				"bytes_written": 512,
+				"lines_written": 12,
+			}},
+		}}},
+		{Wait: 1300 * time.Millisecond, Event: tui.Event{ToolCalls: []tui.ToolCall{
 			{ID: "t3", Name: "Bash", Args: map[string]any{"command": "psql -f db/migrations/0042_users_email_not_null.sql"}},
 		}}},
-		{Wait: 2000 * time.Millisecond, Event: tui.Event{Text: "Done. The migration is at ", Partial: true}},
+		{Wait: 500 * time.Millisecond, Event: tui.Event{ToolResults: []tui.ToolResult{
+			{ID: "t3", Name: "Bash", Response: map[string]any{
+				"stdout":    "BEGIN\nUPDATE 0\nALTER TABLE\nCOMMIT\n",
+				"exit_code": 0,
+			}},
+		}}},
+		{Wait: 1500 * time.Millisecond, Event: tui.Event{Text: "Done. The migration is at ", Partial: true}},
 		{Wait: chunk, Event: tui.Event{Text: "`db/migrations/0042_users_email_not_null.sql` ", Partial: true}},
 		{Wait: chunk, Event: tui.Event{Text: "and verifies cleanly against dev. ", Partial: true}},
 		{Wait: chunk, Event: tui.Event{Text: "Want me to also write the matching down-migration?", Partial: true}},
