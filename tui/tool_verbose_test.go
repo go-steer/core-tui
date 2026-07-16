@@ -46,7 +46,7 @@ func applyToolResultLogic(h *History, verbose bool, name string, args, response 
 		}
 	}
 	h.SetToolPreview(idx, preview)
-	h.SetToolResult(idx, response, errStr)
+	h.SetToolResult(idx, response, errStr, 0)
 }
 
 func TestToolDetailVerbose_AppendsDetailBlock(t *testing.T) {

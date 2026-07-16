@@ -1378,6 +1378,13 @@ func (m *Model) applyToolResult(msg toolResultMsg) {
 	preview := renderToolPreviewWithResult(
 		msg.name, snap[idx].ToolArgsMap, msg.response, msg.err, m.styles,
 	)
+	// Tier 3 (core-tui #60 / SSE spec v1.2.0): append the muted
+	// `[2.4s]` badge to the compact preview when the host reported
+	// per-call latency. Zero suppresses the badge silently so
+	// pre-v1.2.0 servers keep rendering unchanged.
+	if badge := renderLatencyBadge(msg.latencyMs, m.styles); badge != "" {
+		preview += badge
+	}
 	if m.opts.ToolDetailVerbose {
 		// Tier 2 (core-tui #52): append the full args + response
 		// dump under the compact preview when the operator has opted
@@ -1390,7 +1397,7 @@ func (m *Model) applyToolResult(msg toolResultMsg) {
 		}
 	}
 	m.history.SetToolPreview(idx, preview)
-	m.history.SetToolResult(idx, msg.response, msg.err)
+	m.history.SetToolResult(idx, msg.response, msg.err, msg.latencyMs)
 	m.refreshViewport()
 }
 
