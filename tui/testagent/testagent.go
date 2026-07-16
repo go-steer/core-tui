@@ -103,7 +103,7 @@ func CodingDemo() []Step {
 		// inline mode (tier 2) both show real content when driven
 		// against this demo.
 		{Wait: 400 * time.Millisecond, Event: tui.Event{ToolResults: []tui.ToolResult{
-			{ID: "t1", Name: "Read", Response: map[string]any{
+			{ID: "t1", Name: "Read", LatencyMs: 320, Response: map[string]any{
 				"content": "CREATE TABLE users (\n  id BIGSERIAL PRIMARY KEY,\n  email VARCHAR(255),\n  created_at TIMESTAMPTZ NOT NULL DEFAULT NOW()\n);\n",
 			}},
 		}}},
@@ -114,7 +114,7 @@ func CodingDemo() []Step {
 			{ID: "t2", Name: "Write", Args: map[string]any{"path": "db/migrations/0042_users_email_not_null.sql"}},
 		}}},
 		{Wait: 300 * time.Millisecond, Event: tui.Event{ToolResults: []tui.ToolResult{
-			{ID: "t2", Name: "Write", Response: map[string]any{
+			{ID: "t2", Name: "Write", LatencyMs: 180, Response: map[string]any{
 				"path":          "db/migrations/0042_users_email_not_null.sql",
 				"bytes_written": 512,
 				"lines_written": 12,
@@ -124,7 +124,7 @@ func CodingDemo() []Step {
 			{ID: "t3", Name: "Bash", Args: map[string]any{"command": "psql -f db/migrations/0042_users_email_not_null.sql"}},
 		}}},
 		{Wait: 500 * time.Millisecond, Event: tui.Event{ToolResults: []tui.ToolResult{
-			{ID: "t3", Name: "Bash", Response: map[string]any{
+			{ID: "t3", Name: "Bash", LatencyMs: 2400, Response: map[string]any{
 				"stdout":    "BEGIN\nUPDATE 0\nALTER TABLE\nCOMMIT\n",
 				"exit_code": 0,
 			}},

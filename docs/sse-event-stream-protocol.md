@@ -4,7 +4,7 @@ The wire-format contract between core-tui (consumer) and any server (producer �
 
 **Status:** Phase 1 — additive-only. See [core-tui #40](https://github.com/go-steer/core-tui/issues/40) and [core-agent #115](https://github.com/go-steer/core-agent/issues/115) for the phased-rollout context.
 
-**Protocol version:** `1.1.1`. Bumped on changes per the [Versioning](#versioning) rules below.
+**Protocol version:** `1.2.0`. Bumped on changes per the [Versioning](#versioning) rules below.
 
 ---
 
@@ -47,7 +47,7 @@ Example:
 
 ```json
 {
-  "protocol_version": "1.1.1",
+  "protocol_version": "1.2.0",
   "event_types": ["status-update", "usage-update", "inbox", "turn-complete", "turn-error", "stream-chunk", "tool-call", "tool-result"],
   "server": "core-agent/0.4.2"
 }
@@ -241,6 +241,38 @@ Example:
 }
 ```
 
+### 2.7 `tool-result`
+
+**When emitted:** after a tool call completes (success or failure). Predates this document (see §2.1's note on pre-existing event types listed in `capabilities.event_types`); formally documented here in v1.2.0 to specify the `latency_ms` sidecar key added in the same revision.
+
+**Payload:** the per-tool response map, shape governed by the tool itself (`content` for read_file, `stdout`/`stderr`/`exit_code` for bash, `bytes_written` for write_file, etc.). Clients MUST tolerate unknown keys and MUST NOT crash on missing per-tool fields.
+
+**Wall-clock sidecar (v1.2.0+):**
+
+| Field | Type | Required | Description |
+|---|---|---|---|
+| `latency_ms` | integer | no | Wall-clock time (in milliseconds) from tool dispatch to result received. Servers with round-trip timing SHOULD populate this; clients render as e.g. `[2.4s]` under the tool row. Absent on pre-v1.2.0 servers; clients degrade to no badge. |
+
+**Why the response map, not `CustomMetadata`.** The ergonomic sidecar channel would have been `session.Event.CustomMetadata`, but ADK constructs the `tool-result` event *after* `tool.Run` returns — `CustomMetadata` isn't writable from inside `Run`. The response map itself IS writable, and both the remote and embedded core-agent adapters copy the whole map through to `tui.ToolResult.Response` verbatim, so a well-known sidecar key rides both transports without any per-adapter plumbing. Future sidecars (e.g. `tokens_delta`) SHOULD ride the same channel for the same reason.
+
+Example (success + latency):
+
+```json
+{
+  "content": "package main\n\nfunc main() {}\n",
+  "latency_ms": 2412
+}
+```
+
+Example (failure — error rides its own channel via ADK, latency still stamped when available):
+
+```json
+{
+  "error": "no such file or directory",
+  "latency_ms": 47
+}
+```
+
 ---
 
 ## 3. Versioning
@@ -287,7 +319,7 @@ A complete representative session, viewed from the client side reading the SSE s
 
 ```
 event: capabilities
-data: {"protocol_version":"1.1.1","event_types":["status-update","usage-update","inbox","turn-complete","turn-error","stream-chunk","tool-call","tool-result"],"server":"core-agent/0.4.2"}
+data: {"protocol_version":"1.2.0","event_types":["status-update","usage-update","inbox","turn-complete","turn-error","stream-chunk","tool-call","tool-result"],"server":"core-agent/0.4.2"}
 
 event: status-update
 data: {"model":"gemini-2.5-pro","provider":"vertex","perm_mode":"default","turn_state":"idle","context_pct":3}
@@ -360,6 +392,7 @@ The following are deliberately NOT specified here:
 
 | Version | Date | Change |
 |---|---|---|
+| 1.2.0 | 2026-07-16 | **MINOR.** Added optional `latency_ms` sidecar key on `tool-result` response payloads (§2.7 — formally documented in this revision). Closes go-steer/core-agent#277 (emit) + core-tui#60 (consume) — completes core-tui#52 tier 3 (inline `[2.4s]` per tool row + latency chip in the expand-single detail overlay). Sidecar rides the response map itself because ADK's `tool.Run` has no write access to the enclosing `session.Event.CustomMetadata`; §2.7 documents the finding for future sidecars. Fully backward-compatible — pre-v1.2.0 servers omit the field, pre-v1.2.0 clients ignore it. |
 | 1.1.1 | 2026-07-15 | **PATCH.** Added optional `usage-update.last_turn` object (tokens_in / tokens_in_cached / tokens_out / cost_usd / model) carrying authoritative per-turn cost. Complements the v1.1.0 `cost_usd`-on-`turn-complete`-optional demotion so observer-mode (LiveAgent) clients have a source for per-turn footer cost. Closes core-tui #57. Fully backward-compatible — pre-v1.1.1 servers omit the field, pre-v1.1.1 clients ignore it. |
 | 1.1.0 | 2026-06-07 | **MINOR.** `turn-complete.cost_usd` demoted from required → optional with documented fallback to the immediately-following `usage-update` (servers with pricing out-of-band can omit it). §2.1 `capabilities.event_types` clarified to permit listing logical sub-types that ride on multiplexed wire events. §3 evolution rules extended with the required→optional demotion clause that governed this change. |
 | 1.0.0 | 2026-06-07 | Initial spec — `capabilities`, `status-update`, `usage-update`, `inbox`, `turn-complete`, `turn-error`. |

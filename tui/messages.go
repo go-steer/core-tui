@@ -56,11 +56,12 @@ type toolCallMsg struct {
 // rendered result. Adapters that don't surface tool results never
 // emit this — the TUI keeps the call-only preview unchanged.
 type toolResultMsg struct {
-	gen      uint64
-	id       string
-	name     string
-	response map[string]any
-	err      string
+	gen       uint64
+	id        string
+	name      string
+	response  map[string]any
+	err       string
+	latencyMs int64
 }
 
 // usageMsg snapshots the latest Usage from the agent. The TUI keeps

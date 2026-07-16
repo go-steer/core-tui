@@ -213,6 +213,9 @@ func renderToolCallHeader(idx, total int, tool Message, styles Styles) string {
 	if tool.ToolCallID != "" {
 		parts = append(parts, styles.Muted.Render("id "+tool.ToolCallID))
 	}
+	if lat := formatLatency(tool.ToolLatencyMs); lat != "" {
+		parts = append(parts, styles.Muted.Render(lat))
+	}
 	if strings.TrimSpace(tool.ToolError) != "" {
 		parts = append(parts, styles.ErrorText.Render("✘ failed"))
 	} else if tool.ToolResponseMap == nil {

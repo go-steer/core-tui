@@ -328,7 +328,14 @@ func emitEvent(ctx context.Context, ch chan<- tea.Msg, gen uint64, ev Event) {
 		send(toolCallMsg{gen: gen, id: tc.ID, name: tc.Name, args: tc.Args})
 	}
 	for _, tr := range ev.ToolResults {
-		send(toolResultMsg{gen: gen, id: tr.ID, name: tr.Name, response: tr.Response, err: tr.Error})
+		send(toolResultMsg{
+			gen:       gen,
+			id:        tr.ID,
+			name:      tr.Name,
+			response:  tr.Response,
+			err:       tr.Error,
+			latencyMs: resolveToolLatencyMs(tr),
+		})
 	}
 	if ev.Usage != nil {
 		send(usageMsg{gen: gen, usage: *ev.Usage, costUSD: ev.CostUSD, model: ev.Model})

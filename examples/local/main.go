@@ -223,10 +223,13 @@ func seededConversation() []tui.Message {
 			// string so the Ctrl+X detail overlay (core-tui #52
 			// tier 1) shows real content on seeded rows, not just
 			// on rows freshly emitted by a scripted turn.
+			// ToolLatencyMs demos the tier-3 `[Ns]` badge + dialog
+			// chip (core-tui #60 / SSE spec v1.2.0) inline.
 			ToolArgsMap: map[string]any{"path": "db/schema/users.sql"},
 			ToolResponseMap: map[string]any{
 				"content": "CREATE TABLE users (\n  id BIGSERIAL PRIMARY KEY,\n  email VARCHAR(255),\n  created_at TIMESTAMPTZ NOT NULL DEFAULT NOW()\n);\n",
 			},
+			ToolLatencyMs: 320,
 		},
 		{
 			Role: tui.RoleAssistant,
@@ -244,6 +247,7 @@ func seededConversation() []tui.Message {
 				"bytes_written": 512,
 				"lines_written": 12,
 			},
+			ToolLatencyMs: 180,
 		},
 		{
 			Role:        tui.RoleTool,
@@ -254,6 +258,7 @@ func seededConversation() []tui.Message {
 				"stdout":    "BEGIN\nUPDATE 0\nALTER TABLE\nCOMMIT\n",
 				"exit_code": 0,
 			},
+			ToolLatencyMs: 2400,
 		},
 		{
 			Role: tui.RoleSystem,

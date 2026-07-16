@@ -81,6 +81,14 @@ type Message struct {
 	ToolResponseMap map[string]any
 	ToolError       string
 
+	// ToolLatencyMs is the per-call wall-clock latency (in ms)
+	// reported by the host — populated from tui.ToolResult.LatencyMs
+	// which core-tui auto-plucks from Response["latency_ms"] when
+	// adapters don't set it explicitly. 0 = unknown / not reported;
+	// renderers suppress the `[2.4s]` badge and the dialog chip in
+	// that case. Consumer side of core-tui #60 / SSE spec v1.2.0.
+	ToolLatencyMs int64
+
 	// Per-turn metadata populated by the TUI on the final assistant
 	// Message of each turn so the renderer can append a one-line
 	// `◇ Model · 8.4K in · 2.1K out · $0.012 · 4s` footer (R-USE-1).
@@ -223,17 +231,20 @@ func (h *History) SetToolPreview(i int, preview string) {
 	h.entries[i].Version++
 }
 
-// SetToolResult stashes the raw response payload + error string on
-// the tool row at index i so the expand-single detail overlay
-// (dialog_toolcall.go) can re-render the full args + response later
-// on demand. Bumps Version so any renderer that consults these
-// fields invalidates its cache. Out-of-range i is a silent no-op.
-func (h *History) SetToolResult(i int, response map[string]any, errStr string) {
+// SetToolResult stashes the raw response payload + error string +
+// per-call latency on the tool row at index i so the expand-single
+// detail overlay (dialog_toolcall.go) can re-render the full args +
+// response later on demand and the latency badge / chip surfaces
+// the wall-clock timing. Bumps Version so any renderer that
+// consults these fields invalidates its cache. Out-of-range i is a
+// silent no-op.
+func (h *History) SetToolResult(i int, response map[string]any, errStr string, latencyMs int64) {
 	if i < 0 || i >= len(h.entries) {
 		return
 	}
 	h.entries[i].ToolResponseMap = response
 	h.entries[i].ToolError = errStr
+	h.entries[i].ToolLatencyMs = latencyMs
 	h.entries[i].Version++
 }
 

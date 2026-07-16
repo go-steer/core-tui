@@ -108,6 +108,21 @@ type ToolResult struct {
 	Name     string
 	Response map[string]any
 	Error    string
+
+	// LatencyMs is the wall-clock time (in milliseconds) the tool
+	// call took, measured from dispatch to result received. Optional
+	// — 0 suppresses the inline `[2.4s]` badge and dialog chip.
+	//
+	// Adapters MAY populate this field directly; core-tui also
+	// auto-plucks the value from Response["latency_ms"] when this
+	// field is 0, because core-agent's PR #278 emits it inside the
+	// response map (ADK's Tool.Run has no write access to the
+	// enclosing session.Event's CustomMetadata, so the map itself is
+	// the only sidecar channel). Either surface works — hosts pick
+	// whichever fits their pipeline.
+	//
+	// Consumer side of core-tui #60 / SSE spec v1.2.0.
+	LatencyMs int64
 }
 
 // Usage carries token counts for a turn.
