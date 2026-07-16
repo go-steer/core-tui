@@ -25,13 +25,20 @@
 //	shift+tab       cycle the permission mode chip
 //	ctrl+p          open the (sample) command palette
 //	ctrl+g          open the (sample) model picker
+//	ctrl+x          open the tool-call detail overlay (core-tui #52)
 //	ctrl+y          open the (sample) permission modal
 //	ctrl+e          open the (sample) MCP elicitation form
 //	esc             close any open modal
+//
+// Flags:
+//
+//	-verbose-tools  append full args + response detail under every
+//	                tool row (core-tui #52 tier 2)
 package main
 
 import (
 	"context"
+	"flag"
 	"fmt"
 	"os"
 	"time"
@@ -141,6 +148,14 @@ func (demoAgent) InvokeSlash(_ context.Context, name, args string) (tui.SlashRes
 }
 
 func main() {
+	// The library itself has no CLI surface — Options is the seam
+	// (docs/design.md §3). This example binary layers a couple of
+	// flags on top so operators can toggle demo-relevant knobs
+	// without editing + rebuilding.
+	verboseTools := flag.Bool("verbose-tools", false,
+		"append full args + response detail under every tool row (core-tui #52 tier 2)")
+	flag.Parse()
+
 	prompter := tui.NewPrompter()
 	elicitor := tui.NewElicitor()
 
@@ -169,7 +184,8 @@ func main() {
 			Initial: tui.PermissionModeDefault,
 			Set:     func(m tui.PermissionMode) error { return nil },
 		},
-		SeedHistory: seededConversation(),
+		SeedHistory:       seededConversation(),
+		ToolDetailVerbose: *verboseTools,
 	}
 	if err := tui.Run(context.Background(), opts); err != nil {
 		fmt.Fprintln(os.Stderr, "core-tui:", err)
@@ -203,6 +219,14 @@ func seededConversation() []tui.Message {
 			Role:     tui.RoleTool,
 			ToolName: "Read",
 			ToolArgs: "db/schema/users.sql",
+			// Structured args + response mirror the compact display
+			// string so the Ctrl+X detail overlay (core-tui #52
+			// tier 1) shows real content on seeded rows, not just
+			// on rows freshly emitted by a scripted turn.
+			ToolArgsMap: map[string]any{"path": "db/schema/users.sql"},
+			ToolResponseMap: map[string]any{
+				"content": "CREATE TABLE users (\n  id BIGSERIAL PRIMARY KEY,\n  email VARCHAR(255),\n  created_at TIMESTAMPTZ NOT NULL DEFAULT NOW()\n);\n",
+			},
 		},
 		{
 			Role: tui.RoleAssistant,
@@ -211,14 +235,25 @@ func seededConversation() []tui.Message {
 				"(so the constraint can be added safely) and then adds NOT NULL.",
 		},
 		{
-			Role:     tui.RoleTool,
-			ToolName: "Write",
-			ToolArgs: "db/migrations/0042_users_email_not_null.sql",
+			Role:        tui.RoleTool,
+			ToolName:    "Write",
+			ToolArgs:    "db/migrations/0042_users_email_not_null.sql",
+			ToolArgsMap: map[string]any{"path": "db/migrations/0042_users_email_not_null.sql"},
+			ToolResponseMap: map[string]any{
+				"path":          "db/migrations/0042_users_email_not_null.sql",
+				"bytes_written": 512,
+				"lines_written": 12,
+			},
 		},
 		{
-			Role:     tui.RoleTool,
-			ToolName: "Bash",
-			ToolArgs: "psql -f db/migrations/0042_users_email_not_null.sql",
+			Role:        tui.RoleTool,
+			ToolName:    "Bash",
+			ToolArgs:    "psql -f db/migrations/0042_users_email_not_null.sql",
+			ToolArgsMap: map[string]any{"command": "psql -f db/migrations/0042_users_email_not_null.sql"},
+			ToolResponseMap: map[string]any{
+				"stdout":    "BEGIN\nUPDATE 0\nALTER TABLE\nCOMMIT\n",
+				"exit_code": 0,
+			},
 		},
 		{
 			Role: tui.RoleSystem,
