@@ -172,6 +172,23 @@ type LiveAgent interface {
 	Events(ctx context.Context) iter.Seq2[Event, error]
 }
 
+// PermanentStreamError, when implemented by an error returned from
+// LiveAgent.Events, signals a condition the TUI can't recover from by
+// retrying (session gone, auth revoked). Adapters wrap upstream
+// HTTP 404 / 401 / 403 errors — or any locally-detected permanent
+// condition — with this interface so the TUI can flip to a terminal
+// "session unavailable" row instead of looping forever on the
+// reconnect path (issue #51).
+//
+// If the interface isn't implemented, the TUI falls back to a small
+// substring heuristic ("status 404" / "status 401" / "status 403") so
+// existing adapters that already stringify the HTTP status keep the
+// same behavior without needing an immediate update.
+type PermanentStreamError interface {
+	error
+	PermanentStreamErr() bool
+}
+
 // InboxDrainer is an optional capability for hosts whose agent
 // queues operator-injected messages in an internal inbox that's
 // distinct from the per-turn prompt. Combined with InjectableAgent

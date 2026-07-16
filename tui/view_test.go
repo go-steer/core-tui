@@ -100,3 +100,32 @@ func TestWordWrapIndent_RoleIndentOnContinuationSourceLines(t *testing.T) {
 		t.Errorf("source line 1 should get role indent, got %q", lines[1])
 	}
 }
+
+// TestWordWrapIndent_Issue49_SystemMessageWithURL pins the exact repro
+// from issue #49: a long SystemMessage carrying an embedded URL must
+// soft-wrap on word/hyphen boundaries at every reasonable width. The
+// URL segment must never be truncated with an ellipsis — an operator
+// reading the row needs to be able to copy the URL. Regressions here
+// (e.g. reintroducing per-line truncation) would break `/new`,
+// `/switch`, and other slash handlers that return long SystemMessages.
+func TestWordWrapIndent_Issue49_SystemMessageWithURL(t *testing.T) {
+	// Real-world repro from core-agent's /new handler.
+	repro := "/new: created session 019ec063-8265-759f-85da-517b20951acf — attach with `core-agent-tui http://daemon:7777` or relaunch with --new-session"
+
+	for _, width := range []int{40, 60, 80, 100, 120} {
+		got := wordWrapIndent("ℹ  "+repro, width, "   ")
+		// Every emitted line must fit within the width budget.
+		for i, line := range strings.Split(got, "\n") {
+			if w := ansi.StringWidth(line); w > width {
+				t.Errorf("width=%d line %d overflows (%d cols): %q", width, i, w, line)
+			}
+		}
+		// The URL host+port MUST survive intact — no truncation with '…'.
+		if !strings.Contains(got, "daemon:7777") {
+			t.Errorf("width=%d: URL segment 'daemon:7777' missing from wrapped output:\n%s", width, got)
+		}
+		if strings.Contains(got, "c…") || strings.Contains(got, "cor…") {
+			t.Errorf("width=%d: unexpected ellipsis truncation in URL segment:\n%s", width, got)
+		}
+	}
+}

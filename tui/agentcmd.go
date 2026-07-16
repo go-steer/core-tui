@@ -17,6 +17,7 @@ package tui
 import (
 	"context"
 	"errors"
+	"strings"
 	"time"
 
 	tea "charm.land/bubbletea/v2"
@@ -358,4 +359,38 @@ func emitEvent(ctx context.Context, ch chan<- tea.Msg, gen uint64, ev Event) {
 	if ev.TurnError != nil {
 		send(turnErrorMsg{gen: gen, turnError: *ev.TurnError})
 	}
+}
+
+// permanentStreamStatusMarkers is the fallback substring set the TUI
+// scans when a live-stream error doesn't implement PermanentStreamError.
+// Matches the string form core-agent's remote adapter already produces
+// ("status 404: session not found", etc.). Adapters can adopt the
+// PermanentStreamError interface to bypass the heuristic entirely.
+var permanentStreamStatusMarkers = []string{
+	"status 404",
+	"status 401",
+	"status 403",
+}
+
+// isPermanentStreamErr reports whether err represents a live-stream
+// condition the TUI can't recover from by retrying (session gone, auth
+// revoked). Adapters signal this by implementing PermanentStreamError;
+// as a fallback we string-match the HTTP status markers listed above
+// so existing adapters keep the same behavior without a code change.
+// See issue #51.
+func isPermanentStreamErr(err error) bool {
+	if err == nil {
+		return false
+	}
+	var pse PermanentStreamError
+	if errors.As(err, &pse) && pse.PermanentStreamErr() {
+		return true
+	}
+	msg := err.Error()
+	for _, marker := range permanentStreamStatusMarkers {
+		if strings.Contains(msg, marker) {
+			return true
+		}
+	}
+	return false
 }

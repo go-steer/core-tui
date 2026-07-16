@@ -195,6 +195,28 @@ func TestUpdate_LiveStreamStartedMsg_LogsAttachedNote(t *testing.T) {
 	}
 }
 
+// Issue #50: hosts that implement InjectableAgent alongside LiveAgent
+// have operator typing feed the running stream — the "observer" framing
+// is wrong for them. The banner text must branch on the capability.
+func TestUpdate_LiveStreamStartedMsg_InjectableAgent_DropsObserverFraming(t *testing.T) {
+	agent := &injectableLiveAgentStub{liveAgentStub: newLiveAgentStub(), injectsOut: make(chan string, 1)}
+	m := NewModel(Options{Agent: agent})
+	m.viewport.SetWidth(80)
+
+	out, _ := m.Update(liveStreamStartedMsg{cancel: func() {}})
+	got := out.(Model)
+	if got.history.Len() == 0 {
+		t.Fatal("expected banner system row")
+	}
+	last := got.history.Snapshot()[got.history.Len()-1]
+	if strings.Contains(last.Text, "observer") {
+		t.Errorf("InjectableAgent host should not see 'observer' framing, got: %q", last.Text)
+	}
+	if !strings.Contains(last.Text, "Live session") {
+		t.Errorf("expected 'Live session' framing for InjectableAgent host, got: %q", last.Text)
+	}
+}
+
 func TestUpdate_LiveStreamEndedMsg_FlipsDisconnectedAndLogs(t *testing.T) {
 	m := NewModel(Options{Agent: newLiveAgentStub()})
 	m.viewport.SetWidth(80)
@@ -214,7 +236,7 @@ func TestUpdate_LiveStreamErrMsg_RendersErrorRow(t *testing.T) {
 	m := NewModel(Options{Agent: newLiveAgentStub()})
 	m.viewport.SetWidth(80)
 
-	out, _ := m.Update(liveStreamErrMsg{err: errors.New("boom")})
+	out, cmd := m.Update(liveStreamErrMsg{err: errors.New("boom")})
 	got := out.(Model)
 	last := got.history.Snapshot()[got.history.Len()-1]
 	if last.Role != RoleError {
@@ -222,6 +244,105 @@ func TestUpdate_LiveStreamErrMsg_RendersErrorRow(t *testing.T) {
 	}
 	if !strings.Contains(last.Text, "boom") {
 		t.Errorf("expected 'boom' in error row, got: %q", last.Text)
+	}
+	if !strings.Contains(last.Text, "waiting to reconnect") {
+		t.Errorf("transient error should carry reconnect hint, got: %q", last.Text)
+	}
+	if got.liveDisconnected {
+		t.Error("transient error must not flip liveDisconnected")
+	}
+	if cmd == nil {
+		t.Error("transient error should keep draining (cmd != nil)")
+	}
+}
+
+// Issue #51: HTTP 404 / 401 / 403 are permanent conditions — the TUI
+// must NOT loop forever hitting the reconnect path. Verify that the
+// handler flips the disconnected bit, surfaces a distinct row, and
+// returns no drain cmd for each permanent status marker.
+func TestUpdate_LiveStreamErrMsg_PermanentStatuses_StopRetrying(t *testing.T) {
+	permanent := []struct {
+		name string
+		err  error
+	}{
+		{"404", errors.New("attach: status 404: session not found")},
+		{"401", errors.New("attach: status 401: token revoked")},
+		{"403", errors.New("attach: status 403: acl revoked")},
+	}
+	for _, tc := range permanent {
+		t.Run(tc.name, func(t *testing.T) {
+			m := NewModel(Options{Agent: newLiveAgentStub()})
+			m.viewport.SetWidth(80)
+
+			out, cmd := m.Update(liveStreamErrMsg{err: tc.err})
+			got := out.(Model)
+			last := got.history.Snapshot()[got.history.Len()-1]
+			if last.Role != RoleError {
+				t.Errorf("expected RoleError, got %v", last.Role)
+			}
+			if !strings.Contains(last.Text, "session unavailable") {
+				t.Errorf("permanent error should read 'session unavailable', got: %q", last.Text)
+			}
+			if strings.Contains(last.Text, "waiting to reconnect") {
+				t.Errorf("permanent error must not offer reconnect hint, got: %q", last.Text)
+			}
+			if !got.liveDisconnected {
+				t.Error("expected liveDisconnected=true after permanent error")
+			}
+			if cmd != nil {
+				t.Error("expected nil cmd (stop retrying) on permanent error")
+			}
+		})
+	}
+}
+
+// Verify the PermanentStreamError interface path — adapters that wrap
+// their own typed errors bypass the substring heuristic.
+type permErr struct{ msg string }
+
+func (e *permErr) Error() string            { return e.msg }
+func (e *permErr) PermanentStreamErr() bool { return true }
+
+func TestUpdate_LiveStreamErrMsg_PermanentStreamErrorInterface(t *testing.T) {
+	m := NewModel(Options{Agent: newLiveAgentStub()})
+	m.viewport.SetWidth(80)
+
+	out, cmd := m.Update(liveStreamErrMsg{err: &permErr{msg: "adapter-specific: session evicted"}})
+	got := out.(Model)
+	last := got.history.Snapshot()[got.history.Len()-1]
+	if !got.liveDisconnected {
+		t.Error("PermanentStreamError should flip liveDisconnected")
+	}
+	if cmd != nil {
+		t.Error("PermanentStreamError should stop draining")
+	}
+	if !strings.Contains(last.Text, "session unavailable") {
+		t.Errorf("expected 'session unavailable' prefix, got: %q", last.Text)
+	}
+}
+
+// isPermanentStreamErr unit table — covers nil, no-match, each marker,
+// and the interface path.
+func TestIsPermanentStreamErr(t *testing.T) {
+	cases := []struct {
+		name string
+		err  error
+		want bool
+	}{
+		{"nil", nil, false},
+		{"transient", errors.New("connection refused"), false},
+		{"transient-5xx", errors.New("server error: status 502"), false},
+		{"404-marker", errors.New("attach: status 404: session not found"), true},
+		{"401-marker", errors.New("status 401 unauthorized"), true},
+		{"403-marker", errors.New("some prefix status 403 forbidden"), true},
+		{"interface", &permErr{msg: "adapter-permanent"}, true},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			if got := isPermanentStreamErr(tc.err); got != tc.want {
+				t.Errorf("isPermanentStreamErr(%v) = %v, want %v", tc.err, got, tc.want)
+			}
+		})
 	}
 }
 
