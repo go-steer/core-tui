@@ -158,6 +158,16 @@ type slashResultMsg struct {
 	err  error
 }
 
+// remoteInterruptDoneMsg carries the outcome of a /interrupt slash
+// that dispatched through RemoteInterrupter — the fallthrough path
+// used when the TUI has no local per-turn context to cancel
+// (LiveAgent / observer mode). Empty err = the remote endpoint
+// accepted the cancel; non-nil err = network hiccup, endpoint
+// missing, or the daemon reported no in-flight turn. Either way
+// Update appends a follow-up system row so the operator sees
+// resolution, not just the "cancelling remote turn…" placeholder.
+type remoteInterruptDoneMsg struct{ err error }
+
 // liveStreamStartedMsg fires once at startup after the LiveAgent
 // drain goroutine launches; carries the cancel func so the
 // Update handler can stash it on the model's cancelLiveStream

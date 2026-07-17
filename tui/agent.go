@@ -261,6 +261,34 @@ type WakeRequester interface {
 	WakeRequested() <-chan struct{}
 }
 
+// RemoteInterrupter is an optional capability: hosts whose agent runs
+// remotely (LiveAgent observer mode against a daemon) implement it so
+// the /interrupt slash can cancel an in-flight turn even when the TUI
+// has no local per-turn context to cancel.
+//
+// Without this capability, /interrupt short-circuits with "no turn in
+// flight" on remote sessions — the local Run-path gate keys off
+// `m.cancelTurn`, which is only set for operator-initiated turns
+// through the per-turn iterator. Autonomous turns driven by the daemon
+// (k8s-event-watcher injects, runaway tool loops, etc.) stream
+// through LiveAgent but never populate cancelTurn, leaving the
+// operator without a way to stop them from the TUI even when the
+// daemon exposes a cancel endpoint.
+//
+// Implementations MAY block briefly on network I/O; the TUI calls
+// Interrupt off the Update-loop path so it doesn't stall the UI. A
+// short deadline via ctx is appropriate — a hung interrupt is worse
+// than a failed one because it leaves the operator uncertain whether
+// their input landed. Errors surface as an inline RoleError row.
+//
+// Same optional-capability pattern as LiveAgent / InboxDrainer /
+// WakeRequester — the TUI type-asserts at slash-fire time and falls
+// back to the existing "no turn in flight" message when the interface
+// isn't implemented.
+type RemoteInterrupter interface {
+	Interrupt(ctx context.Context) error
+}
+
 // Content is a neutral structured-prompt fragment for ContentRunner
 // (R-CHAT-12). Adapters translate their host's native content
 // representation (ADK Content, anthropic Message, etc.) into / out

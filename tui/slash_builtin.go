@@ -132,14 +132,35 @@ func (m Model) dispatchBuiltinSlash(name, args string) (bool, tea.Model, tea.Cmd
 		return true, m, nil
 
 	case "interrupt", "int":
-		if m.state != stateStreaming || m.cancelTurn == nil {
-			m.history.Append(Message{Role: RoleSystem, Text: "/interrupt: no turn in flight"})
+		// Local Run-path cancel wins when we have it — that's the
+		// original operator-initiated turn context, and cancelling it
+		// unwedges the whole stack (agent goroutine + iterator +
+		// spinner) synchronously.
+		if m.state == stateStreaming && m.cancelTurn != nil {
+			m.cancelTurn()
 			m.input.Reset()
-			m.refreshAndScroll()
 			return true, m, nil
 		}
-		m.cancelTurn()
+		// LiveAgent / observer-mode fallthrough: the daemon is running
+		// the turn autonomously (k8s-event injects, runaway tool loops,
+		// etc.) so we have no local context to cancel. If the host
+		// implements RemoteInterrupter, dispatch a remote cancel. The
+		// RemoteInterrupter contract says implementations may block
+		// briefly on network I/O; we run it in a bounded goroutine to
+		// keep the Update loop responsive, and surface the outcome as
+		// a follow-up system row via remoteInterruptDoneMsg.
+		if ri, ok := m.opts.Agent.(RemoteInterrupter); ok {
+			// Immediate feedback so the operator knows the slash landed.
+			m.history.Append(Message{Role: RoleSystem, Text: "/interrupt: cancelling remote turn…"})
+			m.input.Reset()
+			m.refreshAndScroll()
+			return true, m, remoteInterruptCmd(ri)
+		}
+		// Neither path available. Original message preserved so
+		// operators used to it don't see a behavior regression.
+		m.history.Append(Message{Role: RoleSystem, Text: "/interrupt: no turn in flight"})
 		m.input.Reset()
+		m.refreshAndScroll()
 		return true, m, nil
 
 	case "tools":
@@ -962,4 +983,20 @@ func truncate(s string, n int) string {
 		return s[:n]
 	}
 	return s[:n-3] + "..."
+}
+
+// remoteInterruptCmd runs a RemoteInterrupter.Interrupt in a
+// goroutine off the Update loop and posts the outcome back as a
+// remoteInterruptDoneMsg. Bounded context (5s) so a hung endpoint
+// doesn't leave the operator waiting silently.
+//
+// The 5s bound is generous — a healthy attach endpoint responds in
+// tens of milliseconds; anything longer signals a broken daemon,
+// which we surface as an error row rather than blocking.
+func remoteInterruptCmd(ri RemoteInterrupter) tea.Cmd {
+	return func() tea.Msg {
+		ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+		defer cancel()
+		return remoteInterruptDoneMsg{err: ri.Interrupt(ctx)}
+	}
 }
