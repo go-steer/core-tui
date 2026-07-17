@@ -253,7 +253,28 @@ Example:
 |---|---|---|---|
 | `latency_ms` | integer | no | Wall-clock time (in milliseconds) from tool dispatch to result received. Servers with round-trip timing SHOULD populate this; clients render as e.g. `[2.4s]` under the tool row. Absent on pre-v1.2.0 servers; clients degrade to no badge. |
 
-**Why the response map, not `CustomMetadata`.** The ergonomic sidecar channel would have been `session.Event.CustomMetadata`, but ADK constructs the `tool-result` event *after* `tool.Run` returns — `CustomMetadata` isn't writable from inside `Run`. The response map itself IS writable, and both the remote and embedded core-agent adapters copy the whole map through to `tui.ToolResult.Response` verbatim, so a well-known sidecar key rides both transports without any per-adapter plumbing. Future sidecars (e.g. `tokens_delta`) SHOULD ride the same channel for the same reason.
+**Digest-wrap savings sidecar (v1.3.0+):**
+
+| Field | Type | Required | Description |
+|---|---|---|---|
+| `savings` | object | no | Per-call reduction produced by a digest wrap layer (e.g. core-agent's MCP wrap in `pkg/mcp/digest_wrap.go`). Absent when the call did not dispatch through a wrap. Clients render as an inline `[12k→2k tok · struct]` chip on the tool row and a chip in the tool-call detail overlay header. Absent on pre-v1.3.0 servers; clients degrade to no chip. |
+
+The `savings` object carries the following fields:
+
+| Field | Type | Required | Description |
+|---|---|---|---|
+| `path` | string | yes | Router decision. One of `structural_json` (deterministic JSON pruner), `llm_fallback` (small-tier LLM subagent digested the payload), or `passthrough` (payload was under the wrap's threshold — no reduction). |
+| `original_bytes` | integer | yes | Serialized byte size of the raw payload BEFORE digesting. |
+| `digest_bytes` | integer | yes | Serialized byte size of the digest handed back to the model. |
+| `original_tokens_est` | integer | yes | Estimated original token count. Producers SHOULD use the standard 4-char-per-token heuristic; consumers treat as approximate (±15%). |
+| `digest_tokens_est` | integer | yes | Estimated digest token count. Same heuristic. |
+| `subagent_model` | string | no | On `llm_fallback` only: the small-tier model ID that produced the digest. Zero-valued on structural / passthrough. |
+| `subagent_input_tokens` | integer | no | On `llm_fallback` only: subagent's input tokens. |
+| `subagent_output_tokens` | integer | no | On `llm_fallback` only: subagent's output tokens. |
+
+Passthrough calls SHOULD emit the sidecar for parity (so clients can count "how many calls skipped the wrap") but the compact display renderer suppresses the chip since there's no reduction to report.
+
+**Why the response map, not `CustomMetadata`.** The ergonomic sidecar channel would have been `session.Event.CustomMetadata`, but ADK constructs the `tool-result` event *after* `tool.Run` returns — `CustomMetadata` isn't writable from inside `Run`. The response map itself IS writable, and both the remote and embedded core-agent adapters copy the whole map through to `tui.ToolResult.Response` verbatim, so a well-known sidecar key rides both transports without any per-adapter plumbing. Both `latency_ms` (v1.2.0) and `savings` (v1.3.0) use this channel; future sidecars SHOULD do the same.
 
 Example (success + latency):
 
@@ -270,6 +291,47 @@ Example (failure — error rides its own channel via ADK, latency still stamped 
 {
   "error": "no such file or directory",
   "latency_ms": 47
+}
+```
+
+Example (structural digest wrap + latency):
+
+```json
+{
+  "digest": "...compressed payload...",
+  "raw_bytes": 12345,
+  "method": "structural_json",
+  "call_id": "toolcall-abc",
+  "latency_ms": 720,
+  "savings": {
+    "path": "structural_json",
+    "original_bytes": 12345,
+    "digest_bytes": 2100,
+    "original_tokens_est": 3086,
+    "digest_tokens_est": 525
+  }
+}
+```
+
+Example (LLM-subagent digest wrap + latency):
+
+```json
+{
+  "digest": "The pod is CrashLoopBackOff because /entrypoint.sh is missing.",
+  "raw_bytes": 32100,
+  "method": "llm_fallback",
+  "call_id": "toolcall-xyz",
+  "latency_ms": 2412,
+  "savings": {
+    "path": "llm_fallback",
+    "original_bytes": 32100,
+    "digest_bytes": 210,
+    "original_tokens_est": 8025,
+    "digest_tokens_est": 52,
+    "subagent_model": "gemini-2.5-flash",
+    "subagent_input_tokens": 400,
+    "subagent_output_tokens": 150
+  }
 }
 ```
 
@@ -392,6 +454,7 @@ The following are deliberately NOT specified here:
 
 | Version | Date | Change |
 |---|---|---|
+| 1.3.0 | 2026-07-17 | **MINOR.** Added optional `savings` sidecar object on `tool-result` response payloads (§2.7) carrying the digest wrap's per-call byte / token reduction, router path, and (agentic path only) subagent usage. Closes go-steer/core-agent#223 Phase 4 tier 1 (per-tool inline chip) + tier 2 (detail-overlay chip). Session-level cumulative rendering (`/stats` block) tracked separately. Same response-map sidecar channel as v1.2.0's `latency_ms`. Fully backward-compatible — pre-v1.3.0 servers omit the object, pre-v1.3.0 clients ignore it. |
 | 1.2.0 | 2026-07-16 | **MINOR.** Added optional `latency_ms` sidecar key on `tool-result` response payloads (§2.7 — formally documented in this revision). Closes go-steer/core-agent#277 (emit) + core-tui#60 (consume) — completes core-tui#52 tier 3 (inline `[2.4s]` per tool row + latency chip in the expand-single detail overlay). Sidecar rides the response map itself because ADK's `tool.Run` has no write access to the enclosing `session.Event.CustomMetadata`; §2.7 documents the finding for future sidecars. Fully backward-compatible — pre-v1.2.0 servers omit the field, pre-v1.2.0 clients ignore it. |
 | 1.1.1 | 2026-07-15 | **PATCH.** Added optional `usage-update.last_turn` object (tokens_in / tokens_in_cached / tokens_out / cost_usd / model) carrying authoritative per-turn cost. Complements the v1.1.0 `cost_usd`-on-`turn-complete`-optional demotion so observer-mode (LiveAgent) clients have a source for per-turn footer cost. Closes core-tui #57. Fully backward-compatible — pre-v1.1.1 servers omit the field, pre-v1.1.1 clients ignore it. |
 | 1.1.0 | 2026-06-07 | **MINOR.** `turn-complete.cost_usd` demoted from required → optional with documented fallback to the immediately-following `usage-update` (servers with pricing out-of-band can omit it). §2.1 `capabilities.event_types` clarified to permit listing logical sub-types that ride on multiplexed wire events. §3 evolution rules extended with the required→optional demotion clause that governed this change. |

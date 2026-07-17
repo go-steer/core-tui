@@ -335,6 +335,7 @@ func emitEvent(ctx context.Context, ch chan<- tea.Msg, gen uint64, ev Event) {
 			response:  tr.Response,
 			err:       tr.Error,
 			latencyMs: resolveToolLatencyMs(tr),
+			savings:   resolveToolSavings(tr),
 		})
 	}
 	if ev.Usage != nil {

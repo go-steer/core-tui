@@ -123,6 +123,23 @@ type ToolResult struct {
 	//
 	// Consumer side of core-tui #60 / SSE spec v1.2.0.
 	LatencyMs int64
+
+	// Savings is the digest wrap's per-call reduction — original vs.
+	// digested byte / token counts, plus the router's dispatch
+	// decision (structural pruner, LLM subagent, or bypassed
+	// passthrough). Nil when the host didn't dispatch through a
+	// digest wrap (or the response arrived pre-v1.3.0 without the
+	// sidecar). Renderers show a compact inline chip on the tool row
+	// and a full block in the tool-call detail overlay.
+	//
+	// Same auto-pluck pattern as LatencyMs: adapters MAY populate
+	// this field directly; core-tui also plucks it from
+	// Response["savings"] when this field is nil, because
+	// core-agent's PR #290 emits the map inside the response
+	// payload (same ADK constraint that shipped latency_ms there).
+	//
+	// Consumer side of SSE spec v1.3.0 / core-agent #223 Phase 4.
+	Savings *ToolSavings
 }
 
 // Usage carries token counts for a turn.

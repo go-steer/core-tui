@@ -62,6 +62,13 @@ type toolResultMsg struct {
 	response  map[string]any
 	err       string
 	latencyMs int64
+	// savings, when non-nil, carries the digest wrap's per-call
+	// reduction — original vs. digested byte / token counts + router
+	// decision + (agentic path only) subagent usage. Renderers pluck
+	// it via resolveToolSavings from the response map or from
+	// ToolResult.Savings directly; both surfaces flow through here
+	// as a typed value so downstream handlers don't re-parse.
+	savings *ToolSavings
 }
 
 // usageMsg snapshots the latest Usage from the agent. The TUI keeps
