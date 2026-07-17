@@ -224,6 +224,20 @@ type Options struct {
 	// fast operator can pile messages faster than the model
 	// answers).
 	AutoContinueCap int
+
+	// InitialPrompt seeds the first turn on startup. When non-empty,
+	// Init() emits a one-shot message that Update routes through the
+	// same submitTurn path as an operator-typed submission — so the
+	// prompt renders as a normal RoleUser row, the assistant response
+	// streams into the chat scroll, and the operator lands on the
+	// input line when the turn completes. Empty (the default) keeps
+	// the pre-seed behavior (blank chat on startup).
+	//
+	// Intended for the host CLI's "seed then stay interactive" flag
+	// (core-agent's -i / --interactive-prompt); library callers
+	// wanting non-interactive one-shot behavior should keep using
+	// their headless entrypoint instead.
+	InitialPrompt string
 }
 
 // MidTurnInjectionMode controls operator-typed-during-streaming

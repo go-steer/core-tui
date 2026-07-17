@@ -57,6 +57,15 @@ func (m Model) Init() tea.Cmd {
 			cmds = append(cmds, m.spawnLiveStreamCmd(liveAgent))
 		}
 	}
+	// Options.InitialPrompt seeds the first turn on startup — the msg
+	// lands in Update after the wiring above so the event listener +
+	// theme are already primed by the time we start submitTurn. Skip
+	// in liveMode since the autonomous stream is already producing
+	// events; the two don't compose cleanly.
+	if m.opts.InitialPrompt != "" && !m.liveMode {
+		text := m.opts.InitialPrompt
+		cmds = append(cmds, func() tea.Msg { return initialPromptMsg{text: text} })
+	}
 	return tea.Batch(cmds...)
 }
 
@@ -469,6 +478,32 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		m.thinkingIdx++
 		m.refreshViewport()
 		return m, spinnerTick()
+	case initialPromptMsg:
+		// Options.InitialPrompt lands here exactly once, right after
+		// Init. Defensive guards mirror the Enter-key handler at the
+		// top of update.go: empty text is a no-op; a mid-stream state
+		// shouldn't be reachable this early but we skip rather than
+		// stack turns; slash commands are refused (seed prompts drive
+		// the model, not the TUI's own control surface). Everything
+		// else flows through submitTurn identically to a real
+		// operator submission.
+		text := strings.TrimSpace(msg.text)
+		if text == "" {
+			return m, nil
+		}
+		if m.state == stateStreaming {
+			return m, nil
+		}
+		if strings.HasPrefix(text, "/") {
+			m.history.Append(Message{
+				Role: RoleError,
+				Text: "InitialPrompt cannot be a slash command; ignoring: " + text,
+			})
+			m.refreshViewport()
+			return m, nil
+		}
+		m.recordPrompt(text)
+		return m.submitTurn(text), spinnerTick()
 	case wakeMsg:
 		// Issue #7: the wake signal also fires whenever Inject() is
 		// called by the queue panel (operator typed during streaming).

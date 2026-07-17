@@ -99,6 +99,13 @@ type turnCancelledMsg struct{ gen uint64 }
 // thinking/working verb (R-CHAT-3).
 type spinnerTickMsg struct{}
 
+// initialPromptMsg fires exactly once from Init() when the host set
+// Options.InitialPrompt to a non-empty value. Update routes it
+// through the same submitTurn path an operator-typed submission uses,
+// so the seed prompt renders as a normal RoleUser row + streams the
+// response into chat scroll.
+type initialPromptMsg struct{ text string }
+
 // wakeMsg fires when the host's WakeRequester capability signals
 // the operator should be notified (R-WAKE-1). Carries no payload —
 // the toast banner content is fixed; subsequent design slices can
