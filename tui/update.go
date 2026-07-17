@@ -504,6 +504,21 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		}
 		m.recordPrompt(text)
 		return m.submitTurn(text), spinnerTick()
+	case remoteInterruptDoneMsg:
+		// Follow-up to the "/interrupt: cancelling remote turn…"
+		// placeholder appended in the slash handler. Success case
+		// stays quiet in the transcript itself — the operator
+		// already saw the placeholder; the actual signal they care
+		// about is the streamed tool calls stopping. Errors surface
+		// as an inline row so the operator knows to escalate
+		// (retry, restart daemon, manual kill).
+		if msg.err != nil {
+			m.history.Append(Message{Role: RoleError, Text: "/interrupt: " + msg.err.Error()})
+		} else {
+			m.history.Append(Message{Role: RoleSystem, Text: "/interrupt: remote turn cancelled"})
+		}
+		m.refreshAndScroll()
+		return m, nil
 	case wakeMsg:
 		// Issue #7: the wake signal also fires whenever Inject() is
 		// called by the queue panel (operator typed during streaming).
