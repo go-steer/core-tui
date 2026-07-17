@@ -89,6 +89,16 @@ type Message struct {
 	// that case. Consumer side of core-tui #60 / SSE spec v1.2.0.
 	ToolLatencyMs int64
 
+	// ToolSavings is the digest wrap's per-call reduction (bytes +
+	// tokens, path, agentic-path subagent usage). Populated from
+	// tui.ToolResult.Savings which core-tui auto-plucks from
+	// Response["savings"] when adapters don't set it explicitly.
+	// Nil when the host didn't dispatch through a digest wrap;
+	// renderers suppress the inline chip + dialog block in that
+	// case. Consumer side of SSE spec v1.3.0 / core-agent #223
+	// Phase 4.
+	ToolSavings *ToolSavings
+
 	// Per-turn metadata populated by the TUI on the final assistant
 	// Message of each turn so the renderer can append a one-line
 	// `◇ Model · 8.4K in · 2.1K out · $0.012 · 4s` footer (R-USE-1).
@@ -232,19 +242,20 @@ func (h *History) SetToolPreview(i int, preview string) {
 }
 
 // SetToolResult stashes the raw response payload + error string +
-// per-call latency on the tool row at index i so the expand-single
-// detail overlay (dialog_toolcall.go) can re-render the full args +
-// response later on demand and the latency badge / chip surfaces
-// the wall-clock timing. Bumps Version so any renderer that
-// consults these fields invalidates its cache. Out-of-range i is a
-// silent no-op.
-func (h *History) SetToolResult(i int, response map[string]any, errStr string, latencyMs int64) {
+// per-call latency + digest savings on the tool row at index i so
+// the expand-single detail overlay (dialog_toolcall.go) can re-render
+// the full args + response later on demand, and the badges / chips
+// surface the wall-clock timing and digest reduction. Bumps Version
+// so any renderer that consults these fields invalidates its cache.
+// Out-of-range i is a silent no-op.
+func (h *History) SetToolResult(i int, response map[string]any, errStr string, latencyMs int64, savings *ToolSavings) {
 	if i < 0 || i >= len(h.entries) {
 		return
 	}
 	h.entries[i].ToolResponseMap = response
 	h.entries[i].ToolError = errStr
 	h.entries[i].ToolLatencyMs = latencyMs
+	h.entries[i].ToolSavings = savings
 	h.entries[i].Version++
 }
 

@@ -1420,6 +1420,14 @@ func (m *Model) applyToolResult(msg toolResultMsg) {
 	if badge := renderLatencyBadge(msg.latencyMs, m.styles); badge != "" {
 		preview += badge
 	}
+	// SSE spec v1.3.0: append the muted `[12k→2k tok · struct]` badge
+	// when the digest wrap emitted savings for this call. Sits AFTER
+	// the latency badge so the two chips read left-to-right in wall-
+	// clock-then-cost order. Passthrough / missing token counts
+	// suppress silently — pre-v1.3.0 servers render unchanged.
+	if badge := renderSavingsBadge(msg.savings, m.styles); badge != "" {
+		preview += badge
+	}
 	if m.opts.ToolDetailVerbose {
 		// Tier 2 (core-tui #52): append the full args + response
 		// dump under the compact preview when the operator has opted
@@ -1432,7 +1440,7 @@ func (m *Model) applyToolResult(msg toolResultMsg) {
 		}
 	}
 	m.history.SetToolPreview(idx, preview)
-	m.history.SetToolResult(idx, msg.response, msg.err, msg.latencyMs)
+	m.history.SetToolResult(idx, msg.response, msg.err, msg.latencyMs, msg.savings)
 	m.refreshViewport()
 }
 

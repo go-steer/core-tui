@@ -150,7 +150,7 @@ func TestApplyToolResult_LatencyBadgeAppendedToPreview(t *testing.T) {
 		preview += badge
 	}
 	h.SetToolPreview(idx, preview)
-	h.SetToolResult(idx, response, "", latencyMs)
+	h.SetToolResult(idx, response, "", latencyMs, nil)
 
 	final := h.Snapshot()[idx]
 	if !strings.Contains(final.ToolPreview, "[2.4s]") {
