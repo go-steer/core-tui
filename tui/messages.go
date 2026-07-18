@@ -209,6 +209,16 @@ type liveStreamEndedMsg struct{ gen uint64 }
 // processed.
 type forceRenderMsg struct{}
 
+// coalescedRefreshMsg is the tick fired by markViewportDirty +
+// scheduleCoalescedRefresh: when the handler runs it clears the
+// dirty + pending flags and calls refreshViewport once. All event
+// msgs that land inside the ~1ms coalesce window between the first
+// mark and the tick share the same refresh — turning the previously
+// per-event O(N) concat + SetContent into O(N × batch-size).
+// Critical for attach-to-long-session latency; see model.go's
+// viewportDirty / refreshPending fields for the mechanism.
+type coalescedRefreshMsg struct{}
+
 // Push-mode SSE event-stream msgs (issue #40, spec v1.1.0).
 // One per spec event type; emitEvent in agentcmd.go emits the
 // matching msg when an Event carries the corresponding optional

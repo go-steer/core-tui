@@ -61,6 +61,38 @@ func forceRenderTick() tea.Cmd {
 	})
 }
 
+// coalesceWindow is the delay between the first markViewportDirty
+// call and the coalescedRefreshMsg that actually re-runs
+// refreshViewport. One millisecond matches forceRenderTick's cadence
+// — imperceptible to the operator, but long enough to fold many
+// SSE events (the whole eventCh buffer, typically) into a single
+// paint during attach-to-long-session catch-up.
+const coalesceWindow = time.Millisecond
+
+// markViewportDirty flags the viewport as needing a repaint. Cheap
+// (a bool flip) — safe to call from every event handler that
+// mutates history / usage / model state. The actual refreshViewport
+// call runs later via the coalescedRefreshMsg handler.
+func (m *Model) markViewportDirty() {
+	m.viewportDirty = true
+}
+
+// scheduleCoalescedRefresh returns a Cmd that fires coalescedRefreshMsg
+// after coalesceWindow, or nil if a refresh is already pending or
+// nothing has marked dirty. Idempotent — safe to include in every
+// event handler's returned batch; extra calls collapse to nil while
+// a tick is in flight, so no matter how many events land in the
+// window they trigger exactly one refreshViewport.
+func (m *Model) scheduleCoalescedRefresh() tea.Cmd {
+	if m.refreshPending || !m.viewportDirty {
+		return nil
+	}
+	m.refreshPending = true
+	return tea.Tick(coalesceWindow, func(time.Time) tea.Msg {
+		return coalescedRefreshMsg{}
+	})
+}
+
 // liveStreamRenderCmd returns the Cmd that chat-content Msg
 // handlers (streamChunkMsg, toolCallMsg, toolResultMsg, usageMsg)
 // should yield after applying their state change (issue #26).
@@ -68,18 +100,35 @@ func forceRenderTick() tea.Cmd {
 // In Run mode it's just the bare eventListener — the per-turn
 // iterator keeps the program loop busy with concurrent Msgs.
 //
-// In LiveAgent mode it batches the eventListener with a
-// forceRenderTick so a single non-partial chunk arriving in a
-// quiet window (single-shot model reply, solo autonomous tool
-// call) paints without waiting for the operator's next keypress.
+// In LiveAgent mode it batches the eventListener with a paint
+// kick so a single non-partial chunk arriving in a quiet window
+// (single-shot model reply, solo autonomous tool call) paints
+// without waiting for the operator's next keypress. Preference
+// order:
+//
+//  1. scheduleCoalescedRefresh() when the handler flipped
+//     viewportDirty — the coalescedRefreshMsg tick both re-runs
+//     refreshViewport (paints the state change) and satisfies
+//     issue #24's "guarantee an Update → View cycle" contract.
+//  2. forceRenderTick() as fallback for the rare handler branch
+//     that returns liveStreamRenderCmd without mutating state
+//     (e.g. usageMsg with empty payload) — preserves issue #24's
+//     paint-kick guarantee without doing redundant work.
+//
 // The extras parameter folds in additional concurrent Cmds the
 // handler may need (e.g. spinnerTick for the partial-text path).
-func (m Model) liveStreamRenderCmd(extras ...tea.Cmd) tea.Cmd {
-	cmds := make([]tea.Cmd, 0, len(extras)+2)
+func (m *Model) liveStreamRenderCmd(extras ...tea.Cmd) tea.Cmd {
+	cmds := make([]tea.Cmd, 0, len(extras)+3)
 	cmds = append(cmds, m.eventListener())
 	cmds = append(cmds, extras...)
 	if m.liveMode {
-		cmds = append(cmds, forceRenderTick())
+		if refresh := m.scheduleCoalescedRefresh(); refresh != nil {
+			cmds = append(cmds, refresh)
+		} else {
+			cmds = append(cmds, forceRenderTick())
+		}
+	} else if refresh := m.scheduleCoalescedRefresh(); refresh != nil {
+		cmds = append(cmds, refresh)
 	}
 	if len(cmds) == 1 {
 		return cmds[0]

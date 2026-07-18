@@ -224,6 +224,20 @@ type Model struct {
 	// time. Buffered so a fast agent can't stall on a slow Update.
 	eventCh chan tea.Msg
 
+	// Viewport-refresh coalescing (perf: attach to long remote
+	// sessions used to be O(N²) because each incoming event walked
+	// the full history, concatenated every rendered message, and
+	// called viewport.SetContent on the ever-growing buffer).
+	// Event handlers now flip viewportDirty via markViewportDirty
+	// instead of calling refreshViewport synchronously; a single
+	// coalescedRefreshMsg tick then runs refreshViewport once for
+	// every event that landed in the coalesce window. refreshPending
+	// guards against scheduling redundant ticks while one is already
+	// in flight. Both start zero; user-input and modal-open paths
+	// still refresh synchronously for immediate visual commit.
+	viewportDirty  bool
+	refreshPending bool
+
 	// markdown is the lazily-built Glamour renderer; rebuilt when
 	// dark/light or width changes. nil until first use.
 	markdown *markdownRenderer
