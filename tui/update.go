@@ -200,16 +200,29 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		// Issue #22: stash the cancel func; log the one-time
 		// system row announcing LiveAgent mode.
 		//
-		// Issue #50: banner text branches on InjectableAgent
-		// capability. When the host also implements Inject the
-		// operator IS driving (their typing feeds the running
-		// stream via InjectableAgent.Inject) — the "observer"
-		// framing is misleading. Pure-observer hosts (LiveAgent
-		// without Inject) keep the original read-only wording.
+		// Issue #50 (revised 2026-07-18): banner text branches on
+		// InjectableAgent capability. Three shapes matter, not two:
+		//
+		//   1. **Read-only observer** (LiveAgent, no Inject) — host
+		//      streams events but rejects operator input. Original
+		//      "Attached as observer" text.
+		//   2. **Live session** (LiveAgent + Inject, autonomous
+		//      producer possibly nil) — the honest framing here is
+		//      "events stream + you can inject", NOT "your messages
+		//      drive the agent." The demo case (2026-07-18) is a
+		//      k8s-event-watcher pushing incident injects
+		//      autonomously while the operator observes and CAN
+		//      inject follow-up prompts — the "you drive" wording
+		//      was actively misleading because most turns weren't
+		//      operator-initiated. New wording is neutral about who
+		//      drives.
+		//
+		// Pure-Inject-without-LiveAgent hosts don't reach this msg
+		// (the msg only fires on LiveAgent construction).
 		m.cancelLiveStream = msg.cancel
 		bannerText := "Attached as observer — agent runs autonomously; events stream below."
 		if _, ok := m.opts.Agent.(InjectableAgent); ok {
-			bannerText = "Live session — your messages drive the agent; events stream as they happen."
+			bannerText = "Attached to live session — events stream below; type to send a message."
 		}
 		m.history.Append(Message{Role: RoleSystem, Text: bannerText})
 		m.refreshViewport()

@@ -195,10 +195,16 @@ func TestUpdate_LiveStreamStartedMsg_LogsAttachedNote(t *testing.T) {
 	}
 }
 
-// Issue #50: hosts that implement InjectableAgent alongside LiveAgent
-// have operator typing feed the running stream — the "observer" framing
-// is wrong for them. The banner text must branch on the capability.
-func TestUpdate_LiveStreamStartedMsg_InjectableAgent_DropsObserverFraming(t *testing.T) {
+// Issue #50 (revised 2026-07-18): hosts that implement InjectableAgent
+// alongside LiveAgent have operator typing feed the running stream —
+// the read-only "observer" framing is wrong for them. But the original
+// "your messages drive the agent" wording was also wrong in the other
+// direction: autonomous producers (k8s-event-watcher, MCP alerts) can
+// push injects independently of the operator, so the operator isn't
+// really "driving" — they're one of several input sources. The banner
+// splits the difference: distinguishes read-only observer from
+// live-with-inject, without overpromising who drives.
+func TestUpdate_LiveStreamStartedMsg_InjectableAgent_ShowsLiveSessionFraming(t *testing.T) {
 	agent := &injectableLiveAgentStub{liveAgentStub: newLiveAgentStub(), injectsOut: make(chan string, 1)}
 	m := NewModel(Options{Agent: agent})
 	m.viewport.SetWidth(80)
@@ -210,10 +216,17 @@ func TestUpdate_LiveStreamStartedMsg_InjectableAgent_DropsObserverFraming(t *tes
 	}
 	last := got.history.Snapshot()[got.history.Len()-1]
 	if strings.Contains(last.Text, "observer") {
-		t.Errorf("InjectableAgent host should not see 'observer' framing, got: %q", last.Text)
+		t.Errorf("InjectableAgent host should not see read-only 'observer' framing, got: %q", last.Text)
 	}
-	if !strings.Contains(last.Text, "Live session") {
-		t.Errorf("expected 'Live session' framing for InjectableAgent host, got: %q", last.Text)
+	if !strings.Contains(last.Text, "live session") {
+		t.Errorf("expected 'live session' framing for InjectableAgent host, got: %q", last.Text)
+	}
+	// Regression signal against the old "your messages drive the
+	// agent" wording — it overstated operator agency when the host's
+	// autonomous producer (k8s-event-watcher, scheduled inject, etc.)
+	// was driving most turns. The revised wording avoids that claim.
+	if strings.Contains(last.Text, "drive the agent") {
+		t.Errorf("banner regressed to 'drive the agent' wording that overpromises operator agency, got: %q", last.Text)
 	}
 }
 
