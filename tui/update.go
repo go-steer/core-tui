@@ -102,6 +102,14 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	switch msg := msg.(type) {
 
 	case tea.WindowSizeMsg:
+		// Bubble Tea can emit multiple WindowSizeMsg during startup
+		// (initial size + terminal-negotiated size); skip if
+		// nothing actually changed so we don't run
+		// rerenderHistoryMarkdown or repaint for no reason.
+		if msg.Width == m.width && msg.Height == m.height {
+			return m, nil
+		}
+		widthChanged := msg.Width != m.width
 		m.width, m.height = msg.Width, msg.Height
 		m.resize()
 		// Cached Glamour Rendered text is width-pinned at the
@@ -110,8 +118,11 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		// clips it (leading whitespace can vanish along with the
 		// first few content chars). Re-render every assistant
 		// message through the new-width Glamour so wrapping
-		// matches the current viewport.
-		m.rerenderHistoryMarkdown()
+		// matches the current viewport. Height-only changes leave
+		// wrapping identical, so skip the O(N) Glamour walk then.
+		if widthChanged {
+			m.rerenderHistoryMarkdown()
+		}
 		m.refreshViewport()
 		return m, nil
 
@@ -225,7 +236,7 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			bannerText = "Attached to live session — events stream below; type to send a message."
 		}
 		m.history.Append(Message{Role: RoleSystem, Text: bannerText})
-		m.refreshViewport()
+		m.markViewportDirty()
 		// Issue #28: route through liveStreamRenderCmd so the
 		// eventListener stays armed. This Msg actually arrives
 		// via the spawnLiveStreamCmd Cmd-result path (not
@@ -258,7 +269,7 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			Role: RoleError,
 			Text: "live stream error: " + msg.err.Error() + " — waiting to reconnect",
 		})
-		m.refreshViewport()
+		m.markViewportDirty()
 		// Issue #28: this Msg ARRIVED via eventListener (it was
 		// pushed onto m.eventCh by startLiveStream's drain
 		// goroutine). Returning only the kick would leave nothing
@@ -279,7 +290,7 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			Role: RoleSystem,
 			Text: "Disconnected from live stream. Press Ctrl+C to quit.",
 		})
-		m.refreshViewport()
+		m.markViewportDirty()
 		// Issue #28: same root cause as liveStreamErrMsg. Even
 		// though the iterator has stopped pushing new events,
 		// m.eventCh may still carry events that were buffered
@@ -293,6 +304,21 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		// the View pass that the modal-setting handler above
 		// needed. Do not change model state here — this msg
 		// must stay a paint-only hint.
+		return m, nil
+	case coalescedRefreshMsg:
+		// The paired paint half of markViewportDirty +
+		// scheduleCoalescedRefresh (see agentcmd.go). Every event
+		// handler that landed inside the last coalesceWindow
+		// shares this one refresh; refreshPending is cleared here
+		// so the NEXT dirty flag schedules a fresh tick. If more
+		// events kept flowing after the tick was scheduled but
+		// before it fired, viewportDirty is still true and gets
+		// serviced here in the same pass.
+		m.refreshPending = false
+		if m.viewportDirty {
+			m.viewportDirty = false
+			m.refreshViewport()
+		}
 		return m, nil
 	case usageMsg:
 		if msg.gen != m.sessionGen {
@@ -489,7 +515,10 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			return m, nil
 		}
 		m.thinkingIdx++
-		m.refreshViewport()
+		m.markViewportDirty()
+		if refresh := m.scheduleCoalescedRefresh(); refresh != nil {
+			return m, tea.Batch(spinnerTick(), refresh)
+		}
 		return m, spinnerTick()
 	case initialPromptMsg:
 		// Options.InitialPrompt lands here exactly once, right after
@@ -1349,7 +1378,7 @@ func (m *Model) applyStreamChunk(msg streamChunkMsg) {
 			m.spinnerActive = false
 		}
 	}
-	m.refreshViewport()
+	m.markViewportDirty()
 }
 
 // applyToolCall handles a toolCallMsg. Dedup by ID (R-CHAT-5),
@@ -1414,7 +1443,7 @@ func (m *Model) applyToolCall(msg toolCallMsg) {
 	})
 	m.activeToolID = m.history.LastID()
 	m.toolActive = true
-	m.refreshViewport()
+	m.markViewportDirty()
 }
 
 // applyToolResult attaches a tool's completion (success result or
@@ -1469,7 +1498,7 @@ func (m *Model) applyToolResult(msg toolResultMsg) {
 	}
 	m.history.SetToolPreview(idx, preview)
 	m.history.SetToolResult(idx, msg.response, msg.err, msg.latencyMs, msg.savings)
-	m.refreshViewport()
+	m.markViewportDirty()
 }
 
 // toolArgHint produces the muted-italic detail that renders after
