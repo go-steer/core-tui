@@ -4,7 +4,7 @@ The wire-format contract between core-tui (consumer) and any server (producer �
 
 **Status:** Phase 1 — additive-only. See [core-tui #40](https://github.com/go-steer/core-tui/issues/40) and [core-agent #115](https://github.com/go-steer/core-agent/issues/115) for the phased-rollout context.
 
-**Protocol version:** `1.2.0`. Bumped on changes per the [Versioning](#versioning) rules below.
+**Protocol version:** `1.4.0`. Bumped on changes per the [Versioning](#versioning) rules below.
 
 ---
 
@@ -42,14 +42,63 @@ Six event types are defined in this protocol version. Each section specifies: wh
 | `protocol_version` | string (semver) | yes | Version the server speaks. Clients compare against the version they implement; see [Versioning](#versioning). |
 | `event_types` | array of strings | yes | Names of event types the server emits on this stream. Clients MUST tolerate unknown names (forward-compat). Servers MAY also list **logical** sub-types that ride on a multiplexed event name (e.g. `stream-chunk` / `tool-call` / `tool-result` carried on the legacy `agent` wire event) so clients can detect capability without inspecting frame internals. |
 | `server` | string | no | Free-form server identifier (e.g. `"core-agent/0.4.2"`). Diagnostic only. |
+| `features` | object (v1.4.0+) | no | Feature-flag map derived from live runtime state. Keys map to booleans; consumers treat absent keys as "off / unknown" and unknown keys as forward-compat additions. See [Feature keys](#feature-keys) below. |
+| `slash_commands` | array of strings (v1.4.0+) | no | Dynamic list of server-side slash-command names accepted at `POST /sessions/.../slash/<name>`. Derived from the agent's capability-interface presence (e.g. `CompactSlashProvider` → `"compact"`), not from a registry table. Clients use this to render only the slashes that will succeed against the connected agent. Absent = client falls back to its hardcoded list. |
+| `agent` | object (v1.4.0+) | no | Producer's own identity — name, version, description, model, provider, url. Consolidates fields previously scattered across `/.well-known/agent-card.json`, `GET /sessions/.../status`, and the free-form `server` banner. Every sub-field is optional; consumers render only what's present. See [`agent`](#capabilitiesagent-v140) below. |
+| `caller_id` | string (v1.4.0+) | no | The resolved caller identity after the server's auth middleware ran. Display hint for the client; the canonical source (with admin flag + auth source discriminator) is `GET /whoami`. Absent when the caller couldn't be resolved. |
+
+#### Feature keys
+
+Suggested initial keys advertised on `features`. Servers MAY add unknown keys; clients MUST tolerate them.
+
+| Key | Meaning |
+|---|---|
+| `multi_session` | Server enforces per-session ACLs (many-session tenancy). |
+| `perms_stream` | Agent supports `/perms/stream` SSE + `/perms/respond` POST for HTTP-driven permission prompts. |
+| `cost_ceiling` | Agent has a per-turn or per-session cost ceiling wired. |
+| `observer_mode` | Producer exposes a LiveAgent observer surface. |
+| `mcp` | Agent has one or more MCP servers declared. |
+| `specialists` | Agent supports `POST /slash/subagent` (subagent spawn). |
+| `cross_daemon` | Server hosts the peer registry — clients can render a multi-daemon fleet picker. |
+| `interrupt` | Agent supports `POST /interrupt` (ESC-to-cancel). |
+
+#### `capabilities.agent` (v1.4.0+)
+
+| Field | Type | Required | Description |
+|---|---|---|---|
+| `name` | string | no | Human-readable agent name (e.g. `"core-agent"`, `"mast"`). Falls back to the first registrant's app name when the agent card doesn't override. |
+| `version` | string | no | Agent version (typically the ldflag-injected build version, e.g. `"v2.8.0-dev"`). |
+| `description` | string | no | One-line summary the agent card publishes and the model sees. |
+| `model` | string | no | Active model identifier (e.g. `"gemini-3.1-pro"`). Same source as `status-update.model`. |
+| `provider` | string | no | Provider routing tag (e.g. `"vertex"`, `"anthropic"`). Reserved; empty on producers that don't advertise a provider yet. |
+| `url` | string | no | Canonical external URL for this agent (from `AgentCardConfig.ExternalURL`). Empty when the server derives URLs per-request from the Host header. |
 
 Example:
 
 ```json
 {
-  "protocol_version": "1.2.0",
+  "protocol_version": "1.4.0",
   "event_types": ["status-update", "usage-update", "inbox", "turn-complete", "turn-error", "stream-chunk", "tool-call", "tool-result"],
-  "server": "core-agent/0.4.2"
+  "server": "core-agent/2.8.0-dev",
+  "features": {
+    "multi_session": true,
+    "perms_stream": true,
+    "mcp": true,
+    "specialists": true,
+    "cross_daemon": false,
+    "interrupt": true,
+    "cost_ceiling": false,
+    "observer_mode": false
+  },
+  "slash_commands": ["btw", "compact", "done", "replan", "subagent"],
+  "agent": {
+    "name": "core-agent",
+    "version": "v2.8.0-dev",
+    "description": "Autonomous coding assistant for the core-agent repository.",
+    "model": "gemini-3.1-pro",
+    "url": "https://agents.example.com/core-agent"
+  },
+  "caller_id": "alice@example.com"
 }
 ```
 
@@ -68,8 +117,9 @@ Example:
 | `perm_mode` | string | no | One of `"default"`, `"acceptEdits"`, `"plan"`, `"bypassPermissions"`. |
 | `turn_state` | string | yes | One of `"idle"`, `"streaming"`, `"awaiting_permission"`, `"awaiting_elicit"`. |
 | `context_pct` | integer | no | 0–100. Context-window fill. Absent if the server can't compute it. |
+| `capabilities` | object (v1.4.0+) | no | Hot capability changes — same shape as the [`capabilities`](#21-capabilities) frame, applied via merge semantics. Any field the server sets updates the consumer's cached capabilities; fields the server omits stay as-is. Example use: an MCP server registers mid-session and `features.mcp` flips true, or a new slash-command provider gets wired. Servers MAY defer emitting this (v1.4.0 producers can skip it and rely on the client re-fetching); consumers MUST tolerate its absence. |
 
-All fields are independently optional except `turn_state`. Clients applying a partial payload MUST merge into local state — fields not present in the event are unchanged.
+All fields are independently optional except `turn_state`. Clients applying a partial payload MUST merge into local state — fields not present in the event are unchanged. Merge extends into nested objects: `capabilities.features` merges key-by-key, so a hot update flipping `features.mcp = true` does NOT clobber previously-advertised `features.perms_stream = true`.
 
 Example:
 
@@ -381,7 +431,7 @@ A complete representative session, viewed from the client side reading the SSE s
 
 ```
 event: capabilities
-data: {"protocol_version":"1.2.0","event_types":["status-update","usage-update","inbox","turn-complete","turn-error","stream-chunk","tool-call","tool-result"],"server":"core-agent/0.4.2"}
+data: {"protocol_version":"1.4.0","event_types":["status-update","usage-update","inbox","turn-complete","turn-error","stream-chunk","tool-call","tool-result"],"server":"core-agent/2.8.0-dev","features":{"multi_session":true,"perms_stream":true,"mcp":true,"specialists":true,"cross_daemon":false,"interrupt":true,"cost_ceiling":false,"observer_mode":false},"slash_commands":["btw","compact","done","replan","subagent"],"agent":{"name":"core-agent","version":"v2.8.0-dev","model":"gemini-3.1-pro"},"caller_id":"alice@example.com"}
 
 event: status-update
 data: {"model":"gemini-2.5-pro","provider":"vertex","perm_mode":"default","turn_state":"idle","context_pct":3}
@@ -437,7 +487,22 @@ Note: `turn-error` does NOT emit a `turn-complete` for the same `prompt_id` (the
 
 ---
 
-## 6. Out of scope
+## 6. Slash-response conventions
+
+The `POST /sessions/.../slash/<name>` endpoints (`compact`, `done`, `btw`, `subagent`, `replan`, and any future providers) return JSON response bodies whose shape is per-slash — see each capability interface's response type in the server's `pkg/attach/state.go`. Two response-body keys are **reserved** on every slash response for renderer negotiation:
+
+| Key | Type | Since | Description |
+|---|---|---|---|
+| `_render` | string | reserved (v1.4.0+) | Advises the client which built-in renderer to use for the response body. Values reserved so far: `"text"` (plain-text pane), `"markdown"` (rendered inline), `"json"` (collapsible JSON tree). Consumers MUST tolerate unknown values and fall back to their default renderer. Producers MAY omit; consumers default to their per-slash convention (e.g. `/compact` → markdown summary). |
+| `_schema` | string \| object | reserved (v0.3.0+ target) | Reserved for schema-driven rendering. When present, points the client at a schema (URL or inline JSON Schema) describing the response body so a generic form/table renderer can display it without per-slash knowledge. No producer emits it in v1.4.0. |
+
+Both keys are additive to any existing per-slash response field. Producers MAY populate them at any point without a protocol bump (they're reserved on the response body, not on the wire event). Consumers that don't understand a value SHOULD fall back to their existing per-slash rendering path.
+
+Rationale: mast-web needs to render slash responses without shipping a hardcoded renderer per producer. Reserving these keys now avoids a future producer stamping them with different semantics and creating a rendering collision.
+
+---
+
+## 7. Out of scope
 
 The following are deliberately NOT specified here:
 
@@ -450,10 +515,11 @@ The following are deliberately NOT specified here:
 
 ---
 
-## 7. Change log
+## 8. Change log
 
 | Version | Date | Change |
 |---|---|---|
+| 1.4.0 | 2026-07-20 | **MINOR.** `capabilities` frame (§2.1) extended with four optional fields — `features` (feature-flag map), `slash_commands` (dynamic list of accepted slash names), `agent` (name/version/description/model/provider/url identity block), and `caller_id` (resolved caller identity display hint). Enables backend-agnostic clients (mast-web) to render without a code change per producer. `status-update` (§2.2) gained an optional `capabilities` merge field spec'd for hot capability changes (no producer emits it in v1.4.0 — reserved). New §6 documents reserved `_render` / `_schema` keys on slash-response bodies. New `GET /whoami` endpoint (unauthenticated-safe) returns the resolved caller identity + admin + auth source. Closes go-steer/core-agent#329, sibling to go-steer/mast-web#12. Fully backward-compatible — pre-v1.4.0 servers omit the new fields, pre-v1.4.0 clients ignore them. |
 | 1.3.0 | 2026-07-17 | **MINOR.** Added optional `savings` sidecar object on `tool-result` response payloads (§2.7) carrying the digest wrap's per-call byte / token reduction, router path, and (agentic path only) subagent usage. Closes go-steer/core-agent#223 Phase 4 tier 1 (per-tool inline chip) + tier 2 (detail-overlay chip). Session-level cumulative rendering (`/stats` block) tracked separately. Same response-map sidecar channel as v1.2.0's `latency_ms`. Fully backward-compatible — pre-v1.3.0 servers omit the object, pre-v1.3.0 clients ignore it. |
 | 1.2.0 | 2026-07-16 | **MINOR.** Added optional `latency_ms` sidecar key on `tool-result` response payloads (§2.7 — formally documented in this revision). Closes go-steer/core-agent#277 (emit) + core-tui#60 (consume) — completes core-tui#52 tier 3 (inline `[2.4s]` per tool row + latency chip in the expand-single detail overlay). Sidecar rides the response map itself because ADK's `tool.Run` has no write access to the enclosing `session.Event.CustomMetadata`; §2.7 documents the finding for future sidecars. Fully backward-compatible — pre-v1.2.0 servers omit the field, pre-v1.2.0 clients ignore it. |
 | 1.1.1 | 2026-07-15 | **PATCH.** Added optional `usage-update.last_turn` object (tokens_in / tokens_in_cached / tokens_out / cost_usd / model) carrying authoritative per-turn cost. Complements the v1.1.0 `cost_usd`-on-`turn-complete`-optional demotion so observer-mode (LiveAgent) clients have a source for per-turn footer cost. Closes core-tui #57. Fully backward-compatible — pre-v1.1.1 servers omit the field, pre-v1.1.1 clients ignore it. |
