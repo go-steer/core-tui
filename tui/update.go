@@ -41,6 +41,13 @@ func (m Model) Init() tea.Cmd {
 		m.elicitListener(),
 		m.notifyListener(),
 	}
+	// Prime the render-path host cache (see host_snapshot.go) so the
+	// status header reads model/provider/usage from a snapshot refreshed
+	// off the event loop instead of calling the host from View(). nil
+	// when the host implements neither capability.
+	if c := m.refreshHostSnapshotCmd(); c != nil {
+		cmds = append(cmds, c)
+	}
 	// Issue #22: LiveAgent mode spawns the single long-lived drain
 	// goroutine at startup so autonomous activity reaches the
 	// chat view even before the operator types anything. The
@@ -408,6 +415,34 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			m.history.StampLatestAssistantFooter(lt.Model, m.currentUsage, lt.CostUSD, 0)
 		}
 		return m, m.liveStreamRenderCmd()
+	case hostSnapshotMsg:
+		// Off-loop host-capability refresh landed (see host_snapshot.go).
+		// Drop stale generations, adopt the snapshot, and re-arm the tick
+		// so the render-path cache keeps refreshing without ever calling
+		// the host from View().
+		if msg.gen != m.sessionGen {
+			return m, nil
+		}
+		providerChanged := m.hostSnap.provider != msg.snap.provider
+		m.hostSnap = msg.snap
+		// Under AutoProviderTheme the palette follows the provider, which
+		// now arrives via this cache rather than a synchronous Status()
+		// call. Re-resolve styles when the cached provider changes so the
+		// theme still flips (push-mode does the same in statusUpdateMsg).
+		// Skipped when push already owns the provider tag.
+		if providerChanged && m.opts.AutoProviderTheme && m.pushedProvider == "" {
+			m.refreshTheme()
+			m.refreshViewport()
+		}
+		return m, hostSnapshotTick(m.sessionGen)
+	case hostSnapshotTickMsg:
+		// Tick fired — issue the next off-loop refresh. Stale ticks from a
+		// retired session are dropped (applySwitchTarget starts a fresh
+		// cycle for the new generation).
+		if msg.gen != m.sessionGen {
+			return m, nil
+		}
+		return m, m.refreshHostSnapshotCmd()
 	case inboxStateMsg:
 		if msg.gen != m.sessionGen {
 			return m, m.eventListener()
@@ -1860,6 +1895,7 @@ func (m *Model) applySwitchTarget(tgt *SwitchTarget) tea.Cmd {
 	m.sessionUsage = nil
 	m.pushedProvider = ""
 	m.pushedContextPct = nil
+	m.hostSnap = hostSnapshot{}
 	m.liveDisconnected = false
 	m.liveReadOnlyNoted = false
 	m.liveLastPartialAt = time.Time{}
@@ -1925,7 +1961,7 @@ func (m *Model) applySwitchTarget(tgt *SwitchTarget) tea.Cmd {
 	// goroutines that were reading from replaced channels are
 	// harmless leaks (no future traffic → GC on program exit;
 	// same pattern accepted for LiveAgent teardown).
-	cmds := make([]tea.Cmd, 0, 6)
+	cmds := make([]tea.Cmd, 0, 7)
 	if c := m.eventListener(); c != nil {
 		cmds = append(cmds, c)
 	}
@@ -1945,6 +1981,12 @@ func (m *Model) applySwitchTarget(tgt *SwitchTarget) tea.Cmd {
 		if la, ok := m.opts.Agent.(LiveAgent); ok {
 			cmds = append(cmds, m.spawnLiveStreamCmd(la))
 		}
+	}
+	// Restart the render-path host cache refresh cycle for the new
+	// session (host_snapshot.go). The outgoing cycle's straggler tick is
+	// dropped by the gen guard in Update.
+	if c := m.refreshHostSnapshotCmd(); c != nil {
+		cmds = append(cmds, c)
 	}
 	if len(cmds) == 0 {
 		return nil

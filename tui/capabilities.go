@@ -177,6 +177,13 @@ type SubagentInfo struct {
 // leave model name + state for the TUI to derive from Options;
 // implement StatusReporter when the agent has richer state
 // (deferred / waiting / etc.) to surface.
+//
+// Status() must be safe for concurrent calls and must not block the
+// caller for long: the TUI refreshes the status header off its event
+// loop (see host_snapshot.go), so a slow implementation stalls only a
+// background goroutine — but a panicking or data-racy one still breaks
+// the TUI. Return cached/last-known state rather than doing unbounded
+// I/O inline.
 type StatusReporter interface {
 	Status() Status
 }
@@ -192,6 +199,10 @@ type Status struct {
 // session usage accounting (R-USE-1 / R-USE-3). The TUI snapshots
 // values on each turn end to render the per-turn footer and the
 // /stats output.
+//
+// Like StatusReporter, these accessors must be safe for concurrent
+// calls and should return cached values without blocking — the TUI
+// pulls them off its event loop to keep View() non-blocking.
 type UsageTracker interface {
 	SessionTotals() Usage           // input + output tokens, cumulative
 	SessionCostUSD() float64        // accumulated dollar spend

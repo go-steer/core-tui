@@ -45,6 +45,14 @@ func Run(ctx context.Context, opts Options) error {
 	// Mouse mode is set declaratively on the View (see view.go); no
 	// Program-level option needed in bubbletea v2.
 	p := tea.NewProgram(m, tea.WithContext(ctx))
+
+	// Wedge-recovery escape hatch: SIGQUIT (Ctrl-\) dumps goroutines
+	// and restores the terminal even when the event loop is frozen and
+	// Ctrl+C is dead (see installEscapeHatch). Installed before p.Run()
+	// so it captures the cooked termios prior to bubble-tea's raw-mode
+	// switch; stopped on clean exit so the handler doesn't linger.
+	stopEscape := installEscapeHatch(os.Stdin.Fd(), os.Stdout)
+	defer stopEscape()
 	// Issue #30: close the Notifier on exit so the notifyListener
 	// goroutine returns cleanly (channel send returns ok=false).
 	// Notify after exit silently drops via the closed-flag guard
