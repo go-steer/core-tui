@@ -146,6 +146,14 @@ type Model struct {
 	pushedContextPct *int         // most recent push-status context-pct (pointer so 0 ≠ absent)
 	sessionUsage     *UsageUpdate // most recent cumulative usage snapshot from a usage-update event
 
+	// hostSnap caches the StatusReporter + UsageTracker reads that the
+	// status header used to pull on every paint, refreshed off the event
+	// loop (see host_snapshot.go). The render-path helpers read this
+	// instead of calling the host so a slow/wedged host method can never
+	// block View() and freeze the event loop. Zero value until the first
+	// refresh lands; the helpers fall back to placeholders in that window.
+	hostSnap hostSnapshot
+
 	// AsyncSlashProvider in-flight state (issue #13). The TUI used
 	// to dispatch /btw / /compact and sit silent for the entire 1-10s
 	// model call; inFlightSlash carries the running slash's name +
@@ -562,18 +570,15 @@ func (m Model) displayCwd() string {
 
 // displayProvider extracts the provider tag from the host. Push-
 // mode (issue #40) takes precedence — when a status-update event
-// has populated m.pushedProvider, that wins over the legacy
-// StatusReporter pull. Otherwise falls back to the StatusReporter
-// capability, or empty when neither path has surfaced a provider.
+// has populated m.pushedProvider, that wins over the cached
+// StatusReporter read. Otherwise falls back to the host snapshot
+// (see host_snapshot.go), or empty when neither path has surfaced a
+// provider. Reads only cached state so it's safe from View().
 func (m Model) displayProvider() string {
 	if m.pushedProvider != "" {
 		return m.pushedProvider
 	}
-	reporter, ok := m.opts.Agent.(StatusReporter)
-	if !ok {
-		return ""
-	}
-	return reporter.Status().Provider
+	return m.hostSnap.provider
 }
 
 // refreshTheme re-resolves Styles (picking up the active provider
@@ -649,17 +654,17 @@ func (m Model) resolveStyles(dark bool) Styles {
 // displayModelName picks the best model identifier to surface on the
 // status header/sidebar. Order:
 //
-//  1. StatusReporter.Status().ModelName  — the host's authoritative
-//     read of the live model (preferred; updates on /model swap).
-//  2. m.currentModel                     — set per-turn from streamed
-//     Event.Model when the host populates it; empty before any turn.
-//  3. "(model not set)"                  — placeholder so the chip
-//     isn't blank when neither source has fired yet.
+//  1. hostSnap.modelName  — the cached StatusReporter read of the live
+//     model (preferred; refreshed off-loop, updates on /model swap).
+//  2. m.currentModel      — set per-turn from streamed Event.Model when
+//     the host populates it; empty before any turn.
+//  3. "(model not set)"   — placeholder so the chip isn't blank when
+//     neither source has fired yet.
+//
+// Reads only cached state so it never calls the host from View().
 func (m Model) displayModelName() string {
-	if reporter, ok := m.opts.Agent.(StatusReporter); ok {
-		if s := reporter.Status(); s.ModelName != "" {
-			return s.ModelName
-		}
+	if m.hostSnap.modelName != "" {
+		return m.hostSnap.modelName
 	}
 	if m.currentModel != "" {
 		return m.currentModel
@@ -672,13 +677,13 @@ func (m Model) displayModelName() string {
 // wired (the header just drops the trailing segment rather than
 // rendering placeholder zeros that look like real data).
 func (m Model) usageSummaryOneLine() string {
-	if m.opts.UsageTracker == nil {
+	if m.opts.UsageTracker == nil || !m.hostSnap.hasUsage {
 		return ""
 	}
-	t := m.opts.UsageTracker.SessionTotals()
-	cost := m.opts.UsageTracker.SessionCostUSD()
-	used := m.opts.UsageTracker.ContextWindowUsed()
-	size := m.opts.UsageTracker.ContextWindowSize()
+	t := m.hostSnap.totals
+	cost := m.hostSnap.cost
+	used := m.hostSnap.winUsed
+	size := m.hostSnap.winSize
 	sep := " " + GlyphSeparator + " "
 	out := formatKTokens(t.InputTokens) + " in" + sep + formatKTokens(t.OutputTokens) + " out" + sep + fmt.Sprintf("$%.4f", cost)
 	if size > 0 {
@@ -694,13 +699,13 @@ func (m Model) usageSummaryOneLine() string {
 // just "$X" when context window is unknown). Empty pair when no
 // UsageTracker is wired.
 func (m Model) usageSummaryStacked() (string, string) {
-	if m.opts.UsageTracker == nil {
+	if m.opts.UsageTracker == nil || !m.hostSnap.hasUsage {
 		return "", ""
 	}
-	t := m.opts.UsageTracker.SessionTotals()
-	cost := m.opts.UsageTracker.SessionCostUSD()
-	used := m.opts.UsageTracker.ContextWindowUsed()
-	size := m.opts.UsageTracker.ContextWindowSize()
+	t := m.hostSnap.totals
+	cost := m.hostSnap.cost
+	used := m.hostSnap.winUsed
+	size := m.hostSnap.winSize
 	sep := " " + GlyphSeparator + " "
 	line1 := formatKTokens(t.InputTokens) + " in" + sep + formatKTokens(t.OutputTokens) + " out"
 	line2 := fmt.Sprintf("$%.4f", cost)
