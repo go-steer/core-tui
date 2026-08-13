@@ -66,6 +66,55 @@ type SessionInfo struct {
 	Display     string // optional; defaults to ID when empty
 	Description string // optional dim subtitle
 	Current     bool   // marks the currently-attached row
+
+	// Input, when non-nil, turns this row into an ACTION row
+	// rather than a session row (issue #56): Enter opens a
+	// single-line text-input dialog on top of the picker instead
+	// of calling SwitchToSession. The canonical use is a
+	// "+ Attach to endpoint…" row on a multi-daemon host where
+	// the target isn't enumerable — the operator types it.
+	//
+	// Action rows are never marked "(current)" and their ID is
+	// never passed to SwitchToSession; the row's own Submit
+	// closure produces the SwitchTarget. `/switch <id>` naming an
+	// action row opens the same dialog.
+	Input *SessionInput
+}
+
+// SessionInput describes the text-input dialog a SessionInfo action
+// row opens on Enter, plus the closure that turns the typed value
+// into a SwitchTarget. Submit is the only required field.
+//
+// Keeping Submit on the row (rather than routing back through
+// SwitchToSession with a magic ID) means the host writes the
+// "what does this row do" logic in exactly one place, and core-tui
+// never has to guess which IDs are real sessions.
+type SessionInput struct {
+	// Title is the dialog title bar. Empty defaults to the row's
+	// display name.
+	Title string
+
+	// Prompt is the question line above the input box, e.g.
+	// "Daemon URL:".
+	Prompt string
+
+	// Placeholder is the dim hint shown while the box is empty,
+	// e.g. "http://host:7778".
+	Placeholder string
+
+	// Initial pre-fills the box.
+	Initial string
+
+	// Validate is called with the trimmed value on Enter. A
+	// non-empty return renders inline under the box and keeps the
+	// dialog open. Nil accepts anything (including "").
+	Validate func(value string) string
+
+	// Submit turns the trimmed value into a SwitchTarget. A
+	// non-nil error surfaces as a RoleError row and closes both
+	// dialogs; the current session stays attached. Same contract
+	// as SessionSwitcher.SwitchToSession — see SwitchTarget.
+	Submit func(value string) (SwitchTarget, error)
 }
 
 // Reloader backs /reload (R-RELOAD-1 / R-RELOAD-2).

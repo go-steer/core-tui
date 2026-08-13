@@ -62,7 +62,21 @@ func (d *sessionPickerDialog) HandleKey(stroke string, m *Model) DialogAction {
 		d.idx = (d.idx + 1) % len(sessions)
 		return DialogAction{Consumed: true}
 	case "enter":
+		if d.idx >= len(sessions) {
+			d.idx = len(sessions) - 1
+		}
+		if d.idx < 0 {
+			d.idx = 0
+		}
 		pick := sessions[d.idx]
+		// Action row (issue #56) — hand off to a text-input dialog
+		// stacked on top of this one instead of switching. We stay
+		// open underneath so esc on the input returns the operator
+		// to the list rather than dumping them back to chat.
+		if pick.Input != nil {
+			m.overlayStack.Open(newSessionInputDialog(pick))
+			return DialogAction{Consumed: true}
+		}
 		// Picking the currently-attached row is a no-op — nothing
 		// to detach from. Close cleanly without wiping history.
 		if pick.Current {
@@ -125,11 +139,19 @@ func (d *sessionPickerDialog) Render(totalWidth int, m *Model) string {
 					marker = "> "
 				}
 				row := marker + disp
-				if s.ID != disp {
-					row += m.styles.Muted.Render("  (" + s.ID + ")")
-				}
-				if s.Current {
-					row += "  " + m.styles.Muted.Render("(current)")
+				// Action rows (issue #56) carry no session identity
+				// — showing "(id)" or "(current)" next to
+				// "+ Attach to endpoint…" would read as a session
+				// that exists. Their affordance is the ▸ chevron.
+				if s.Input != nil {
+					row += "  " + m.styles.Muted.Render(GlyphCollapsed)
+				} else {
+					if s.ID != disp {
+						row += m.styles.Muted.Render("  (" + s.ID + ")")
+					}
+					if s.Current {
+						row += "  " + m.styles.Muted.Render("(current)")
+					}
 				}
 				if s.Description != "" {
 					row += "  " + m.styles.Muted.Render(s.Description)
@@ -150,6 +172,59 @@ func (d *sessionPickerDialog) Render(totalWidth int, m *Model) string {
 		Width:  width,
 		Styles: m.styles,
 	}.Render()
+}
+
+// sessionInputDialogID is the text-input dialog the picker stacks
+// on top of itself for SessionInfo action rows (issue #56).
+const sessionInputDialogID = "session-input"
+
+// newSessionInputDialog builds the text-input dialog for a
+// SessionInfo action row. The submit closure runs the row's own
+// Submit, then closes BOTH this dialog and the picker underneath so
+// a successful attach lands the operator straight in the new
+// session. Failures also close both and leave a RoleError row —
+// same shape as a failed SwitchToSession from the list.
+func newSessionInputDialog(row SessionInfo) Dialog {
+	in := row.Input
+	title := in.Title
+	if title == "" {
+		title = row.Display
+	}
+	if title == "" {
+		title = "Enter a Value"
+	}
+	return NewTextInputDialog(TextInputConfig{
+		ID:          sessionInputDialogID,
+		Title:       title,
+		Prompt:      in.Prompt,
+		Placeholder: in.Placeholder,
+		Initial:     in.Initial,
+		Validate:    in.Validate,
+		Footer:      "enter attach " + GlyphSeparator + " esc back",
+		Submit: func(value string, m *Model) DialogAction {
+			// Close the picker underneath first; the Overlay pops
+			// THIS dialog itself when we return Close: true.
+			closeBoth := func() { m.overlayStack.Close(sessionPickerDialogID) }
+			fail := func(text string) DialogAction {
+				closeBoth()
+				m.history.Append(Message{Role: RoleError, Text: "/switch: " + text})
+				m.refreshViewport()
+				return DialogAction{Consumed: true, Close: true}
+			}
+			if in.Submit == nil {
+				return fail("session row " + row.ID + " has no Submit closure")
+			}
+			tgt, err := in.Submit(value)
+			if err != nil {
+				return fail(err.Error())
+			}
+			if tgt.Agent == nil {
+				return fail("SessionInput.Submit returned nil Agent")
+			}
+			closeBoth()
+			return DialogAction{Consumed: true, Close: true, Cmd: m.applySwitchTarget(&tgt)}
+		},
+	})
 }
 
 // Keep lipgloss import happy — RenderContext pulls it in via

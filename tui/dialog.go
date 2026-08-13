@@ -53,6 +53,27 @@ type Dialog interface {
 	Render(width int, m *Model) string
 }
 
+// KeyMsgDialog is an optional extension of Dialog for modals whose
+// body owns a real text-editing widget (issue #56's TextInputDialog
+// is the first). Dialog.HandleKey receives a NORMALIZED stroke
+// ("ctrl+u", "shift+enter") which is lossy for an input widget: it
+// drops Key.Text — the grapheme(s) the terminal actually delivered,
+// which is exactly what a textinput wants to insert — and it can't
+// carry a bracketed paste.
+//
+// Dialogs that implement this interface get the raw
+// tea.KeyPressMsg from Overlay.HandleKeyMsg; every other Dialog
+// keeps the stroke-string contract untouched. Implementations must
+// still provide HandleKey (Dialog is embedded) — the convention is
+// to synthesize a KeyPressMsg from the stroke and delegate, so both
+// entry points stay behaviorally identical.
+type KeyMsgDialog interface {
+	Dialog
+
+	// HandleKeyMsg is the full-fidelity twin of HandleKey.
+	HandleKeyMsg(msg tea.KeyPressMsg, m *Model) DialogAction
+}
+
 // DialogAction is the return shape of HandleKey. Composite so
 // dialogs can signal "consume key" + "close me" + "emit a Cmd"
 // (e.g. ThemeChangedMsg from the theme picker) in one go.
@@ -140,6 +161,28 @@ func (o *Overlay) HandleKey(stroke string, m *Model) (consumed bool, cmd tea.Cmd
 		return false, nil
 	}
 	act := front.HandleKey(stroke, m)
+	if act.Close {
+		o.CloseFront()
+	}
+	return act.Consumed, act.Cmd
+}
+
+// HandleKeyMsg is HandleKey with the raw keystroke preserved. When
+// the front-most dialog implements KeyMsgDialog it gets the full
+// tea.KeyPressMsg; otherwise we fall back to the normalized-stroke
+// contract. This is the entry point handleKey uses — HandleKey
+// stays for callers that only hold a stroke string.
+func (o *Overlay) HandleKeyMsg(msg tea.KeyPressMsg, m *Model) (consumed bool, cmd tea.Cmd) {
+	front := o.Front()
+	if front == nil {
+		return false, nil
+	}
+	var act DialogAction
+	if kd, ok := front.(KeyMsgDialog); ok {
+		act = kd.HandleKeyMsg(msg, m)
+	} else {
+		act = front.HandleKey(msg.String(), m)
+	}
 	if act.Close {
 		o.CloseFront()
 	}

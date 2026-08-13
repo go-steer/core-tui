@@ -232,6 +232,20 @@ func (m Model) dispatchBuiltinSlash(name, args string) (bool, tea.Model, tea.Cmd
 			m.input.Reset()
 			return true, m, nil
 		}
+		// `/switch <id>` naming an action row (issue #56) opens the
+		// row's text-input dialog rather than treating the row ID
+		// as a session — the host's SwitchToSession has never heard
+		// of that ID.
+		for _, s := range switcher.Sessions() {
+			if s.ID != args || s.Input == nil {
+				continue
+			}
+			if !m.overlayStack.HasID(sessionInputDialogID) {
+				m.overlayStack.Open(newSessionInputDialog(s))
+			}
+			m.input.Reset()
+			return true, m, nil
+		}
 		// `/switch <id>` — scripted / muscle-memory direct-jump.
 		tgt, err := switcher.SwitchToSession(args)
 		if err != nil {
