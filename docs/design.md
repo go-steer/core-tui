@@ -248,7 +248,27 @@ type SessionSwitcher interface {
 type SessionInfo struct {
     ID, Display, Description string
     Current                  bool
+    // Input (issue #56) turns the row into an ACTION row: Enter
+    // opens a single-line text-input Dialog stacked on the picker
+    // and the row's own Submit closure produces the SwitchTarget,
+    // so SwitchToSession never sees a synthetic ID. Backs the
+    // "+ Attach to endpoint…" row on multi-daemon hosts.
+    Input *SessionInput
 }
+type SessionInput struct {
+    Title, Prompt, Placeholder, Initial string
+    Validate func(value string) string            // "" = valid
+    Submit   func(value string) (SwitchTarget, error)
+}
+
+// The primitive behind it is a general one — any Dialog can stack a
+// text prompt on top of itself:
+//
+//   NewTextInputDialog(TextInputConfig{...}) Dialog
+//
+// Dialogs that own a text widget implement KeyMsgDialog (optional
+// extension of Dialog) to receive the raw tea.KeyPressMsg instead
+// of the normalized stroke string.
 
 // SwitchTarget is also reachable via SlashResult.SwitchTo, so any
 // SlashProvider / AsyncSlashProvider can request an Agent swap

@@ -28,6 +28,9 @@
 //	ctrl+x          open the tool-call detail overlay (core-tui #52)
 //	ctrl+y          open the (sample) permission modal
 //	ctrl+e          open the (sample) MCP elicitation form
+//	/switch         open the session picker; its "+ Attach to
+//	                endpoint…" row demos the text-input dialog
+//	                (core-tui #56)
 //	esc             close any open modal
 //
 // Flags:
@@ -41,6 +44,7 @@ import (
 	"flag"
 	"fmt"
 	"os"
+	"strings"
 	"time"
 
 	"github.com/go-steer/core-tui/tui"
@@ -118,6 +122,59 @@ func demoElicitAfter(e tui.Elicitor, delay time.Duration) {
 			{Name: "visibility", Type: tui.ElicitFieldEnum, EnumChoices: []string{"public", "private", "internal"}, Default: "private"},
 		},
 	})
+}
+
+// Sessions implements tui.SessionSwitcher. Two fake sessions plus
+// the action row from core-tui #56: a row carrying SessionInput is
+// rendered with a ▸ chevron and, on Enter, opens a single-line
+// text-input dialog stacked on the picker instead of switching. The
+// typed value goes to SessionInput.Submit, which returns the
+// SwitchTarget — no magic IDs round-tripping through
+// SwitchToSession. A real multi-daemon host dials the URL here.
+func (demoAgent) Sessions() []tui.SessionInfo {
+	return []tui.SessionInfo{
+		{ID: "local", Display: "local", Description: "in-process scripted agent", Current: true},
+		{ID: "staging", Display: "staging", Description: "fake remote daemon"},
+		{
+			ID:      "attach",
+			Display: "+ Attach to endpoint…",
+			Input: &tui.SessionInput{
+				Title:       "Attach to Endpoint",
+				Prompt:      "Daemon URL:",
+				Placeholder: "http://otherhost:7778",
+				Validate: func(v string) string {
+					if v == "" {
+						return "endpoint is required"
+					}
+					if !strings.HasPrefix(v, "http://") && !strings.HasPrefix(v, "https://") {
+						return "endpoint must start with http:// or https://"
+					}
+					return ""
+				},
+				Submit: func(v string) (tui.SwitchTarget, error) {
+					return tui.SwitchTarget{
+						Agent: demoAgent{Agent: testagent.NewScripted(testagent.CodingDemo())},
+						Note:  "Attached to " + v + " (demo — nothing was actually dialed)",
+					}, nil
+				},
+			},
+		},
+	}
+}
+
+// SwitchToSession implements tui.SessionSwitcher for the plain
+// (non-action) rows. Hands back a fresh scripted agent so the demo
+// shows the history wipe + re-paint. Action-row IDs never land here
+// — that's the point of SessionInput.Submit — so an unknown ID is a
+// real error and demos the RoleError path.
+func (demoAgent) SwitchToSession(id string) (tui.SwitchTarget, error) {
+	if id != "local" && id != "staging" {
+		return tui.SwitchTarget{}, fmt.Errorf("unknown session %q", id)
+	}
+	return tui.SwitchTarget{
+		Agent: demoAgent{Agent: testagent.NewScripted(testagent.CodingDemo())},
+		Note:  "Attached to session " + id,
+	}, nil
 }
 
 func (demoAgent) SlashCommands() []tui.SlashCommandSpec {
@@ -203,7 +260,8 @@ func seededConversation() []tui.Message {
 			Role: tui.RoleSystem,
 			Text: "Visual preview — type ? for the full keymap. Try: / for slash palette · " +
 				"@ for file palette · ctrl+g model · ctrl+y permission · ctrl+e elicit · " +
-				"ctrl+b toggle layout · shift+tab cycle perm-mode · /btw <q> for a side-answer modal. " +
+				"ctrl+b toggle layout · shift+tab cycle perm-mode · /btw <q> for a side-answer modal · " +
+				"/switch for the session picker (its last row types in an endpoint). " +
 				"Press enter to start a streaming turn; type ahead and press enter again to " +
 				"queue follow-up prompts — they auto-fire as each turn ends.",
 		},

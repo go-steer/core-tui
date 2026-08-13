@@ -153,6 +153,25 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	case tea.KeyPressMsg:
 		return m.handleKey(msg)
 
+	case tea.PasteMsg:
+		// Bracketed paste never goes through handleKey, so without
+		// this a paste while a text-input Dialog is open would land
+		// in the chat textarea BEHIND the modal — the single most
+		// likely operator move at an "Attach to endpoint (URL):"
+		// prompt. Route it to the front dialog as a synthetic
+		// key press carrying the whole run in Key.Text. Non-input
+		// dialogs (the pickers) don't implement KeyMsgDialog, so
+		// they never see it and the paste falls through as before.
+		if _, ok := m.overlayStack.Front().(KeyMsgDialog); ok {
+			if key, ok := pasteKeyMsg(msg.Content); ok {
+				if consumed, cmd := m.overlayStack.HandleKeyMsg(key, &m); consumed {
+					m.refreshViewport()
+					return m, cmd
+				}
+			}
+			return m, nil
+		}
+
 	case streamChunkMsg:
 		// Straggler from an outgoing session (issue #48 / #53) —
 		// don't let it bleed into the new session's assistant
@@ -736,8 +755,17 @@ func (m Model) handleKey(msg tea.KeyPressMsg) (tea.Model, tea.Cmd) {
 			m.refreshViewport()
 			return m, nil
 		}
-		// Esc closes the front-most Dialog overlay (model picker).
+		// Esc goes to the front-most Dialog first so it can do
+		// cancel-time work (the theme picker restores the palette
+		// it previewed; a nested text input pops back to its
+		// parent picker). Dialogs all return Consumed+Close for
+		// esc; the CloseFront below is the fallback for one that
+		// declines to handle it.
 		if m.overlayStack.HasDialogs() {
+			if consumed, cmd := m.overlayStack.HandleKeyMsg(msg, &m); consumed {
+				m.refreshViewport()
+				return m, cmd
+			}
 			m.overlayStack.CloseFront()
 			m.refreshViewport()
 			return m, nil
@@ -836,7 +864,7 @@ func (m Model) handleKey(msg tea.KeyPressMsg) (tea.Model, tea.Cmd) {
 	// Cmd is dialogs' channel for emitting outbound msgs (e.g.
 	// theme picker fires ThemeChangedMsg here on commit).
 	if m.overlayStack.HasDialogs() {
-		if consumed, cmd := m.overlayStack.HandleKey(stroke, &m); consumed {
+		if consumed, cmd := m.overlayStack.HandleKeyMsg(msg, &m); consumed {
 			m.refreshViewport()
 			return m, cmd
 		}
