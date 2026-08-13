@@ -127,7 +127,7 @@ func builtinSlashItems() []paletteItem {
 		{Name: "resume", Description: "list / load a saved session transcript", Available: true},
 		{Name: "skills", Description: "loaded skill bundles", Available: true},
 		{Name: "stats", Description: "per-turn + session usage totals", Available: true},
-		{Name: "subagents", Description: "list background subagents", Available: true},
+		{Name: "subagents", Display: "/subagents [<name>]", Description: "list subagents / open one's report + turn log", Available: true},
 		{Name: "switch", Display: "/switch, /sess", Description: "open session picker / attach to <id> in place", Available: true},
 		{Name: "theme", Description: "open theme picker / switch theme", Available: true},
 		{Name: "tools", Description: "list tools and gate state", Available: true},

@@ -16,6 +16,9 @@ package tui
 
 import (
 	"context"
+	"errors"
+	"fmt"
+	"strings"
 	"time"
 )
 
@@ -219,6 +222,134 @@ type SubagentInfo struct {
 	Status     string // "running" / "done" / "failed" / "paused"
 	LastReport string // most recent alert / completion text (truncated)
 	StartedAt  time.Time
+}
+
+// SubagentEventReader backs the subagent turn drill-down (issue #71):
+// what a subagent actually DID, not just its name, status, and final
+// report. Hosts that keep a per-subagent turn log implement it; the
+// canonical one is core-agent's
+// GET /sessions/{id}/agents/{name}/events.
+//
+// Two surfaces consume it, both off the render path:
+//
+//   - `/subagents <name>` opens a detail overlay — the untruncated
+//     report (issue #70) above a scrollable turn log.
+//   - A running SYNC subagent's tool row grows a live preview block
+//     underneath it, tailed while the call is in flight, which
+//     collapses to a one-line summary when the result lands.
+//
+// Contract:
+//
+//   - Paged and cursored. since is a seq cursor; 0 means "from the
+//     start". Return the page plus the cursor to resume from. The
+//     tail poller calls this once a second with the previous
+//     NextSince, so an implementation that ignores since will make
+//     the TUI re-render the whole log every tick.
+//   - Honor ctx. The TUI always passes a bounded one and discards
+//     late results; a blocking implementation parks a background
+//     goroutine, never the event loop.
+//   - Report an unresolvable name as a *SubagentNotFoundError rather
+//     than an empty page, so the UI can say "no such subagent, here
+//     are the ones there are" instead of showing a plausible-looking
+//     empty log. An empty page means "this subagent has recorded no
+//     turns yet", which is a different and legitimate answer.
+type SubagentEventReader interface {
+	SubagentEvents(ctx context.Context, name string, since int64) (SubagentEventPage, error)
+}
+
+// SubagentEventPage is one page of a subagent's inner turns.
+type SubagentEventPage struct {
+	// Events are the turns in chronological order.
+	Events []SubagentEvent
+
+	// NextSince is the cursor to pass back to fetch what comes
+	// after this page. Hosts that can't produce a cursor may leave
+	// it 0; the TUI then de-duplicates by Seq and re-reads from the
+	// start each poll, which works but costs more.
+	NextSince int64
+
+	// Truncated reports that a page limit cut this response short
+	// and there is more to fetch immediately from NextSince.
+	Truncated bool
+}
+
+// SubagentEvent is one turn inside a subagent: what it said, what it
+// called, and what came back. Every field is optional — a turn that
+// only calls a tool has no Text, and a turn that only speaks has no
+// calls.
+type SubagentEvent struct {
+	// Seq is the host's monotonic ordering key, also used to
+	// de-duplicate across overlapping pages. 0 when the host has no
+	// sequence number, in which case the TUI falls back to
+	// append-in-arrival-order.
+	Seq int64
+
+	// Timestamp is when the turn was recorded; zero suppresses the
+	// time column.
+	Timestamp time.Time
+
+	// Author is who produced the turn — the model, the user proxy,
+	// a tool name, whatever vocabulary the host uses.
+	Author string
+
+	// Text is the turn's prose (model output, a report body).
+	Text string
+
+	// ToolCalls / ToolResults are the structured tool traffic. Args
+	// and Response are the raw maps, same shape as ToolCall /
+	// ToolResult on the streaming surface — the TUI does its own
+	// summarizing so subagent rows read like the parent's.
+	ToolCalls   []SubagentToolCall
+	ToolResults []SubagentToolResult
+}
+
+// SubagentToolCall is one tool invocation inside a subagent turn.
+type SubagentToolCall struct {
+	ID   string
+	Name string
+	Args map[string]any
+}
+
+// SubagentToolResult is one tool result inside a subagent turn.
+type SubagentToolResult struct {
+	ID       string
+	Name     string
+	Response map[string]any
+	Error    string
+}
+
+// SubagentNotFoundError is what a SubagentEventReader returns for a
+// name it cannot resolve. Available carries the names that WOULD
+// resolve, so the UI can name them instead of leaving the operator to
+// guess at a spelling.
+//
+// The distinction this type exists to preserve: "no such subagent" is
+// not "this subagent did nothing". A reader that flattens the two
+// into an empty page makes the TUI render a convincing empty turn log
+// for a typo — the exact failure go-steer/core-agent#694 fixed on the
+// server side.
+type SubagentNotFoundError struct {
+	Name      string
+	Available []string
+}
+
+func (e *SubagentNotFoundError) Error() string {
+	if len(e.Available) == 0 {
+		return fmt.Sprintf("no subagent named %q in this session", e.Name)
+	}
+	return fmt.Sprintf("no subagent named %q in this session (available: %s)",
+		e.Name, strings.Join(e.Available, ", "))
+}
+
+// asSubagentNotFound unwraps err to a *SubagentNotFoundError.
+// Wrapped is fine: a remote adapter that annotates the error with the
+// request it failed still means "no such subagent".
+func asSubagentNotFound(err error) (*SubagentNotFoundError, bool) {
+	var nf *SubagentNotFoundError
+	if errors.As(err, &nf) {
+		return nf, true
+	}
+	return nil, false
 }
 
 // StatusReporter backs the persistent status surface (R-USE-2)

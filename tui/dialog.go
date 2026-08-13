@@ -131,6 +131,18 @@ func (o *Overlay) CloseFront() {
 // HasDialogs reports whether anything is open.
 func (o *Overlay) HasDialogs() bool { return len(o.dialogs) > 0 }
 
+// Get returns the dialog with id from anywhere in the stack, or nil.
+// Unlike Front it doesn't care what's on top: an async reply for a
+// dialog that another modal has since covered still belongs to it.
+func (o *Overlay) Get(id string) Dialog {
+	for _, d := range o.dialogs {
+		if d.ID() == id {
+			return d
+		}
+	}
+	return nil
+}
+
 // HasID reports whether a dialog with id is on the stack
 // (useful for singleton checks before Open).
 func (o *Overlay) HasID(id string) bool {
