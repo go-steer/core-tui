@@ -364,6 +364,46 @@ type SubagentInfo struct {
     StartedAt                time.Time
 }
 
+// SubagentEventReader backs the subagent drill-down: `/subagents
+// <name>` opens an overlay with the UNTRUNCATED LastReport (#70)
+// above the subagent's turn log (#71), and a running sync
+// subagent's tool row grows a live preview block underneath it
+// that collapses to a one-line summary when the result lands.
+//
+// Polled, not streamed, and deliberately so: a subagent's turns are
+// kept off the parent's event stream (they'd flood every attached
+// chat view), so the only live view of them is a cursored re-read
+// of the host's log. `since` is a seq cursor; 0 means "from the
+// start"; the reply carries the cursor to resume from. Both callers
+// poll once a second while their surface is open, off the render
+// path with a bounded context.
+//
+// A name the host cannot resolve MUST return *SubagentNotFoundError
+// carrying the names that would resolve — not an empty page. The
+// two are different facts, and flattening them makes the TUI paint
+// a convincing empty turn log for a typo (the server-side half of
+// this is go-steer/core-agent#694).
+type SubagentEventReader interface {
+    SubagentEvents(ctx context.Context, name string, since int64) (SubagentEventPage, error)
+}
+type SubagentEventPage struct {
+    Events    []SubagentEvent
+    NextSince int64
+    Truncated bool
+}
+type SubagentEvent struct {
+    Seq         int64
+    Timestamp   time.Time
+    Author      string
+    Text        string
+    ToolCalls   []SubagentToolCall
+    ToolResults []SubagentToolResult
+}
+type SubagentNotFoundError struct {
+    Name      string
+    Available []string
+}
+
 // SlashProvider lets an agent advertise its own slash commands. The
 // TUI queries SlashCommands at startup and after Reload, merges the
 // entries into /help and the palette under an agent-scoped section,
@@ -882,7 +922,9 @@ core-agent's setup mirrors cogo but adds:
   package).
 - `PermissionController` adapter (wraps `permissions.Gate`).
 - `ToolLister` adapter.
-- `SubagentLister` adapter (over the `BackgroundAgentManager`).
+- `SubagentLister` adapter (over the `BackgroundAgentManager`), plus
+  a `SubagentEventReader` adapter over
+  `GET /sessions/{id}/agents/{name}/events` for the turn drill-down.
 - `Interruptible` adapter (wraps `Agent.Interrupt`).
 - `SlashProvider` adapter exposing core-agent's agent-side commands
   (and, in attach mode, forwarding `InvokeSlash` to the remote agent

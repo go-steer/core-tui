@@ -374,11 +374,24 @@ func (m Model) dispatchBuiltinSlash(name, args string) (bool, tea.Model, tea.Cmd
 		return true, m, nil
 
 	case "subagents":
+		// Bare `/subagents` lists the roster; `/subagents <name>`
+		// drills into one — the untruncated report plus its turn
+		// log, live-tailed while open (issues #70 and #71).
+		if name := strings.TrimSpace(args); name != "" {
+			text, cmd := m.openSubagentDetail(name)
+			if text != "" {
+				m.history.Append(Message{Role: RoleSystem, Text: text})
+			}
+			m.input.Reset()
+			m.refreshAndScroll()
+			return true, m, cmd
+		}
 		lister, ok := m.opts.Agent.(SubagentLister)
 		if !ok {
 			m.history.Append(Message{Role: RoleSystem, Text: "/subagents: agent doesn't implement SubagentLister"})
 		} else {
-			m.history.Append(Message{Role: RoleSystem, Text: renderSubagentList(lister.Subagents())})
+			_, drillable := m.opts.Agent.(SubagentEventReader)
+			m.history.Append(Message{Role: RoleSystem, Text: renderSubagentList(lister.Subagents(), drillable)})
 		}
 		m.input.Reset()
 		m.refreshAndScroll()
@@ -651,7 +664,7 @@ func (m Model) renderBuiltinHelp() string {
 	b.WriteString("  /reload              — rebuild agent from disk\n")
 	b.WriteString("  /permissions         — review session approvals\n")
 	b.WriteString("  /pricing refresh|set — manage cost rates\n")
-	b.WriteString("  /subagents           — list background subagents\n")
+	b.WriteString("  /subagents [<name>]  — list subagents or open one's turn log\n")
 	b.WriteString("  /interrupt, /int     — cancel the in-flight turn\n")
 	b.WriteString("  /mouse               — toggle terminal mouse capture\n")
 
@@ -970,21 +983,36 @@ func renderApprovalLog(logs []ApprovalLog) string {
 	return strings.TrimRight(b.String(), "\n")
 }
 
-func renderSubagentList(subs []SubagentInfo) string {
+// renderSubagentList renders the roster. Reports stay clipped to one
+// line here — the list is a scan surface, and a subagent that just
+// wrote three paragraphs shouldn't bury the others. drillable adds
+// the pointer to where the rest of it lives (issue #70): the
+// `/subagents <name>` overlay, which renders the report in full.
+func renderSubagentList(subs []SubagentInfo, drillable bool) string {
 	if len(subs) == 0 {
 		return "/subagents: none running"
 	}
 	var b strings.Builder
 	fmt.Fprintf(&b, "/subagents: %d subagent(s)\n", len(subs))
+	clipped := false
 	for _, s := range subs {
 		line := fmt.Sprintf("  • %s [%s]", s.Name, s.Status)
 		if !s.StartedAt.IsZero() {
 			line += " — started " + s.StartedAt.Format("15:04:05")
 		}
-		if s.LastReport != "" {
-			line += " — " + truncate(s.LastReport, 60)
+		if report := collapseWhitespace(s.LastReport); report != "" {
+			short := truncate(report, 60)
+			clipped = clipped || short != report
+			line += " — " + short
 		}
 		b.WriteString(line + "\n")
+	}
+	if drillable {
+		hint := "  /subagents <name> for the full report and turn log"
+		if !clipped {
+			hint = "  /subagents <name> for its turn log"
+		}
+		b.WriteString(hint + "\n")
 	}
 	return strings.TrimRight(b.String(), "\n")
 }

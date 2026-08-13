@@ -204,7 +204,12 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		// Issue #26: render kick in LiveAgent mode — a solo
 		// autonomous tool call could otherwise sit invisible
 		// until the next operator keypress.
-		return m, m.liveStreamRenderCmd()
+		//
+		// Issue #71: a sync subagent runs for as long as it takes
+		// and says nothing on the parent's stream, so start tailing
+		// its turns into the row we just appended. No-op for
+		// ordinary tools.
+		return m, m.liveStreamRenderCmd(m.startSubagentTail(msg))
 	case toolResultMsg:
 		if msg.gen != m.sessionGen {
 			return m, m.eventListener()
@@ -454,6 +459,48 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			m.refreshViewport()
 		}
 		return m, hostSnapshotTick(m.sessionGen)
+	case subagentEventsMsg:
+		// A `/subagents <name>` overlay page landed (issue #71).
+		// Addressed to the dialog wherever it sits in the stack —
+		// another modal may have opened on top of it since.
+		if msg.gen != m.sessionGen {
+			return m, nil
+		}
+		if d, ok := m.overlayStack.Get(subagentDialogID).(*subagentDialog); ok && d.apply(msg) {
+			m.refreshViewport()
+		}
+		return m, nil
+	case subagentPollMsg:
+		// Live tail for the open overlay. Polling stops by simply
+		// not re-arming: closing the dialog, retargeting it, or
+		// switching sessions all drop the next tick on the floor.
+		if msg.gen != m.sessionGen {
+			return m, nil
+		}
+		d, ok := m.overlayStack.Get(subagentDialogID).(*subagentDialog)
+		if !ok || d.name != msg.name {
+			return m, nil
+		}
+		reader, ok := m.opts.Agent.(SubagentEventReader)
+		if !ok {
+			return m, nil
+		}
+		lister, _ := m.opts.Agent.(SubagentLister)
+		return m, tea.Batch(
+			subagentEventsCmd(reader, lister, m.sessionGen, d.name, d.since),
+			subagentPollTick(m.sessionGen, d.name),
+		)
+	case subagentTailMsg:
+		// Inline tail page for a running sync-subagent tool row.
+		if msg.gen != m.sessionGen {
+			return m, nil
+		}
+		return m, m.applySubagentTail(msg)
+	case subagentTailTickMsg:
+		if msg.gen != m.sessionGen {
+			return m, nil
+		}
+		return m, m.resumeSubagentTail(msg.callID)
 	case hostSnapshotTickMsg:
 		// Tick fired — issue the next off-loop refresh. Stale ticks from a
 		// retired session are dropped (applySwitchTarget starts a fresh
@@ -1548,6 +1595,19 @@ func (m *Model) applyToolResult(msg toolResultMsg) {
 	if badge := renderSavingsBadge(msg.savings, m.styles); badge != "" {
 		preview += badge
 	}
+	// Issue #71: this row was tailing a sync subagent's turns while
+	// it ran. The result is in, so collapse the live block to one
+	// line of counts pointing at `/subagents <name>` — the whole log
+	// is in the overlay, and leaving six turn lines under every
+	// finished subagent would bury the transcript.
+	if t, tailed := m.stopSubagentTail(msg.id); tailed {
+		if line := renderSubagentTailSummary(t, m.styles); line != "" {
+			if preview != "" {
+				preview += "\n"
+			}
+			preview += line
+		}
+	}
 	if m.opts.ToolDetailVerbose {
 		// Tier 2 (core-tui #52): append the full args + response
 		// dump under the compact preview when the operator has opted
@@ -1910,6 +1970,10 @@ func (m *Model) applySwitchTarget(tgt *SwitchTarget) tea.Cmd {
 	for k := range m.seenToolIDs {
 		delete(m.seenToolIDs, k)
 	}
+	// Tails and the not-a-subagent cache are both per-host facts:
+	// the new Agent has its own subagents and its own tool names.
+	clear(m.subagentTails)
+	clear(m.subagentNotTail)
 	m.queue = nil
 	m.pendingPermission = nil
 	m.pendingElicit = nil

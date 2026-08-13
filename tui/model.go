@@ -187,8 +187,19 @@ type Model struct {
 	inProgressStableRender string
 	toolActive             bool // true after a ToolCall; flips back on next Text
 	seenToolIDs            map[string]bool
-	thinkingIdx            int  // rotation index into ThinkingPhrases / WorkingPhrases
-	spinnerActive          bool // gates spinner tick scheduling
+
+	// subagentTails tracks the live turn tail under each in-flight
+	// sync-subagent tool row (issue #71), keyed by tool call ID.
+	// Entries are created in applyToolCall and retired in
+	// applyToolResult; a tool whose polls come back unresolved
+	// gives up early and lands in subagentNotTail.
+	subagentTails map[string]*subagentTail
+	// subagentNotTail is the per-tool-NAME negative cache: once
+	// `read_file` has been proven not to be a subagent, no later
+	// `read_file` call pays for the polls again.
+	subagentNotTail map[string]bool
+	thinkingIdx     int  // rotation index into ThinkingPhrases / WorkingPhrases
+	spinnerActive   bool // gates spinner tick scheduling
 
 	// queue is the per-session prompt queue (R-CHAT-10). Each entry
 	// transitions through Queued → InFlight → Done / Failed and
@@ -417,20 +428,22 @@ func NewModel(opts Options) Model {
 		initialDark = true
 	}
 	m := Model{
-		opts:          opts,
-		styles:        NewStyles(initialDark, opts.Branding), // overwritten on BackgroundColorMsg unless ForceTheme is set
-		viewport:      vp,
-		input:         ta,
-		statusLayout:  opts.StatusLayout,
-		permMode:      opts.PermissionMode.Initial,
-		themeName:     opts.InitialThemeName,
-		eventCh:       make(chan tea.Msg, 32),
-		seenToolIDs:   make(map[string]bool),
-		historyCursor: -1,
-		startedAt:     time.Now(),
-		listCache:     newListCache(),
-		caps:          DetectCapabilities(),
-		newlineHint:   defaultNewlineHint(DetectCapabilities().TermProgram),
+		opts:            opts,
+		styles:          NewStyles(initialDark, opts.Branding), // overwritten on BackgroundColorMsg unless ForceTheme is set
+		viewport:        vp,
+		input:           ta,
+		statusLayout:    opts.StatusLayout,
+		permMode:        opts.PermissionMode.Initial,
+		themeName:       opts.InitialThemeName,
+		eventCh:         make(chan tea.Msg, 32),
+		seenToolIDs:     make(map[string]bool),
+		subagentTails:   make(map[string]*subagentTail),
+		subagentNotTail: make(map[string]bool),
+		historyCursor:   -1,
+		startedAt:       time.Now(),
+		listCache:       newListCache(),
+		caps:            DetectCapabilities(),
+		newlineHint:     defaultNewlineHint(DetectCapabilities().TermProgram),
 	}
 	// LiveAgent precedence (issue #22): when the host satisfies
 	// LiveAgent, the per-turn Run path is bypassed entirely and a

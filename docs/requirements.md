@@ -458,6 +458,16 @@ listed in `/help`:
 - **R-SUB-1** If the agent implements `SubagentLister`, expose a
   `/subagents` slash command listing names + statuses + last reports.
   No driving / scheduling — read-only awareness.
+- **R-SUB-2** If the agent also implements `SubagentEventReader`,
+  `/subagents <name>` opens a detail overlay: the untruncated
+  `LastReport` above a scrollable log of that subagent's turns,
+  live-tailed while it stays open. An unresolvable name reports the
+  names that would have resolved rather than rendering an empty log.
+- **R-SUB-3** While a SYNC subagent's tool call is in flight, its
+  tool row carries a live preview of the newest turns, so the
+  operator sees progress instead of a spinner. The block collapses
+  to a one-line summary (turn / tool-call counts, and where to read
+  the rest) when the result lands.
 
 ### 3.17 Reload (should)
 
