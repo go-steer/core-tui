@@ -95,7 +95,7 @@ to contaminate.
 | Built-in pager for file output instead of shelling out | Inspiration only — implementation-time choice. |
 | Hybrid inline-scrollback rendering (commits turn blocks to terminal native scroll history via `tea.Println`) | **Adopted** — see [R-CHAT-9](./requirements.md#31-core-chat-loop-must) (`Options.RenderMode` = `AltScreen` or `Inline`) + [design.md §4.3](./design.md#43-render-mode-r-chat-9). |
 | Multi-modal `@`-mention typeahead (symbols, artifacts, git commits, web URLs, …) | **Adopted** — see [R-AT-4](./requirements.md#35-file-expansion-must) (`Options.MentionProviders`). |
-| Agent-initiated `ask_question` multiple-choice modal | **Adopted** — see [R-PROMPT-1](./requirements.md#319-agent-driven-prompts-should) (`UserPrompter`). |
+| Agent-initiated `ask_question` multiple-choice modal | **Specified, not shipped** — see [R-PROMPT-1](./requirements.md#319-agent-driven-prompts-should) (`UserPrompter`). Whether to build it or drop the requirement is part of issue #78. |
 | Suspend TUI to `$EDITOR` via `tea.ExecProcess` for inspection / editing | **Adopted** — see [R-CHAT-8](./requirements.md#31-core-chat-loop-must). |
 | OSC 52 system clipboard integration | **Adopted** — see [R-CLIP-1](./requirements.md#320-system-clipboard-should). |
 | Auto-expiring "Hold Shift to select text" overlay when mouse capture is on | **Adopted** — see [R-MOUSE-3](./requirements.md#312-mouse-support-must). |

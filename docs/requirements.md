@@ -180,7 +180,7 @@ listed in `/help`:
 | `/deny <pattern>` | Add denylist pattern (live + persisted) | `PermissionController` |
 | `/pricing refresh` | Force-refresh upstream pricing catalog | `PricingController` |
 | `/pricing set <model> <in/M> <out/M>` | Manual per-model rate override | `PricingController` |
-| `/interrupt`, `/int` | Cancel in-flight turn | `Interruptible` |
+| `/interrupt`, `/int` | Cancel in-flight turn | none for a locally-driven turn (ctx cancellation); `RemoteInterrupter` for a turn the TUI has no local context for |
 | `/mouse [on|off]` | Toggle mouse capture | — |
 
 - **R-CMD-1** Commands whose capability is missing must respond with a
@@ -526,7 +526,11 @@ listed in `/help`:
 
 ### 3.19 Agent-driven prompts (should)
 
-- **R-PROMPT-1** When the host wires the TUI-supplied `UserPrompter`
+- **R-PROMPT-1** (⚠️ specified, not shipped as of v0.19.0 — neither
+  `UserPrompter` nor `NewUserPrompter()` exists in `package tui`.
+  Whether to build it or drop this requirement is part of the
+  exported-surface audit, issue #78.)
+  When the host wires the TUI-supplied `UserPrompter`
   into its agent, the agent may call `AskUser` mid-turn to elicit a
   structured multiple-choice answer from the operator. The TUI
   renders a blocking modal listing the choices (label + optional
@@ -649,8 +653,16 @@ A user-visible smoke checklist for v1:
 1. `go test ./...` passes.
 2. The bundled `examples/local/` binary starts, accepts input,
    streams a response, handles `/help`, `/quit`.
-3. The bundled `examples/permissions/` binary triggers the permission
-   modal on a fake tool call and round-trips a decision.
+3. A headless smoke test drives the permission round-trip end to end:
+   a scripted tool call trips the gate, the modal renders, and the
+   decision unblocks the turn — across the allow, deny, and
+   allow-always branches and both permission layouts. (Not met — the
+   smoke harness is issue #81, which owns the fixture. This criterion
+   originally called for a separate `examples/permissions/` binary;
+   that was dropped because `examples/local` already round-trips a
+   real prompt through `tui.NewPrompter()` on `ctrl+y`, and a
+   machine-checked test is a stronger promise than a binary someone
+   has to run and eyeball.)
 4. `/model`, `/reload`, `/pricing refresh` all surface "not
    available" cleanly when their capabilities aren't wired.
 5. core-agent builds against the current release with its

@@ -348,7 +348,7 @@ Initial release: `package tui` extracted from the duplicated `internal/tui` tree
 
 ### Added
 
-- **The plug-in surface** — the `Agent` interface and `Event` type, the §3.3 optional capability interfaces, `Options`, and the TUI-implemented `PermissionPrompter` / `Elicitor` / `UserPrompter` triple. Capabilities are feature-detected by type assertion, and a missing one degrades to a "not available in this host" message rather than an error.
+- **The plug-in surface** — the `Agent` interface and `Event` type, the §3.3 optional capability interfaces, `Options`, and the TUI-implemented `PermissionPrompter` / `Elicitor` pair. Capabilities are feature-detected by type assertion, and a missing one degrades to a "not available in this host" message rather than an error.
 - **The chat loop** — streaming assistant tokens rendered incrementally through Glamour, inline tool-call rows, the per-turn footer, prompt history, `/clear` with confirmation, transcript save/`/resume`, and the `Esc`-interrupts-turn / `Ctrl+C`-quits split.
 - **Prompt queueing during streaming** (R-CHAT-10) with the four-state queue panel, plus `InjectableAgent` + `MidTurnInjectionMode` (R-CHAT-11), `WakeRequester` + its toast banner (R-WAKE-1), `ContentRunner` + the `Content` type (R-CHAT-12), and `SlashResult.ModalAnswer` + the side-answer modal (R-CMD-5).
 - **Live `/` and `@` palettes** (R-PAL-1/2), a real model picker and file palette, real `/mcp` `/tools` `/skills`, `/stats` with cost, `/allow` and `/deny`, `Options.PersistModelChoice` (R-MOD-3), the status header/sidebar with a persisted layout choice, the bottom-anchored help panel on `?`, and the 3-tier color context indicator.

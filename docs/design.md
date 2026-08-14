@@ -68,9 +68,9 @@ core-tui/
 │   ├── agentcmd.go     translates Agent events → tea.Msgs
 │   └── *_test.go       table-driven Update() tests + smoke tests
 └── examples/
-    ├── local/          minimal: in-process echo "agent" → smoke testing
-    ├── permissions/    fake tool calls exercising the modal
-    └── core-agent/     core-agent adapter sketch (local + attach)
+    ├── local/          scripted in-process agent → visual harness
+    ├── notifier-smoke/ standalone Notifier-contract exerciser
+    └── core-agent/     reference-host adapter sketch (issue #82)
 ```
 
 ### 2.1 Why one flat package
@@ -196,12 +196,17 @@ The TUI feature-detects each via type assertion. Each interface
 matches one user-visible feature and is documented as such.
 
 ```go
-// Interruptible lets the TUI proactively cancel a turn beyond just
-// cancelling the ctx — useful when the agent wraps its own
-// cancellation semantics (core-agent's Agent.Interrupt for the
-// attach-mode path). Optional; ctx cancellation always works.
-type Interruptible interface {
-    Interrupt() bool
+// RemoteInterrupter lets the TUI cancel an in-flight turn it has no
+// local context for — a LiveAgent observer session watching a
+// daemon's autonomous turn. Without it, /interrupt short-circuits
+// with "no turn in flight" on remote sessions, because the local gate
+// keys off the per-turn cancel func that only operator-initiated
+// turns populate. Implementations MAY block briefly on network I/O;
+// the TUI calls Interrupt off the Update-loop path with a short
+// deadline, and errors surface as an inline RoleError row. Optional;
+// ctx cancellation of a locally-driven turn always works regardless.
+type RemoteInterrupter interface {
+    Interrupt(ctx context.Context) error
 }
 
 // StatusReporter feeds the header bar.
@@ -646,7 +651,13 @@ type Elicitor interface {
     Elicit(ctx context.Context, serverName string, req ElicitRequest) (ElicitResult, error)
 }
 
-// UserPrompter is implemented by the TUI. Hosts pass the value
+// UserPrompter — SPECIFIED, NOT SHIPPED as of v0.19.0. Neither the
+// interface nor NewUserPrompter() exists in package tui; whether to
+// build it or drop R-PROMPT-1 is part of the exported-surface audit
+// (issue #78). Hosts needing agent-initiated questions today route
+// them through Elicitor.
+//
+// As specified: implemented by the TUI, with hosts passing the value
 // returned by tui.NewUserPrompter() into their agent so the agent
 // can call AskUser mid-turn for structured multiple-choice input
 // (R-PROMPT-1). Distinct from Elicitor (MCP-server-initiated, form-
@@ -870,7 +881,8 @@ neutral interfaces in §3. Every adapter does the same four things:
    This is the only required interface.
 2. **Implement zero or more capability interfaces** from §3.3
    (`ModelSwapper`, `Reloader`, `PermissionController`,
-   `PricingController`, `ToolLister`, `SubagentLister`, `Interruptible`,
+   `PricingController`, `ToolLister`, `SubagentLister`,
+   `SubagentEventReader`, `SessionSwitcher`, `RemoteInterrupter`,
    `StatusReporter`, `SlashProvider`). Each one lights up the
    corresponding slash command or UI affordance; missing ones degrade
    to a "not available" message. Capabilities may be implemented on
@@ -929,7 +941,8 @@ for its shipped shape. core-agent's setup mirrors §6.1 but adds:
 - `SubagentLister` adapter (over the `BackgroundAgentManager`), plus
   a `SubagentEventReader` adapter over
   `GET /sessions/{id}/agents/{name}/events` for the turn drill-down.
-- `Interruptible` adapter (wraps `Agent.Interrupt`).
+- `RemoteInterrupter` adapter (wraps `Agent.Interrupt`), so
+  `/interrupt` reaches a daemon-driven turn in attach mode.
 - `SlashProvider` adapter exposing core-agent's agent-side commands
   (and, in attach mode, forwarding `InvokeSlash` to the remote agent
   over HTTP so the same command set works locally and over the wire).
@@ -949,15 +962,20 @@ Adapter LOC budget: ~400 lines (more capabilities to wire).
   each source TUI; we lift them.
 - **Smoke tests** — headless `tea.Program` with the alt-screen
   disabled, feeding a `bytes.Buffer` for stdin. Validates startup +
-  shutdown.
+  shutdown, and drives the flows that span more than one goroutine:
+  chiefly the permission round-trip, where a scripted tool call trips
+  the gate, the modal renders, and the decision unblocks the turn.
+  Not built yet — tracked as issue #81, which owns the fixture.
 - **Capability tests** — a `mockagent` package implements `Agent` +
   every capability; tests assert that each slash command's
   "available" and "not available" paths render correctly when the
   capability is present / absent.
-- **Adapter examples** — `examples/cogo` and `examples/core-agent`
-  build a one-file adapter against a fake of each host's agent.go;
-  failing to compile after a refactor is a CI signal that the
-  interface broke.
+- **Adapter example** — `examples/core-agent` builds a one-file
+  adapter against a fake of the reference host's agent.go; failing to
+  compile after a refactor is a CI signal that the plug-in surface
+  broke. With one gating host this is the only compile-time canary
+  we have, so it matters more than it did when there were two.
+  Not built yet — tracked as issue #82.
 
 ## 8. Compatibility & versioning
 
@@ -1013,7 +1031,9 @@ Adapter LOC budget: ~400 lines (more capabilities to wire).
 
 ## 11. Implementation plan (informational)
 
-Suggested order, not normative:
+Historical — this was the order sketched before v0.1.0, kept for the
+record. Steps 1–5 and 7 are done; what remains of step 6 is tracked
+on the [v1.0 milestone](https://github.com/go-steer/core-tui/milestone/1).
 
 1. Scaffold module + `tui` package skeleton; copy `decisions.md`,
    `requirements.md`, `design.md` into place. ✅ (this commit)
@@ -1025,7 +1045,13 @@ Suggested order, not normative:
 4. Lift the existing test suite, fix imports, get to green.
 5. Implement the capability feature-detection in Update + the "not
    available" message paths.
-6. Write `examples/local` (smoke), `examples/permissions` (modal
-   exercise), `examples/cogo` and `examples/core-agent` adapter
-   sketches.
-7. Open migration PRs against cogo + core-agent.
+6. Write `examples/local` (visual harness) and the `examples/core-agent`
+   adapter sketch. ◐ `examples/local` shipped; the adapter sketch is
+   issue #82. The originally-planned `examples/permissions` binary was
+   dropped: `examples/local` already round-trips a real prompt through
+   `tui.NewPrompter()` on `ctrl+y`, and the coverage a separate binary
+   would have added belongs in the headless smoke harness (issue #81),
+   not in a program a human has to run and eyeball.
+7. Open migration PRs against the host(s). ✅ core-agent migrated as
+   of core-tui v0.18.0; cogo never started one and no longer gates a
+   release (§8).
