@@ -32,6 +32,10 @@ const sessionPickerDialogID = "session-picker"
 // SwitchToSession + applySwitchTarget on Enter.
 type sessionPickerDialog struct {
 	idx int
+	// off is the first visible row. Session lists are host-supplied
+	// and unbounded — a long-running endpoint can advertise dozens —
+	// so the list windows around the cursor.
+	off int
 }
 
 func newSessionPickerDialog() *sessionPickerDialog {
@@ -161,7 +165,9 @@ func (d *sessionPickerDialog) Render(totalWidth int, m *Model) string {
 				}
 				rows = append(rows, row)
 			}
-			body = strings.Join(rows, "\n")
+			view := modalBodyHeight(m.height, modalChromeRows)
+			d.off = listWindow(d.off, d.idx, len(rows), view)
+			body = strings.Join(scrollView(m.styles, rows, nonNeg(width-4), view, d.off), "\n")
 		}
 	}
 	footer := "↑↓ choose " + GlyphSeparator + " enter attach " + GlyphSeparator + " esc cancel"

@@ -833,6 +833,9 @@ func (m Model) footerHint() string {
 	case m.confirmingClear:
 		return "Confirm clear?" + sep + "type y / yes to wipe" + sep + "anything else cancels"
 	case m.sideAnswer != nil:
+		if m.modalScroll != nil && m.modalScroll.overflows() {
+			return "Side answer" + sep + "↑↓ scroll" + sep + "enter/space/esc dismiss"
+		}
 		return "Side answer" + sep + "enter/space/esc dismiss"
 	case m.state == stateStreaming:
 		return "Streaming…" + sep + "esc interrupt" + sep + "enter queues prompt" + sep + "ctrl+c cancel turn"
@@ -993,12 +996,28 @@ func (m *Model) renderSideAnswer() string {
 	case strings.TrimSpace(m.sideAnswer.Answer) == "":
 		body = m.styles.SystemText.Render("(no answer)")
 	default:
-		mr := m.ensureMarkdown()
-		body = mr.renderMarkdown(m.sideAnswer.Answer)
+		// Wrapped to the modal, not to the chat column — see
+		// ensureModalMarkdown.
+		mr := m.ensureModalMarkdown(width - 4)
+		body = strings.TrimRight(mr.renderMarkdown(m.sideAnswer.Answer), "\n")
 	}
 
+	// A /btw answer is a full Glamour document and routinely runs
+	// past the bottom of the screen. Window it (two columns reserved
+	// on the right for the scrollbar) and record the geometry so the
+	// keystroke / wheel handlers can clamp against it.
+	lines := strings.Split(body, "\n")
+	view := modalBodyHeight(m.height, modalChromeRows)
+	sc := m.scroll()
+	sc.measure(len(lines), view)
+	body = strings.Join(scrollView(m.styles, lines, nonNeg(width-4), view, sc.offset), "\n")
+
+	dismiss := "esc / enter / space dismiss"
+	if hint := scrollHint(sc.overflows()); hint != "" {
+		dismiss = hint + "  " + GlyphSeparator + "  " + dismiss
+	}
 	footerRule := m.styles.ModalBorder.Render(strings.Repeat(GlyphRule, nonNeg(width-2)))
-	footerLine := m.styles.ModalFooter.Render("esc / enter / space dismiss")
+	footerLine := m.styles.ModalFooter.Render(dismiss)
 
 	content := lipgloss.JoinVertical(lipgloss.Left,
 		titleLine,
@@ -1157,10 +1176,26 @@ func (m *Model) renderPermissionModal() string {
 	if req.Detail != "" {
 		lines = append(lines, m.renderPermissionDetail(req, width-4))
 	}
-	body := strings.Join(lines, "\n")
 
-	footerLine := m.styles.ModalFooter.Render(permissionKeyHint(req.Verb))
+	hint := permissionKeyHint(req.Verb)
 	footerRule := m.styles.ModalBorder.Render(strings.Repeat(GlyphRule, nonNeg(width-2)))
+
+	// Window the body. A large diff or a long shell script used to
+	// run off the bottom of the screen with no way to reach the
+	// rest — and this is the one modal where reading all of it
+	// before answering actually matters. The key hint wraps on
+	// narrow terminals, so measure it rather than assuming one row.
+	body := strings.Join(lines, "\n")
+	bodyLines := strings.Split(body, "\n")
+	chrome := modalChromeRows - 1 + wrappedRows(hint, width-2)
+	view := modalBodyHeight(m.height, chrome)
+	sc := m.scroll()
+	sc.measure(len(bodyLines), view)
+	body = strings.Join(scrollView(m.styles, bodyLines, nonNeg(width-4), view, sc.offset), "\n")
+	if sc.overflows() {
+		hint = scrollHint(true) + " " + GlyphSeparator + " " + hint
+	}
+	footerLine := m.styles.ModalFooter.Render(hint)
 
 	content := lipgloss.JoinVertical(lipgloss.Left,
 		titleLine,
@@ -1254,18 +1289,40 @@ func (m *Model) renderElicitModal() string {
 	titleRule := m.styles.ModalBorder.Render(strings.Repeat(GlyphRule, nonNeg(width-lipgloss.Width(titleBar)-3)))
 	titleLine := titleBar + " " + titleRule
 
-	var body, footer string
+	var (
+		bodyLines []string
+		focusLine = -1 // -1 = no cursor to keep on screen (URL mode)
+		footer    string
+	)
 	if req.Mode == ElicitURLMode {
-		body = m.styles.Accent.Render(req.URL)
+		body := m.styles.Accent.Render(req.URL)
 		if req.Description != "" {
 			body = m.styles.Muted.Render(req.Description) + "\n\n" + body
 		}
+		bodyLines = strings.Split(body, "\n")
 		footer = "a / enter accept " + GlyphSeparator + " n decline " + GlyphSeparator + " esc cancel"
 	} else {
-		body = m.renderElicitForm(width - 4)
+		bodyLines, focusLine = m.elicitFormLines(width - 4)
 		footer = "tab next " + GlyphSeparator + " shift+tab prev " + GlyphSeparator +
 			" space toggle " + GlyphSeparator + " ←/→ enum " + GlyphSeparator +
 			" enter submit " + GlyphSeparator + " esc cancel"
+	}
+
+	// Window the field list. A form with more fields than the
+	// terminal has rows used to bury everything past the fold — and
+	// Tab could walk the focus down into the invisible part. The
+	// offset follows the focused field (listWindow) while arrow /
+	// page keys and the wheel move it directly.
+	chrome := modalChromeRows - 1 + wrappedRows(footer, width-2)
+	view := modalBodyHeight(m.height, chrome)
+	sc := m.scroll()
+	sc.measure(len(bodyLines), view)
+	if focusLine >= 0 {
+		sc.follow(focusLine)
+	}
+	body := strings.Join(scrollView(m.styles, bodyLines, nonNeg(width-4), view, sc.offset), "\n")
+	if sc.overflows() {
+		footer = scrollHint(true) + " " + GlyphSeparator + " " + footer
 	}
 
 	footerRule := m.styles.ModalBorder.Render(strings.Repeat(GlyphRule, nonNeg(width-2)))
@@ -1281,19 +1338,25 @@ func (m *Model) renderElicitModal() string {
 	return m.styles.ModalBorder.Padding(0, 1).Width(width).Render(content)
 }
 
-// renderElicitForm renders the form's fields one per line, with
-// the focused row highlighted in the accent color.
-func (m *Model) renderElicitForm(width int) string {
+// elicitFormLines renders the form's fields, one per terminal row
+// with the focused row highlighted in the accent color, and returns
+// the row index the focused field starts on. The caller needs both to
+// window a form taller than the modal while keeping the Tab cursor on
+// screen — a field row can be two lines when it carries a
+// description, so "field index" and "row index" differ.
+func (m *Model) elicitFormLines(width int) (lines []string, focus int) {
 	req := m.pendingElicit
 	if req == nil {
-		return ""
+		return nil, 0
 	}
-	var rows []string
 	for i, f := range req.Fields {
-		row := m.renderElicitField(f, i == m.elicitFieldIdx, width)
-		rows = append(rows, row)
+		focused := i == m.elicitFieldIdx
+		if focused {
+			focus = len(lines)
+		}
+		lines = append(lines, strings.Split(m.renderElicitField(f, focused, width), "\n")...)
 	}
-	return strings.Join(rows, "\n")
+	return lines, focus
 }
 
 // renderElicitField renders one field row (label : value), styling
@@ -1386,6 +1449,7 @@ func (m Model) renderHelpPanel(width int) string {
 		}},
 		{"Side-answer modal (R-CMD-5)", [][2]string{
 			{"/btw <q>", "open a transient Glamour-rendered modal"},
+			{"↑↓ / pgup / pgdn", "scroll a long answer"},
 			{"esc / enter / space", "dismiss modal (answer doesn't land in history)"},
 		}},
 		{"Navigation", [][2]string{
@@ -1399,6 +1463,7 @@ func (m Model) renderHelpPanel(width int) string {
 		{"Modals", [][2]string{
 			{"ctrl+g", "model picker (when ModelSwapper is wired)"},
 			{"ctrl+x", "expand a tool call (args + response detail)"},
+			{"↑↓ / pgup / pgdn / mouse wheel", "scroll any modal body"},
 			{"esc", "close / cancel any open modal"},
 		}},
 		{"Interrupt / quit", [][2]string{

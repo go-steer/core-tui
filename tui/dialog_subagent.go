@@ -102,7 +102,7 @@ func (d *subagentDialog) HandleKey(stroke string, m *Model) DialogAction {
 		d.scroll = nonNeg(d.scroll - viewport)
 		d.pinned = false
 		return DialogAction{Consumed: true}
-	case "pgdn":
+	case "pgdown", "pgdn":
 		d.scroll = min(maxScroll, d.scroll+viewport)
 		d.pinned = d.scroll >= maxScroll
 		return DialogAction{Consumed: true}
@@ -118,6 +118,15 @@ func (d *subagentDialog) HandleKey(stroke string, m *Model) DialogAction {
 	// Unhandled key — consume so it doesn't leak to the composer
 	// behind the modal, but don't close.
 	return DialogAction{Consumed: true}
+}
+
+// ScrollBy implements ScrollDialog: mouse-wheel ticks move the log,
+// and scrolling up off the bottom releases the follow-the-tail pin
+// exactly as the arrow keys do.
+func (d *subagentDialog) ScrollBy(delta int, m *Model) {
+	maxScroll := nonNeg(d.lastBody - detailViewportHeight(m.height))
+	d.scroll = min(nonNeg(d.scroll+delta), maxScroll)
+	d.pinned = d.scroll >= maxScroll
 }
 
 // apply folds a fetched page into the overlay. Returns false when the
@@ -179,15 +188,7 @@ func (d *subagentDialog) Render(totalWidth int, m *Model) string {
 	}
 	d.scroll = min(nonNeg(d.scroll), maxScroll)
 
-	visible := bodyLines
-	if len(bodyLines) > viewport {
-		visible = append([]string(nil), bodyLines[d.scroll:d.scroll+viewport]...)
-		bar := strings.Split(Scrollbar(m.styles, len(visible), len(bodyLines), viewport, d.scroll), "\n")
-		pad := lipgloss.NewStyle().Width(content)
-		for i := range visible {
-			visible[i] = pad.Render(visible[i]) + " " + bar[i]
-		}
-	}
+	visible := scrollView(m.styles, bodyLines, content, viewport, d.scroll)
 
 	return RenderContext{
 		Title:  "Subagent " + GlyphSeparator + " " + d.name,

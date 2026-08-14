@@ -153,6 +153,18 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	case tea.KeyPressMsg:
 		return m.handleKey(msg)
 
+	case tea.MouseWheelMsg:
+		// A modal on screen owns the wheel. Without this the event
+		// falls through to the chat viewport BEHIND the modal and
+		// scrolls something the operator can't see — the modal
+		// itself never moves. handleWheel returns false when
+		// nothing modal is open (or when the surface under the
+		// wheel really is the chat, e.g. an inline permission
+		// prompt), and we fall through to the viewport as before.
+		if cmd, handled := m.handleWheel(msg); handled {
+			return m, cmd
+		}
+
 	case tea.PasteMsg:
 		// Bracketed paste never goes through handleKey, so without
 		// this a paste while a text-input Dialog is open would land
@@ -692,6 +704,7 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	case permissionRequestMsg:
 		req := msg.req
 		m.pendingPermission = &req
+		m.scroll().reset()
 		// Inline permission layout: force-snap viewport to bottom
 		// so the prompt is visible (operator was likely watching
 		// the assistant text; the new prompt appears below it and
@@ -707,6 +720,7 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	case elicitRequestMsg:
 		r := msg.req
 		m.pendingElicit = &r
+		m.scroll().reset()
 		m.pendingElicitSrv = msg.serverName
 		m.elicitFieldIdx = 0
 		m.elicitValues = make(map[string]any, len(r.Fields))
@@ -772,6 +786,56 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	m.input, taCmd = m.input.Update(msg)
 	m.viewport, vpCmd = m.viewport.Update(msg)
 	return m, tea.Batch(taCmd, vpCmd)
+}
+
+// handleWheel routes a mouse-wheel tick to whichever modal surface
+// is on screen. Returns handled=false when the event belongs to the
+// chat viewport instead — no modal open, an inline permission prompt
+// (which lives IN the chat flow and scrolls with it), or a
+// horizontal wheel, which no modal consumes.
+//
+// Mirrors View's z-order cascade: permission → elicit → side answer
+// → Dialog stack. The embedded huh form never reaches here; Update
+// hands it every msg before the switch.
+func (m *Model) handleWheel(msg tea.MouseWheelMsg) (tea.Cmd, bool) {
+	var delta int
+	switch msg.Button {
+	case tea.MouseWheelUp:
+		delta = -wheelScrollLines
+	case tea.MouseWheelDown:
+		delta = wheelScrollLines
+	default:
+		return nil, false
+	}
+
+	switch {
+	case m.pendingPermission != nil:
+		// Only the centered overlay scrolls here. The default
+		// inline layout renders the prompt inside the chat
+		// viewport, so the wheel should keep scrolling the chat —
+		// that IS the surface showing the prompt.
+		if m.opts.PermissionLayout != PermissionOverlay {
+			return nil, false
+		}
+		m.scroll().by(delta)
+		return nil, true
+	case m.pendingElicit != nil:
+		m.scroll().by(delta)
+		return nil, true
+	case m.sideAnswer != nil:
+		m.scroll().by(delta)
+		return nil, true
+	case m.overlayStack.HasDialogs():
+		consumed, cmd := m.overlayStack.HandleWheel(delta, m)
+		if consumed {
+			// Same repaint the key path does: a wheel tick on the
+			// theme picker moves the selection, which live-previews
+			// the palette on the chat behind the modal.
+			m.refreshViewport()
+		}
+		return cmd, consumed
+	}
+	return nil, false
 }
 
 // handleKey runs the keymap for the visual-preview slice. The slice
@@ -865,6 +929,14 @@ func (m Model) handleKey(msg tea.KeyPressMsg) (tea.Model, tea.Cmd) {
 		return m, nil
 	}
 
+	// A /btw answer longer than the terminal is tall gets windowed
+	// by renderSideAnswer; these keys move the window. Claiming them
+	// here also stops "up" from quietly walking prompt history
+	// behind the modal, which is what it did before.
+	if m.sideAnswer != nil && m.scroll().applyStroke(stroke) {
+		return m, nil
+	}
+
 	// Permission modal — R-PERM-2's six decision keys. Highest
 	// precedence after Esc so nothing else fires while pending.
 	if m.pendingPermission != nil {
@@ -889,6 +961,14 @@ func (m Model) handleKey(msg tea.KeyPressMsg) (tea.Model, tea.Cmd) {
 		case "a":
 			m.dispatchPermission(DecisionAllowAlways)
 			return m, m.promptListener()
+		}
+		// Arrow / page keys scroll the detail body — a 200-line diff
+		// in the centered overlay was previously readable only down
+		// to whatever fit on screen. Inline layout needs nothing
+		// here: it renders in the chat viewport, which already
+		// scrolls.
+		if m.opts.PermissionLayout == PermissionOverlay {
+			m.scroll().applyStroke(stroke)
 		}
 		// Swallow any other key — modal is exclusive while open.
 		return m, nil
@@ -1895,6 +1975,7 @@ func (m Model) applySlashResult(name string, res SlashResult, err error) (tea.Mo
 	}
 	if res.ModalAnswer != nil {
 		m.sideAnswer = res.ModalAnswer
+		m.scroll().reset()
 	}
 	if res.SystemMessage != "" {
 		m.history.Append(Message{Role: RoleSystem, Text: res.SystemMessage})
@@ -1981,6 +2062,7 @@ func (m *Model) applySwitchTarget(tgt *SwitchTarget) tea.Cmd {
 	m.elicitFieldIdx = 0
 	m.elicitValues = nil
 	m.sideAnswer = nil
+	m.scroll().reset()
 	m.pendingForm = nil
 	m.palette = nil
 	m.consecutiveAutoContinues = 0
@@ -2260,6 +2342,15 @@ func (m *Model) dispatchElicit(r ElicitResult) {
 // is dispatched, otherwise nil for in-form moves).
 func (m *Model) handleElicitKey(stroke string) tea.Cmd {
 	req := m.pendingElicit
+	// Arrow / page keys scroll the modal body first — a form with
+	// more fields than the terminal has rows was unreachable below
+	// the fold. None of the form bindings below use them (field nav
+	// is Tab / Shift+Tab, enum cycling is left/right), and printable
+	// input is single-rune, so nothing is shadowed.
+	if m.scroll().applyStroke(stroke) {
+		m.refreshViewport()
+		return func() tea.Msg { return nil }
+	}
 	if req.Mode == ElicitURLMode {
 		switch stroke {
 		case "a", "enter":

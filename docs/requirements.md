@@ -417,6 +417,12 @@ listed in `/help`:
   chrome. Hint text and timeout are overridable via
   `Options.MouseHint` + `Options.MouseHintTTL`. Borrowed from the
   Antigravity CLI; see [`ui-references.md`](./ui-references.md).
+- **R-MOUSE-4** While a modal is on screen the wheel scrolls *that
+  modal*, not the chat behind it. Exception: the inline permission
+  layout renders inside the chat viewport, so the wheel keeps
+  scrolling the chat — that is the surface showing the prompt. On a
+  cursor list (the pickers) one wheel tick moves the selection by one
+  row, not by the three-row wheel step.
 
 ### 3.13 Branding (must)
 
@@ -553,6 +559,26 @@ listed in `/help`:
   fallback (`pbcopy`/`xclip`/`wl-copy`) it tried if any were
   resolvable, or instructions for the user otherwise. No host
   configuration required; works out of the box.
+
+### 3.22 Modal scrolling (must)
+
+- **R-SCROLL-1** Every modal surface whose body can outgrow the
+  terminal scrolls: the `/btw` side answer, the permission overlay,
+  the elicitation form, the tool-call and subagent detail overlays,
+  and the theme / model / session pickers. A modal never renders
+  taller than the terminal and lets the terminal clip the overflow.
+- **R-SCROLL-2** The scroll vocabulary is `↑`/`↓`, `PgUp`/`PgDn`,
+  `Home`/`End`, plus the mouse wheel (R-MOUSE-4). Modals that accept
+  typed input bind arrows and page keys only — never bare `j`/`k`,
+  which belong to the field being typed into.
+- **R-SCROLL-3** A scrollable body that overflows shows a scrollbar
+  column on its right edge and a `↑↓ scroll` hint in the modal
+  footer; a body that fits shows neither.
+- **R-SCROLL-4** Modals with a focused row (the elicitation form)
+  keep that row on screen when focus moves, but do not yank the view
+  back to it on unrelated repaints. Modals that tail live content
+  (the subagent log) stay pinned to the newest line until the user
+  scrolls up, and `End` re-pins.
 
 ## 4. Non-functional Requirements
 
