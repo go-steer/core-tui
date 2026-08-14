@@ -87,14 +87,14 @@ Every source file carries the full Apache 2.0 header attributed to The go-steer 
 ### Tests
 
 - Unit tests live next to the code (`*_test.go`) and drive the `bubbletea.Model` via direct `Update(msg)` calls plus assertions on history / palette / modal state.
-- Smoke tests run a headless `tea.Program` against the bundled `examples/local/` and `examples/permissions/` fixtures.
+- Smoke tests run a headless `tea.Program` over an in-tree scripted agent, covering startup/shutdown and the flows that span goroutines — chiefly the permission round-trip. The harness doesn't exist yet ([#81](https://github.com/go-steer/core-tui/issues/81)); until it does, those paths are covered only by direct `Update(msg)` tests.
 - A new feature without a test is not done. A new bug fix without a regression test makes it easy for the bug to come back.
 - Target ≥ 70% statement coverage in `package tui` (per [`docs/requirements.md`](./docs/requirements.md) §N-TEST).
 
 ## Project layout
 
 - `tui/` — the library; public API per [`docs/design.md`](./docs/design.md) §3.
-- `examples/` — minimal host adapter examples (`local`, `permissions`, plus host-specific sketches).
+- `examples/` — runnable host examples: `local` (scripted agent, the visual harness) and `notifier-smoke` (the `Notifier` contract).
 - `dev/` — local + CI tooling (run from here, don't reinvent).
 - `docs/` — source-of-truth design docs (`requirements.md`, `design.md`, `decisions.md`).
 - `docs/site/` — Hugo source for the published documentation site.

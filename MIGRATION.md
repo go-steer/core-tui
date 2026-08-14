@@ -35,11 +35,12 @@ Every host adapter does the same four things (`docs/design.md` §6.0):
 2. **Implement zero or more capability interfaces** from §3.3
    (`ModelSwapper`, `Reloader`, `PermissionController`,
    `PricingController`, `ToolLister`, `SubagentLister`,
-   `Interruptible`, `StatusReporter`, `SlashProvider`). Each lights
-   up the corresponding slash command or UI affordance; missing ones
-   degrade to a "not available in this host" message.
+   `SubagentEventReader`, `SessionSwitcher`, `RemoteInterrupter`,
+   `StatusReporter`, `SlashProvider`, `LiveAgent`, `InjectableAgent`).
+   Each lights up the corresponding slash command or UI affordance;
+   missing ones degrade to a "not available in this host" message.
 3. **Wire the TUI-implemented interfaces** (`PermissionPrompter`,
-   `Elicitor`, `UserPrompter`) into the host's permission gate / MCP
+   `Elicitor`) into the host's permission gate / MCP
    servers / agent before the first `Agent.Run`.
 4. **Construct `Options` and call `tui.Run(ctx, opts)`.** Field
    additions to `Options` are non-breaking, so adapters compiled
@@ -83,7 +84,7 @@ of core-agent's pre-extraction TUI). The TUI is driven by:
 | `PricingController` | (not present) | Skip. `/pricing` degrades to "not available". |
 | `ToolLister` | (not present — tools baked into the agent at startup) | Skip for v1. `/tools` palette stays "not available" until cogo adds tool introspection. |
 | `SubagentLister` | (not present) | Skip. cogo has no subagents. |
-| `Interruptible` | (not present — cogo uses `ctx` cancellation only) | Skip. `Esc`-interrupt still works via the context the TUI passes into `Agent.Run`. |
+| `RemoteInterrupter` | (not present — cogo runs in-process, `ctx` cancellation only) | Skip. `Esc`-interrupt still works via the context the TUI passes into `Agent.Run`; this capability is for turns the TUI has no local context for. |
 | `SlashProvider` | (no agent-defined commands) | Not needed — every cogo slash command maps to a core-tui built-in once the corresponding capability is wired. |
 | `PermissionPrompter` (TUI-provided) | cogo's `gate.Prompter` | Construct via `tui.NewPrompter()`, hand to `gate.SetPrompter` before `agent.Run`. |
 | `Elicitor` (TUI-provided) | cogo's MCP server elicit callback | Construct via `tui.NewElicitor()`, register with each MCP server's `Connect` call. |
@@ -273,12 +274,12 @@ Other notable host pieces:
 | `PricingController` | `internal/pricing.RefreshPricing` + `SetPricing` | Wrap; surface the 5-layer precedence (config / project / user-manual / external / builtin / longest-prefix) inside `Refresh`. core-agent's per-model `ModelConfig.Pricing` map is the host's storage; core-tui doesn't see it. |
 | `ToolLister` | `agent.Agent.Tools() []tool.Tool` (or `AttachTools()` in attach mode) | Wrap; map `tool.Tool` → `tui.ToolInfo`. |
 | `SubagentLister` | `agent.Agent.BackgroundManager().Subagents()` (or `AttachAgents()` in attach mode) | Wrap; map entries → `tui.SubagentInfo` (`Name, Status, LastReport, StartedAt`). |
-| `Interruptible` | `agent.Agent.Interrupt() bool` (or `AttachInterrupt()` in attach mode) | One-line wrapper. |
+| `RemoteInterrupter` | `agent.Agent.Interrupt() bool` (or `AttachInterrupt()` in attach mode) | Thin wrapper — core-tui's signature is `Interrupt(ctx) error`, so map `false` to an error. Only consulted when there's no local turn context to cancel. |
 | `StatusReporter` | `agent.Agent.AttachStatus()` (returns `attach.StatusInfo`) | Wrap; map `StatusInfo.State` to the core-tui state string. |
 | `SlashProvider` | `/subagent` flag parser + `/btw` invocation | **Needed.** See §3.3 below — `/subagent` is pure SlashProvider; `/btw` needs the resolution from §5. |
 | `PermissionPrompter` (TUI-provided) | `gate.SetPrompter` | Wire. |
 | `Elicitor` (TUI-provided) | each MCP server's elicit callback | Wire per server. |
-| `UserPrompter` (TUI-provided) | (not used today — core-agent has no `ask_question` tool) | Optional. Wire if a future tool needs it. |
+| `UserPrompter` (TUI-provided) | (not used today — core-agent has no `ask_question` tool) | Nothing to do: core-tui doesn't ship this interface either. R-PROMPT-1 is specified but unimplemented — see design.md §3.4 and issue #78. |
 | `Options.UsageTracker` | `internal/usage.Tracker` | Same as cogo. |
 | `Options.MentionProviders` | (not needed) | Built-in file provider is sufficient. |
 | `Options.Branding.Wordmark` | `AgentConfig.DisplayName` | Pass through. |
@@ -310,8 +311,13 @@ type coreAgentCaps struct {
     pricing      *pricing.Manager
 }
 
-// Interruptible
-func (c *coreAgentCaps) Interrupt() bool { return c.inner.Interrupt() }
+// RemoteInterrupter
+func (c *coreAgentCaps) Interrupt(ctx context.Context) error {
+    if !c.inner.Interrupt() {
+        return errors.New("no turn in flight")
+    }
+    return nil
+}
 
 // ToolLister
 func (c *coreAgentCaps) Tools() []tui.ToolInfo {
@@ -400,7 +406,7 @@ the adapter just changes how `Agent.Run` works.
 | core-tui surface | attach-mode source | Notes |
 |---|---|---|
 | `tui.Agent.Run` | `Client.Stream(ctx, sid, since)` | Translator subscribes to the SSE stream, converts each `Frame.Event` to a `tui.Event`. On EOF, re-subscribes with the last seen `Seq`. |
-| `Interruptible` | `Client.Interrupt(ctx, sid)` | One round-trip; returns a bool. |
+| `RemoteInterrupter` | `Client.Interrupt(ctx, sid)` | One round-trip. This is the capability's home case — an attached observer watching a daemon-driven turn has no local context to cancel. |
 | `ToolLister` | `Client.Tools(ctx, sid)` | One round-trip; cache for the session unless `/reload` fires. |
 | `SubagentLister` | `Client.Agents(ctx, sid)` | One round-trip per `/subagents` open. |
 | `StatusReporter` | `Client.Status(ctx, sid)` | Lightweight poll. |
@@ -546,7 +552,7 @@ requires `github.com/go-steer/core-tui`, the adapter lives in
 
 - [x] Add `cmd/core-agent-tui/main.go`.
 - [x] Same translator + capability adapters as cogo, plus:
-      `Interruptible`, `ToolLister`, `SubagentLister`,
+      `RemoteInterrupter`, `ToolLister`, `SubagentLister`,
       `PricingController`, `SlashProvider` for `/btw`.
 - [x] Wire `Prompter`, `Elicitor`.
 - [x] Construct `Options`.
@@ -567,7 +573,7 @@ runtime rather than by build target.
       single adapter instead.
 - [ ] Implement the `attachAgent.Run` translator with reconnection
       + `since` replay.
-- [ ] Implement `Interruptible`, `ToolLister`, `SubagentLister`,
+- [ ] Implement `RemoteInterrupter`, `ToolLister`, `SubagentLister`,
       `StatusReporter` (each one round-trip to the attach client).
 - [ ] Decide whether to bind `Client.Inject` to a custom key; if so,
       register a `SlashProvider` entry for it.

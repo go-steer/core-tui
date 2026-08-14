@@ -35,19 +35,24 @@ tui/                  the library; public API per design.md §3.
                       flat package — Model + Update/View + slash
                       commands + palette + permissions modal +
                       elicit modal + markdown renderer + transcript.
-examples/             host-adapter examples.
-  local/              minimal in-process "echo" agent for smoke tests.
-  permissions/        fake tool calls that exercise the permission modal.
-  core-agent/         adapter sketch (local + attach flavors).
+  testagent/          scripted agent fixture — tests + examples/local.
+examples/             runnable host examples.
+  local/              scripted agent + every capability wired; the
+                      visual harness (ctrl+y permission, ctrl+e elicit,
+                      ctrl+x tool detail, /switch, -verbose-tools).
+  notifier-smoke/     standalone Notifier-contract exerciser.
 dev/                  build / test / lint tooling — see dev/README.md.
 docs/                 source-of-truth design docs (requirements,
                       design, decisions).
 docs/site/            published Hugo+Docsy site.
 .github/workflows/    thin delegators to dev/ci/presubmits/.
+CHANGELOG.md          every release back to v0.1.0 + the stability
+                      promise. Promoted at tag time (see below).
 ```
 
-Note: `tui/` does not exist yet — the repo currently ships only the
-docs. The layout above is the target shape (design.md §2).
+Not here yet: `examples/core-agent/` (the reference-host adapter
+sketch, issue #82) — with one gating host it would be the only
+compile-time canary on the plug-in surface.
 
 ## Build & test
 
@@ -167,8 +172,21 @@ Recipe:
    `gh release create vX.Y.Z --title --notes-file <file>` where
    `<file>` is the `[X.Y.Z]` CHANGELOG section.
 
+Accumulate the `### Added` / `### Fixed` / `### Security` entries under
+`[Unreleased]` **as each PR lands**, not at tag time — then step 2 is
+mechanical and nothing gets reconstructed from `git log` afterwards.
+
 ## Status
 
-Pre-v0.1. The repo currently ships only `docs/requirements.md` and
-`docs/design.md`. Implementation of `package tui` follows the order
-sketched in `docs/design.md` §11.
+Shipping. Latest release is tracked in [`CHANGELOG.md`](./CHANGELOG.md);
+`package tui` is complete enough that core-agent deleted its
+`internal/tui/` and depends on this library (as of v0.18.0).
+
+Pre-1.0. What's left before the API freezes is the
+[v1.0 milestone](https://github.com/go-steer/core-tui/milestone/1):
+capability-surface consolidation, the exported-surface audit, removing
+the vestigial render paths, an `apidiff` gate in CI, headless smoke
+tests, the `examples/core-agent` adapter, coverage to the ≥70% floor,
+and macOS in the CI matrix. Read the milestone before proposing
+anything that widens the exported surface — it is being narrowed, not
+grown.
