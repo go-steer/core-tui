@@ -29,4 +29,5 @@ The integration seam is a small Go interface set: hosts implement `tui.Agent` (o
 - **Source code** → [github.com/go-steer/core-tui](https://github.com/go-steer/core-tui)
 - **Issues** → [github.com/go-steer/core-tui/issues](https://github.com/go-steer/core-tui/issues) — bug reports, feature requests
 - **Discussions** → [github.com/go-steer/core-tui/discussions](https://github.com/go-steer/core-tui/discussions) — questions, what-are-you-building threads
-- **Releases & changelog** → [latest releases](https://github.com/go-steer/core-tui/releases)
+- **Releases** → [latest releases](https://github.com/go-steer/core-tui/releases)
+- **Changelog** → [`CHANGELOG.md`](https://github.com/go-steer/core-tui/blob/main/CHANGELOG.md) — every version back to v0.1.0, with the stability promise up top
