@@ -50,18 +50,6 @@ const (
 	stateStreaming                  // turn in flight: input disabled, spinner active
 )
 
-// overlay identifies which enum-driven modal, if any, is currently
-// visible. Permission + elicit modals don't ride this enum — they're
-// keyed off pendingPermission / pendingElicit directly so the real
-// flows can open them without the TUI having to also flip an
-// overlay value.
-type overlay int
-
-const (
-	overlayNone overlay = iota
-	overlayModelPicker
-)
-
 // Model is the Bubble Tea model that drives the TUI. Field set is the
 // minimum needed for the v0 visual-preview slice; later slices add
 // streaming state, modal forms, transcript persistence, etc.
@@ -94,7 +82,6 @@ type Model struct {
 
 	statusLayout StatusLayout
 	permMode     PermissionMode
-	overlay      overlay
 
 	// themeName holds the operator's explicit named-theme pick
 	// (seeded from Options.InitialThemeName, mutated by the
@@ -360,16 +347,12 @@ type Model struct {
 	// with the session-start instant.
 	startedAt time.Time
 
-	// modelPickerIdx is preserved only for the inline (non-Dialog)
-	// legacy overlay render path that's still in renderOverlay's
-	// vestigial body. Real picker state now lives inside
-	// modelPickerDialog (see dialog_modelpicker.go).
-	modelPickerIdx int
-
-	// overlay is the dialog stack (agentic-tui skill §9). Model
-	// picker rides this stack; permission / elicit / sideAnswer
-	// still use their inline pendingX fields because the channel
-	// lifecycle hasn't been decoupled yet.
+	// overlayStack is the dialog stack (agentic-tui skill §9) and
+	// the only modal mechanism besides the inline pendingX fields.
+	// Model picker, theme picker, session picker and the detail
+	// overlays all ride this stack; permission / elicit /
+	// sideAnswer still use their inline pendingX fields because
+	// the channel lifecycle hasn't been decoupled yet.
 	overlayStack Overlay
 
 	// caps holds the env-sniffed terminal capability bag

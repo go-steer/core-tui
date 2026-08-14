@@ -180,8 +180,6 @@ func (m Model) modalCursor(modal string) (c *tea.Cursor, covered bool) {
 		return nil, true // read-only viewer
 	case m.overlayStack.HasDialogs():
 		c = m.overlayStack.cursor(m.width, &m)
-	case m.overlay != overlayNone:
-		return nil, true // vestigial enum overlay: model picker
 	default:
 		return nil, false
 	}

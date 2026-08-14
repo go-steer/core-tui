@@ -42,6 +42,12 @@ The wire protocol in [`docs/sse-event-stream-protocol.md`](./docs/sse-event-stre
 - **Truncated diffs no longer advertise a keybinding that doesn't exist** ([#94](https://github.com/go-steer/core-tui/issues/94)). The marker under a clipped diff read `… +N more lines · ctrl+o to expand (todo)`. `ctrl+o` is bound nowhere in the package, so the one key the transcript named was the one key that did nothing — and the note-to-self shipped to operators. The marker is now just `… +N more lines`. Row-level diff expansion needs a message cursor first; when it lands, the affordance comes back with a key behind it.
 - **The scrollbar thumb no longer vanishes at the bottom of long content** ([#92](https://github.com/go-steer/core-tui/issues/92)). `Scrollbar` computed one more thumb position than it drew rows, so at maximum scroll the thumb landed one row past the end of the track: clipped short for a multi-row thumb, and gone entirely for the one-row thumb any content much longer than the viewport produces. The thumb now rests flush on the final row at maximum offset.
 
+### Removed
+
+- **The vestigial enum-driven overlay path** ([#90](https://github.com/go-steer/core-tui/pull/90), closing [#79](https://github.com/go-steer/core-tui/issues/79)). `Model` carried an unexported `overlay` enum (`overlayNone` / `overlayModelPicker`) left over from the visual-preview slice, along with the `modelPickerIdx` field, `renderOverlay`, the `case m.overlay != overlayNone` arm in `View`'s modal cascade, the matching `footerHint` case, and a second copy of the model-picker key handling in `Update`. A write-set analysis over `tui/*.go` **and** the test suite (`docs/api-audit.md` §4) found no assignment of any non-`overlayNone` value anywhere, so `m.overlay` was provably always `overlayNone` and every consumer of it was unreachable. Real picker state has lived in the `Dialog` stack since v0.1.0; `Ctrl+G` and `/model` both open `modelPickerDialog`. No exported symbol changed and **no host action is required** — this is dead-code removal ahead of the v1.0 freeze, so the paths don't become permanent maintenance obligations.
+
+The `usageMsg` bullet on that issue was a **false positive and nothing changed for it**: `usageMsg` is not legacy, it is still fed from `Event.Usage` / `Event.Model` in `tui/agentcmd.go`, and `turnSummaryMsg` is an additional push-mode path (v0.9.0), not a replacement. Deleting it would have broken per-turn usage rendering for every pull-mode host.
+
 ---
 
 ## [0.19.0] — 2026-08-14
