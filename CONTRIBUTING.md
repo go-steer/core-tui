@@ -16,7 +16,7 @@ By participating in this project you agree to abide by the [Code of Conduct](./C
 
 For anything beyond a typo fix or one-line bug, open an issue first so we can agree on the approach. PRs that are aligned upfront merge faster than ones that surface a design disagreement at review time.
 
-The library's stable surface is documented in [`docs/design.md`](./docs/design.md) §3 (the `Agent` interface + capability interfaces + `Options` + the `Prompter`/`Elicitor` pair). Changes that touch this surface need to be discussed before implementation — both named hosts (`cogo`, `core-agent`) depend on it.
+The library's stable surface is documented in [`docs/design.md`](./docs/design.md) §3 (the `Agent` interface + capability interfaces + `Options` + the `Prompter`/`Elicitor` pair). Changes that touch this surface need to be discussed before implementation — the reference host (`core-agent`) depends on it, as does any third-party host.
 
 ### Workflow
 

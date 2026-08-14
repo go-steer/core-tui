@@ -1,8 +1,10 @@
 # core-tui Design
 
 This document specifies how `core-tui` is structured, what its plug-in
-surface looks like, and how the two named hosts (cogo, core-agent)
-satisfy it. It is the design counterpart to `requirements.md`.
+surface looks like, and how a host satisfies it. core-agent is the
+reference host; cogo appears throughout as a second, smaller worked
+example and is not a gating consumer (§8). It is the design
+counterpart to `requirements.md`.
 
 Throughout this document, the prefix `tui` refers to the package
 `github.com/go-steer/core-tui/tui`. Other packages are noted with
@@ -68,7 +70,6 @@ core-tui/
 └── examples/
     ├── local/          minimal: in-process echo "agent" → smoke testing
     ├── permissions/    fake tool calls exercising the modal
-    ├── cogo/           cogo adapter sketch (uses cogo's agent pkg)
     └── core-agent/     core-agent adapter sketch (local + attach)
 ```
 
@@ -894,9 +895,11 @@ A scaffold adapter, with stubs for each capability, ships as
 `examples/local/` (see §11). Third-party hosts can copy it as a
 starting point.
 
-### 6.1 cogo (Gemini-only, local-only)
+### 6.1 cogo (Gemini-only, local-only) — illustrative
 
-cogo today has the TUI under `internal/tui`. Migration:
+Not a scheduled migration (§8). Kept as the small-host shape, where
+most capabilities are declined. cogo has the TUI under
+`internal/tui`. Migration would be:
 
 1. Delete `internal/tui` entirely.
 2. Add `cmd/cogo-tui/main.go` (or fold into existing `cmd/cogo`)
@@ -914,9 +917,10 @@ cogo today has the TUI under `internal/tui`. Migration:
 
 Adapter LOC budget: ~150 lines total.
 
-### 6.2 core-agent (multi-provider, local + attach)
+### 6.2 core-agent (multi-provider, local + attach) — the reference host
 
-core-agent's setup mirrors cogo but adds:
+This is the migration that actually happened; see `MIGRATION.md` §3
+for its shipped shape. core-agent's setup mirrors §6.1 but adds:
 
 - `PricingController` adapter (wraps the existing `internal/pricing`
   package).
@@ -961,8 +965,19 @@ Adapter LOC budget: ~400 lines (more capabilities to wire).
   §3 (Agent + Event + capability interfaces + Options field names).
   Field additions to Options are non-breaking by Go-module rules
   (struct literal with explicit field names is the documented usage).
-- v1.0 — declared once both cogo and core-agent are migrated and
-  green for one minor release.
+- v1.0 — declared once the reference host (core-agent) has been
+  migrated and green for one minor release, AND the pre-freeze work
+  in the [v1.0 milestone](https://github.com/go-steer/core-tui/milestone/1)
+  has landed: the capability-surface consolidation (§10 risk 1), the
+  exported-surface audit, removal of the vestigial render paths, and
+  an `apidiff` gate in CI so the promise is machine-checked rather
+  than reviewer-checked.
+
+  The original criterion required *both* cogo and core-agent. cogo
+  is no longer a gating consumer — core-agent completed its migration
+  (its `internal/tui/` is deleted and it tracks each release), while
+  cogo never started one. Additional hosts adopting core-tui are
+  welcome and tracked, but do not gate a release.
 - Pre-1.0 changes are recorded in `CHANGELOG.md`.
 
 ## 9. What we deliberately leave out
