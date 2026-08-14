@@ -39,6 +39,9 @@ the v2 transcript schema.
   spacing, modal composition).
 - **[Decisions](./docs/decisions.md)** — every load-bearing choice
   with rationale + rejected alternatives.
+- **[API audit](./docs/api-audit.md)** — every exported symbol with its
+  doc comment, the commit and release that introduced it, and whether it
+  is part of the contract; decision material for the 1.0 freeze.
 - **[UI references](./docs/ui-references.md)** — observations from
   other agentic TUIs (Antigravity, Claude Code, Codex, Crush, Cursor).
 - **[Migration guide](./MIGRATION.md)** — adapter contract + per-host

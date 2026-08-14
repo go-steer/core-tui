@@ -28,6 +28,12 @@ that touches the public surface:
 - [`docs/design.md`](./docs/design.md) — module layout, the plug-in
   surface, lifecycle, and the test strategy.
 
+When you need to know whether a given exported symbol is contract or
+incidental, when it shipped, or what its doc comment actually says, use
+[`docs/api-audit.md`](./docs/api-audit.md) — it inventories all 223
+exported symbols and 438 members with provenance. It is generated, so
+treat it as a snapshot (audit date is in its header), not a live index.
+
 ## Layout
 
 ```
