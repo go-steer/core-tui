@@ -1,17 +1,24 @@
 # Migrating to core-tui
 
-This document is the guide for migrating the two named hosts —
-[`go-steer/cogo`](https://github.com/go-steer/cogo) and
-[`go-steer/core-agent`](https://github.com/go-steer/core-agent) — from
-their in-tree `internal/tui` packages to depending on `core-tui`. It's
-also the reference for any third-party host writing an adapter against
-core-tui's stable surface.
+This document is the guide for moving a host off an in-tree
+`internal/tui` package and onto `core-tui`. It enumerates what an
+adapter needs to do, maps host features to core-tui surfaces,
+surfaces the gaps that don't have a clean mapping, and provides
+concrete adapter sketches.
 
-It is **not** a migration *commit log* — the actual cogo and
-core-agent migration PRs live in those repos. This doc enumerates
-what each host's adapter needs to do, maps every host feature to a
-core-tui surface, surfaces the gaps that don't have a clean mapping,
-and provides concrete adapter sketches.
+**Status of the two named hosts.**
+[`go-steer/core-agent`](https://github.com/go-steer/core-agent) has
+completed its migration — `internal/tui/` is deleted, `cmd/core-agent-tui`
+is the shipped surface, and it tracks each core-tui release. It is the
+reference host, and §3 is the worked case.
+[`go-steer/cogo`](https://github.com/go-steer/cogo) never started one
+and is **no longer a gating consumer** (`docs/design.md` §8); §2 is
+retained as a second worked example — a smaller host with fewer
+capabilities — for third-party adapter authors, not as a plan of
+record.
+
+It is **not** a migration *commit log* — the actual migration PRs live
+in the host repos.
 
 The stable surface itself is documented in [`docs/design.md`](./docs/design.md) §3.
 This guide consumes that contract — it doesn't redefine it.
@@ -43,11 +50,18 @@ host's existing entrypoint).
 
 ---
 
-## 2. cogo
+## 2. cogo (illustrative — not a plan of record)
+
+cogo is not a gating consumer and has no scheduled migration. This
+section is kept because it's a useful second shape to reason about:
+a small host with no subagents, no pricing, and no runtime tool
+introspection, where most capability interfaces are simply declined.
+Third-party adapter authors will recognize their own situation here
+more often than in core-agent's §3.
 
 ### 2.1 Source-tree summary
 
-cogo today owns `internal/tui/` (≈ 30 files, single package, mirror
+cogo owns `internal/tui/` (≈ 30 files, single package, mirror
 of core-agent's pre-extraction TUI). The TUI is driven by:
 
 - **`internal/agent.Agent`** — wraps an ADK runner. Streams
@@ -506,7 +520,7 @@ responsibilities with no core-tui spec change implied.
 
 ## 6. Per-host migration checklist
 
-### cogo
+### cogo (illustrative — no scheduled migration, see §2)
 
 - [ ] Add `cmd/cogo-tui/main.go` (or fold into existing `cmd/cogo`).
 - [ ] Implement `tui.Agent` translator (~30 lines).
@@ -523,23 +537,34 @@ responsibilities with no core-tui spec change implied.
       live render works; queue panel appears when typing ahead.
 - [ ] CI passes.
 
-### core-agent (local)
+### core-agent (local) — done
 
-- [ ] Add `cmd/core-agent-tui/main.go`.
-- [ ] Same translator + capability adapters as cogo, plus:
+Complete as of core-tui v0.18.0: `internal/tui/` is deleted, `go.mod`
+requires `github.com/go-steer/core-tui`, the adapter lives in
+`cmd/core-agent/coretui_enabled.go` (behind a `no_tui` build tag) and
+`cmd/core-agent-tui/` ships the standalone binary.
+
+- [x] Add `cmd/core-agent-tui/main.go`.
+- [x] Same translator + capability adapters as cogo, plus:
       `Interruptible`, `ToolLister`, `SubagentLister`,
       `PricingController`, `SlashProvider` for `/btw`.
-- [ ] Wire `Prompter`, `Elicitor`.
-- [ ] Construct `Options`.
-- [ ] Delete `internal/tui/`.
-- [ ] Smoke-test: every command from the cogo list, plus `/tools`,
+- [x] Wire `Prompter`, `Elicitor`.
+- [x] Construct `Options`.
+- [x] Delete `internal/tui/`.
+- [x] Smoke-test: every command from the cogo list, plus `/tools`,
       `/subagents`, `/interrupt`, `/pricing refresh`, `/pricing set`,
       `/btw <question>`.
-- [ ] CI passes.
+- [x] CI passes.
 
-### core-agent (attach)
+### core-agent (attach) — done, shape differs
 
-- [ ] Add `cmd/core-agent-tui-attach/main.go`.
+Shipped, but not as the separate binary this checklist anticipated:
+attach support lives in the same adapter (`cmd/core-agent/coretui_enabled.go`)
+via core-agent's `pkg/attach` + `pkg/attachadapter`, selected at
+runtime rather than by build target.
+
+- [ ] ~~Add `cmd/core-agent-tui-attach/main.go`~~ — folded into the
+      single adapter instead.
 - [ ] Implement the `attachAgent.Run` translator with reconnection
       + `since` replay.
 - [ ] Implement `Interruptible`, `ToolLister`, `SubagentLister`,
@@ -558,7 +583,7 @@ responsibilities with no core-tui spec change implied.
 
 ## 7. FAQ
 
-**Will the migration break existing cogo / core-agent users?**
+**Will migrating break existing users of a host's TUI?**
 No. The TUI's user-visible behavior is the superset of what the v1
 `internal/tui` packages did — every slash command, modal, and key
 binding either lifts as-is or comes with documented additions

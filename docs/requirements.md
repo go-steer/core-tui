@@ -11,11 +11,19 @@ two sibling projects:
 - [`github.com/go-steer/core-agent`](https://github.com/go-steer/core-agent)
   — multi-provider agent runtime with attach-mode + autonomous loops
 
-Both ship copies of essentially the same TUI under `internal/tui/`.
-The duplication is real (the two trees differ by ~3 files and a
+Both shipped copies of essentially the same TUI under `internal/tui/`.
+The duplication was real (the two trees differed by ~3 files and a
 handful of slash commands). core-tui consolidates them into one
-library, generalizes the agent-side seam so neither host is favored,
-and serves as the single TUI both projects depend on going forward.
+library and generalizes the agent-side seam so no single host is
+favored.
+
+**core-agent is the reference host**: it has completed the migration,
+tracks each release, and exercises the full capability surface. cogo
+is no longer a gating consumer — its TUI is the historical source of
+much of this behavior, and its adapter material in
+[`MIGRATION.md`](../MIGRATION.md) §2 is kept as a worked example for
+third-party hosts, but nothing in this document is blocked on cogo
+adopting core-tui.
 
 The non-goals are equally important:
 
@@ -31,10 +39,11 @@ documented Go interface set (see `design.md` for the shape).
 ## 2. Glossary
 
 - **Host** — a Go program that imports core-tui and supplies a
-  conforming agent. cogo and core-agent are the two named hosts.
+  conforming agent. core-agent is the reference host; cogo is a
+  historical one (see §1).
 - **Agent** — the host-supplied object that core-tui drives via the
-  `tui.Agent` interface. May be in-process (cogo) or a transparent
-  HTTP client to a remote agent (core-agent's attach mode).
+  `tui.Agent` interface. May be in-process or a transparent HTTP
+  client to a remote agent (core-agent's attach mode).
 - **Turn** — one user-prompt-to-completion cycle; the agent's `Run`
   method returns an iterator of events for one turn.
 - **Capability** — an optional method-set the agent may implement to
@@ -611,15 +620,17 @@ listed in `/help`:
 
 - **I-IFACE** The agent plug-in interface is documented as the
   primary stable surface of the library. See `design.md` §3.
-- **I-COGO** A wiring example must show cogo's existing `internal/agent.Agent`
-  satisfying the interface with a < 50-line adapter and a
-  `cmd/cogo-tui` example.
-- **I-CORE-AGENT** Same as above for core-agent, plus an example
+- **I-CORE-AGENT** A wiring example must show core-agent's agent type
+  satisfying the interface with a small adapter, plus an example
   showing the `attachclient` flavor (remote agent over HTTP)
   satisfying the same interface.
-- **I-MIGRATE** A `MIGRATION.md` (deliverable with v1) describes how
-  cogo and core-agent each drop their `internal/tui/` in favor of
-  core-tui.
+- **I-MIGRATE** A `MIGRATION.md` describes how a host drops its
+  in-tree `internal/tui/` in favor of core-tui. core-agent's
+  migration is the worked case; the cogo material in §2 is retained
+  as a second example for third-party hosts, not as a deliverable.
+
+`I-COGO` (a `cmd/cogo-tui` wiring example) was removed once cogo
+stopped being a gating consumer — see §1 and `design.md` §8.
 
 ## 6. Out of scope (v1)
 
@@ -642,6 +653,7 @@ A user-visible smoke checklist for v1:
    modal on a fake tool call and round-trips a decision.
 4. `/model`, `/reload`, `/pricing refresh` all surface "not
    available" cleanly when their capabilities aren't wired.
-5. A cogo branch and a core-agent branch each successfully replace
-   `internal/tui` with core-tui imports and pass their existing test
-   suites (smoke; full migration is downstream work).
+5. core-agent builds against the current release with its
+   `internal/tui` removed and passes its existing test suite. (Met as
+   of core-tui v0.18.0 — core-agent's `internal/tui/` is gone and
+   `cmd/core-agent-tui` is the shipped surface.)

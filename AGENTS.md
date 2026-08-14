@@ -9,8 +9,11 @@ instruction prefix. Keep it short and load-bearing.
 `core-tui` is a standalone, reusable Bubble Tea TUI for agentic
 assistants — extracted from the duplicated TUI code in
 [`go-steer/cogo`](https://github.com/go-steer/cogo) and
-[`go-steer/core-agent`](https://github.com/go-steer/core-agent) so both
-projects can depend on a single library going forward.
+[`go-steer/core-agent`](https://github.com/go-steer/core-agent) so
+hosts can depend on a single library going forward.
+[`go-steer/core-agent`](https://github.com/go-steer/core-agent) is the
+reference host and the only one that gates a release; cogo is a
+historical source, not a gating consumer (`docs/design.md` §8).
 
 It is intentionally agent-framework agnostic: nothing under `tui/`
 imports an LLM SDK, an MCP SDK, or an agent runtime. The integration
@@ -35,7 +38,6 @@ tui/                  the library; public API per design.md §3.
 examples/             host-adapter examples.
   local/              minimal in-process "echo" agent for smoke tests.
   permissions/        fake tool calls that exercise the permission modal.
-  cogo/               adapter sketch against cogo's agent package.
   core-agent/         adapter sketch (local + attach flavors).
 dev/                  build / test / lint tooling — see dev/README.md.
 docs/                 source-of-truth design docs (requirements,
@@ -139,8 +141,10 @@ Conventions worth knowing at agent prompt time:
 SemVer: minor bump (`v0.X.0`) pre-1.0 for any release; patch
 (`v0.X.Y`) for fix-only releases. Breaking changes land on minor
 bumps with a one-version deprecation period when feasible. v1.0 is
-declared once both cogo and core-agent have migrated and stayed green
-for one minor release (per `docs/design.md` §8).
+declared once the reference host (core-agent) has been migrated and
+stayed green for one minor release AND the pre-freeze work in the
+[v1.0 milestone](https://github.com/go-steer/core-tui/milestone/1) has
+landed (per `docs/design.md` §8). cogo is not a gating consumer.
 
 Recipe:
 
