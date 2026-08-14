@@ -57,6 +57,12 @@ const toolCallDialogPreferredWidth = 96
 type toolCallDialog struct {
 	idx    int
 	scroll int
+	// lastBody / lastView cache the geometry of the most recent
+	// render so wheel ticks can clamp without re-rendering the
+	// detail body. Keys don't need them (Render re-clamps), but the
+	// wheel arrives between renders in bursts.
+	lastBody int
+	lastView int
 }
 
 // newToolCallDialog constructs a fresh overlay focused on the
@@ -99,7 +105,7 @@ func (d *toolCallDialog) HandleKey(stroke string, m *Model) DialogAction {
 			d.scroll = 0
 		}
 		return DialogAction{Consumed: true}
-	case "right", "ctrl+n", "pgdn":
+	case "right", "ctrl+n", "pgdown", "pgdn":
 		if d.idx < n-1 {
 			d.idx++
 			d.scroll = 0
@@ -125,6 +131,12 @@ func (d *toolCallDialog) HandleKey(stroke string, m *Model) DialogAction {
 	// Unhandled key — consume so it doesn't leak to the textarea
 	// behind the modal, but don't close.
 	return DialogAction{Consumed: true}
+}
+
+// ScrollBy implements ScrollDialog: mouse-wheel ticks move the
+// detail body, clamped against the last render's geometry.
+func (d *toolCallDialog) ScrollBy(delta int, _ *Model) {
+	d.scroll = min(nonNeg(d.scroll+delta), nonNeg(d.lastBody-d.lastView))
 }
 
 func (d *toolCallDialog) Render(totalWidth int, m *Model) string {
@@ -167,24 +179,11 @@ func (d *toolCallDialog) Render(totalWidth int, m *Model) string {
 	bodyLines := strings.Split(detail, "\n")
 
 	viewport := detailViewportHeight(m.height)
-	if maxScroll := len(bodyLines) - viewport; d.scroll > maxScroll {
-		if maxScroll < 0 {
-			d.scroll = 0
-		} else {
-			d.scroll = maxScroll
-		}
-	}
-	if d.scroll < 0 {
-		d.scroll = 0
-	}
-	visible := bodyLines
-	if len(bodyLines) > viewport {
-		end := d.scroll + viewport
-		if end > len(bodyLines) {
-			end = len(bodyLines)
-		}
-		visible = bodyLines[d.scroll:end]
-	}
+	d.lastBody, d.lastView = len(bodyLines), viewport
+	d.scroll = min(nonNeg(d.scroll), nonNeg(len(bodyLines)-viewport))
+	// Two columns on the right are reserved for the scrollbar so the
+	// body doesn't reflow the moment the detail starts overflowing.
+	visible := scrollView(m.styles, bodyLines, nonNeg(width-6), viewport, d.scroll)
 	body := header + "\n\n" + strings.Join(visible, "\n")
 
 	footer := renderToolCallFooter(len(tools), len(bodyLines), viewport)

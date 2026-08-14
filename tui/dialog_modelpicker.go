@@ -36,6 +36,10 @@ const modelPickerDialogID = "model-picker"
 // via PersistModelChoice when wired.
 type modelPickerDialog struct {
 	idx int
+	// off is the first visible row — a host advertising more models
+	// than the terminal has rows would otherwise paint the tail of
+	// the list past the bottom edge with no way to reach it.
+	off int
 }
 
 // newModelPickerDialog constructs a fresh picker focused on the
@@ -140,7 +144,9 @@ func (d *modelPickerDialog) Render(totalWidth int, m *Model) string {
 				}
 				rows = append(rows, row)
 			}
-			body = strings.Join(rows, "\n")
+			view := modalBodyHeight(m.height, modalChromeRows)
+			d.off = listWindow(d.off, d.idx, len(rows), view)
+			body = strings.Join(scrollView(m.styles, rows, nonNeg(width-4), view, d.off), "\n")
 		}
 	}
 	footer := "↑↓ choose " + GlyphSeparator + " enter accept " + GlyphSeparator + " esc cancel"

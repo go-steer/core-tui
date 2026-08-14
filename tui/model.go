@@ -120,6 +120,19 @@ type Model struct {
 	elicitFieldIdx   int            // currently-focused field (Tab/Shift+Tab nav)
 	elicitValues     map[string]any // in-progress form values
 
+	// modalScroll is the shared scroll offset for the modals that
+	// live inline on the Model rather than on the Overlay stack —
+	// the permission overlay, the elicit form, and the /btw side
+	// answer. Only one of them renders at a time (View's precedence
+	// cascade), so one offset is enough; each open resets it.
+	//
+	// It's a POINTER because View() has a value receiver: the render
+	// path measures the body and writes the geometry back here so
+	// the next keystroke can clamp without re-rendering. Use
+	// Model.scroll() rather than touching the field — a zero-value
+	// Model{} (tests) has nil here.
+	modalScroll *scrollState
+
 	// toast is a transient banner that renders between the input
 	// box and the footer (R-WAKE-1). Cleared after toastTTL via
 	// cullToast on the next render. Set by wakeMsg handling.
@@ -260,6 +273,12 @@ type Model struct {
 	// markdown is the lazily-built Glamour renderer; rebuilt when
 	// dark/light or width changes. nil until first use.
 	markdown *markdownRenderer
+
+	// modalMarkdown is the same thing sized for a modal body (the
+	// /btw side answer), kept apart so the narrower modal width
+	// doesn't evict the chat renderer on every open. See
+	// ensureModalMarkdown.
+	modalMarkdown *markdownRenderer
 
 	// quitting flips when Ctrl+C / Ctrl+D land, so the next Update
 	// returns tea.Quit.
@@ -442,6 +461,7 @@ func NewModel(opts Options) Model {
 		historyCursor:   -1,
 		startedAt:       time.Now(),
 		listCache:       newListCache(),
+		modalScroll:     &scrollState{},
 		caps:            DetectCapabilities(),
 		newlineHint:     defaultNewlineHint(DetectCapabilities().TermProgram),
 	}
@@ -520,6 +540,26 @@ func (m *Model) ensureMarkdown() *markdownRenderer {
 		m.inProgressStableRender = ""
 	}
 	return m.markdown
+}
+
+// ensureModalMarkdown returns a markdown renderer word-wrapped to a
+// MODAL body width rather than the chat column's.
+//
+// The /btw modal used to render its answer through ensureMarkdown,
+// i.e. wrapped for the viewport — 20-plus columns wider than the
+// modal frame it lands in. Every long line then got re-wrapped by
+// the frame, which both doubled the modal's height and made the body
+// impossible to measure for scrolling (source lines != screen rows).
+// Cached separately from m.markdown so a modal never evicts the
+// chat's renderer.
+func (m *Model) ensureModalMarkdown(width int) *markdownRenderer {
+	if width <= 0 {
+		width = 80
+	}
+	if m.modalMarkdown == nil || m.modalMarkdown.dark != m.styles.Dark || m.modalMarkdown.width != width {
+		m.modalMarkdown = newMarkdownRenderer(m.styles.Dark, width)
+	}
+	return m.modalMarkdown
 }
 
 // permissionModeWired reports whether the host configured the chip.

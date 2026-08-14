@@ -33,6 +33,10 @@ const themePickerDialogID = "theme-picker"
 type themePickerDialog struct {
 	idx          int
 	originalName string
+	// off is the first visible row: the builtin registry already
+	// outgrows a short terminal, so the list windows around the
+	// cursor rather than painting past the bottom edge.
+	off int
 }
 
 // newThemePickerDialog focuses the row matching the currently
@@ -133,7 +137,9 @@ func (d *themePickerDialog) Render(totalWidth int, m *Model) string {
 			}
 			rows = append(rows, row)
 		}
-		body = strings.Join(rows, "\n")
+		view := modalBodyHeight(m.height, modalChromeRows)
+		d.off = listWindow(d.off, d.idx, len(rows), view)
+		body = strings.Join(scrollView(m.styles, rows, nonNeg(width-4), view, d.off), "\n")
 	}
 	footer := "↑↓ preview " + GlyphSeparator + " enter accept " + GlyphSeparator + " esc cancel"
 	return RenderContext{
