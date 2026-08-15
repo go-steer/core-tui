@@ -22,6 +22,7 @@ package tui
 import (
 	"strings"
 
+	tea "charm.land/bubbletea/v2"
 	"charm.land/lipgloss/v2"
 )
 
@@ -30,35 +31,101 @@ const sessionPickerDialogID = "session-picker"
 // sessionPickerDialog renders SessionSwitcher.Sessions() with a
 // cursor + "(current)" marker on the attached row, dispatches
 // SwitchToSession + applySwitchTarget on Enter.
+//
+// Mirrors dialog_modelpicker.go's snapshot shape (issue #114): the
+// list is pulled once, off the Update goroutine, when the dialog
+// opens; HandleKey and Render read the snapshot and never call the
+// host. Sessions() is a remote enumeration on the hosts that motivate
+// this capability at all, so re-pulling it per keystroke and again
+// per paint was the worst version of the pattern.
 type sessionPickerDialog struct {
+	// loaded flips when sessionsLoadedMsg installs the snapshot. As
+	// on the model picker there is no "unwired" state: the
+	// SessionSwitcher type assertion is free and View()-safe; only
+	// the list is a host call.
+	loaded bool
+
+	// sessions is the snapshot: the full list as the host returned
+	// it, never re-pulled while the dialog is open.
+	sessions []SessionInfo
+
+	// idx is the cursor, an index into rows().
 	idx int
+
 	// off is the first visible row. Session lists are host-supplied
 	// and unbounded — a long-running endpoint can advertise dozens —
 	// so the list windows around the cursor.
 	off int
+
+	// switching is the session ID of an in-flight SwitchToSession, or
+	// "". The dialog stays open showing progress until
+	// sessionSwitchedMsg lands.
+	switching string
 }
 
+// newSessionPickerDialog constructs the picker with no snapshot yet.
+// Prefer Model.openSessionPicker, which pairs the Open with the Cmd
+// that fills it.
 func newSessionPickerDialog() *sessionPickerDialog {
 	return &sessionPickerDialog{idx: 0}
 }
 
+// openSessionPicker pushes the session picker (singleton) and returns
+// the Cmd that pulls Sessions() off the Update goroutine. Nil Cmd
+// when the picker is already open or the capability is unwired.
+func (m *Model) openSessionPicker() tea.Cmd {
+	if m.overlayStack.HasID(sessionPickerDialogID) {
+		return nil
+	}
+	m.overlayStack.Open(newSessionPickerDialog())
+	return m.sessionsCmd()
+}
+
 func (d *sessionPickerDialog) ID() string { return sessionPickerDialogID }
 
+// rows returns the list the cursor indexes into and Render paints —
+// the same filtering seam as modelPickerDialog.rows.
+func (d *sessionPickerDialog) rows() []SessionInfo { return d.sessions }
+
+// applySessions installs the open-time snapshot, from Update's
+// sessionsLoadedMsg handler.
+func (d *sessionPickerDialog) applySessions(sessions []SessionInfo) {
+	d.sessions = sessions
+	d.loaded = true
+	d.idx = 0
+	d.off = 0
+}
+
 func (d *sessionPickerDialog) HandleKey(stroke string, m *Model) DialogAction {
-	switcher, ok := m.opts.Agent.(SessionSwitcher)
-	if !ok {
+	if stroke == "esc" {
+		return DialogAction{Consumed: true, Close: true}
+	}
+	if d.switching != "" {
+		// A SwitchToSession is in flight; swallow keys rather than
+		// let the operator stack a second attach.
+		return DialogAction{Consumed: true}
+	}
+	switcher, wired := m.opts.Agent.(SessionSwitcher)
+	if !wired {
 		// Agent doesn't support session switching — close cleanly.
 		return DialogAction{Consumed: true, Close: true}
 	}
-	sessions := switcher.Sessions()
+	if !d.loaded {
+		return DialogAction{Consumed: true}
+	}
+	sessions := d.rows()
 	if len(sessions) == 0 {
 		m.history.Append(Message{Role: RoleSystem, Text: "/switch: no sessions available"})
 		m.refreshViewport()
 		return DialogAction{Consumed: true, Close: true}
 	}
+	if d.idx >= len(sessions) {
+		d.idx = len(sessions) - 1
+	}
+	if d.idx < 0 {
+		d.idx = 0
+	}
 	switch stroke {
-	case "esc":
-		return DialogAction{Consumed: true, Close: true}
 	case "up", "ctrl+p":
 		d.idx = (d.idx - 1 + len(sessions)) % len(sessions)
 		return DialogAction{Consumed: true}
@@ -66,12 +133,6 @@ func (d *sessionPickerDialog) HandleKey(stroke string, m *Model) DialogAction {
 		d.idx = (d.idx + 1) % len(sessions)
 		return DialogAction{Consumed: true}
 	case "enter":
-		if d.idx >= len(sessions) {
-			d.idx = len(sessions) - 1
-		}
-		if d.idx < 0 {
-			d.idx = 0
-		}
 		pick := sessions[d.idx]
 		// Action row (issue #56) — hand off to a text-input dialog
 		// stacked on top of this one instead of switching. We stay
@@ -86,23 +147,31 @@ func (d *sessionPickerDialog) HandleKey(stroke string, m *Model) DialogAction {
 		if pick.Current {
 			return DialogAction{Consumed: true, Close: true}
 		}
-		tgt, err := switcher.SwitchToSession(pick.ID)
-		if err != nil {
-			m.history.Append(Message{Role: RoleError, Text: "/switch: " + err.Error()})
-			m.refreshViewport()
-			return DialogAction{Consumed: true, Close: true}
-		}
-		if tgt.Agent == nil {
-			m.history.Append(Message{Role: RoleError, Text: "/switch: SessionSwitcher returned nil Agent"})
-			m.refreshViewport()
-			return DialogAction{Consumed: true, Close: true}
-		}
-		cmd := m.applySwitchTarget(&tgt)
-		return DialogAction{Consumed: true, Close: true, Cmd: cmd}
+		// Stay open + mark in flight; sessionSwitchedMsg closes us.
+		d.switching = pick.ID
+		return DialogAction{Consumed: true, Cmd: switchToSessionCmd(switcher, m.sessionGen, pick.ID)}
 	}
 	// Unhandled key — consume so it doesn't leak to the textarea
 	// behind the modal, but don't close.
 	return DialogAction{Consumed: true}
+}
+
+// applySessionSwitch is the Update-side half of the Enter path.
+// Returns the listener-batch Cmd applySwitchTarget produces, or nil
+// on failure. Called only after the sessionGen guard has passed.
+func (m *Model) applySessionSwitch(msg sessionSwitchedMsg) tea.Cmd {
+	if msg.err != nil {
+		m.history.Append(Message{Role: RoleError, Text: "/switch: " + msg.err.Error()})
+		m.refreshViewport()
+		return nil
+	}
+	if msg.target.Agent == nil {
+		m.history.Append(Message{Role: RoleError, Text: "/switch: SessionSwitcher returned nil Agent"})
+		m.refreshViewport()
+		return nil
+	}
+	tgt := msg.target
+	return m.applySwitchTarget(&tgt)
 }
 
 func (d *sessionPickerDialog) Render(totalWidth int, m *Model) string {
@@ -114,12 +183,18 @@ func (d *sessionPickerDialog) Render(totalWidth int, m *Model) string {
 		width = 30
 	}
 
-	switcher, ok := m.opts.Agent.(SessionSwitcher)
+	// Snapshot-only render (issue #114) — no host call from View().
+	_, wired := m.opts.Agent.(SessionSwitcher)
 	body := ""
-	if !ok {
+	switch {
+	case !wired:
 		body = m.styles.Muted.Render("agent does not implement SessionSwitcher")
-	} else {
-		sessions := switcher.Sessions()
+	case d.switching != "":
+		body = m.styles.Muted.Render("attaching to " + d.switching + "…")
+	case !d.loaded:
+		body = m.styles.Muted.Render("loading sessions…")
+	default:
+		sessions := d.rows()
 		if len(sessions) == 0 {
 			body = m.styles.Muted.Render("(no sessions advertised by the agent)")
 		} else {

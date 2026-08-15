@@ -78,7 +78,7 @@ func (a *attachRowAgent) Sessions() []SessionInfo {
 // what happens after.
 func openAttachRow(t *testing.T, m *Model) {
 	t.Helper()
-	d := newSessionPickerDialog()
+	d := readySessionPicker(m)
 	m.overlayStack.Open(d)
 	d.idx = 2 // the action row
 	act := d.HandleKey("enter", m)
@@ -280,7 +280,7 @@ func TestSessionPicker_ActionRowRender(t *testing.T) {
 	m := NewModel(Options{Agent: agent})
 	m.viewport.SetWidth(80)
 
-	d := newSessionPickerDialog()
+	d := readySessionPicker(&m)
 	var row string
 	for _, l := range strings.Split(renderPlain(d, &m), "\n") {
 		if strings.Contains(l, "Attach to endpoint") {

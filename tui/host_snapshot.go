@@ -20,17 +20,19 @@ import (
 	tea "charm.land/bubbletea/v2"
 )
 
-// hostSnapshot caches the host's StatusReporter + UsageTracker reads so
-// the render path never calls the host from inside View().
+// hostSnapshot caches the host's StatusReporter + UsageTracker +
+// SubagentLister reads so the render path never calls the host from
+// inside View().
 //
 // Why this matters: bubble-tea runs Update and View on a single event-
 // loop goroutine. The status header pulls the model name, provider, and
-// usage figures on every paint; if any of those host methods blocks
-// (a slow or wedged remote daemon, say), View() blocks, the event loop
-// freezes, and the whole TUI locks up — keys and Ctrl+C included, since
-// those arrive as messages the frozen loop can't read. Reading from this
-// cache instead keeps View() pure and non-blocking regardless of how the
-// host implements its capability methods.
+// usage figures on every paint, and the sidebar pulls the subagent
+// roster; if any of those host methods blocks (a slow or wedged remote
+// daemon, say), View() blocks, the event loop freezes, and the whole TUI
+// locks up — keys and Ctrl+C included, since those arrive as messages the
+// frozen loop can't read. Reading from this cache instead keeps View()
+// pure and non-blocking regardless of how the host implements its
+// capability methods.
 //
 // The cache is refreshed off the event loop by refreshHostSnapshotCmd on
 // a periodic tick (see hostSnapshotInterval). Push-mode fields the Update
@@ -45,6 +47,12 @@ type hostSnapshot struct {
 	cost      float64
 	winUsed   int // UsageTracker.ContextWindowUsed()
 	winSize   int // UsageTracker.ContextWindowSize()
+
+	// hasSubagents reports that a SubagentLister was wired, so an
+	// empty subagents slice means "none running" rather than "no
+	// capability". The sidebar renders a different row for each.
+	hasSubagents bool
+	subagents    []SubagentInfo // SubagentLister.Subagents()
 }
 
 // hostSnapshotMsg carries a completed off-loop refresh back into Update.
@@ -70,9 +78,9 @@ type hostSnapshotTickMsg struct{ gen uint64 }
 const hostSnapshotInterval = time.Second
 
 // pullHostSnapshot reads the host capabilities once. Runs inside the
-// refresh Cmd's goroutine (off the event loop), never from View(). Both
-// arguments are nil-safe: a host may implement neither, either, or both.
-func pullHostSnapshot(reporter StatusReporter, tracker UsageTracker) hostSnapshot {
+// refresh Cmd's goroutine (off the event loop), never from View(). Every
+// argument is nil-safe: a host may implement none, some, or all.
+func pullHostSnapshot(reporter StatusReporter, tracker UsageTracker, lister SubagentLister) hostSnapshot {
 	snap := hostSnapshot{valid: true}
 	if reporter != nil {
 		s := reporter.Status()
@@ -86,23 +94,28 @@ func pullHostSnapshot(reporter StatusReporter, tracker UsageTracker) hostSnapsho
 		snap.winUsed = tracker.ContextWindowUsed()
 		snap.winSize = tracker.ContextWindowSize()
 	}
+	if lister != nil {
+		snap.hasSubagents = true
+		snap.subagents = lister.Subagents()
+	}
 	return snap
 }
 
 // refreshHostSnapshotCmd builds the off-loop refresh Cmd, or nil when the
-// host implements neither capability (nothing to cache — the View
-// helpers fall back to placeholders). The host interfaces and sessionGen
-// are captured at construction so the closure doesn't touch the model
-// from its goroutine.
+// host implements none of the cached capabilities (nothing to cache — the
+// View helpers fall back to placeholders). The host interfaces and
+// sessionGen are captured at construction so the closure doesn't touch the
+// model from its goroutine.
 func (m Model) refreshHostSnapshotCmd() tea.Cmd {
 	reporter, _ := m.opts.Agent.(StatusReporter)
+	lister, _ := m.opts.Agent.(SubagentLister)
 	tracker := m.opts.UsageTracker
-	if reporter == nil && tracker == nil {
+	if reporter == nil && tracker == nil && lister == nil {
 		return nil
 	}
 	gen := m.sessionGen
 	return func() tea.Msg {
-		return hostSnapshotMsg{gen: gen, snap: pullHostSnapshot(reporter, tracker)}
+		return hostSnapshotMsg{gen: gen, snap: pullHostSnapshot(reporter, tracker, lister)}
 	}
 }
 

@@ -282,6 +282,91 @@ type noticeMsg struct {
 	dropped int // coalesced drop count; appended to rendered text as "(+N dropped)"
 }
 
+// Off-loop host-call replies (issue #114). Each is produced by a Cmd
+// in host_async.go and carries the sessionGen captured when the Cmd
+// was built, so a mid-flight `/switch` retires the reply exactly like
+// every other generation-guarded msg above.
+
+// modelsLoadedMsg carries the ModelSwapper.AvailableModels() snapshot
+// pulled when the model picker opened. Update installs it on the
+// dialog (addressed via overlayStack.Get, so a modal stacked on top
+// of the picker in the meantime doesn't misroute it).
+type modelsLoadedMsg struct {
+	gen    uint64
+	models []ModelInfo
+}
+
+// modelSwitchedMsg carries the outcome of ModelSwapper.SwitchModel.
+//
+// gen matters more here than anywhere else in this group: the handler
+// assigns msg.agent to m.opts.Agent, so landing a stale reply after a
+// session switch would attach the WRONG agent to the current session.
+// A mismatched gen is dropped without touching opts.
+type modelSwitchedMsg struct {
+	gen   uint64
+	id    string
+	agent Agent
+	err   error
+}
+
+// sessionsLoadedMsg carries the SessionSwitcher.Sessions() snapshot
+// pulled when the session picker opened.
+type sessionsLoadedMsg struct {
+	gen      uint64
+	sessions []SessionInfo
+}
+
+// sessionSwitchedMsg carries the outcome of
+// SessionSwitcher.SwitchToSession. The handler runs applySwitchTarget,
+// which itself bumps sessionGen — so a second reply from a superseded
+// picker is dropped by the guard rather than switching twice.
+type sessionSwitchedMsg struct {
+	gen    uint64
+	id     string
+	target SwitchTarget
+	err    error
+}
+
+// slashCommandsMsg carries the host's SlashProvider.SlashCommands()
+// rows for a `/` palette that already opened with the built-ins.
+//
+// seq identifies the palette instance (Model.paletteSeq, bumped on
+// every open). A palette opens and closes many times inside one
+// session generation, so gen alone can't tell whether the reply still
+// belongs to what is on screen.
+type slashCommandsMsg struct {
+	gen   uint64
+	seq   uint64
+	items []paletteItem
+}
+
+// fileItemsMsg carries the @-palette's directory-walk result for the
+// palette instance identified by seq. Same seq rationale as
+// slashCommandsMsg; gen rides along for symmetry with the rest of the
+// group even though the walk is filesystem- not agent-derived.
+type fileItemsMsg struct {
+	gen   uint64
+	seq   uint64
+	items []paletteItem
+}
+
+// reloadDoneMsg carries the outcome of Reloader.Reload, run off-loop
+// under reloadTimeout.
+type reloadDoneMsg struct {
+	gen    uint64
+	result ReloadResult
+	err    error
+}
+
+// pricingRefreshedMsg carries the outcome of
+// PricingController.Refresh, run off-loop under
+// pricingRefreshTimeout.
+type pricingRefreshedMsg struct {
+	gen     uint64
+	summary string
+	err     error
+}
+
 // ThemeChangedMsg is emitted by the /theme picker (and `/theme
 // <name>` with a known name) when the operator commits a new
 // theme. Hosts have two equivalent ways to persist:
