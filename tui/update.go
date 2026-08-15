@@ -555,7 +555,7 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			return m, nil
 		}
 		if d, ok := m.overlayStack.Get(modelPickerDialogID).(*modelPickerDialog); ok {
-			d.applyModels(msg.models)
+			d.applyModels(msg.models, m.displayModelName())
 			m.refreshViewport()
 		}
 		return m, nil

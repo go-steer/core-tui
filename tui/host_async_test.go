@@ -124,7 +124,7 @@ func (a *slowAgent) InvokeSlash(context.Context, string, string) (SlashResult, e
 func readyModelPicker(m *Model) *modelPickerDialog {
 	d := newModelPickerDialog()
 	if sw, ok := m.opts.Agent.(ModelSwapper); ok {
-		d.applyModels(sw.AvailableModels())
+		d.applyModels(sw.AvailableModels(), m.displayModelName())
 	}
 	return d
 }
