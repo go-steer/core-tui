@@ -173,7 +173,7 @@ Threshold (tentative): **8 lines visible by default**.
 | Preview length | Default render | Operator escape hatch |
 |---|---|---|
 | 0-8 lines | Full preview inline | n/a |
-| 9-50 lines | First 6 lines + `… +N lines · ctrl+o to expand` | Ctrl+O on focused row (needs message-cursor; v1 = no expand, just truncate) |
+| 9-50 lines | First 6 lines + `… +N more lines` | Ctrl+O on focused row (needs message-cursor; v1 = no expand, just truncate, and the marker says so — issue [#94](https://github.com/go-steer/core-tui/issues/94)) |
 | 50+ lines | First 6 lines + `… +N lines · large preview suppressed` | `/diff <message-id>` slash command to dump in a system message (v2) |
 
 Each preview line is prefixed with the standard 4-space indent (matches
