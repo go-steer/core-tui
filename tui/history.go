@@ -46,6 +46,18 @@ type Message struct {
 	// messages after a turn completes (R-CHAT-4). Empty during stream.
 	Rendered string
 
+	// renderedWidth is the viewport width Rendered was word-wrapped
+	// at. The debounced resize reflow (issue #104) compares it
+	// against the current width to decide whether a message still
+	// has to go back through Glamour — that comparison is what lets
+	// a drag out and back skip every message it never touched.
+	// Zero means "unknown" (a Rendered set by a host or a test
+	// fixture rather than by the render path), which the reflow
+	// treats as stale so behavior matches the pre-#104 unconditional
+	// pass. Unexported deliberately: a render-path detail, not part
+	// of the Message contract hosts populate.
+	renderedWidth int
+
 	// ToolName, ToolArgs populated when Role == RoleTool.
 	ToolName string
 	ToolArgs string
@@ -161,6 +173,17 @@ func (h *History) Append(m Message) {
 	h.entries = append(h.entries, m)
 }
 
+// at returns a copy of entry i, or false when i is out of range.
+// Unexported single-entry read for hot paths that would otherwise
+// pay a whole-history Snapshot to look at one row (the resize warm
+// pass, issue #104).
+func (h *History) at(i int) (Message, bool) {
+	if i < 0 || i >= len(h.entries) {
+		return Message{}, false
+	}
+	return h.entries[i], true
+}
+
 // Snapshot returns a copy of every entry, in order.
 func (h *History) Snapshot() []Message {
 	out := make([]Message, len(h.entries))
@@ -179,10 +202,20 @@ func (h *History) Reset() {
 // Out-of-range i is a silent no-op so callers can pass the
 // snapshot index without bounds-checking.
 func (h *History) SetRendered(i int, rendered string) {
+	h.setRenderedAt(i, rendered, 0)
+}
+
+// setRenderedAt is SetRendered plus the width the render was
+// wrapped at (issue #104). The resize reflow uses it so a later
+// pass can tell which entries are already correct for the current
+// viewport and skip them. Unexported — the width stamp is a
+// render-path invariant, not something a host should assert.
+func (h *History) setRenderedAt(i int, rendered string, width int) {
 	if i < 0 || i >= len(h.entries) {
 		return
 	}
 	h.entries[i].Rendered = rendered
+	h.entries[i].renderedWidth = width
 	h.entries[i].Version++
 }
 

@@ -299,6 +299,25 @@ type Model struct {
 	viewportDirty  bool
 	refreshPending bool
 
+	// Debounced resize reflow (issue #104 — see resize.go).
+	// resizeGen stamps every width-changing WindowSizeMsg; the
+	// settle / warm ticks carry the stamp they were scheduled with
+	// and are dropped when it no longer matches, so a superseded
+	// drag's callback can't clobber a newer resize. reflowPending
+	// says a width change is still working its way through the
+	// transcript; reflowCursor is how far the incremental warm walk
+	// has got. msgSpans is the per-message line range recorded by
+	// the last refreshViewport, used to work out which messages are
+	// on screen (and therefore must reflow in this frame).
+	// reflowMaxID is the highest Message.ID that existed when the
+	// width changed — rows appended after it are committed at the
+	// current width and must not be re-rendered.
+	resizeGen     uint64
+	reflowPending bool
+	reflowCursor  int
+	reflowMaxID   uint64
+	msgSpans      []msgSpan
+
 	// markdown is the lazily-built Glamour renderer; rebuilt when
 	// dark/light or width changes. nil until first use.
 	markdown *markdownRenderer

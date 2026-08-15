@@ -1,0 +1,442 @@
+// Copyright 2026 The go-steer team
+//
+// Licensed under the Apache License, Version 2.0 (the "License");
+// you may not use this file except in compliance with the License.
+// You may obtain a copy of the License at
+//
+//     http://www.apache.org/licenses/LICENSE-2.0
+//
+// Unless required by applicable law or agreed to in writing, software
+// distributed under the License is distributed on an "AS IS" BASIS,
+// WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+// See the License for the specific language governing permissions and
+// limitations under the License.
+
+package tui
+
+import (
+	"strings"
+	"testing"
+
+	tea "charm.land/bubbletea/v2"
+	"charm.land/lipgloss/v2"
+)
+
+// Debounced resize reflow (issue #104). The contract under test:
+//
+//   - a width-changing event reflows only what is on screen;
+//   - the settle tick warms the rest, in slices;
+//   - a settle tick from a superseded drag is ignored;
+//   - follow state survives a drag (issue #93 must not regress);
+//   - the list cache is not dropped when the width did not change.
+
+// maxRenderedWidth returns the widest display line in s, ignoring
+// ANSI escapes. Glamour word-wraps to its configured width, so this
+// is how a test checks that a message really was reflowed.
+func maxRenderedWidth(s string) int {
+	widest := 0
+	for _, line := range strings.Split(s, "\n") {
+		if w := lipgloss.Width(strings.TrimRight(line, " ")); w > widest {
+			widest = w
+		}
+	}
+	return widest
+}
+
+// settleResizeReflow delivers settle + warm ticks (plus the
+// coalesced repaint each schedules) until the reflow retires.
+// Mirrors what the Bubble Tea runtime does with the returned Cmds,
+// minus the wall-clock waits.
+func settleResizeReflow(t *testing.T, m Model) Model {
+	t.Helper()
+	for i := 0; m.reflowPending; i++ {
+		if i > 10000 {
+			t.Fatal("resize reflow never retired")
+		}
+		out, _ := m.Update(resizeReflowMsg{gen: m.resizeGen})
+		m = out.(Model)
+		out, _ = m.Update(coalescedRefreshMsg{})
+		m = out.(Model)
+	}
+	return m
+}
+
+// assistantVersions returns the per-index Version of every
+// assistant row — the fingerprint of "this message was re-rendered".
+func assistantVersions(m Model) map[int]uint64 {
+	out := map[int]uint64{}
+	for i, msg := range m.history.Snapshot() {
+		if msg.Role == RoleAssistant {
+			out[i] = msg.Version
+		}
+	}
+	return out
+}
+
+// TestResizeEvent_ReflowsOnlyVisible — the core of issue #104. A
+// single width-changing WindowSizeMsg must NOT push the whole
+// transcript back through Glamour inside the handler; it re-renders
+// the on-screen window and defers the rest.
+func TestResizeEvent_ReflowsOnlyVisible(t *testing.T) {
+	m := newBenchDragModel(40) // 80 rows, 40 of them assistant
+	before := assistantVersions(m)
+
+	out, cmd := m.Update(tea.WindowSizeMsg{Width: 70, Height: 40})
+	m = out.(Model)
+	if cmd == nil {
+		t.Fatal("a width-changing resize must return the settle tick Cmd")
+	}
+
+	after := assistantVersions(m)
+	bumped := 0
+	for i, v := range after {
+		if v != before[i] {
+			bumped++
+		}
+	}
+	if bumped == 0 {
+		t.Fatal("expected the visible window to reflow synchronously, got no re-renders")
+	}
+	if bumped >= len(before) {
+		t.Fatalf("resize re-rendered the whole transcript inline (%d/%d) — the pass was supposed to be deferred", bumped, len(before))
+	}
+	if !m.reflowPending {
+		t.Error("reflowPending must stay set until the deferred warm pass retires")
+	}
+}
+
+// TestResizeEvent_VisibleTextIsCorrectWidthImmediately — the
+// operator must see correct-width text for the visible region right
+// away, not after the settle. The tail is what a following operator
+// sees, so the last assistant row must already be wrapped narrow.
+func TestResizeEvent_VisibleTextIsCorrectWidthImmediately(t *testing.T) {
+	m := newBenchDragModel(40)
+
+	out, _ := m.Update(tea.WindowSizeMsg{Width: 70, Height: 40})
+	m = out.(Model)
+
+	snap := m.history.Snapshot()
+	last := snap[len(snap)-1]
+	if last.Role != RoleAssistant {
+		t.Fatalf("setup: expected an assistant row at the tail, got role %v", last.Role)
+	}
+	width := m.viewport.Width()
+	if got := maxRenderedWidth(last.Rendered); got > width {
+		t.Errorf("tail message still wrapped at the old width: widest line %d > viewport %d", got, width)
+	}
+	if last.renderedWidth != width {
+		t.Errorf("tail message renderedWidth = %d, want %d", last.renderedWidth, width)
+	}
+}
+
+// TestResizeSettle_ReflowsWholeHistory — after the drag settles,
+// nothing is left at a stale wrap width.
+func TestResizeSettle_ReflowsWholeHistory(t *testing.T) {
+	m := newBenchDragModel(40)
+
+	// A drag: several width-changing events back to back.
+	for _, w := range []int{110, 104, 96, 88, 80} {
+		out, _ := m.Update(tea.WindowSizeMsg{Width: w, Height: 40})
+		m = out.(Model)
+	}
+	m = settleResizeReflow(t, m)
+
+	width := m.viewport.Width()
+	for i, msg := range m.history.Snapshot() {
+		if msg.Role != RoleAssistant {
+			continue
+		}
+		if msg.renderedWidth != width {
+			t.Fatalf("message %d not reflowed after settle: renderedWidth=%d want %d", i, msg.renderedWidth, width)
+		}
+		if got := maxRenderedWidth(msg.Rendered); got > width {
+			t.Fatalf("message %d wrapped too wide after settle: %d > %d", i, got, width)
+		}
+	}
+}
+
+// TestResizeSettle_WarmsIncrementally — the warm pass must not be
+// one synchronous burst. With 40 assistant rows and a chunk of
+// resizeWarmChunk, retiring the backlog has to take several ticks.
+func TestResizeSettle_WarmsIncrementally(t *testing.T) {
+	m := newBenchDragModel(40)
+	out, _ := m.Update(tea.WindowSizeMsg{Width: 70, Height: 40})
+	m = out.(Model)
+
+	ticks := 0
+	for m.reflowPending {
+		ticks++
+		if ticks > 10000 {
+			t.Fatal("resize reflow never retired")
+		}
+		out, cmd := m.Update(resizeReflowMsg{gen: m.resizeGen})
+		m = out.(Model)
+		if m.reflowPending && cmd == nil {
+			t.Fatal("an unfinished warm pass must return the next warm tick")
+		}
+	}
+	if ticks < 2 {
+		t.Errorf("warm pass retired in %d tick(s) — it is supposed to be sliced, not a single burst", ticks)
+	}
+}
+
+// TestResizeSettle_StaleTickDropped — the generation guard. Two
+// drags overlap; the older drag's settle tick must not resume a walk
+// that a newer resize has already restarted.
+func TestResizeSettle_StaleTickDropped(t *testing.T) {
+	m := newBenchDragModel(40)
+
+	out, _ := m.Update(tea.WindowSizeMsg{Width: 70, Height: 40})
+	m = out.(Model)
+	staleGen := m.resizeGen
+
+	// Advance the first drag's warm walk a little so a stale tick
+	// resuming it would be visible as cursor movement.
+	out, _ = m.Update(resizeReflowMsg{gen: staleGen})
+	m = out.(Model)
+	if m.reflowCursor == 0 {
+		t.Fatal("setup: expected the warm walk to have advanced")
+	}
+
+	// A newer resize supersedes it and restarts the walk.
+	out, _ = m.Update(tea.WindowSizeMsg{Width: 60, Height: 40})
+	m = out.(Model)
+	if m.resizeGen == staleGen {
+		t.Fatal("a width change must bump resizeGen")
+	}
+	cursorAfterNewResize := m.reflowCursor
+	versionsAfterNewResize := assistantVersions(m)
+
+	// The superseded drag's settle tick lands late.
+	out, cmd := m.Update(resizeReflowMsg{gen: staleGen})
+	m = out.(Model)
+	if cmd != nil {
+		t.Error("a stale settle tick must not schedule follow-on work")
+	}
+	if m.reflowCursor != cursorAfterNewResize {
+		t.Errorf("stale settle tick advanced the newer walk: cursor %d → %d", cursorAfterNewResize, m.reflowCursor)
+	}
+	for i, v := range assistantVersions(m) {
+		if v != versionsAfterNewResize[i] {
+			t.Fatalf("stale settle tick re-rendered message %d", i)
+		}
+	}
+
+	// The current drag still settles correctly.
+	m = settleResizeReflow(t, m)
+	width := m.viewport.Width()
+	for i, msg := range m.history.Snapshot() {
+		if msg.Role == RoleAssistant && msg.renderedWidth != width {
+			t.Fatalf("message %d left stale at width %d (want %d) after the newer drag settled", i, msg.renderedWidth, width)
+		}
+	}
+}
+
+// TestResizeDrag_KeepsFollow — issue #93's follow bit must survive a
+// drag: an operator pinned to the tail stays pinned.
+func TestResizeDrag_KeepsFollow(t *testing.T) {
+	m := newBenchDragModel(40)
+	if !m.follow {
+		t.Fatal("setup: expected the model to start following the tail")
+	}
+
+	for i := range dragBurst {
+		out, _ := m.Update(tea.WindowSizeMsg{Width: dragWidthAt(i), Height: 40})
+		m = out.(Model)
+	}
+	if !m.follow {
+		t.Fatal("drag dropped the operator off the tail")
+	}
+	m = settleResizeReflow(t, m)
+	if !m.follow {
+		t.Fatal("settle dropped the operator off the tail")
+	}
+	if !m.viewport.AtBottom() {
+		t.Error("following model is not scrolled to the bottom after a drag")
+	}
+}
+
+// TestResizeDrag_KeepsScrollbackDetached — the mirror case: an
+// operator who has scrolled UP must not be yanked to the tail by a
+// resize, and the rows they are looking at must still reflow.
+func TestResizeDrag_KeepsScrollbackDetached(t *testing.T) {
+	m := newBenchDragModel(40)
+	m.viewport.SetYOffset(0)
+	m.syncFollow()
+	if m.follow {
+		t.Fatal("setup: expected follow to drop after scrolling to the top")
+	}
+
+	out, _ := m.Update(tea.WindowSizeMsg{Width: 70, Height: 40})
+	m = out.(Model)
+	if m.follow {
+		t.Error("resize re-armed follow for an operator reading scrollback")
+	}
+	if m.viewport.AtBottom() {
+		t.Error("resize yanked a detached operator to the tail")
+	}
+
+	// The rows on screen at the top of the transcript are the ones
+	// that had to reflow.
+	snap := m.history.Snapshot()
+	width := m.viewport.Width()
+	for i, msg := range snap {
+		if msg.Role != RoleAssistant {
+			continue
+		}
+		if msg.renderedWidth != width {
+			t.Errorf("first visible assistant row (index %d) was not reflowed: renderedWidth=%d want %d", i, msg.renderedWidth, width)
+		}
+		break
+	}
+}
+
+// TestResize_ListCacheSurvivesUnchangedWidth — a height-only resize
+// (and any repaint) must not drop the render memo. Before #104 the
+// cache pinned a single width and reset on any mismatch; the entries
+// are now width-keyed, so an unchanged width keeps every hit.
+func TestResize_ListCacheSurvivesUnchangedWidth(t *testing.T) {
+	m := newBenchDragModel(20)
+	entriesBefore := len(m.listCache.entries)
+	if entriesBefore == 0 {
+		t.Fatal("setup: expected a warm list cache")
+	}
+
+	out, _ := m.Update(tea.WindowSizeMsg{Width: benchDragBaseWidth, Height: 50})
+	m = out.(Model)
+
+	if got := len(m.listCache.entries); got < entriesBefore {
+		t.Errorf("height-only resize dropped cache entries: %d → %d", entriesBefore, got)
+	}
+	snap := m.history.Snapshot()
+	item := messageItem{msg: snap[0], idx: 0, total: len(snap)}
+	if _, ok := m.listCache.get(item, m.viewport.Width()); !ok {
+		t.Error("expected a cache hit at the unchanged width")
+	}
+}
+
+// TestResize_ListCacheKeepsEarlierWidth — a message already rendered
+// at the incoming width survives the resize, so dragging back to a
+// width the cache has seen is a hit rather than a cold rebuild.
+func TestResize_ListCacheKeepsEarlierWidth(t *testing.T) {
+	m := newBenchDragModel(20)
+	wide := m.viewport.Width()
+	snap := m.history.Snapshot()
+	// Pick a row the visible-window reflow will not touch, so its
+	// Version (and therefore its cache entry) stays valid.
+	item := messageItem{msg: snap[0], idx: 0, total: len(snap)}
+	if _, ok := m.listCache.get(item, wide); !ok {
+		t.Fatal("setup: expected a warm entry at the starting width")
+	}
+
+	out, _ := m.Update(tea.WindowSizeMsg{Width: benchDragBaseWidth - 6, Height: 40})
+	m = out.(Model)
+	if m.viewport.Width() == wide {
+		t.Fatal("setup: expected the chat width to change")
+	}
+
+	snap = m.history.Snapshot()
+	item = messageItem{msg: snap[0], idx: 0, total: len(snap)}
+	if _, ok := m.listCache.get(item, wide); !ok {
+		t.Error("the width-keyed entry from before the resize should have survived")
+	}
+}
+
+// TestResizeSettle_RetiresCarriedOverRenders — during a drag,
+// off-screen rows are painted from the previous width's render
+// rather than re-assembled. Those carried-over entries are
+// approximate by construction: the settle must retire every one of
+// them, and the transcript must end up byte-identical to a cold
+// render at the final width.
+func TestResizeSettle_RetiresCarriedOverRenders(t *testing.T) {
+	m := newBenchDragModel(40)
+	for _, w := range []int{112, 100, 92, 84} {
+		out, _ := m.Update(tea.WindowSizeMsg{Width: w, Height: 40})
+		m = out.(Model)
+	}
+	carried := 0
+	for _, e := range m.listCache.entries {
+		if e.approx {
+			carried++
+		}
+	}
+	if carried == 0 {
+		t.Fatal("expected the drag to carry off-screen rows over rather than re-assembling them")
+	}
+
+	m = settleResizeReflow(t, m)
+
+	for key, e := range m.listCache.entries {
+		if e.approx {
+			t.Fatalf("approximate cache entry for message %d survived the settle", key.id)
+		}
+	}
+	// Byte-for-byte equality with a cold render at the settled
+	// width: nothing is left carrying the drag's intermediate state.
+	width := m.viewport.Width()
+	snap := m.history.Snapshot()
+	for i, msg := range snap {
+		item := messageItem{msg: msg, idx: i, total: len(snap)}
+		got, ok := m.listCache.get(item, width)
+		if !ok {
+			t.Fatalf("message %d has no exact cache entry after the settle", i)
+		}
+		if want := m.renderMessage(msg); got != want {
+			t.Fatalf("message %d is not the cold render at width %d", i, width)
+		}
+	}
+}
+
+// TestResizeMidWarm_ScrollExposesExactRows — the operator scrolls
+// into cold backlog before the warm pass has reached it. The rows
+// that scroll into view must be exact in that same frame, not
+// carried-over.
+func TestResizeMidWarm_ScrollExposesExactRows(t *testing.T) {
+	m := newBenchDragModel(40)
+	out, _ := m.Update(tea.WindowSizeMsg{Width: 72, Height: 40})
+	m = out.(Model)
+	if !m.reflowPending {
+		t.Fatal("setup: expected a pending reflow")
+	}
+
+	// Jump to the top of the transcript — the coldest region.
+	m.viewport.GotoTop()
+	m.syncFollow()
+	m.refreshViewport()
+
+	width := m.viewport.Width()
+	snap := m.history.Snapshot()
+	for i := 0; i < 2 && i < len(snap); i++ {
+		item := messageItem{msg: snap[i], idx: i, total: len(snap)}
+		got, ok := m.listCache.get(item, width)
+		if !ok {
+			t.Fatalf("row %d scrolled into view but has no exact render", i)
+		}
+		if want := m.renderMessage(snap[i]); got != want {
+			t.Fatalf("row %d scrolled into view carrying a stale-width render", i)
+		}
+		if snap[i].Role == RoleAssistant && snap[i].renderedWidth != width {
+			t.Fatalf("row %d scrolled into view without being reflowed (renderedWidth=%d want %d)", i, snap[i].renderedWidth, width)
+		}
+	}
+}
+
+// TestResize_HeightOnlyDoesNotScheduleReflow — height changes leave
+// wrapping identical; they must not arm the settle timer at all.
+func TestResize_HeightOnlyDoesNotScheduleReflow(t *testing.T) {
+	m := newBenchDragModel(5)
+	genBefore := m.resizeGen
+
+	out, cmd := m.Update(tea.WindowSizeMsg{Width: benchDragBaseWidth, Height: 55})
+	m = out.(Model)
+
+	if cmd != nil {
+		t.Error("height-only resize must not schedule a settle tick")
+	}
+	if m.resizeGen != genBefore {
+		t.Errorf("height-only resize bumped resizeGen: %d → %d", genBefore, m.resizeGen)
+	}
+	if m.reflowPending {
+		t.Error("height-only resize armed a reflow")
+	}
+}

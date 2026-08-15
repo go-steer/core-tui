@@ -112,8 +112,8 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	case tea.WindowSizeMsg:
 		// Bubble Tea can emit multiple WindowSizeMsg during startup
 		// (initial size + terminal-negotiated size); skip if
-		// nothing actually changed so we don't run
-		// rerenderHistoryMarkdown or repaint for no reason.
+		// nothing actually changed so we don't run the reflow or
+		// repaint for no reason.
 		if msg.Width == m.width && msg.Height == m.height {
 			return m, nil
 		}
@@ -124,15 +124,33 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		// time of the render; when the viewport narrows the cached
 		// output is wider than the visible area and the terminal
 		// clips it (leading whitespace can vanish along with the
-		// first few content chars). Re-render every assistant
-		// message through the new-width Glamour so wrapping
-		// matches the current viewport. Height-only changes leave
-		// wrapping identical, so skip the O(N) Glamour walk then.
+		// first few content chars). Height-only changes leave
+		// wrapping identical, so skip the reflow entirely then.
+		//
+		// Issue #104: this used to re-render EVERY assistant message
+		// through Glamour right here, inline — 91.5ms per event at
+		// 100 turns, paid once per event for the whole stream of
+		// them a pane drag emits. beginResizeReflow instead reflows
+		// only what is on screen (bounded by viewport height) and
+		// returns a settle tick that warms the rest incrementally
+		// once the drag stops. See resize.go.
+		var cmd tea.Cmd
 		if widthChanged {
-			m.rerenderHistoryMarkdown()
+			cmd = m.beginResizeReflow()
 		}
 		m.refreshViewport()
-		return m, nil
+		return m, cmd
+
+	case resizeReflowMsg:
+		// Settle / warm tick for a width change (issue #104). The
+		// generation guard is the same shape as the sessionGen
+		// checks below: multiple drags can have ticks in flight, and
+		// a tick from a superseded drag must not resume a walk whose
+		// target width is no longer current.
+		if msg.gen != m.resizeGen {
+			return m, nil
+		}
+		return m, m.continueResizeReflow()
 
 	case tea.BackgroundColorMsg:
 		// When the host has set Options.ForceTheme, the operator's
@@ -1624,9 +1642,13 @@ func (m *Model) applyStreamChunk(msg streamChunkMsg) {
 					Role:     RoleAssistant,
 					Text:     m.inProgressText,
 					Rendered: mr.renderMarkdown(m.inProgressText),
-					Model:    m.currentModel,
-					Usage:    m.currentUsage,
-					CostUSD:  m.currentCost,
+					// Stamp the wrap width so the resize reflow
+					// (issue #104) can tell this render is already
+					// correct for the current viewport.
+					renderedWidth: mr.width,
+					Model:         m.currentModel,
+					Usage:         m.currentUsage,
+					CostUSD:       m.currentCost,
 				}
 				m.history.Append(msg)
 				m.inProgressText = ""
@@ -1667,9 +1689,10 @@ func (m *Model) applyToolCall(msg toolCallMsg) {
 	if strings.TrimSpace(m.inProgressText) != "" {
 		mr := m.ensureMarkdown()
 		m.history.Append(Message{
-			Role:     RoleAssistant,
-			Text:     m.inProgressText,
-			Rendered: mr.renderMarkdown(m.inProgressText),
+			Role:          RoleAssistant,
+			Text:          m.inProgressText,
+			Rendered:      mr.renderMarkdown(m.inProgressText),
+			renderedWidth: mr.width,
 		})
 		m.inProgressText = ""
 		m.inProgressStablePrefix = ""
@@ -1863,13 +1886,14 @@ func (m *Model) finalizeTurn(elapsed time.Duration, notice string) {
 	if strings.TrimSpace(m.inProgressText) != "" {
 		mr := m.ensureMarkdown()
 		msg := Message{
-			Role:     RoleAssistant,
-			Text:     m.inProgressText,
-			Rendered: mr.renderMarkdown(m.inProgressText),
-			Model:    m.currentModel,
-			Usage:    m.currentUsage,
-			CostUSD:  m.currentCost,
-			Elapsed:  elapsed,
+			Role:          RoleAssistant,
+			Text:          m.inProgressText,
+			Rendered:      mr.renderMarkdown(m.inProgressText),
+			renderedWidth: mr.width,
+			Model:         m.currentModel,
+			Usage:         m.currentUsage,
+			CostUSD:       m.currentCost,
+			Elapsed:       elapsed,
 		}
 		m.history.Append(msg)
 	}
@@ -2239,26 +2263,6 @@ func (m *Model) applySwitchTarget(tgt *SwitchTarget) tea.Cmd {
 		return cmds[0]
 	}
 	return tea.Batch(cmds...)
-}
-
-// rerenderHistoryMarkdown re-runs Glamour at the current viewport
-// width over every assistant message with a cached Rendered. Called
-// from the WindowSizeMsg path so a resize doesn't leave the
-// transcript displaying width-pinned output that the terminal then
-// clips. Cheap-enough — typical transcripts hold dozens of
-// messages, not thousands.
-func (m *Model) rerenderHistoryMarkdown() {
-	mr := m.ensureMarkdown()
-	if mr == nil {
-		return
-	}
-	snap := m.history.Snapshot()
-	for i, msg := range snap {
-		if msg.Role != RoleAssistant || msg.Text == "" {
-			continue
-		}
-		m.history.SetRendered(i, mr.renderMarkdown(msg.Text))
-	}
 }
 
 // promptHistoryCap bounds the shell-style recall buffer. 100 entries

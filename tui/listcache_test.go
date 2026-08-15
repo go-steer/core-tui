@@ -45,13 +45,20 @@ func TestListCache_HitMissInvalidation(t *testing.T) {
 		t.Fatalf("expected hit, got (%q, %v)", got, ok)
 	}
 
-	// Width change: drop everything.
+	// New width: miss, because nothing has been rendered at 100 yet.
 	if _, ok := c.get(a, 100); ok {
 		t.Fatalf("expected miss on width change")
 	}
 	c.put(a, 100, "rendered-A-100")
-	if _, ok := c.get(a, 80); ok {
-		t.Fatalf("expected miss back at width=80 — cache should have been reset")
+	// ...but the width=80 entry SURVIVES (issue #104). A drag out
+	// and back must not re-render what it already rendered.
+	got, ok = c.get(a, 80)
+	if !ok || got != "rendered-A-80" {
+		t.Fatalf("expected the width=80 entry to survive a render at width=100, got (%q, %v)", got, ok)
+	}
+	got, ok = c.get(a, 100)
+	if !ok || got != "rendered-A-100" {
+		t.Fatalf("expected hit at width=100, got (%q, %v)", got, ok)
 	}
 
 	// Version bump invalidates that entry but not the cache.
