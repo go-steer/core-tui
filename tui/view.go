@@ -211,6 +211,16 @@ func (m Model) View() tea.View {
 		body = lipgloss.Place(m.width, m.height, lipgloss.Center, lipgloss.Center, modal)
 	}
 
+	// Clamp the composed frame to the terminal (issue #102). Every
+	// join above — JoinVertical, JoinHorizontal, lipgloss.Place,
+	// plain concatenation — can overflow, and nothing downstream
+	// catches it: Bubble Tea happily writes 122 columns into a
+	// 100-column terminal and, when the frame is too TALL, drops
+	// the top lines so the operator silently loses the header.
+	// This is the last thing View does, deliberately: it is a
+	// safety net under the layout, not part of it.
+	body = clipFrame(body, m.width, m.height)
+
 	v := tea.NewView(body)
 	v.AltScreen = true
 	v.BackgroundColor = nil // respect the terminal's own background
@@ -225,6 +235,62 @@ func (m Model) View() tea.View {
 		v.MouseMode = tea.MouseModeCellMotion
 	}
 	return v
+}
+
+// clipFrame clamps a composed frame to a width x height terminal.
+// It is the final post-pass in View (issue #102) and exists because
+// the composition above has no single choke point: chrome is built
+// with lipgloss.JoinVertical / JoinHorizontal / Place and plain
+// concatenation, so overflow is possible at every join and nothing
+// caught it at the end.
+//
+// Width: every line is truncated with ansi.Truncate, which is
+// escape-aware — it counts display cells, keeps the SGR state
+// intact, and re-emits a reset. Byte-level slicing would cut an
+// escape sequence in half and spill the raw bytes into the
+// terminal, so it is never used here. Width comparisons likewise go
+// through ansi.StringWidth, not len: a frame full of box-drawing
+// glyphs and CJK is not one byte per column.
+//
+// Height: the FIRST height lines are kept and the rest dropped.
+// That choice is deliberate. Keeping the head is deterministic and
+// trivially explainable, which is what a safety net needs to be —
+// and the head is where the status header lives, the one row whose
+// silent disappearance (Bubble Tea drops from the top when it
+// overflows) is hardest for an operator to notice. It is not a
+// layout policy: the row BUDGET is issue #103's job, and once that
+// lands this cap should never fire at all. If it does fire, resize
+// gave the frame more rows than the terminal has, and that is the
+// bug to fix — not the tie-break here.
+//
+// A non-positive width or height means we don't know the terminal
+// geometry (pre-WindowSizeMsg, or a host reporting nonsense), so
+// the body passes through untouched rather than being clipped to
+// nothing. A frame that already fits comes back byte-identical.
+func clipFrame(body string, width, height int) string {
+	if width <= 0 || height <= 0 {
+		return body
+	}
+	lines := strings.Split(body, "\n")
+	if len(lines) > height {
+		lines = lines[:height]
+	}
+	changed := len(lines) != strings.Count(body, "\n")+1
+	for i, line := range lines {
+		if ansi.StringWidth(line) <= width {
+			continue
+		}
+		// No ellipsis tail: this is a clamp, not a summary. An
+		// added "…" would itself consume a column and would read
+		// as intentional content in a frame that is simply too
+		// wide.
+		lines[i] = ansi.Truncate(line, width, "")
+		changed = true
+	}
+	if !changed {
+		return body
+	}
+	return strings.Join(lines, "\n")
 }
 
 // resize recomputes the viewport and textarea dimensions from the
