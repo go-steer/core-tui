@@ -307,6 +307,15 @@ listed in `/help`:
   so the host can write the choice to a settings file. Initial mode
   is read from `Options.PermissionMode.Initial`. Borrowed from
   Claude Code; see [`ui-references.md`](./ui-references.md).
+- **R-PERM-8** The six decision keys are inert for a short grace
+  period (~300ms) after the modal appears, and keystrokes that arrive
+  inside it are routed to the prompt instead. A permission request
+  lands asynchronously, so without the window whatever the operator
+  was typing answers a modal they have not seen yet — and two of the
+  six decisions widen the agent's authority beyond the current call.
+  `esc` is exempt: it denies, which is the fail-safe direction. The
+  elicitation modal applies the same window to the keys that dispatch
+  a result (see R-ELIC-4).
 
 ### 3.8 Model picker (must)
 
@@ -364,6 +373,13 @@ listed in `/help`:
   validation, Esc to decline.
 - **R-ELIC-3** Schemas with nested objects or unsupported types are
   declined automatically with a "schema unsupported" system message.
+- **R-ELIC-4** The keys that dispatch a result — URL-mode `a`/Enter
+  accept and `n` decline, form-mode Enter submit — observe the same
+  grace period as the permission modal (R-PERM-8), for the same
+  reason: the form is opened by a server, not by the operator. Field
+  editing and navigation stay live throughout; they are visible and
+  reversible, and nothing leaves the TUI until a result is
+  dispatched.
 
 ### 3.10 Usage tracking & display (must)
 

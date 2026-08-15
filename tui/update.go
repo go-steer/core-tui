@@ -705,6 +705,7 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	case permissionRequestMsg:
 		req := msg.req
 		m.pendingPermission = &req
+		m.permissionShownAt = time.Now()
 		m.scroll().reset()
 		// Inline permission layout: force-snap viewport to bottom
 		// so the prompt is visible (operator was likely watching
@@ -721,6 +722,7 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	case elicitRequestMsg:
 		r := msg.req
 		m.pendingElicit = &r
+		m.elicitShownAt = time.Now()
 		m.scroll().reset()
 		m.pendingElicitSrv = msg.serverName
 		m.elicitFieldIdx = 0
@@ -843,6 +845,40 @@ func (m *Model) handleWheel(msg tea.MouseWheelMsg) (tea.Cmd, bool) {
 	return nil, false
 }
 
+// modalInputGrace is how long after a permission prompt or an
+// elicitation form appears its committing keys stay inert.
+//
+// Both modals are opened by the agent, not by the operator, so
+// whatever was already in the terminal's input buffer when the
+// request landed would otherwise be read as the answer. Typing "say"
+// at the wrong moment used to dispatch allow-session, allow-always
+// and allow-once — three grants, one of them persistent, from a word
+// aimed at the prompt. The window has to cover buffered input without
+// being perceptible to someone reacting to the modal; a third of a
+// second is well inside human reaction time (~250ms at best) and well
+// past a terminal's buffer flush.
+const modalInputGrace = 300 * time.Millisecond
+
+// withinGrace reports whether a modal stamped at shownAt is still
+// inside its no-commit window. A zero stamp is treated as expired so
+// a directly-constructed Model (tests, hosts poking state) behaves
+// exactly as it did before the window existed.
+func (m Model) withinGrace(shownAt time.Time) bool {
+	return !shownAt.IsZero() && time.Since(shownAt) < modalInputGrace
+}
+
+// isPermissionDecisionKey reports whether a keystroke commits a
+// permission decision — R-PERM-2's six. "v" is included regardless of
+// whether the request carries a Verb: during the grace window the
+// safe reading of any of these is "the operator was typing".
+func isPermissionDecisionKey(stroke string) bool {
+	switch stroke {
+	case "y", "n", "s", "v", "t", "a":
+		return true
+	}
+	return false
+}
+
 // handleKey runs the keymap for the visual-preview slice. The slice
 // owns these bindings (no real agent dispatch yet); follow-up slices
 // will replace this with full slash routing and modal state machines.
@@ -944,7 +980,24 @@ func (m Model) handleKey(msg tea.KeyPressMsg) (tea.Model, tea.Cmd) {
 
 	// Permission modal — R-PERM-2's six decision keys. Highest
 	// precedence after Esc so nothing else fires while pending.
+	//
+	// A prompt arrives asynchronously, so for the first
+	// modalInputGrace the decision keys are inert and anything the
+	// operator was already typing goes to the prompt instead of
+	// answering a modal they haven't seen (issue #95). Esc is
+	// deliberately outside the window (handled above): it denies,
+	// which is the fail-safe direction, and a buffered Esc costs at
+	// most a re-ask.
 	if m.pendingPermission != nil {
+		if m.withinGrace(m.permissionShownAt) && isPermissionDecisionKey(stroke) {
+			var cmd tea.Cmd
+			m.input, cmd = m.input.Update(msg)
+			if m.syncInputHeight() {
+				m.resize()
+			}
+			m.refreshViewport()
+			return m, cmd
+		}
 		switch stroke {
 		case "y":
 			m.dispatchPermission(DecisionAllowOnce)
@@ -2368,6 +2421,14 @@ func (m *Model) handleElicitKey(stroke string) tea.Cmd {
 		m.refreshViewport()
 		return func() tea.Msg { return nil }
 	}
+	// Same asynchronous-arrival problem as the permission modal
+	// (issue #95): hold the keys that COMMIT a result — URL-mode
+	// accept / decline and form submit — inert for modalInputGrace.
+	// Field editing and navigation stay live throughout: they're
+	// visible, reversible, and nothing leaves the TUI until a commit.
+	if m.withinGrace(m.elicitShownAt) && isElicitCommitKey(*req, stroke) {
+		return func() tea.Msg { return nil }
+	}
 	if req.Mode == ElicitURLMode {
 		switch stroke {
 		case "a", "enter":
@@ -2467,6 +2528,17 @@ func (m *Model) handleElicitKey(stroke string) tea.Cmd {
 		}
 	}
 	return func() tea.Msg { return nil }
+}
+
+// isElicitCommitKey reports whether a keystroke sends a result back
+// to the host — the elicit modal's equivalent of a permission
+// decision. URL mode commits on accept / submit / decline; form mode
+// commits on Enter.
+func isElicitCommitKey(req ElicitRequest, stroke string) bool {
+	if req.Mode == ElicitURLMode {
+		return stroke == "a" || stroke == "enter" || stroke == "n"
+	}
+	return stroke == "enter"
 }
 
 // isElicitEmpty reports whether v is the zero value for its type
