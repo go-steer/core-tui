@@ -2748,9 +2748,22 @@ func (m *Model) cullQueue() {
 	m.queue = kept
 }
 
-// trimToolArg truncates a tool-arg summary to max runes, appending a
-// truncation marker (style.md §2 GlyphTruncate).
+// trimToolArg sanitizes a tool-arg summary and truncates it to max
+// runes, appending a truncation marker (style.md §2 GlyphTruncate).
+//
+// This is the second untrusted-content funnel in the package — the
+// rune-based one, for single-row arg hints and queue rows where the
+// CALLER supplies the width. Everything that renders a whole line of
+// model- or host-derived text goes through sanitizeLine instead
+// (sanitize.go). Both apply the same escape set; only the cap
+// differs, because an arg hint is trimmed to the terminal's columns
+// and a content line to perLineByteCap.
+//
+// Sanitizing BEFORE the rune trim is deliberate: escaping expands
+// (an ESC becomes four runes, not one), so trimming first would let
+// the row overflow the width the caller asked for.
 func trimToolArg(s string, max int) string {
+	s = sanitizeContent(s)
 	r := []rune(s)
 	if len(r) <= max {
 		return s

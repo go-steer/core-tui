@@ -103,9 +103,27 @@ func renderToolDetail(args, response map[string]any, errStr string, styles Style
 // json.MarshalIndent so callers see a stable, human-readable shape.
 // Falls back to fmt.Sprintf when the value isn't JSON-marshalable
 // (unlikely for map[string]any but cheap insurance).
+//
+// NOTE (#108): `json.MarshalIndent` does MOST of the escaping for
+// free — an ESC inside a payload string comes out as the six literal
+// characters `\u001b`, so no 7-bit ANSI sequence survives
+// marshaling intact — but it is NOT the whole job. `encoding/json`
+// escapes C0 (below 0x20) plus a short list of HTML-sensitive ASCII,
+// and passes DEL (0x7F) and the entire C1 range (U+0080–U+009F)
+// through verbatim. U+009B is the 8-bit CSI introducer and a UTF-8
+// terminal acts on it, so the marshaled body still takes a
+// sanitizeContent pass before it is capped.
+//
+// That pass cannot double-escape what the encoder already wrote:
+// sanitizeContent never touches a backslash, so `\u001b` stays
+// exactly six characters wide, and it is the identity function on
+// the plain-ASCII bodies that are the norm here.
+//
+// The error banner needs the same pass for its own reason — see
+// renderDetailError.
 func renderDetailSection(label string, payload map[string]any, styles Styles) string {
 	head := styles.Muted.Render(detailIndent + label + ":")
-	body := marshalPretty(payload)
+	body := sanitizeContent(marshalPretty(payload))
 	body = capBytesPerLine(body, detailValueByteCap)
 	body = capLines(body, detailMaxLines)
 	// Indent one level deeper than the label so the JSON braces
@@ -116,17 +134,23 @@ func renderDetailSection(label string, payload map[string]any, styles Styles) st
 
 // renderDetailError paints the tool's error string as a red
 // "error: <message>" banner. Distinct from renderResultError
-// (tool_preview_result.go) because that one truncates at 200 chars
-// for the compact preview; the detail view shows the full text
-// under the same styling since operators opened the overlay
-// specifically to see it.
+// (tool_preview_result.go) because that one truncates at
+// perLineByteCap for the compact preview; the detail view shows the
+// full text under the same styling since operators opened the
+// overlay specifically to see it.
+//
+// This is the ONE path through this file that does not inherit
+// json.MarshalIndent's escaping (#108) — the error string is
+// rendered as prose, not as a JSON value. So it takes
+// sanitizeContent explicitly: strip and escape, but no length cap,
+// because "show me everything" is the whole point of the overlay.
 func renderDetailError(errStr string, styles Styles) string {
 	text := strings.TrimSpace(errStr)
 	if text == "" {
 		text = "(failed)"
 	}
 	head := styles.Muted.Render(detailIndent + "error:")
-	body := indentBlock(text, detailIndent+"  ")
+	body := indentBlock(sanitizeContent(normalizeNewlines(text)), detailIndent+"  ")
 	return head + "\n" + styles.ErrorText.Render(body)
 }
 
@@ -160,6 +184,15 @@ func indentBlock(s, prefix string) string {
 // trailing ellipsis so a single monster scalar (e.g. a base64 blob)
 // doesn't wrap into a screenful. Multi-line preservation is
 // intentional — the detail body isn't a single logical line.
+//
+// This is the package's SECOND per-line byte cap, alongside
+// truncateCells / perLineByteCap in sanitize.go. They are not
+// mergeable as written: this one caps at detailValueByteCap (4000)
+// because the operator explicitly asked for detail, it runs over an
+// already-JSON-escaped body where a tab is the two characters `\t`
+// rather than a four-cell expansion, and it caps EVERY line of a
+// block instead of one row. Worth collapsing if a third cap ever
+// shows up; not worth a shared helper with three flags today.
 func capBytesPerLine(s string, maxBytes int) string {
 	if maxBytes <= 0 {
 		return s

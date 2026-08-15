@@ -100,22 +100,23 @@ func renderToolResult(name string, args, response map[string]any, err string, st
 }
 
 // renderResultError formats a tool failure as a red error row
-// under the tool name. Single line, truncated to the same byte
-// cap a diff line uses so a multi-page panic trace doesn't blow
-// up the preview area. Uses summaryIndent + "⎿ " so the row
-// visually anchors to the call line above it, matching the
-// read-preview and diff-summary conventions.
+// under the tool name. Single line, run through sanitizeLine so a
+// multi-page panic trace doesn't blow up the preview area and a
+// hostile error string can't repaint the terminal. Uses
+// summaryIndent + "⎿ " so the row visually anchors to the call line
+// above it, matching the read-preview and diff-summary conventions.
+//
+// This used to carry its own `errCap = 200` byte slice — the same
+// number perLineByteCap already held, maintained twice and escaping
+// nothing. Error text is as untrusted as any other tool output: it
+// carries filenames, shell output and remote payloads verbatim.
 func renderResultError(err string, styles Styles) string {
-	const errCap = 200
 	errStyle := lipgloss.NewStyle().Foreground(styles.Theme.Error).Bold(true)
 	text := strings.TrimSpace(err)
 	if text == "" {
 		text = "(failed)"
 	}
-	if len(text) > errCap {
-		text = text[:errCap] + "…"
-	}
-	return styles.Muted.Render(summaryIndent) + errStyle.Render("✘ error: ") + styles.ErrorText.Render(text)
+	return styles.Muted.Render(summaryIndent) + errStyle.Render("✘ error: ") + styles.ErrorText.Render(sanitizeLine(text))
 }
 
 // renderReadFileResult shows the first resultLineCap lines of the
@@ -154,7 +155,7 @@ func renderReadManyFilesResult(response map[string]any, styles Styles) string {
 		if len(files) > 3 {
 			body += fmt.Sprintf(", +%d more", len(files)-3)
 		}
-		return indent + styles.Muted.Render(body)
+		return indent + styles.Muted.Render(sanitizeLine(body))
 	}
 	if bytes, ok := intArg(response, "bytes", "size"); ok && bytes > 0 {
 		return indent + styles.Muted.Render(fmt.Sprintf("read %s", formatBytes(bytes)))
@@ -177,7 +178,7 @@ func renderGrepResult(response map[string]any, styles Styles) string {
 			if i > 0 {
 				b.WriteString("\n")
 			}
-			b.WriteString(indent + styles.Muted.Render(truncateBytes(m)))
+			b.WriteString(indent + styles.Muted.Render(sanitizeLine(m)))
 		}
 		if len(matches) > resultLineCap {
 			b.WriteString("\n" + indent + styles.Muted.Render(fmt.Sprintf("… +%d more matches", len(matches)-resultLineCap)))
@@ -210,7 +211,7 @@ func renderGlobResult(response map[string]any, styles Styles) string {
 		if i > 0 {
 			b.WriteString("\n")
 		}
-		b.WriteString(indent + styles.Muted.Render(p))
+		b.WriteString(indent + styles.Muted.Render(sanitizeLine(p)))
 	}
 	if len(paths) > resultLineCap {
 		b.WriteString("\n" + indent + styles.Muted.Render(fmt.Sprintf("… +%d more paths", len(paths)-resultLineCap)))
@@ -236,7 +237,7 @@ func renderBashResult(response map[string]any, styles Styles) string {
 		}
 		errStyle := lipgloss.NewStyle().Foreground(styles.Theme.Warning)
 		first := firstLine(stderr)
-		b.WriteString(indent + errStyle.Render("stderr: ") + styles.Muted.Render(truncateBytes(first)))
+		b.WriteString(indent + errStyle.Render("stderr: ") + styles.Muted.Render(sanitizeLine(first)))
 	}
 	if exit, ok := intArg(response, "exit_code", "exit", "returncode"); ok && exit != 0 {
 		if b.Len() > 0 {
@@ -274,13 +275,17 @@ func renderWriteFileResult(response map[string]any, styles Styles) string {
 //
 // Unlike the diff renderer, there's no gutter, no +/- glyph, no
 // bg tint — the content is informational, not a change.
+//
+// `content` is raw file bytes or raw bash stdout, so it gets the
+// same treatment renderDiffInline gives a diff: CRLF collapsed at
+// the split, then every line through sanitizeLine.
 func renderCodeInline(content string, styles Styles, maxLines int, lang string) string {
 	if content == "" {
 		return ""
 	}
 	const indent = "    "
 	ctxStyle := lipgloss.NewStyle().Foreground(styles.Theme.FgMuted)
-	lines := strings.Split(strings.TrimRight(content, "\n"), "\n")
+	lines := strings.Split(strings.TrimRight(normalizeNewlines(content), "\n"), "\n")
 	out := make([]string, 0, len(lines)+1)
 	truncatedAt := -1
 	for i, line := range lines {
@@ -288,7 +293,7 @@ func renderCodeInline(content string, styles Styles, maxLines int, lang string) 
 			truncatedAt = i
 			break
 		}
-		body := truncateBytes(line)
+		body := sanitizeLine(line)
 		if lang != "" {
 			body = highlightLine(body, lang, nil)
 		} else {
