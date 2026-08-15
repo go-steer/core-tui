@@ -165,9 +165,28 @@ type Model struct {
 	toastSetAt time.Time
 
 	// Streaming-turn state (R-CHAT-3 / R-CHAT-4 / R-CHAT-6).
-	state          turnState
-	cancelTurn     context.CancelFunc // non-nil while state == stateStreaming
-	turnStarted    time.Time
+	state      turnState
+	cancelTurn context.CancelFunc // non-nil while state == stateStreaming
+
+	// turnStarted is when the current spinner animation began, and
+	// is what the thinking line's elapsed readout counts from
+	// (issue #111). Stamped at exactly the two sites that bump
+	// spinnerGen — submitTurn for the per-turn Run path, and
+	// applyStreamChunk's spinnerActive false→true flip for the
+	// LiveAgent path, which never calls submitTurn — and zeroed
+	// wherever that animation stops. Invariant: non-zero iff a
+	// spinner animation is live. Read via Model.turnElapsed, which
+	// treats the zero value as "no turn" rather than as 1970.
+	turnStarted time.Time
+
+	// now is the Model's clock, defaulted to time.Now by NewModel.
+	// Exists so tests can pin the elapsed readout instead of
+	// goldening wall-clock output. Unexported and deliberately NOT
+	// an Options field: this is test scaffolding, and Options is
+	// under the stability promise in CHANGELOG.md. Access through
+	// Model.nowFn, which tolerates the nil on a zero-value Model{}.
+	now func() time.Time
+
 	inProgressText string  // accumulator for streamed tokens
 	currentUsage   *Usage  // most recent usage snapshot for this turn
 	currentCost    float64 // most recent positive cost for this turn (USD)
@@ -523,6 +542,7 @@ func NewModel(opts Options) Model {
 		subagentNotTail: make(map[string]bool),
 		historyCursor:   -1,
 		startedAt:       time.Now(),
+		now:             time.Now,
 		listCache:       newListCache(),
 		modalScroll:     &scrollState{},
 		caps:            DetectCapabilities(),
