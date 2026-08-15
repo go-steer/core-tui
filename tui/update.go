@@ -826,6 +826,16 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	// modal owns it), so this is a scroll path: re-read the follow
 	// intent from where the viewport ended up.
 	m.syncFollow()
+	// Same auto-grow reconciliation handleKey does after forwarding a
+	// keystroke. A bracketed paste reaches the textarea through HERE,
+	// not through handleKey — so without this the multi-line paste
+	// that issue #121's doc comment promises would "grow the box
+	// visibly" only grew it on the next unrelated keystroke. One bool
+	// read when nothing moved.
+	if m.syncInputHeight() {
+		m.resize()
+		m.refreshViewport()
+	}
 	return m, tea.Batch(taCmd, vpCmd)
 }
 
@@ -1337,6 +1347,17 @@ func (m Model) handleKey(msg tea.KeyPressMsg) (tea.Model, tea.Cmd) {
 		fakeEnter := tea.KeyPressMsg(tea.Key{Code: tea.KeyEnter})
 		var cmd tea.Cmd
 		m.input, cmd = m.input.Update(fakeEnter)
+		// The newline just changed the line count, so run the same
+		// reconciliation the forwarded-keystroke path at the bottom
+		// of this function does. This arm returns early, so without
+		// it the box stayed at its old height until the operator
+		// typed something else — the one gesture whose whole purpose
+		// is to add a row was the one that did not grow the box
+		// (issue #121).
+		if m.syncInputHeight() {
+			m.resize()
+			m.refreshViewport()
+		}
 		return m, cmd
 
 	case "?":

@@ -329,19 +329,27 @@ const chatMinHeight = 3
 // and after the user toggles StatusHeader <-> StatusSidebar.
 //
 // The row budget here is the mirror image of what View composes: the
-// viewport gets m.height minus every OTHER row View joins around it.
-// The rule the whole function follows is *measure, never assume* —
-// each term below renders the very same string View will render and
-// takes its lipgloss.Height. Hardcoding a row count was how issue
-// #103 happened: the header was pinned at 2 rows even though
-// renderHeader word-wraps to as many as 6 on a narrow terminal, so
-// the frame overflowed and clipFrame ate the footer.
+// terminal's m.height rows are handed out to everything View joins
+// around the chat viewport, and the viewport gets what is left. The
+// rule the whole thing follows is *measure, never assume* — each term
+// renders the very same string View will render and takes its
+// lipgloss.Height. Hardcoding a row count was how issue #103
+// happened: the header was pinned at 2 rows even though renderHeader
+// word-wraps to as many as 6 on a narrow terminal, so the frame
+// overflowed and clipFrame ate the footer.
+//
+// The allocation itself — which element yields to which when the rows
+// run out — lives in allocateChrome (budget.go) with the priority
+// order and its justification. resize is the part that has to happen
+// first: the widths, because renderInputBox reads
+// m.viewport.Width() and every wrap-sensitive measurement depends on
+// the width it is rendered at.
 //
 // Only siblings of the viewport are charged. Anything that renders
 // INSIDE the viewport (the prompt queue panel, the spinner line, the
 // in-progress assistant block) is already paid for out of the
 // viewport's own rows and must not be subtracted again — see the
-// queue note below.
+// queue note in budget.go.
 func (m *Model) resize() {
 	if m.width == 0 || m.height == 0 {
 		return
@@ -366,76 +374,32 @@ func (m *Model) resize() {
 	}
 
 	// Set the widths before measuring: renderInputBox reads
-	// m.viewport.Width(), and every wrap-sensitive row count below
-	// depends on the width it is rendered at.
+	// m.viewport.Width(), and every wrap-sensitive row count in the
+	// budget depends on the width it is rendered at.
 	m.viewport.SetWidth(chatWidth)
 	m.input.SetWidth(chatWidth - 2) // leave room for the input border
-	// Pre-existing behaviour, deliberately unchanged here: resize
-	// resets the textarea to its minimum height, which is why the
-	// measurement below is currently always 4. It is still a
-	// measurement and not a constant on purpose — the day resize
-	// stops overriding syncInputHeight's auto-grow, the budget
-	// follows the taller box without another edit.
-	m.input.SetHeight(textareaMinHeight)
 
-	// Header: measured, not assumed (issue #103). renderHeader
-	// word-wraps the status line, so it is 2 rows on a wide terminal
-	// and grows to 6 on a 20-column one.
-	headerRows := 0
-	if layout == StatusHeader {
-		headerRows = lipgloss.Height(m.renderHeader())
-	}
-	// The footer wraps on narrow terminals; it is never less than the
-	// one row renderFooter always emits.
-	footerRows := lipgloss.Height(m.renderFooter(chromeWidth))
-	if footerRows < 1 {
-		footerRows = 1
-	}
-	helpRows := 0
-	if m.helpOpen {
-		helpRows = lipgloss.Height(m.renderHelpPanel(chromeWidth))
-	}
-	palRows := 0
-	if m.palette != nil {
-		palRows = lipgloss.Height(m.renderPalette(chromeWidth))
-	}
-	// Toast: View slots the wake banner between the input box and the
-	// footer whenever renderToast returns non-empty, so the budget is
-	// guarded on exactly that condition rather than on m.toast != ""
-	// — the renderer also applies the TTL and the sticky-slash bypass
-	// (issue #103, part 2).
-	toastRows := 0
-	if toast := m.renderToast(chromeWidth); toast != "" {
-		toastRows = lipgloss.Height(toast)
-	}
-	// The input box is the textarea plus its one-row top border.
-	// Measured after SetHeight above so the two can't disagree.
-	inputBoxRows := lipgloss.Height(m.renderInputBox())
-
-	// No queue term. renderQueuePanel is appended by renderInProgress
-	// into the viewport's CONTENT, not joined beside the viewport by
-	// View — unlike the footer / help / palette, which are siblings.
-	// Subtracting it shrank the viewport by the panel's height AND
-	// then spent that height rendering the panel inside the smaller
-	// viewport, so a 4-row queue cost the operator 4 rows of chat and
-	// left the frame 4 rows short of the terminal (issue #103).
-	chatHeight := m.height - headerRows - helpRows - palRows -
-		inputBoxRows - toastRows - footerRows
-	if chatHeight < chatMinHeight {
-		chatHeight = chatMinHeight
-	}
-
-	m.viewport.SetHeight(chatHeight)
+	m.chrome = m.allocateChrome(layout, chromeWidth)
+	m.viewport.SetHeight(m.chrome.chat)
 }
 
 // syncInputHeight clamps the textarea's height to its current line
-// count (between textareaMinHeight and textareaMaxHeight). Returns
-// true when the height changed so callers can trigger a layout
-// reconciliation (resize + refresh + bottom-snap if pinned).
+// count, between textareaMinHeight and whatever the last chrome
+// budget can afford (budget.go). Returns true when the height changed
+// so callers can trigger a layout reconciliation (resize + refresh +
+// bottom-snap if pinned).
 //
 // Called from every keystroke-forward + after any programmatic
 // input mutation so multi-line paste / typed newlines grow the
 // box visibly, and Ctrl+U / Esc-out-of-history shrinks it back.
+//
+// It clamps to the budget rather than straight to textareaMaxHeight
+// so that it agrees with the resize() the caller is about to run. The
+// two used to disagree — resize reset the box to its minimum on every
+// call, so the grow computed here was discarded before it could be
+// rendered and the box never appeared (issue #121). Asking here for a
+// height that resize would only take back again would leave the same
+// disagreement in place, one keystroke at a time.
 func (m *Model) syncInputHeight() bool {
 	desired := m.input.LineCount()
 	if desired < textareaMinHeight {
@@ -443,6 +407,9 @@ func (m *Model) syncInputHeight() bool {
 	}
 	if desired > textareaMaxHeight {
 		desired = textareaMaxHeight
+	}
+	if ceiling := m.chrome.inputMax; ceiling > 0 && desired > ceiling {
+		desired = atLeast(ceiling, textareaMinHeight)
 	}
 	if m.input.Height() == desired {
 		return false
@@ -1551,6 +1518,13 @@ func nonNeg(x int) int {
 // conditionally include it without branching on `if helpOpen` in the
 // View() composition. Width sets the column width — pass chatWidth in
 // sidebar mode and m.width in header mode.
+//
+// The panel is 38 rows tall at every width and every terminal size,
+// which is more than an 80x24 terminal has to give it (issue #119).
+// Until that is fixed the chrome budget caps it — the join at the end
+// elides whatever does not fit into m.chrome.helpCap rows — so the
+// overflow lands inside the panel rather than pushing the input box
+// and the footer out of the frame (issue #121).
 func (m Model) renderHelpPanel(width int) string {
 	if !m.helpOpen || width <= 0 {
 		return ""
@@ -1620,7 +1594,7 @@ func (m Model) renderHelpPanel(width int) string {
 		}
 	}
 	lines = append(lines, rule)
-	return strings.Join(lines, "\n")
+	return m.joinPanelRows(lines, m.chrome.helpCap, width)
 }
 
 // renderTurnErrorBlock paints a structured turn-error from a

@@ -80,6 +80,15 @@ type Model struct {
 	width  int
 	height int
 
+	// chrome is the row allocation the last resize() computed for
+	// everything View stacks around the chat viewport (budget.go).
+	// It is carried on the model because the two collapsible panels
+	// have to see the ceiling they were given at render time, and
+	// because syncInputHeight clamps the auto-grow to what the
+	// budget can afford. The zero value means "never sized", which
+	// every reader treats as "no ceiling".
+	chrome chromeBudget
+
 	statusLayout StatusLayout
 	permMode     PermissionMode
 
