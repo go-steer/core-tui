@@ -103,6 +103,101 @@ func TestPalette_FilterEmptyReturnsAll(t *testing.T) {
 	}
 }
 
+// TestPalette_RankingOrderIsPinned is the regression net around the
+// ranker itself: the FULL ordered result for a spread of filters over
+// the real built-in catalog and a file-shaped fixture, written out
+// literally.
+//
+// The three tests above pin one tier boundary each, which is the
+// right shape for explaining the algorithm but is not enough to move
+// it. This one exists because the ranking was lifted out of
+// palette.filtered into the shared rankNames helper (issue #117) so
+// the pickers could use it too, and "the palette's behaviour must not
+// change" needed to be a test rather than a claim. Every element of
+// every want below was captured from the pre-lift implementation.
+//
+// A deliberate change to the ranking updates these tables; an
+// accidental one fails them.
+func TestPalette_RankingOrderIsPinned(t *testing.T) {
+	slashCases := []struct {
+		filter string
+		want   []string
+	}{
+		{filter: "m", want: []string{"mcp", "model", "mouse", "memory", "theme", "resume", "permissions"}},
+		{filter: "mo", want: []string{"model", "mouse", "memory"}},
+		{filter: "model", want: []string{"model"}},
+		{filter: "pricing", want: []string{"pricing", "pricing set", "pricing refresh"}},
+		{filter: "e", want: []string{"deny", "help", "keys", "clear", "model", "mouse", "theme", "memory", "reload", "resume", "interrupt", "subagents", "permissions", "pricing set", "allow bundle:", "pricing refresh"}},
+		{filter: "allow", want: []string{"allow", "allow bundle:"}},
+		{filter: "sw", want: []string{"switch"}},
+		{filter: "set", want: []string{"pricing set"}},
+		{filter: "ricing", want: []string{"pricing", "pricing set", "pricing refresh"}},
+		{filter: "help", want: []string{"help"}},
+		// Case folding is on the whole name, not just the head.
+		{filter: "S", want: []string{"stats", "skills", "switch", "subagents", "keys", "mouse", "tools", "resume", "permissions", "pricing set", "pricing refresh"}},
+		// Non-matching filters drop every row rather than scoring
+		// them to zero — the palette shows its "no matches" state.
+		{filter: "z", want: nil},
+		{filter: "?", want: nil},
+		{filter: "/", want: nil},
+	}
+	for _, tc := range slashCases {
+		t.Run("slash/"+tc.filter, func(t *testing.T) {
+			p := &palette{kind: paletteSlash, items: builtinSlashItems(), filter: tc.filter}
+			assertNameOrder(t, names(p.filtered()), tc.want)
+		})
+	}
+
+	files := []paletteItem{
+		{Name: "main"},
+		{Name: "main.go"},
+		{Name: "main_test.go"},
+		{Name: "cmd/main/run.go"},
+		{Name: "cmd/maintain/run.go"},
+		{Name: "lib/domain.go"},
+		{Name: "docs/", IsDir: true},
+		{Name: "docs/design.md"},
+		{Name: "internal/main/main.go"},
+		{Name: "README.md"},
+	}
+	fileCases := []struct {
+		filter string
+		want   []string
+	}{
+		{filter: "main", want: []string{"main", "main.go", "main_test.go", "internal/main/main.go", "cmd/main/run.go", "lib/domain.go", "cmd/maintain/run.go"}},
+		{filter: "MAIN", want: []string{"main", "main.go", "main_test.go", "internal/main/main.go", "cmd/main/run.go", "lib/domain.go", "cmd/maintain/run.go"}},
+		{filter: "run", want: []string{"cmd/main/run.go", "cmd/maintain/run.go"}},
+		{filter: "docs", want: []string{"docs/", "docs/design.md"}},
+		{filter: "go", want: []string{"main.go", "main_test.go", "lib/domain.go", "cmd/main/run.go", "cmd/maintain/run.go", "internal/main/main.go"}},
+		{filter: "md", want: []string{"README.md", "docs/design.md", "cmd/main/run.go", "cmd/maintain/run.go"}},
+		{filter: "d", want: []string{"lib/domain.go", "docs/design.md", "docs/", "README.md", "cmd/main/run.go", "cmd/maintain/run.go"}},
+		// Empty filter is identity, in source order — not a rank of
+		// everything against "".
+		{filter: "", want: []string{"main", "main.go", "main_test.go", "cmd/main/run.go", "cmd/maintain/run.go", "lib/domain.go", "docs/", "docs/design.md", "internal/main/main.go", "README.md"}},
+	}
+	for _, tc := range fileCases {
+		t.Run("file/"+tc.filter, func(t *testing.T) {
+			p := &palette{kind: paletteFile, items: files, filter: tc.filter}
+			assertNameOrder(t, names(p.filtered()), tc.want)
+		})
+	}
+}
+
+// assertNameOrder compares two name slices element by element and
+// reports the whole ordering on failure — a rank test whose message
+// is "index 4 differs" makes you re-run it by hand to see what moved.
+func assertNameOrder(t *testing.T, got, want []string) {
+	t.Helper()
+	if len(got) != len(want) {
+		t.Fatalf("got %d rows %v, want %d rows %v", len(got), got, len(want), want)
+	}
+	for i := range want {
+		if got[i] != want[i] {
+			t.Fatalf("rank %d is %q, want %q\n got: %v\nwant: %v", i, got[i], want[i], got, want)
+		}
+	}
+}
+
 // TestPalette_ContainsSwitch pins that /switch (issue #53) is
 // discoverable when the operator types `/` to open the palette.
 // v0.10.0 shipped the dispatcher + /help entry but forgot the
