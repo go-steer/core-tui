@@ -224,7 +224,10 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		// quiet window paints without waiting for a keypress.
 		// liveStreamRenderCmd handles the conditional batching.
 		if needSpinner {
-			return m, m.liveStreamRenderCmd(spinnerTick())
+			// applyStreamChunk bumped spinnerGen on the false→true
+			// flip, so this arms a chain that supersedes anything
+			// left over from the previous stretch (issue #112).
+			return m, m.liveStreamRenderCmd(m.armSpinner())
 		}
 		return m, m.liveStreamRenderCmd()
 	case toolCallMsg:
@@ -639,6 +642,18 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		m.finalizeTurn(0, "(interrupted)")
 		return m.maybeDrainQueue()
 	case spinnerTickMsg:
+		// Identity guard (issue #112). The two level gates below can
+		// only tell whether *a* spinner should be running right now,
+		// not which chain this tick belongs to — and m.state flips
+		// back to stateStreaming well inside one spinnerCadence when
+		// a turn end is immediately followed by another submitTurn
+		// (queue drain, auto-continue). The superseded chain's next
+		// tick therefore passes the level gates and re-arms, and the
+		// verb pool rotates at 2x for the rest of the session. The
+		// stamp is what distinguishes the chains.
+		if msg.gen != m.spinnerGen {
+			return m, nil
+		}
 		// Two gating paths:
 		//   - per-turn (Run): m.state == stateStreaming
 		//   - LiveAgent (#22): m.spinnerActive driven by
@@ -649,9 +664,9 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		m.thinkingIdx++
 		m.markViewportDirty()
 		if refresh := m.scheduleCoalescedRefresh(); refresh != nil {
-			return m, tea.Batch(spinnerTick(), refresh)
+			return m, tea.Batch(m.armSpinner(), refresh)
 		}
-		return m, spinnerTick()
+		return m, m.armSpinner()
 	case initialPromptMsg:
 		// Options.InitialPrompt lands here exactly once, right after
 		// Init. Defensive guards mirror the Enter-key handler at the
@@ -677,7 +692,8 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			return m, nil
 		}
 		m.recordPrompt(text)
-		return m.submitTurn(text), spinnerTick()
+		out := m.submitTurn(text)
+		return out, out.armSpinner()
 	case remoteInterruptDoneMsg:
 		// Follow-up to the "/interrupt: cancelling remote turn…"
 		// placeholder appended in the slash handler. Success case
@@ -1307,7 +1323,8 @@ func (m Model) handleKey(msg tea.KeyPressMsg) (tea.Model, tea.Cmd) {
 		// Operator-initiated turn resets the auto-continue cap so
 		// the next streak gets the full budget. (Issue #9.)
 		m.consecutiveAutoContinues = 0
-		return m.submitTurn(text), spinnerTick()
+		out := m.submitTurn(text)
+		return out, out.armSpinner()
 
 	case "shift+enter", "ctrl+j", "alt+enter":
 		// Insert a newline (R-CHAT-1). All three forms are accepted
@@ -1522,6 +1539,13 @@ func (m Model) submitTurn(text string) Model {
 	m.toolActive = false
 	m.thinkingIdx = 0
 	m.spinnerActive = true
+	// A new turn starts a new spinner animation, so it retires the
+	// previous chain (issue #112). Turn-level granularity is the
+	// point: a queue drain or an auto-continue re-enters submitTurn
+	// while the finishing turn's tick is still in flight, and both
+	// turns live in the same session, so sessionGen would not
+	// separate them.
+	m.spinnerGen++
 	for k := range m.seenToolIDs {
 		delete(m.seenToolIDs, k)
 	}
@@ -1568,6 +1592,11 @@ func (m *Model) applyStreamChunk(msg streamChunkMsg) {
 			if !m.spinnerActive {
 				m.spinnerActive = true
 				m.thinkingIdx = 0
+				// LiveAgent has no submitTurn, so this false→true
+				// flip is where the stretch's animation begins —
+				// bump here too or the caller's armSpinner would
+				// re-use the previous stretch's generation (#112).
+				m.spinnerGen++
 			}
 		} else {
 			m.liveLastCommitAt = time.Now()
@@ -2541,7 +2570,7 @@ func (m Model) maybeDrainQueue() (tea.Model, tea.Cmd) {
 	prompt := m.queue[idx].Text
 	m.queue[idx].State = QueueInFlight
 	out := m.submitTurn(prompt)
-	return out, tea.Batch(spinnerTick(), out.eventListener())
+	return out, tea.Batch(out.armSpinner(), out.eventListener())
 }
 
 // enqueueDuringStream routes an operator-typed-during-streaming

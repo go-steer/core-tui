@@ -230,6 +230,17 @@ type Model struct {
 	thinkingIdx     int  // rotation index into ThinkingPhrases / WorkingPhrases
 	spinnerActive   bool // gates spinner tick scheduling
 
+	// spinnerGen identifies the spinner tick chain that is allowed to
+	// be live (issue #112). Bumped wherever a new animation starts —
+	// submitTurn (per turn) and applyStreamChunk (per LiveAgent
+	// stretch) — and stamped onto every spinnerTickMsg by armSpinner.
+	// The handler drops a tick whose stamp is stale, which terminates
+	// the superseded chain instead of letting it re-arm forever
+	// alongside the current one. Deliberately NOT sessionGen: that
+	// only bumps on session switch, so two overlapping turns inside
+	// one session — the reported symptom — would share a generation.
+	spinnerGen uint64
+
 	// queue is the per-session prompt queue (R-CHAT-10). Each entry
 	// transitions through Queued → InFlight → Done / Failed and
 	// lingers in terminal state for cullTTL so the operator can see
