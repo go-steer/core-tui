@@ -455,6 +455,12 @@ const maxPaletteRows = 8
 // width. Returns empty when no palette is open. Follows style.md §6
 // modal patterns but anchored to the chat-column bottom rather than
 // centered.
+//
+// R-PAL-3's maxPaletteRows is the cap in a terminal with room for it.
+// On a short one the chrome budget lowers it (m.chrome.paletteCap,
+// budget.go) so the panel scrolls a smaller window instead of pushing
+// the input box out of the frame — the palette is the third of the
+// three variable-height elements that could do that (issue #121).
 func (m Model) renderPalette(width int) string {
 	if m.palette == nil || width <= 0 {
 		return ""
@@ -475,13 +481,14 @@ func (m Model) renderPalette(width int) string {
 		lines = append(lines, "  "+m.styles.SystemText.Render("no matches"))
 	} else {
 		// Scrolling window: the visible slice tracks the cursor so
-		// ↑/↓ can step past the maxPaletteRows boundary. When the
-		// cursor is below the window we slide it down; above, up.
+		// ↑/↓ can step past the window boundary. When the cursor is
+		// below the window we slide it down; above, up.
+		window := m.paletteWindow()
 		start := 0
-		if m.palette.cursor >= maxPaletteRows {
-			start = m.palette.cursor - maxPaletteRows + 1
+		if m.palette.cursor >= window {
+			start = m.palette.cursor - window + 1
 		}
-		end := start + maxPaletteRows
+		end := start + window
 		if end > len(items) {
 			end = len(items)
 		}
@@ -500,7 +507,29 @@ func (m Model) renderPalette(width int) string {
 	}
 
 	lines = append(lines, rule)
-	return strings.Join(lines, "\n")
+	return m.joinPanelRows(lines, m.chrome.paletteCap, width)
+}
+
+// paletteWindow is how many item rows the palette may show at once:
+// R-PAL-3's maxPaletteRows, lowered to whatever the chrome budget
+// left it (budget.go) once the panel's own chrome — the two rules and
+// the header — is paid for. Never below one row; a palette with no
+// visible item would be unusable, and the budget charges the
+// shortfall to overflow instead.
+//
+// This is the palette shrinking itself to the ceiling. joinPanelRows
+// still elides at the end as a backstop, because the two scroll
+// indicators are conditional and can each add a row after the window
+// has been chosen.
+func (m Model) paletteWindow() int {
+	window := maxPaletteRows
+	if ceiling := m.chrome.paletteCap; ceiling > 0 {
+		const panelChrome = 3 // top rule + header + bottom rule
+		if avail := ceiling - panelChrome; avail < window {
+			window = avail
+		}
+	}
+	return atLeast(window, 1)
 }
 
 // renderPaletteRow renders one row: `> Display              Description`.

@@ -64,20 +64,81 @@ func composedRows(m Model) int {
 	return rows
 }
 
+// irreducibleRows is the shortest frame resize() can compose for
+// this model: the chrome View always draws (header, toast, footer),
+// the input box at its minimum, the chat viewport at its floor, and
+// one row for each collapsible panel that is open — an open panel
+// keeps a row to say so (budget.go).
+//
+// Computed here from the model rather than read out of m.chrome so
+// that the assertion below is an independent check on the budget and
+// not a restatement of it.
+func irreducibleRows(m Model) int {
+	chromeWidth := m.width
+	rows := 0
+	if m.effectiveLayout() == StatusSidebar {
+		chromeWidth = m.width - sidebarWidth - 3
+	} else {
+		rows += lipgloss.Height(m.renderHeader())
+	}
+	rows += lipgloss.Height(m.renderFooter(chromeWidth))
+	if toast := m.renderToast(chromeWidth); toast != "" {
+		rows += lipgloss.Height(toast)
+	}
+	// The input box's minimum: textareaMinHeight plus whatever
+	// renderInputBox spends on its own border, derived by measuring
+	// the live box against the height it was given.
+	rows += textareaMinHeight + (lipgloss.Height(m.renderInputBox()) - m.input.Height())
+	rows += chatMinHeight
+	if m.helpOpen {
+		rows++
+	}
+	if m.palette != nil {
+		rows++
+	}
+	return rows
+}
+
 // assertBudgetExact checks that the composed frame is exactly
-// m.height rows. Skipped when the viewport has bottomed out at
-// chatMinHeight: at that point the terminal is too short to hold
-// the chrome at all, resize() has stopped subtracting, and
-// clipFrame legitimately takes over.
+// m.height rows — or, on a terminal too short to hold even the
+// irreducible chrome, exactly that irreducible minimum and not one
+// row more.
+//
+// It used to SKIP whenever the viewport bottomed out at chatMinHeight,
+// on the theory that a floored viewport means the budget is exhausted
+// rather than wrong. That was the hole the help-panel bug lived in
+// (issue #121): `?` on an 80x24 terminal floors the viewport, so every
+// cell that would have caught a 48-row frame in a 24-row terminal
+// skipped instead, silently, and the grid stayed green while the
+// input box and the footer were being clipped out of the frame. An
+// exhausted budget is now a checkable number, so it is checked.
 func assertBudgetExact(t *testing.T, m Model) {
 	t.Helper()
-	if m.viewport.Height() <= chatMinHeight {
-		t.Skipf("viewport bottomed out at the %d-row floor; budget is exhausted, not wrong", chatMinHeight)
+	irreducible := irreducibleRows(m)
+	want := m.height
+	if irreducible > want {
+		// Not a skip: the frame is still allowed exactly one size
+		// here, and resize() must not spend a row beyond it.
+		t.Logf("terminal is %d rows; the irreducible chrome needs %d, so clipFrame will trim %d",
+			m.height, irreducible, irreducible-m.height)
+		want = irreducible
 	}
-	if got := composedRows(m); got != m.height {
-		t.Errorf("composed frame is %d rows in a %d-row terminal (delta %+d); "+
+	if got := composedRows(m); got != want {
+		t.Errorf("composed frame is %d rows in a %d-row terminal, want %d (delta %+d); "+
 			"resize budgeted a viewport of %d",
-			got, m.height, got-m.height, m.viewport.Height())
+			got, m.height, want, got-want, m.viewport.Height())
+	}
+	if got, expect := m.chrome.overflow, want-m.height; got != expect {
+		t.Errorf("budget reports an overflow of %d rows, want %d", got, expect)
+	}
+	// The budget's own accounting has to agree with the measurement:
+	// a term that resize allocated but View spends differently is a
+	// budget that is exact by luck.
+	if got := m.chrome.frameRows(); got != composedRows(m) {
+		t.Errorf("budget adds up to %d rows but the frame composes %d "+
+			"(header %d, chat %d, palette %d, help %d, input %d, toast %d, footer %d)",
+			got, composedRows(m), m.chrome.header, m.chrome.chat, m.chrome.palette,
+			m.chrome.help, m.chrome.input, m.chrome.toast, m.chrome.footer)
 	}
 }
 
@@ -228,11 +289,98 @@ func TestResize_HelpAndPaletteStayBudgeted(t *testing.T) {
 	assertBudgetExact(t, m)
 }
 
+// budgetStates are the UI configurations the exactness grid sweeps.
+// Every one of them puts a different variable-height element into
+// the chrome: the collapsible panels, the auto-grown input box, and
+// the two together competing for the same rows.
+//
+// The tall-textarea states are the ones issue #121 added. Before it,
+// resize() reset the textarea to textareaMinHeight on every call, so
+// the grid could not have caught a clamp bug in the input box — there
+// was no state in which the box was ever taller than three rows.
+func budgetStates() []frameState {
+	return []frameState{
+		{
+			name: "transcript",
+			setup: func(_ *testing.T, m Model, _, _ int) Model {
+				return withHostileTranscript(m)
+			},
+		},
+		{
+			name: "tall-textarea",
+			setup: func(_ *testing.T, m Model, _, _ int) Model {
+				return withTallTextarea(withHostileTranscript(m))
+			},
+		},
+		{
+			name: "help-panel",
+			setup: func(_ *testing.T, m Model, _, _ int) Model {
+				m = withHostileTranscript(m)
+				m.helpOpen = true
+				m.resize()
+				m.refreshViewport()
+				return m
+			},
+		},
+		{
+			name: "tall-textarea+help-panel",
+			setup: func(_ *testing.T, m Model, _, _ int) Model {
+				m = withHostileTranscript(m)
+				m.helpOpen = true
+				m.resize()
+				return withTallTextarea(m)
+			},
+		},
+		{
+			name: "palette",
+			setup: func(_ *testing.T, m Model, _, _ int) Model {
+				m = withHostileTranscript(m)
+				m = withPalette(m)
+				m.refreshViewport()
+				return m
+			},
+		},
+		{
+			name: "toast",
+			setup: func(_ *testing.T, m Model, _, _ int) Model {
+				m = withHostileTranscript(m)
+				m.toast = "woke up: agent switched to a model with a long name"
+				m.toastSetAt = time.Now()
+				m.resize()
+				m.refreshViewport()
+				return m
+			},
+		},
+	}
+}
+
+// withPalette opens the slash palette the way a keystroke does —
+// refreshPalette is what handleKey calls after forwarding one, and
+// it resizes on open.
+func withPalette(m Model) Model {
+	m.input.SetValue("/")
+	m.refreshPalette()
+	return m
+}
+
+// withTallTextarea fills the input with more lines than
+// textareaMaxHeight and reconciles the layout the way every
+// keystroke path does (syncInputHeight, then resize on a change).
+func withTallTextarea(m Model) Model {
+	m.input.SetValue(strings.Repeat("a typed line\n", textareaMaxHeight+5))
+	if m.syncInputHeight() {
+		m.resize()
+	}
+	m.refreshViewport()
+	return m
+}
+
 // TestResize_BudgetExactGrid sweeps the same axes as the
 // frame-invariant grid but asserts exactness rather than the
 // one-sided "does not overflow". Anything View renders that resize
-// forgets — or measures at the wrong width — shows up here as a
-// non-zero delta in one cell.
+// forgets — or measures at the wrong width, or lets grow past the
+// rows it was allocated — shows up here as a non-zero delta in one
+// cell.
 func TestResize_BudgetExactGrid(t *testing.T) {
 	layouts := []struct {
 		name   string
@@ -242,14 +390,17 @@ func TestResize_BudgetExactGrid(t *testing.T) {
 		{"sidebar", StatusSidebar},
 	}
 	for _, lay := range layouts {
-		for _, w := range frameWidths {
-			for _, h := range frameHeights {
-				name := lay.name + "/" + strconv.Itoa(w) + "x" + strconv.Itoa(h)
-				t.Run(name, func(t *testing.T) {
-					m := newFrameModel(lay.layout, w, h)
-					m = withHostileTranscript(m)
-					assertBudgetExact(t, m)
-				})
+		for _, st := range budgetStates() {
+			for _, w := range frameWidths {
+				for _, h := range frameHeights {
+					name := lay.name + "/" + st.name + "/" +
+						strconv.Itoa(w) + "x" + strconv.Itoa(h)
+					t.Run(name, func(t *testing.T) {
+						m := newFrameModel(lay.layout, w, h)
+						m = st.setup(t, m, w, h)
+						assertBudgetExact(t, m)
+					})
+				}
 			}
 		}
 	}

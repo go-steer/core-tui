@@ -122,6 +122,17 @@ func frameStates() []frameState {
 				return m
 			},
 		},
+		{
+			// Issue #121: the auto-grown input box. resize() used to
+			// reset the textarea to textareaMinHeight on every call,
+			// so no state in this grid could ever compose a frame
+			// with a box taller than three rows and the clamp on it
+			// was untested by construction.
+			name: "tall-textarea",
+			setup: func(_ *testing.T, m Model, _, _ int) Model {
+				return withTallTextarea(withHostileTranscript(m))
+			},
+		},
 	}
 }
 
