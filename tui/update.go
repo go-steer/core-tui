@@ -786,6 +786,10 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	)
 	m.input, taCmd = m.input.Update(msg)
 	m.viewport, vpCmd = m.viewport.Update(msg)
+	// The chat wheel lands here too (handleWheel declines when no
+	// modal owns it), so this is a scroll path: re-read the follow
+	// intent from where the viewport ended up.
+	m.syncFollow()
 	return m, tea.Batch(taCmd, vpCmd)
 }
 
@@ -1121,7 +1125,10 @@ func (m Model) handleKey(msg tea.KeyPressMsg) (tea.Model, tea.Cmd) {
 	case "ctrl+l":
 		// Reset viewport scroll to the top. Mirrors the shell-style
 		// "redraw / clear screen" muscle memory without actually
-		// clearing history (use /clear for that).
+		// clearing history (use /clear for that). An explicit jump
+		// away from the tail ends follow — otherwise the next repaint
+		// would drag the operator straight back down.
+		m.follow = false
 		m.viewport.GotoTop()
 		return m, nil
 
@@ -1315,18 +1322,18 @@ func (m Model) handleKey(msg tea.KeyPressMsg) (tea.Model, tea.Cmd) {
 	)
 	m.input, taCmd = m.input.Update(msg)
 	m.viewport, vpCmd = m.viewport.Update(msg)
+	// PgUp / PgDn just moved the viewport (nothing else reaches it);
+	// re-read the follow intent before anything touches the layout.
+	m.syncFollow()
 	// Auto-grow textarea: if typing (or pasting) bumped the line
 	// count, re-clamp the textarea height between min/max and
 	// re-resolve the layout so the viewport shrinks to make room.
-	// Re-snap the viewport to the bottom when the operator was
-	// already pinned there so they don't lose the in-flight tail.
+	// refreshViewport re-snaps to the tail from m.follow — sampling
+	// AtBottom() here instead would read the post-resize geometry and
+	// drop follow exactly like the WindowSizeMsg path did (#93).
 	if m.syncInputHeight() {
-		wasAtBottom := m.viewport.AtBottom()
 		m.resize()
 		m.refreshViewport()
-		if wasAtBottom {
-			m.viewport.GotoBottom()
-		}
 	}
 	// Refresh palette state from the updated input — opens a new
 	// palette on a fresh `/` or `@` trigger, closes the active one
@@ -1493,10 +1500,12 @@ func (m Model) submitTurn(text string) Model {
 		delete(m.seenToolIDs, k)
 	}
 	m.cancelTurn = m.startAgentTurn(m.opts.Agent, text)
-	m.refreshViewport()
 	// Operator-initiated submit always scrolls to bottom — they want
 	// to see their own message land and the response start, even if
-	// they'd been scrolled up reading backlog.
+	// they'd been scrolled up reading backlog. Re-arming follow is
+	// part of that: the reply streams in below, and they asked for it.
+	m.follow = true
+	m.refreshViewport()
 	m.viewport.GotoBottom()
 	// Spinner tick scheduled separately from event listener; both
 	// stream their own messages into Update.
@@ -2129,6 +2138,8 @@ func (m *Model) applySwitchTarget(tgt *SwitchTarget) tea.Cmd {
 		m.history.Append(Message{Role: RoleSystem, Text: tgt.Note})
 	}
 
+	// A fresh session starts on its tail, following.
+	m.follow = true
 	m.refreshViewport()
 	m.viewport.GotoBottom()
 

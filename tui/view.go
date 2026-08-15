@@ -328,6 +328,10 @@ func (m *Model) refreshAndScroll() {
 	if m.syncInputHeight() {
 		m.resize()
 	}
+	// An explicit jump to the tail is also a re-arm: the operator
+	// asked to see the newest content, so subsequent repaints should
+	// keep them there.
+	m.follow = true
 	m.refreshViewport()
 	m.viewport.GotoBottom()
 }
@@ -379,10 +383,16 @@ func (m *Model) refreshViewport() {
 	}
 
 	// Preserve scroll position across re-renders: only auto-scroll
-	// to the bottom when the operator is already pinned there. If
+	// to the bottom when the operator is following the tail. If
 	// they've scrolled up to read backlog, an incoming stream chunk
 	// must not yank them back (parity with internal/tui:512).
-	atBottom := m.viewport.AtBottom()
+	//
+	// m.follow, not viewport.AtBottom(): sampling here read the
+	// geometry AFTER a resize had already changed it, so a shrunken
+	// viewport reported "not at bottom" and follow was lost mid-
+	// stream (issue #93). The flag also frees this function from the
+	// second latent constraint the sample carried — it had to be
+	// taken before SetContent.
 	m.viewport.SetContent(b.String())
 	// Defensively pin horizontal scroll to 0. The viewport supports
 	// xOffset (for terminals wider than the chat column), but the
@@ -392,9 +402,19 @@ func (m *Model) refreshViewport() {
 	// any scroll that crept in via mouse wheel, palette key, or
 	// future bindings.
 	m.viewport.SetXOffset(0)
-	if atBottom {
+	if m.follow {
 		m.viewport.GotoBottom()
 	}
+}
+
+// syncFollow re-derives the follow flag from where the viewport
+// actually sits. Call it right after a user-driven scroll (a key or
+// wheel event forwarded to the viewport) and only then: the sample is
+// only meaningful while the geometry is the one the operator scrolled
+// in. Scrolling up drops follow; scrolling back down to the bottom
+// re-arms it.
+func (m *Model) syncFollow() {
+	m.follow = m.viewport.AtBottom()
 }
 
 // renderInProgress returns the live block at the bottom of the chat
