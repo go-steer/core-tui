@@ -114,11 +114,37 @@ func (d *modelPickerDialog) rows() []ModelInfo { return d.models }
 // This is also where the cursor gets seeded: issue #110 wants it on
 // the CURRENT model rather than row 0, and the list only exists from
 // this point on — the constructor has nothing to seed against.
-func (d *modelPickerDialog) applyModels(models []ModelInfo) {
+//
+// current is the caller's m.displayModelName(). It is passed in rather
+// than read here because a dialog must not reach into the Model for
+// state it can be handed; Render already resolves it the same way.
+func (d *modelPickerDialog) applyModels(models []ModelInfo, current string) {
 	d.models = models
 	d.loaded = true
-	d.idx = 0
+	d.idx = indexOfModel(models, current)
 	d.off = 0
+}
+
+// indexOfModel finds the row for the active model, matching on the
+// same predicate Render uses to paint its "(current)" tag — ID first,
+// then the display name, since a host may advertise either as the
+// thing the operator recognises. Returns 0 when nothing matches, which
+// covers an unset model and a host whose current model is not in its
+// own list.
+func indexOfModel(models []ModelInfo, current string) int {
+	if current == "" {
+		return 0
+	}
+	for i, mi := range models {
+		disp := mi.Display
+		if disp == "" {
+			disp = mi.ID
+		}
+		if mi.ID == current || disp == current {
+			return i
+		}
+	}
+	return 0
 }
 
 func (d *modelPickerDialog) HandleKey(stroke string, m *Model) DialogAction {
