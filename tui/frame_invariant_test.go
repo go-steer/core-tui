@@ -39,6 +39,7 @@ import (
 	"strconv"
 	"strings"
 	"testing"
+	"time"
 
 	tea "charm.land/bubbletea/v2"
 	"github.com/charmbracelet/x/ansi"
@@ -139,6 +140,20 @@ func frameStates() []frameState {
 			},
 		},
 		{
+			// Issue #135: the LiveAgent path composed no frame in this
+			// grid at all — the in-progress block was gated shut on it,
+			// so every cell measured a frame that live mode never
+			// actually produces. That absence is why the streamed prose
+			// and the spinner line could both go missing without a test
+			// noticing. Now that the gate opens, the block's own
+			// geometry — wrapped Glamour prose plus the spinner verb
+			// with its widest elapsed suffix — is inside the invariants.
+			name: "live-stretch",
+			setup: func(_ *testing.T, m Model, _, _ int) Model {
+				return withLiveStretch(withHostileTranscript(m))
+			},
+		},
+		{
 			// Issue #121: the auto-grown input box. resize() used to
 			// reset the textarea to textareaMinHeight on every call,
 			// so no state in this grid could ever compose a frame
@@ -150,6 +165,26 @@ func frameStates() []frameState {
 			},
 		},
 	}
+}
+
+// withLiveStretch puts the model mid-LiveAgent-stretch: liveMode on,
+// a partial chunk accumulated, spinner running.
+//
+// The elapsed readout is pinned through the injected clock (Model.now,
+// issue #111) rather than left on the wall clock — both because a
+// time-dependent frame is a flaky frame, and because the value chosen
+// is the widest the suffix ever gets ("2h00m"), which is the case the
+// width invariant should be measuring.
+func withLiveStretch(m Model) Model {
+	m.liveMode = true
+	long := strings.Repeat("live-streamed-unbreakable-token-", 8)
+	out, _ := m.Update(streamChunkMsg{gen: m.sessionGen, text: long, partial: true})
+	m = out.(Model)
+	start := time.Date(2026, 8, 15, 9, 0, 0, 0, time.UTC)
+	m.turnStarted = start
+	m.now = func() time.Time { return start.Add(2 * time.Hour) }
+	m.refreshViewport()
+	return m
 }
 
 // withHostileTranscript seeds a transcript whose content is chosen

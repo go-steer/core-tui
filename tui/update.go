@@ -746,11 +746,16 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		if msg.gen != m.spinnerGen {
 			return m, nil
 		}
-		// Two gating paths:
+		// Two gating paths, both folded into turnInFlight:
 		//   - per-turn (Run): m.state == stateStreaming
 		//   - LiveAgent (#22): m.spinnerActive driven by
 		//     applyStreamChunk's partial-vs-commit logic
-		if m.state != stateStreaming && (!m.liveMode || !m.spinnerActive) {
+		//
+		// Shares the predicate with renderInProgress on purpose
+		// (issue #135). A chain that ticks while the render gate is
+		// shut rotates a verb nobody can see, which is exactly the
+		// state the live path sat in.
+		if !m.turnInFlight() {
 			return m, nil
 		}
 		m.thinkingIdx++
@@ -2032,10 +2037,11 @@ func (m *Model) finalizeTurn(elapsed time.Duration, notice string) {
 	m.state = stateIdle
 	m.spinnerActive = false
 	// The turn's animation is over, so its elapsed origin goes with
-	// it (issue #111). Nothing can paint a stale value today —
-	// renderInProgress gates the spinner line on stateStreaming —
-	// but the field's invariant is "non-zero iff an animation is
-	// live", and a render-path gate is the wrong place to keep it.
+	// it (issue #111). Clearing state, spinnerActive and turnStarted
+	// together is what keeps turnInFlight and the readout agreeing:
+	// the field's invariant is "non-zero iff an animation is live",
+	// and leaning on a render-path gate to hide a stale value is
+	// what issue #135 turned out to be.
 	m.turnStarted = time.Time{}
 
 	// Commit the streamed text as a Message. Skip when empty (the

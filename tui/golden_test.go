@@ -49,6 +49,7 @@ import (
 	"strconv"
 	"strings"
 	"testing"
+	"time"
 
 	tea "charm.land/bubbletea/v2"
 	"charm.land/lipgloss/v2"
@@ -237,6 +238,51 @@ func TestGolden_Frame(t *testing.T) {
 			assertGolden(t, "frame_w"+strconv.Itoa(w), m.View().Content)
 		})
 	}
+}
+
+// TestGolden_LiveFrame pins the composed frame mid-LiveAgent stretch
+// (issue #135).
+//
+// The rest of the frame corpus is captured from an idle model, which
+// by construction cannot notice the in-progress block going missing —
+// an idle model has no in-progress block to lose. This is the capture
+// where the streamed prose, the spinner verb line and the elapsed
+// suffix are all on screen at once, so a future gate change that
+// swallows any of them shows up as a diff rather than as silence.
+func TestGolden_LiveFrame(t *testing.T) {
+	pinChromaStyle(t)
+	pinCwd(t)
+	for _, w := range goldenWidths {
+		t.Run("width-"+strconv.Itoa(w), func(t *testing.T) {
+			m := goldenLiveModel(t, w, 24)
+			assertGolden(t, "live_frame_w"+strconv.Itoa(w), m.View().Content)
+		})
+	}
+}
+
+// goldenLiveModel is goldenModel put mid-stretch: liveMode on, one
+// partial chunk accumulated, spinner running.
+//
+// The elapsed readout is time-dependent, so it is pinned through the
+// injected clock (Model.now, issue #111) rather than suppressed —
+// forty-two seconds is past turnElapsedFloor, which means the suffix
+// is actually in the captured bytes. Left on the wall clock this
+// corpus would re-diff on every run.
+func goldenLiveModel(t *testing.T, w, h int) Model {
+	t.Helper()
+	m := goldenModel(t, w, h)
+	m.liveMode = true
+	out, _ := m.Update(streamChunkMsg{
+		gen:     m.sessionGen,
+		text:    "Reading the package and working out what changed.",
+		partial: true,
+	})
+	m = out.(Model)
+	start := time.Date(2026, 8, 15, 9, 0, 0, 0, time.UTC)
+	m.turnStarted = start
+	m.now = func() time.Time { return start.Add(42 * time.Second) }
+	m.refreshViewport()
+	return m
 }
 
 // TestGolden_HelpFrame pins the composed frame with the help panel
