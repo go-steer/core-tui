@@ -43,6 +43,7 @@
 package tui
 
 import (
+	"charm.land/bubbles/v2/textinput"
 	tea "charm.land/bubbletea/v2"
 	"charm.land/lipgloss/v2"
 	"github.com/charmbracelet/x/ansi"
@@ -86,6 +87,61 @@ func (o *Overlay) cursor(width int, m *Model) *tea.Cursor {
 		return nil
 	}
 	return cd.DialogCursor(width, m)
+}
+
+// textInputCursor is the caret for a bubbles textinput, corrected for
+// issue #125. Returns nil when the widget is blurred or painting its
+// own virtual cursor, matching textinput.Cursor's contract; the
+// result is relative to the widget's own top-left cell, so callers
+// still add their chrome.
+//
+// textinput.Cursor() in the pinned bubbles/v2 v2.1.0 has two bugs
+// (textinput/textinput.go:916-936, byte-identical in v2.1.1, so a
+// version bump is not the fix):
+//
+//  1. xOffset = m.Position() + promptWidth adds a RUNE INDEX to a
+//     CELL WIDTH. Every double-width rune before the caret — CJK,
+//     most emoji — undercounts it by one cell. That is exactly the
+//     IME anchoring that setting tea.View.Cursor exists to get right
+//     (issue #105).
+//  2. m.offset, the horizontal scroll position, is ignored entirely.
+//     View() twenty lines earlier gets it right (pos := max(0,
+//     m.pos-m.offset)); Cursor() computes against the UNSCROLLED
+//     string and the min() clamp then pins the caret to the right
+//     edge of the box. No wide runes needed: type past the width of
+//     the input and walk left.
+//
+// What this fixes and what it does not:
+//
+//	fits in the box     corrected here, exactly, for any script.
+//	scrolled            left to upstream, still wrong.
+//
+// The split is forced. m.offset has no exported accessor, so
+// reproducing bug 2 downstream would mean reimplementing
+// handleOverflow's scroll arithmetic against a value we can only see
+// through Value() and Position() — guessing where the widget scrolled
+// to, and being wrong in a different way. But handleOverflow sets
+// offset to 0 whenever the whole value fits (textinput.go:355-359),
+// so in that case Value() and Position() ARE the complete state and
+// ansi.StringWidth over the prefix is the true cell offset. Width()
+// <= 0 means SetWidth was never called, which takes the same
+// early-return and is likewise unscrolled.
+//
+// Deleting this is a one-liner once upstream measures the prefix
+// itself: the correction becomes a no-op, not a double-correction.
+func textInputCursor(ti textinput.Model, prompt string) *tea.Cursor {
+	c := ti.Cursor()
+	if c == nil {
+		return nil
+	}
+	value := ti.Value()
+	if w := ti.Width(); w > 0 && ansi.StringWidth(value) > w {
+		return c // scrolled: blocked on the unexported offset
+	}
+	runes := []rune(value)
+	pos := min(max(ti.Position(), 0), len(runes))
+	c.X = lipgloss.Width(prompt) + ansi.StringWidth(string(runes[:pos]))
+	return c
 }
 
 // inputOrigin is the frame cell the input box's top-left corner was

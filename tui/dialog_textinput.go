@@ -264,8 +264,12 @@ func (d *textInputDialog) Render(totalWidth int, m *Model) string {
 // body. Inside the body the input is the first part unless a prompt
 // line was configured, in which case it is the second. The inline
 // validation error renders BELOW the input and never moves it.
+//
+// The column comes from textInputCursor rather than straight from the
+// widget: bubbles' own textinput.Cursor() mixes a rune index with a
+// cell width and ignores its scroll offset (issue #125, cursor.go).
 func (d *textInputDialog) DialogCursor(_ int, _ *Model) *tea.Cursor {
-	c := d.input.Cursor()
+	c := textInputCursor(d.input, d.input.Prompt)
 	if c == nil {
 		return nil // blurred
 	}
