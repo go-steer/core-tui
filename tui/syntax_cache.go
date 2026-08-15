@@ -48,6 +48,17 @@ var syntaxCache sync.Map
 // cached — they're pathological and re-resolution is cheap.
 var lexerCache sync.Map
 
+// langCache memoizes detectLang's resolved language name per label
+// so repeat tool events for the same path skip lexers.Match, whose
+// own doc comment warns it runs hundreds of filepath.Match calls per
+// lookup. Unlike lexerCache below, misses ARE cached: "" is the
+// ordinary answer for the paths a session touches most (README,
+// LICENSE, Makefile, plain text, extensionless binaries), so
+// skipping the negative result would leave the hot half of the path
+// uncached. detectLang is a pure function of its input, so an entry
+// never needs invalidating.
+var langCache sync.Map
+
 // chromaSyntaxStyle is the Chroma color theme used for inline
 // highlighting. github-light reads well on both light and dark
 // terminals — the foreground-only colors don't depend on the
@@ -59,10 +70,24 @@ var chromaSyntaxStyle = styles.Get("github")
 // stays stable as long as the same name maps to the same lexer,
 // so we return the canonical Lexer.Config().Name (e.g. "Go",
 // "Python") rather than the raw extension.
+//
+// Every result — including the empty-string miss — rides langCache,
+// so the lexers.Match glob sweep is paid once per distinct label
+// per process rather than once per tool event.
 func detectLang(label string) string {
 	if label == "" {
 		return ""
 	}
+	if v, ok := langCache.Load(label); ok {
+		return v.(string)
+	}
+	lang := detectLangUncached(label)
+	langCache.Store(label, lang)
+	return lang
+}
+
+// detectLangUncached does the actual Chroma lexer match.
+func detectLangUncached(label string) string {
 	l := lexers.Match(label)
 	if l == nil {
 		return ""
