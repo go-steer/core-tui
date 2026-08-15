@@ -16,6 +16,7 @@ package tui
 
 import (
 	"strings"
+	"sync"
 	"testing"
 
 	"charm.land/lipgloss/v2"
@@ -148,6 +149,82 @@ func TestDetectLang_NoMatch(t *testing.T) {
 	if got := detectLang(""); got != "" {
 		t.Errorf("expected empty lang for empty label, got %q", got)
 	}
+}
+
+// TestDetectLang_CachedResultsAgree pins the memoized answer to the
+// uncached one for hits AND misses, in both orders — a cold call
+// followed by a warm one, and a warm one whose entry was seeded by
+// an earlier test in the package.
+func TestDetectLang_CachedResultsAgree(t *testing.T) {
+	labels := []string{
+		"foo.go", "main.go", "a/b/c.py", "index.ts", "style.css",
+		"README", "LICENSE", "Makefile", "notes", "a/b/c",
+	}
+	for _, label := range labels {
+		want := detectLangUncached(label)
+		for i := range 3 {
+			if got := detectLang(label); got != want {
+				t.Errorf("detectLang(%q) call %d = %q, want %q", label, i, got, want)
+			}
+		}
+	}
+}
+
+// TestDetectLang_CachesMisses is the deliberate divergence from
+// getLexer, which does not cache nil. "" is the common result for
+// non-code paths, so a miss must be memoized or the hot half of the
+// path stays uncached. Asserted through the cache directly because
+// the return value alone cannot distinguish a hit from a re-match.
+func TestDetectLang_CachesMisses(t *testing.T) {
+	const label = "TestDetectLang_CachesMisses/no-such-lexer"
+	langCache.Delete(label)
+	if got := detectLang(label); got != "" {
+		t.Fatalf("expected empty lang for %q, got %q", label, got)
+	}
+	v, ok := langCache.Load(label)
+	if !ok {
+		t.Fatalf("miss for %q was not cached", label)
+	}
+	if s, _ := v.(string); s != "" {
+		t.Errorf("cached miss = %q, want empty string", s)
+	}
+}
+
+// TestDetectLang_EmptyLabelNotCached keeps the "" short-circuit
+// ahead of the cache — storing an entry for the empty label would
+// be a pure waste of a map slot.
+func TestDetectLang_EmptyLabelNotCached(t *testing.T) {
+	langCache.Delete("")
+	if got := detectLang(""); got != "" {
+		t.Fatalf("expected empty lang for empty label, got %q", got)
+	}
+	if _, ok := langCache.Load(""); ok {
+		t.Error("empty label should not occupy a cache entry")
+	}
+}
+
+// TestDetectLang_Concurrent exercises the cache from many goroutines
+// at once; -race turns a non-atomic map into a failure here.
+func TestDetectLang_Concurrent(t *testing.T) {
+	labels := []string{"a.go", "b.py", "README", "c.rs", "Makefile", "d.md"}
+	want := make([]string, len(labels))
+	for i, label := range labels {
+		want[i] = detectLangUncached(label)
+	}
+	var wg sync.WaitGroup
+	for g := range 16 {
+		wg.Add(1)
+		go func() {
+			defer wg.Done()
+			for i := range labels {
+				j := (i + g) % len(labels)
+				if got := detectLang(labels[j]); got != want[j] {
+					t.Errorf("detectLang(%q) = %q, want %q", labels[j], got, want[j])
+				}
+			}
+		}()
+	}
+	wg.Wait()
 }
 
 func TestHighlightLine_EmptyLang(t *testing.T) {
