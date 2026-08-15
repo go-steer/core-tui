@@ -1,0 +1,6 @@
+# Golden fixtures under tui/testdata/ store rendered frames verbatim,
+# ANSI escape sequences included. A regenerated corpus is reviewed by
+# re-running the tests, not by reading escape codes in a diff — so
+# suppress the textual diff and keep review focused on the code that
+# changed the output.
+*.golden -diff
