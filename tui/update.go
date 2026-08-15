@@ -20,6 +20,7 @@ import (
 	"strconv"
 	"strings"
 	"time"
+	"unicode"
 
 	"charm.land/bubbles/v2/textarea"
 	tea "charm.land/bubbletea/v2"
@@ -2422,14 +2423,25 @@ func (m *Model) handleElicitKey(stroke string) tea.Cmd {
 		if f.Type == ElicitFieldString {
 			cur, _ := m.elicitValues[f.Name].(string)
 			if cur != "" {
-				m.elicitValues[f.Name] = cur[:len(cur)-1]
+				// Delete one rune, not one byte: slicing a string by
+				// byte cuts a multi-byte encoding in half and leaves
+				// invalid UTF-8 in m.elicitValues, which then flows
+				// into the frame AND into the ElicitResult the host
+				// receives.
+				r := []rune(cur)
+				m.elicitValues[f.Name] = string(r[:len(r)-1])
 				m.refreshViewport()
 				return func() tea.Msg { return nil }
 			}
 		}
 	}
 	// Printable single-rune keystrokes — append to string fields.
-	if len(stroke) == 1 {
+	// Count runes, not bytes: every printable character outside ASCII
+	// is 2-4 bytes, so a byte-length guard silently drops é / 日 / 😀
+	// and the form is unusable for anything but ASCII. Multi-rune
+	// named strokes ("ctrl+b", "enter") still fail the count, and
+	// IsPrint keeps a lone control rune out of the value.
+	if r := []rune(stroke); len(r) == 1 && unicode.IsPrint(r[0]) {
 		f := req.Fields[m.elicitFieldIdx]
 		if f.Type == ElicitFieldString || f.Type == ElicitFieldNumber || f.Type == ElicitFieldInteger {
 			cur, _ := m.elicitValues[f.Name].(string)
