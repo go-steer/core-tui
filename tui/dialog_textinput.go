@@ -163,9 +163,11 @@ func NewTextInputDialog(cfg TextInputConfig) Dialog {
 		ti.SetValue(cfg.Initial)
 		ti.CursorEnd()
 	}
-	// Focus AFTER the initial SetStyles inside textinput.New so the
-	// virtual cursor ends up visible: cursor.SetMode recomputes
-	// IsBlinked from the focus flag, and Focus() flips it on.
+	// Real cursor, not a painted block (issue #105) — see the same
+	// call in NewModel. Also retires the blink plumbing problem
+	// noted in syncStyles: a real cursor blinks in the terminal, so
+	// nothing has to route cursor.BlinkMsg back into the widget.
+	ti.SetVirtualCursor(false)
 	_ = ti.Focus()
 
 	return &textInputDialog{cfg: cfg, input: ti}
@@ -252,6 +254,29 @@ func (d *textInputDialog) Render(totalWidth int, m *Model) string {
 	}.Render()
 }
 
+// DialogCursor implements cursorDialog: it reports where the caret
+// sits inside the input box, relative to the dialog block's own
+// top-left cell. Overlay.Cursor adds the origin lipgloss.Place
+// composited the dialog at (cursor.go).
+//
+// The offsets are RenderContext's chrome, which is fixed: one column
+// of horizontal padding, and a title line plus a blank row above the
+// body. Inside the body the input is the first part unless a prompt
+// line was configured, in which case it is the second. The inline
+// validation error renders BELOW the input and never moves it.
+func (d *textInputDialog) DialogCursor(_ int, _ *Model) *tea.Cursor {
+	c := d.input.Cursor()
+	if c == nil {
+		return nil // blurred
+	}
+	c.X += 1 // RenderContext's Padding(0, 1)
+	c.Y += 2 // title line + blank row
+	if d.cfg.Prompt != "" {
+		c.Y++
+	}
+	return c
+}
+
 // syncStyles rebuilds the textinput palette from the active theme.
 // Called per-render (cheap, guarded) because /theme can swap the
 // palette while this dialog is open — the theme picker applies on
@@ -271,11 +296,12 @@ func (d *textInputDialog) syncStyles(s Styles) {
 	ts.Focused.Placeholder = lipgloss.NewStyle().Foreground(s.Theme.FgSubtle)
 	ts.Blurred.Placeholder = ts.Focused.Placeholder
 	ts.Cursor.Color = s.Theme.Primary
-	// Static (non-blinking) cursor: a blinking virtual cursor needs
-	// cursor.BlinkMsg to be routed back into the widget, and the
-	// Dialog contract is keystrokes-only — no msg pipe. Static
-	// renders the block every frame with no plumbing.
-	ts.Cursor.Blink = false
+	// Blink is on: the TERMINAL owns the caret now (issue #105), so
+	// blinking costs no plumbing. It used to be forced off because a
+	// blinking VIRTUAL cursor needs cursor.BlinkMsg routed back into
+	// the widget and the Dialog contract is keystrokes-only — no msg
+	// pipe. That constraint died with the virtual cursor.
+	ts.Cursor.Blink = true
 	d.input.SetStyles(ts)
 }
 

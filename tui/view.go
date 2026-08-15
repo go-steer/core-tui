@@ -112,9 +112,10 @@ func (m Model) effectiveLayout() StatusLayout {
 	return m.statusLayout
 }
 
-// View composes the full TUI. Returns a tea.View with AltScreen on
-// and the brand cursor block. Layout is governed by m.statusLayout
-// (R-USE-2).
+// View composes the full TUI. Returns a tea.View with AltScreen on,
+// mouse capture per Options.Mouse, and the terminal's real cursor
+// parked on whichever text surface owns input (cursor.go). Layout is
+// governed by m.statusLayout (R-USE-2).
 func (m Model) View() tea.View {
 	if m.width == 0 || m.height == 0 {
 		return tea.NewView("")
@@ -122,6 +123,15 @@ func (m Model) View() tea.View {
 
 	chat := m.viewport.View()
 	input := m.renderInputBox()
+
+	// origin is where the input box's top-left cell lands in the
+	// composed frame. The textarea reports a cursor relative to
+	// ITSELF, so the cursor path (cursor.go) needs this to translate
+	// it into absolute frame coordinates. It is recorded here, by the
+	// code doing the stacking, rather than re-derived afterwards:
+	// which parts get emitted is a run-time decision (help panel,
+	// palette, toast are all conditional) and it differs per layout.
+	var origin inputOrigin
 
 	var body string
 	switch m.effectiveLayout() {
@@ -143,6 +153,11 @@ func (m Model) View() tea.View {
 		if pal != "" {
 			leftParts = append(leftParts, pal)
 		}
+		// The left column starts at column 0 of the frame, so the
+		// input box's x origin is 0 — but it is only chatWidth wide,
+		// not m.width. Row origin is the stacked height of everything
+		// JoinVertical puts above it.
+		origin = inputOrigin{x: 0, y: stackedHeight(leftParts)}
 		leftParts = append(leftParts, input)
 		if t := m.renderToast(chatWidth); t != "" {
 			leftParts = append(leftParts, t)
@@ -170,6 +185,9 @@ func (m Model) View() tea.View {
 		if pal != "" {
 			parts = append(parts, pal)
 		}
+		// Header layout: the input box spans the full width at column
+		// 0, one row below the header + chat + any open panels.
+		origin = inputOrigin{x: 0, y: stackedHeight(parts)}
 		parts = append(parts, input)
 		if t := m.renderToast(m.width); t != "" {
 			parts = append(parts, t)
@@ -183,13 +201,19 @@ func (m Model) View() tea.View {
 	// by default — preserves the assistant text + tool-call
 	// context the operator is approving. Hosts that prefer the
 	// centered modal flip Options.PermissionLayout = PermissionOverlay.
+	//
+	// modalFrame retains the front-most modal's rendered block. It is
+	// what the cursor path measures to re-derive the origin
+	// lipgloss.Place gave it — a centered block's top-left cell is a
+	// function of its own size, so it has to be computed, not guessed.
+	var modalFrame string
 	switch {
 	case m.pendingPermission != nil && m.opts.PermissionLayout == PermissionOverlay:
-		modal := m.renderPermissionModal()
-		body = lipgloss.Place(m.width, m.height, lipgloss.Center, lipgloss.Center, modal)
+		modalFrame = m.renderPermissionModal()
+		body = lipgloss.Place(m.width, m.height, lipgloss.Center, lipgloss.Center, modalFrame)
 	case m.pendingElicit != nil:
-		modal := m.renderElicitModal()
-		body = lipgloss.Place(m.width, m.height, lipgloss.Center, lipgloss.Center, modal)
+		modalFrame = m.renderElicitModal()
+		body = lipgloss.Place(m.width, m.height, lipgloss.Center, lipgloss.Center, modalFrame)
 	case m.pendingForm != nil:
 		// Embedded huh.Form (e.g. /pricing set) takes priority
 		// over all other overlays — its keystrokes are routed
@@ -197,18 +221,18 @@ func (m Model) View() tea.View {
 		// View returns a string (not bubbletea v2's tea.View),
 		// so wrap directly.
 		formView := m.pendingForm.View()
-		framed := m.styles.ModalBorder.Padding(1, 2).Render(formView)
-		body = lipgloss.Place(m.width, m.height, lipgloss.Center, lipgloss.Center, framed)
+		modalFrame = m.styles.ModalBorder.Padding(1, 2).Render(formView)
+		body = lipgloss.Place(m.width, m.height, lipgloss.Center, lipgloss.Center, modalFrame)
 	case m.sideAnswer != nil:
-		modal := m.renderSideAnswer()
-		body = lipgloss.Place(m.width, m.height, lipgloss.Center, lipgloss.Center, modal)
+		modalFrame = m.renderSideAnswer()
+		body = lipgloss.Place(m.width, m.height, lipgloss.Center, lipgloss.Center, modalFrame)
 	case m.overlayStack.HasDialogs():
 		// Front-most Dialog wins over the vestigial enum overlay.
-		modal := m.overlayStack.Render(m.width, &m)
-		body = lipgloss.Place(m.width, m.height, lipgloss.Center, lipgloss.Center, modal)
+		modalFrame = m.overlayStack.Render(m.width, &m)
+		body = lipgloss.Place(m.width, m.height, lipgloss.Center, lipgloss.Center, modalFrame)
 	case m.overlay != overlayNone:
-		modal := m.renderOverlay()
-		body = lipgloss.Place(m.width, m.height, lipgloss.Center, lipgloss.Center, modal)
+		modalFrame = m.renderOverlay()
+		body = lipgloss.Place(m.width, m.height, lipgloss.Center, lipgloss.Center, modalFrame)
 	}
 
 	// Clamp the composed frame to the terminal (issue #102). Every
@@ -224,6 +248,11 @@ func (m Model) View() tea.View {
 	v := tea.NewView(body)
 	v.AltScreen = true
 	v.BackgroundColor = nil // respect the terminal's own background
+	// Park the terminal's real cursor on whichever text surface owns
+	// input (issue #105). Computed AFTER clipFrame so it can never
+	// point at a row or column the clamp just removed. Nil hides the
+	// cursor, which is what we want whenever no surface owns it.
+	v.Cursor = m.frameCursor(origin, modalFrame)
 	// Cell-motion mouse capture so the wheel scrolls the viewport.
 	// Operators who want native terminal text-select hold Shift to
 	// bypass capture (matches internal/tui + Claude Code). Hosts
@@ -1427,13 +1456,11 @@ func renderArgsDetail(text string, width int, styles Styles) string {
 	return styles.Muted.Render(wordWrap(text, width))
 }
 
-// renderElicitModal renders an MCP elicit request as either a form
-// (per-field) or URL action row (R-ELIC-1 / R-ELIC-2).
-func (m *Model) renderElicitModal() string {
-	req := m.pendingElicit
-	if req == nil {
-		return ""
-	}
+// elicitModalWidth is the elicit modal's column count: 72 clamped to
+// the terminal, floored at 30. Shared with the cursor path
+// (cursor.go), which has to lay out the focused field row at exactly
+// the width the renderer used.
+func (m Model) elicitModalWidth() int {
 	width := 72
 	if m.width > 0 && width > m.width-4 {
 		width = m.width - 4
@@ -1441,6 +1468,17 @@ func (m *Model) renderElicitModal() string {
 	if width < 30 {
 		width = 30
 	}
+	return width
+}
+
+// renderElicitModal renders an MCP elicit request as either a form
+// (per-field) or URL action row (R-ELIC-1 / R-ELIC-2).
+func (m *Model) renderElicitModal() string {
+	req := m.pendingElicit
+	if req == nil {
+		return ""
+	}
+	width := m.elicitModalWidth()
 
 	title := req.Title
 	if title == "" {
@@ -1523,6 +1561,16 @@ func (m *Model) elicitFormLines(width int) (lines []string, focus int) {
 	return lines, focus
 }
 
+// elicitFieldRow lays out one "  label:           value" form row.
+// Factored out of renderElicitField so the cursor path (cursor.go)
+// can measure the prefix — everything left of the value — with the
+// exact padding the renderer applies, instead of re-deriving the
+// column arithmetic and drifting from it. The focused row swaps the
+// two-space lead for "> ", which is the same width.
+func elicitFieldRow(label, value string) string {
+	return fmt.Sprintf("  %-16s %s", label, value)
+}
+
 // renderElicitField renders one field row (label : value), styling
 // the focused one accent-bold. Width is reserved for future
 // per-field truncation; unused today but kept on the signature so
@@ -1533,7 +1581,7 @@ func (m *Model) renderElicitField(f ElicitField, focused bool, _ int) string {
 		label += "*"
 	}
 	value := m.formatElicitValue(f)
-	row := fmt.Sprintf("  %-16s %s", label+":", value)
+	row := elicitFieldRow(label+":", value)
 	rendered := m.styles.AssistantText.Render(row)
 	if focused {
 		rendered = m.styles.Accent.Render("> " + strings.TrimPrefix(row, "  "))
