@@ -158,7 +158,11 @@ func TestSyncInputHeight_AgreesWithResize(t *testing.T) {
 // into plus the only row that says how to quit.
 //
 // The budget does not fix the panel; it stops the panel from evicting
-// anything. What the panel itself should look like is #119's call.
+// anything. What the panel itself should look like was #119's call,
+// and its answer is pagination: the panel now lays a page out to the
+// cap instead of rendering all 38 rows and being elided at it, so the
+// `… N more rows` marker this test used to assert is gone and the
+// page counter on the title row is what replaced it.
 func TestResize_HelpPanelKeepsInputAndFooterInFrame(t *testing.T) {
 	const w, h = 80, 24
 	m := newFrameModel(StatusHeader, w, h)
@@ -169,7 +173,7 @@ func TestResize_HelpPanelKeepsInputAndFooterInFrame(t *testing.T) {
 	// Opened but not yet reconciled: the panel's natural height, with
 	// no cap on it, is the thing that has to be too tall for this to
 	// be testing anything.
-	m.helpOpen = true
+	m.advanceHelp()
 	if got := lipgloss.Height(m.renderHelpPanel(w)); got <= h {
 		t.Skipf("help panel is %d rows, no longer taller than a %d-row terminal", got, h)
 	}
@@ -186,9 +190,14 @@ func TestResize_HelpPanelKeepsInputAndFooterInFrame(t *testing.T) {
 	if !strings.Contains(frame, "ctrl+c quit") {
 		t.Error("the footer is not in the frame with the help panel open")
 	}
-	// The panel took what was left and said what it dropped.
-	if !strings.Contains(frame, GlyphTruncate+" ") {
-		t.Error("the truncated help panel does not say how many rows it dropped")
+	// The panel fit itself into what was left and said where in the
+	// panel the operator is — rather than being cut off mid-row with
+	// the elision marker, which is what it did before issue #119.
+	if !strings.Contains(frame, "page 1/") {
+		t.Error("the paginated help panel does not say which page it is showing")
+	}
+	if strings.Contains(frame, "more rows") {
+		t.Error("the help panel was elided by its cap instead of laid out to it")
 	}
 	assertBudgetExact(t, m)
 }

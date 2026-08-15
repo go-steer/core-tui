@@ -123,6 +123,22 @@ func frameStates() []frameState {
 			},
 		},
 		{
+			// Issue #119: the help panel paginates to the row cap the
+			// chrome budget gives it, and a page past the first is a
+			// different set of rows at a different height. The
+			// invariants have to hold on those too.
+			name: "help-panel-paged",
+			setup: func(_ *testing.T, m Model, _, _ int) Model {
+				m = withHostileTranscript(m)
+				m.advanceHelp()
+				m.resize()
+				m.advanceHelp()
+				m.resize()
+				m.refreshViewport()
+				return m
+			},
+		},
+		{
 			// Issue #121: the auto-grown input box. resize() used to
 			// reset the textarea to textareaMinHeight on every call,
 			// so no state in this grid could ever compose a frame

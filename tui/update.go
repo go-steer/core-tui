@@ -967,7 +967,7 @@ func (m Model) handleKey(msg tea.KeyPressMsg) (tea.Model, tea.Cmd) {
 			return m, nil
 		}
 		if m.helpOpen {
-			m.helpOpen = false
+			m.closeHelp()
 			m.resize()
 			m.refreshViewport()
 			return m, nil
@@ -1385,11 +1385,15 @@ func (m Model) handleKey(msg tea.KeyPressMsg) (tea.Model, tea.Cmd) {
 		return m, cmd
 
 	case "?":
-		// Toggle the bottom-anchored stacked help panel. Only fires
-		// when input is empty so users can still type `?` mid-sentence
-		// without hijacking the key.
+		// Walk the bottom-anchored stacked help panel: open it, page
+		// through whatever does not fit the terminal, then close. Only
+		// fires when input is empty so users can still type `?`
+		// mid-sentence without hijacking the key — which is also what
+		// makes it safe to page on, and why the panel does not have to
+		// take pgup / pgdn away from the chat to be height-aware
+		// (issue #119, help.go).
 		if strings.TrimSpace(m.input.Value()) == "" {
-			m.helpOpen = !m.helpOpen
+			m.advanceHelp()
 			m.resize()
 			m.refreshViewport()
 			return m, nil

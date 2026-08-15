@@ -239,6 +239,55 @@ func TestGolden_Frame(t *testing.T) {
 	}
 }
 
+// TestGolden_HelpFrame pins the composed frame with the help panel
+// open. goldenModel never set helpOpen, so the panel — the one piece
+// of chrome that was 38 rows and 81 cells at every terminal size
+// (issue #119) — had no golden coverage at all, and goldenWidths
+// already brackets the width it overflowed at.
+//
+// Three shapes are captured. The 24-row cells are the terminal the
+// defect was measured on and show the panel paginated to the rows the
+// chrome budget left it; the tall cell shows the whole panel in one
+// page, which is the layout the paging vocabulary must stay out of;
+// and page 2 pins that a page past the first composes a frame like
+// any other.
+func TestGolden_HelpFrame(t *testing.T) {
+	pinChromaStyle(t)
+	pinCwd(t)
+	for _, w := range goldenWidths {
+		t.Run("width-"+strconv.Itoa(w), func(t *testing.T) {
+			m := goldenHelpModel(t, w, 24, 0)
+			assertGolden(t, "help_frame_w"+strconv.Itoa(w), m.View().Content)
+		})
+	}
+	t.Run("page-2", func(t *testing.T) {
+		m := goldenHelpModel(t, 100, 24, 1)
+		assertGolden(t, "help_frame_w100_page2", m.View().Content)
+	})
+	t.Run("tall", func(t *testing.T) {
+		m := goldenHelpModel(t, 100, 60, 0)
+		assertGolden(t, "help_frame_w100_h60", m.View().Content)
+	})
+}
+
+// goldenHelpModel is goldenModel with the help panel opened and
+// walked to page, through the same advanceHelp the `?` key runs.
+func goldenHelpModel(t *testing.T, w, h, page int) Model {
+	t.Helper()
+	m := goldenModel(t, w, h)
+	m.advanceHelp()
+	m.resize()
+	for i := 0; i < page; i++ {
+		m.advanceHelp()
+		m.resize()
+	}
+	if !m.helpOpen {
+		t.Fatalf("the panel closed before reaching page %d at %dx%d", page, w, h)
+	}
+	m.refreshViewport()
+	return m
+}
+
 // goldenModel builds a deterministic, fully-seeded model: fixed
 // theme, fixed transcript, and no environment-derived chrome.
 //
