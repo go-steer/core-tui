@@ -455,32 +455,61 @@ func (m *Model) refreshViewport() {
 	if m.width == 0 {
 		return
 	}
+	// Issue #104: a width change reflows the on-screen rows only, so
+	// anything the operator can see is at the current wrap width by
+	// the time it paints — including rows a mid-warm scroll just
+	// exposed. No-op (one bool read) when no resize is in flight;
+	// visLo..visHi is then empty and nothing below defers.
+	visLo, visHi := m.reflowVisible()
+
 	var b strings.Builder
 	entries := m.history.Snapshot()
 	rule := m.styles.Rule.Render(strings.Repeat(GlyphRule, m.viewport.Width()))
 
 	width := m.viewport.Width()
+	// Record each message's line span so the resize path can tell
+	// which messages are on screen without re-measuring (resize.go).
+	spans := make([]msgSpan, 0, len(entries))
+	line := 0
 	for i, msg := range entries {
 		if i > 0 {
+			// The separator's height is known statically — the rule
+			// is one line — so nothing here has to be measured.
 			if msg.Role == RoleUser {
 				b.WriteString("\n")
 				b.WriteString(rule)
 				b.WriteString("\n\n")
+				line += 3
 			} else {
 				b.WriteString("\n\n")
+				line += 2
 			}
 		}
 		// Lazy-render cache (listcache.go) — skip the Glamour /
 		// word-wrap / lipgloss work for unchanged messages.
 		item := messageItem{msg: msg, idx: i, total: len(entries)}
-		if cached, ok := m.listCache.get(item, width); ok {
-			b.WriteString(cached)
-		} else {
-			rendered := m.renderMessage(msg)
-			m.listCache.put(item, width, rendered)
-			b.WriteString(rendered)
+		rendered, ok := m.listCache.get(item, width)
+		if !ok && m.reflowPending && (i < visLo || i > visHi) {
+			// Off screen with a resize still working through the
+			// transcript: carry the previous width's render rather
+			// than re-assembling a row nobody can see. Keeps a drag
+			// event O(visible) instead of O(history). The warm pass
+			// retires these one slice at a time (resize.go).
+			if stale, hit := m.listCache.getStale(item); hit {
+				m.listCache.putStale(item, width, stale)
+				rendered, ok = stale, true
+			}
 		}
+		if !ok {
+			rendered = m.renderMessage(msg)
+			m.listCache.put(item, width, rendered)
+		}
+		start := line
+		b.WriteString(rendered)
+		line += strings.Count(rendered, "\n")
+		spans = append(spans, msgSpan{start: start, end: line})
 	}
+	m.msgSpans = spans
 
 	if inProgress := m.renderInProgress(); inProgress != "" {
 		if m.history.Len() > 0 {

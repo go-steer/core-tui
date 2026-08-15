@@ -21,7 +21,6 @@
 // message:
 //
 //   - cache miss      → render via renderMessage, store entry
-//   - width mismatch  → drop the whole cache, render fresh
 //   - version mismatch → invalidate that entry, render fresh
 //   - cache hit       → reuse content, skip the render
 //
@@ -29,6 +28,16 @@
 // resize, slash dispatch) re-Glamour-rendered every assistant
 // message in history. With 50+ messages and ~10ms per render, that
 // scales O(turns × n_messages) and visibly stutters.
+//
+// Entries are keyed by (identity, width), not by identity alone
+// (issue #104). The cache used to pin one width and drop EVERY
+// entry the moment the viewport width changed, which made a
+// terminal drag — a stream of width-changing WindowSizeMsg events
+// — pay a fully cold reassembly per event, and pay it again on the
+// way back when the operator dragged the pane to a width the cache
+// had already rendered at. Keying by width means a message already
+// rendered at the incoming width survives the resize; retainedWidths
+// bounds the extra memory that buys.
 
 package tui
 
@@ -88,35 +97,61 @@ type listCacheEntry struct {
 	version uint64
 	frozen  bool
 	content string
+	// approx marks content carried over from a DIFFERENT width
+	// while a resize reflow is pending (issue #104). Rows off
+	// screen during a drag are not worth re-assembling on every
+	// event — their wrapping is deferred anyway — so the cache
+	// parks the previous width's render under the new width and
+	// flags it. get() refuses to serve an approximate entry, so a
+	// row that scrolls into view re-renders exactly; the warm pass
+	// retires the rest a slice at a time.
+	approx bool
 }
 
-// listCache is the per-Model render memo. Keyed by Item.Identity().
-// Dropped wholesale on width change so wrapping is correct; per-
-// entry invalidation happens on version mismatch.
+// listCacheKey pins an entry to one (item, width) pair. A drag
+// across a handful of columns therefore accumulates one entry per
+// visited width per message rather than invalidating everything.
+type listCacheKey struct {
+	id    uint64
+	width int
+}
+
+// retainedWidths caps how many distinct viewport widths the cache
+// keeps entries for. A drag walks through dozens of widths; keeping
+// all of them would grow the memo without bound (and every stale
+// width is dead weight the moment the drag settles). Three is
+// enough to cover the settled width plus the last two the operator
+// swept through — which is what a jittery drag actually revisits.
+const retainedWidths = 3
+
+// listCache is the per-Model render memo, keyed by (Item.Identity(),
+// width). Per-entry invalidation happens on version mismatch;
+// widths beyond retainedWidths are evicted least-recently-used.
 type listCache struct {
-	width   int
-	entries map[uint64]listCacheEntry
+	// width is the most recent width put/reset saw. Kept so
+	// callers that want the pin (tests, diagnostics) can read it;
+	// lookups no longer consult it.
+	width int
+	// widths is the MRU list of live widths, newest first, capped
+	// at retainedWidths.
+	widths  []int
+	entries map[listCacheKey]listCacheEntry
 }
 
 // newListCache returns an empty cache. The width is recorded
-// lazily on the first lookup so the cache starts oblivious to
+// lazily on the first store so the cache starts oblivious to
 // viewport size.
 func newListCache() *listCache {
-	return &listCache{entries: map[uint64]listCacheEntry{}}
+	return &listCache{entries: map[listCacheKey]listCacheEntry{}}
 }
 
 // get returns the cached render for item at width, or "" + false
-// on miss / width mismatch / version mismatch. On miss, the
-// caller is expected to Render and store via put.
+// on miss / version mismatch. A width the cache has no entries for
+// is simply a miss — it does NOT evict the other widths. On miss,
+// the caller is expected to Render and store via put.
 func (c *listCache) get(item Item, width int) (string, bool) {
-	if c.width != width {
-		// Width changed — the cache is dead for the new layout.
-		// Drop everything and reset the width pin.
-		c.reset(width)
-		return "", false
-	}
-	entry, ok := c.entries[item.Identity()]
-	if !ok {
+	entry, ok := c.entries[listCacheKey{id: item.Identity(), width: width}]
+	if !ok || entry.approx {
 		return "", false
 	}
 	if entry.frozen {
@@ -137,10 +172,8 @@ func (c *listCache) get(item Item, width int) (string, bool) {
 // when the item reports Finished — subsequent gets for that
 // entry skip straight to the content (until version bumps).
 func (c *listCache) put(item Item, width int, content string) {
-	if c.width != width {
-		c.reset(width)
-	}
-	c.entries[item.Identity()] = listCacheEntry{
+	c.touchWidth(width)
+	c.entries[listCacheKey{id: item.Identity(), width: width}] = listCacheEntry{
 		width:   width,
 		version: item.Version(),
 		frozen:  item.Finished(),
@@ -148,19 +181,104 @@ func (c *listCache) put(item Item, width int, content string) {
 	}
 }
 
-// reset clears every entry and re-pins to width. Called when
-// width changes or when the host explicitly invalidates (e.g.
-// theme change rebuilding Glamour).
-func (c *listCache) reset(width int) {
-	c.width = width
-	c.entries = map[uint64]listCacheEntry{}
+// getStale returns the freshest cached render for item at ANY
+// retained width, approximate entries included. Only the resize
+// path calls it, and only for rows outside the visible window
+// (issue #104): re-assembling a row the operator cannot see, at a
+// width whose Glamour pass has been deferred anyway, is work that
+// buys nothing. The version check still applies — a row whose
+// CONTENT changed is never served from a stale entry.
+func (c *listCache) getStale(item Item) (string, bool) {
+	id := item.Identity()
+	version := item.Version()
+	// c.widths is MRU-ordered, so this finds the most recently
+	// rendered width first.
+	for _, w := range c.widths {
+		if entry, ok := c.entries[listCacheKey{id: id, width: w}]; ok && entry.version == version {
+			return entry.content, true
+		}
+	}
+	return "", false
 }
 
-// drop removes a single entry by identity. Used when a specific
-// item's source data changed in a way the version counter can't
-// capture (e.g. style change on just that role).
+// putStale parks content under width flagged approximate. get()
+// will not serve it; the caller owes an exact render before the
+// resize reflow retires (warmReflowSlice → dropApprox).
+func (c *listCache) putStale(item Item, width int, content string) {
+	c.touchWidth(width)
+	c.entries[listCacheKey{id: item.Identity(), width: width}] = listCacheEntry{
+		width:   width,
+		version: item.Version(),
+		frozen:  item.Finished(),
+		content: content,
+		approx:  true,
+	}
+}
+
+// dropApprox removes every approximate entry for id, at any
+// retained width, and reports whether it removed any. The resize
+// warm pass uses the return value to charge its per-slice budget:
+// retiring an approximate entry means the next paint pays a real
+// render for that row, so it counts as work.
+func (c *listCache) dropApprox(id uint64) bool {
+	dropped := false
+	for _, w := range c.widths {
+		key := listCacheKey{id: id, width: w}
+		if entry, ok := c.entries[key]; ok && entry.approx {
+			delete(c.entries, key)
+			dropped = true
+		}
+	}
+	return dropped
+}
+
+// touchWidth promotes width to the front of the MRU list and
+// evicts every entry belonging to a width that falls off the end.
+// Eviction is O(entries) but only runs when a drag crosses into a
+// fourth width, and it walks a map the drag was about to shrink
+// anyway.
+func (c *listCache) touchWidth(width int) {
+	c.width = width
+	for i, w := range c.widths {
+		if w == width {
+			copy(c.widths[1:i+1], c.widths[:i])
+			c.widths[0] = width
+			return
+		}
+	}
+	c.widths = append([]int{width}, c.widths...)
+	if len(c.widths) <= retainedWidths {
+		return
+	}
+	evicted := c.widths[retainedWidths:]
+	c.widths = c.widths[:retainedWidths]
+	for key := range c.entries {
+		for _, w := range evicted {
+			if key.width == w {
+				delete(c.entries, key)
+				break
+			}
+		}
+	}
+}
+
+// reset clears every entry and re-pins to width. Called when the
+// host explicitly invalidates every render (theme change rebuilding
+// Glamour, /clear, transcript resume re-keying the ID space) — NOT
+// on a plain width change, which is now handled per entry.
+func (c *listCache) reset(width int) {
+	c.width = width
+	c.widths = []int{width}
+	c.entries = map[listCacheKey]listCacheEntry{}
+}
+
+// drop removes an entry by identity at every retained width. Used
+// when a specific item's source data changed in a way the version
+// counter can't capture (e.g. style change on just that role).
 func (c *listCache) drop(id uint64) {
-	delete(c.entries, id)
+	for _, w := range c.widths {
+		delete(c.entries, listCacheKey{id: id, width: w})
+	}
 }
 
 // messageItem wraps a history Message + its position index so it
