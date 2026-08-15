@@ -347,79 +347,36 @@ func (p *palette) triggerRune() string {
 	return "/"
 }
 
-// filtered returns the subset of items matching filter, ranked
-// across four tiers (agentic-tui skill §8.B):
+// filtered returns the subset of items matching filter, ranked by
+// the shared 4-tier classifier in rank.go — exact basename, basename
+// prefix, whole path segment, then substring, tiebroken by shorter
+// name. Empty filter returns items in original order (the same slice,
+// not a copy). All matching is case-insensitive.
 //
-//  1. exact basename match           ("main" → "main.go")
-//  2. basename prefix match          ("main" → "main_test.go")
-//  3. path-segment exact match       ("main" → "cmd/main/run.go")
-//  4. fuzzy substring                ("main" → "models/main_factory.go")
-//
-// Ties are broken by shorter path (prefer items closer to repo
-// root). Empty filter returns items in original order. All matches
-// are case-insensitive.
+// The ranking itself used to live here. It moved to rankNames so the
+// model / session / theme pickers could type-to-filter with the same
+// ordering (issue #117); this is now the adapter that maps indices
+// back onto paletteItems. Behaviour is unchanged and pinned by
+// TestPalette_RankingOrderIsPinned.
 func (p *palette) filtered() []paletteItem {
 	if p.filter == "" {
 		return p.items
 	}
-	q := strings.ToLower(p.filter)
-
-	type ranked struct {
-		item paletteItem
-		tier int
-		path string // lowercased name for tiebreak
-	}
-	rs := make([]ranked, 0, len(p.items))
-	for _, item := range p.items {
-		name := strings.ToLower(item.Name)
-		// Treat the last path segment (after the final '/') as the
-		// basename. Slash commands have no '/' so the basename is
-		// the whole name.
-		base := name
-		if i := strings.LastIndex(name, "/"); i >= 0 {
-			base = name[i+1:]
-		}
-		switch {
-		case base == q:
-			rs = append(rs, ranked{item, 1, name})
-		case strings.HasPrefix(base, q):
-			rs = append(rs, ranked{item, 2, name})
-		case segmentEquals(name, q):
-			rs = append(rs, ranked{item, 3, name})
-		case strings.Contains(name, q):
-			rs = append(rs, ranked{item, 4, name})
-		}
-	}
-	sort.SliceStable(rs, func(i, j int) bool {
-		if rs[i].tier != rs[j].tier {
-			return rs[i].tier < rs[j].tier
-		}
-		// Tiebreak: shorter path wins (closer to repo root /
-		// fewer typed chars to confirm).
-		if len(rs[i].path) != len(rs[j].path) {
-			return len(rs[i].path) < len(rs[j].path)
-		}
-		return rs[i].path < rs[j].path
-	})
-	out := make([]paletteItem, len(rs))
-	for i, r := range rs {
-		out[i] = r.item
+	idx := rankNames(paletteNames(p.items), p.filter)
+	out := make([]paletteItem, len(idx))
+	for i, at := range idx {
+		out[i] = p.items[at]
 	}
 	return out
 }
 
-// segmentEquals reports whether q appears as a full
-// slash-delimited segment anywhere in path. "main" matches
-// "cmd/main/run.go" (the middle segment) but NOT
-// "cmd/maintain/run.go" (segment "maintain" contains but doesn't
-// equal q).
-func segmentEquals(path, q string) bool {
-	for _, seg := range strings.Split(path, "/") {
-		if seg == q {
-			return true
-		}
+// paletteNames projects the field the ranker matches on.
+func paletteNames(items []paletteItem) []string {
+	out := make([]string, len(items))
+	for i, it := range items {
+		out[i] = it.Name
 	}
-	return false
+	return out
 }
 
 // moveCursor advances the cursor by delta with wrap-around.
