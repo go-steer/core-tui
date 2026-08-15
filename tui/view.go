@@ -293,9 +293,30 @@ func clipFrame(body string, width, height int) string {
 	return strings.Join(lines, "\n")
 }
 
+// chatMinHeight is the floor resize will shrink the viewport to.
+// Below three rows the chat column stops being able to show a
+// message at all, so we stop subtracting and let clipFrame trim the
+// overflow instead (see clipFrame's note on who owns the budget).
+const chatMinHeight = 3
+
 // resize recomputes the viewport and textarea dimensions from the
 // current width / height + status layout. Called after WindowSizeMsg
 // and after the user toggles StatusHeader <-> StatusSidebar.
+//
+// The row budget here is the mirror image of what View composes: the
+// viewport gets m.height minus every OTHER row View joins around it.
+// The rule the whole function follows is *measure, never assume* —
+// each term below renders the very same string View will render and
+// takes its lipgloss.Height. Hardcoding a row count was how issue
+// #103 happened: the header was pinned at 2 rows even though
+// renderHeader word-wraps to as many as 6 on a narrow terminal, so
+// the frame overflowed and clipFrame ate the footer.
+//
+// Only siblings of the viewport are charged. Anything that renders
+// INSIDE the viewport (the prompt queue panel, the spinner line, the
+// in-progress assistant block) is already paid for out of the
+// viewport's own rows and must not be subtracted again — see the
+// queue note below.
 func (m *Model) resize() {
 	if m.width == 0 || m.height == 0 {
 		return
@@ -306,52 +327,80 @@ func (m *Model) resize() {
 	if layout == StatusSidebar {
 		chatWidth = m.width - sidebarWidth - 3
 	}
-
-	const inputHeight = 3
-	const footerHeight = 1
-	headerHeight := 0
-	if layout == StatusHeader {
-		headerHeight = 2 // status line + a blank row
-	}
-	// Allow the footer to wrap onto a second line when the terminal
-	// is narrow; reserve up to 2 rows for it. Footer wrap width must
-	// match the column it'll render in — chatWidth in sidebar mode,
-	// m.width in header mode.
-	footerRows := footerHeight
-	footerWidth := m.width
-	if layout == StatusSidebar {
-		footerWidth = chatWidth
-	}
-	if footerWidth > 0 {
-		footerRows = lipgloss.Height(m.renderFooter(footerWidth))
-		if footerRows < 1 {
-			footerRows = 1
-		}
-	}
-	helpRows := 0
-	if m.helpOpen {
-		helpRows = lipgloss.Height(m.renderHelpPanel(footerWidth))
-	}
-	palRows := 0
-	if m.palette != nil {
-		palRows = lipgloss.Height(m.renderPalette(footerWidth))
-	}
-	queueRows := 0
-	if len(m.queue) > 0 {
-		queueRows = lipgloss.Height(m.renderQueuePanel())
-	}
-	chatHeight := m.height - headerHeight - inputHeight - footerRows - helpRows - palRows - queueRows - 2 // 2 = input top border + spacer
-	if chatHeight < 3 {
-		chatHeight = 3
-	}
-
 	if chatWidth < 1 {
 		chatWidth = 1
 	}
+
+	// Chrome wrap width must match the column each element will
+	// actually render in — chatWidth in sidebar mode (View wraps the
+	// whole left stack to the chat column so the sidebar isn't pushed
+	// off the right edge), m.width in header mode.
+	chromeWidth := m.width
+	if layout == StatusSidebar {
+		chromeWidth = chatWidth
+	}
+
+	// Set the widths before measuring: renderInputBox reads
+	// m.viewport.Width(), and every wrap-sensitive row count below
+	// depends on the width it is rendered at.
 	m.viewport.SetWidth(chatWidth)
-	m.viewport.SetHeight(chatHeight)
 	m.input.SetWidth(chatWidth - 2) // leave room for the input border
-	m.input.SetHeight(inputHeight)
+	// Pre-existing behaviour, deliberately unchanged here: resize
+	// resets the textarea to its minimum height, which is why the
+	// measurement below is currently always 4. It is still a
+	// measurement and not a constant on purpose — the day resize
+	// stops overriding syncInputHeight's auto-grow, the budget
+	// follows the taller box without another edit.
+	m.input.SetHeight(textareaMinHeight)
+
+	// Header: measured, not assumed (issue #103). renderHeader
+	// word-wraps the status line, so it is 2 rows on a wide terminal
+	// and grows to 6 on a 20-column one.
+	headerRows := 0
+	if layout == StatusHeader {
+		headerRows = lipgloss.Height(m.renderHeader())
+	}
+	// The footer wraps on narrow terminals; it is never less than the
+	// one row renderFooter always emits.
+	footerRows := lipgloss.Height(m.renderFooter(chromeWidth))
+	if footerRows < 1 {
+		footerRows = 1
+	}
+	helpRows := 0
+	if m.helpOpen {
+		helpRows = lipgloss.Height(m.renderHelpPanel(chromeWidth))
+	}
+	palRows := 0
+	if m.palette != nil {
+		palRows = lipgloss.Height(m.renderPalette(chromeWidth))
+	}
+	// Toast: View slots the wake banner between the input box and the
+	// footer whenever renderToast returns non-empty, so the budget is
+	// guarded on exactly that condition rather than on m.toast != ""
+	// — the renderer also applies the TTL and the sticky-slash bypass
+	// (issue #103, part 2).
+	toastRows := 0
+	if toast := m.renderToast(chromeWidth); toast != "" {
+		toastRows = lipgloss.Height(toast)
+	}
+	// The input box is the textarea plus its one-row top border.
+	// Measured after SetHeight above so the two can't disagree.
+	inputBoxRows := lipgloss.Height(m.renderInputBox())
+
+	// No queue term. renderQueuePanel is appended by renderInProgress
+	// into the viewport's CONTENT, not joined beside the viewport by
+	// View — unlike the footer / help / palette, which are siblings.
+	// Subtracting it shrank the viewport by the panel's height AND
+	// then spent that height rendering the panel inside the smaller
+	// viewport, so a 4-row queue cost the operator 4 rows of chat and
+	// left the frame 4 rows short of the terminal (issue #103).
+	chatHeight := m.height - headerRows - helpRows - palRows -
+		inputBoxRows - toastRows - footerRows
+	if chatHeight < chatMinHeight {
+		chatHeight = chatMinHeight
+	}
+
+	m.viewport.SetHeight(chatHeight)
 }
 
 // syncInputHeight clamps the textarea's height to its current line
