@@ -16,9 +16,11 @@ package tui
 
 import (
 	"strconv"
+	"strings"
 	"testing"
 
 	tea "charm.land/bubbletea/v2"
+	"github.com/charmbracelet/x/ansi"
 )
 
 // followModel returns a sized model holding a transcript several
@@ -180,4 +182,203 @@ func TestFollow_ExplicitJumpsSetTheFlag(t *testing.T) {
 	if m.viewport.YOffset() != 0 {
 		t.Errorf("after ctrl+l the next repaint moved the viewport to YOffset=%d, want 0", m.viewport.YOffset())
 	}
+}
+
+// Issue #113: `end` is ctrl+l's counterpart — it jumps to the tail
+// AND re-arms follow. The flag is the point: a jump that moved the
+// viewport without setting m.follow would be undone by the next
+// repaint, which is exactly the state PgDn-until-AtBottom already
+// gets you out of.
+func TestFollow_EndJumpsToTailAndReArms(t *testing.T) {
+	m := followModel(t, 100, 40, 200)
+
+	out, _ := m.Update(keyPress("pgup"))
+	m = out.(Model)
+	if m.follow {
+		t.Fatal("setup: PgUp did not release follow")
+	}
+	if m.viewport.AtBottom() {
+		t.Fatal("setup: PgUp did not move the viewport off the tail")
+	}
+
+	out, cmd := m.Update(keyPress("end"))
+	m = out.(Model)
+	if !m.follow {
+		t.Error("end jumped to the tail but left follow released — the next repaint would drag the operator back off it")
+	}
+	if !m.viewport.AtBottom() {
+		t.Errorf("end did not reach the tail, YOffset=%d", m.viewport.YOffset())
+	}
+	if cmd != nil {
+		t.Error("end returned a command; a pure scroll should not schedule work")
+	}
+
+	// The re-armed flag survives into the next chunk.
+	m.history.Append(Message{Role: RoleAssistant, Text: "fresh chunk", Rendered: "fresh chunk"})
+	m.refreshViewport()
+	if !m.viewport.AtBottom() {
+		t.Errorf("follow re-armed by end did not pin the next chunk, YOffset=%d", m.viewport.YOffset())
+	}
+}
+
+// end must not disturb the input: it is a viewport key, and the
+// textarea's content has to survive the keystroke untouched.
+func TestFollow_EndLeavesTheInputAlone(t *testing.T) {
+	m := followModel(t, 100, 40, 200)
+	m.input.SetValue("half-typed prompt")
+
+	out, _ := m.Update(keyPress("end"))
+	m = out.(Model)
+	if got := m.input.Value(); got != "half-typed prompt" {
+		t.Errorf("end mutated the input: %q", got)
+	}
+}
+
+// end is claimed for goto-bottom ONLY while the input is empty.
+// "end goes to end-of-line" is too strong a convention to shadow in a
+// box the operator is composing in — the more so once syncInputHeight
+// grows that box to textareaMaxHeight rows. With text in the input the
+// key must reach the textarea instead, leaving the transcript where it
+// was and follow released.
+func TestFollow_EndYieldsToTheInputWhenComposing(t *testing.T) {
+	m := followModel(t, 100, 40, 200)
+	m.viewport.GotoTop()
+	m.follow = false
+	m.input.SetValue("a half-typed prompt")
+	before := m.viewport.YOffset()
+
+	out, _ := m.Update(keyPress("end"))
+	m = out.(Model)
+
+	if m.follow {
+		t.Error("end re-armed follow while the operator was composing; want the textarea to own the key")
+	}
+	if got := m.viewport.YOffset(); got != before {
+		t.Errorf("end scrolled the transcript while composing: YOffset %d -> %d", before, got)
+	}
+}
+
+// ...and the empty-input case still reaches the chat, so the
+// conditional does not quietly disable the binding.
+func TestFollow_EndClaimedWhenInputEmpty(t *testing.T) {
+	m := followModel(t, 100, 40, 200)
+	m.viewport.GotoTop()
+	m.follow = false
+	m.input.SetValue("")
+
+	out, _ := m.Update(keyPress("end"))
+	m = out.(Model)
+
+	if !m.follow {
+		t.Error("end did not re-arm follow with an empty input")
+	}
+	if !m.viewport.AtBottom() {
+		t.Errorf("end did not reach the tail: YOffset=%d", m.viewport.YOffset())
+	}
+}
+
+// Regression guard for the two shadows issue #113 explicitly refuses
+// to give up: binding `end` must not tempt anyone into handing
+// ctrl+d / ctrl+u back to the viewport's half-page scroll bindings.
+func TestFollow_EndDoesNotUnshadowQuitOrKillLine(t *testing.T) {
+	t.Run("ctrl+d still quits", func(t *testing.T) {
+		m := followModel(t, 100, 40, 200)
+		out, cmd := m.Update(keyPress("ctrl+d"))
+		m = out.(Model)
+		if !m.quitting {
+			t.Error("ctrl+d did not set quitting — it scrolled instead of quitting")
+		}
+		if cmd == nil {
+			t.Fatal("ctrl+d returned no command, want tea.Quit")
+		}
+		if _, ok := cmd().(tea.QuitMsg); !ok {
+			t.Errorf("ctrl+d command produced %T, want tea.QuitMsg", cmd())
+		}
+	})
+
+	t.Run("ctrl+u still kills the line", func(t *testing.T) {
+		m := followModel(t, 100, 40, 200)
+		m.input.SetValue("text to kill")
+		m.historyCursor = 3
+		out, _ := m.Update(keyPress("ctrl+u"))
+		m = out.(Model)
+		if got := m.input.Value(); got != "" {
+			t.Errorf("ctrl+u left %q in the input — it scrolled instead of clearing", got)
+		}
+		if m.historyCursor != -1 {
+			t.Errorf("ctrl+u left historyCursor=%d, want -1", m.historyCursor)
+		}
+	})
+}
+
+// The help panel must not advertise keys that do nothing. Before
+// #113 the Navigation section listed "home / end", neither of which
+// was bound anywhere — the same class of lie as the unbound ctrl+o
+// marker fixed in #94. This walks the rendered rows and presses every
+// key the section names, asserting each one actually moves the
+// viewport.
+func TestHelpPanel_NavigationKeysAreAllBound(t *testing.T) {
+	m := followModel(t, 100, 40, 200)
+	m.helpOpen = true
+
+	keys := helpPanelSectionKeys(t, m, "Navigation")
+	if len(keys) == 0 {
+		t.Fatal("no Navigation keys parsed out of the help panel")
+	}
+
+	for _, stroke := range keys {
+		t.Run(stroke, func(t *testing.T) {
+			// Park mid-transcript so a key can prove itself by
+			// moving in either direction.
+			probe := followModel(t, 100, 40, 200)
+			probe.viewport.SetYOffset(probe.viewport.YOffset() / 2)
+			before := probe.viewport.YOffset()
+
+			out, _ := probe.Update(keyPress(stroke))
+			probe = out.(Model)
+			if probe.viewport.YOffset() == before {
+				t.Errorf("help panel advertises %q under Navigation but it left the viewport at YOffset=%d", stroke, before)
+			}
+		})
+	}
+}
+
+// helpPanelSectionKeys renders the help panel and returns the
+// individual key strokes named in the given section, splitting rows
+// like "pgup / pgdn" into their parts.
+func helpPanelSectionKeys(t *testing.T, m Model, section string) []string {
+	t.Helper()
+
+	panel := ansi.Strip(m.renderHelpPanel(100))
+	if panel == "" {
+		t.Fatal("renderHelpPanel returned empty; helpOpen not set?")
+	}
+
+	var (
+		keys   []string
+		inside bool
+	)
+	for _, line := range strings.Split(panel, "\n") {
+		trimmed := strings.TrimSpace(line)
+		switch {
+		case trimmed == section:
+			inside = true
+			continue
+		case !inside:
+			continue
+		case trimmed == "":
+			// Blank line closes the section.
+			inside = false
+			continue
+		}
+		// Rows are "    <key><padding><description>"; the key column
+		// is everything up to the first run of two or more spaces.
+		fields := strings.SplitN(trimmed, "  ", 2)
+		for _, part := range strings.Split(fields[0], "/") {
+			if part = strings.TrimSpace(part); part != "" {
+				keys = append(keys, part)
+			}
+		}
+	}
+	return keys
 }

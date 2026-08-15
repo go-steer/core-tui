@@ -1179,6 +1179,30 @@ func (m Model) handleKey(msg tea.KeyPressMsg) (tea.Model, tea.Cmd) {
 		m.viewport.GotoTop()
 		return m, nil
 
+	case "end":
+		// The counterpart to ctrl+l: jump back to the tail and
+		// re-arm follow so a live stream resumes pinning. Without
+		// this the only way back from the backlog is holding PgDn
+		// until AtBottom() re-arms follow on its own.
+		//
+		// Deliberately not refreshAndScroll: this is a pure scroll,
+		// and that helper also runs syncInputHeight + resize.
+		//
+		// Claimed ONLY while the input is empty. bubbles' textarea
+		// binds end to LineEnd, and "end goes to end-of-line" is far
+		// too strong a convention to shadow in a box the operator is
+		// composing in — the more so since syncInputHeight grows that
+		// box to textareaMaxHeight rows, where line-end is the whole
+		// point. With nothing typed there is no line to end, so the
+		// key is free and the chat can have it. ctrl+e reaches
+		// end-of-line in either state.
+		if m.input.Value() == "" {
+			m.follow = true
+			m.viewport.GotoBottom()
+			return m, nil
+		}
+		// Non-empty input: fall through to the textarea below.
+
 	case "ctrl+u":
 		// Clear the input field + exit history navigation (shell-
 		// style "kill line back to start"). Doesn't touch history.
@@ -1379,7 +1403,9 @@ func (m Model) handleKey(msg tea.KeyPressMsg) (tea.Model, tea.Cmd) {
 	// bindings with the non-letter forms only (they'd otherwise eat
 	// typed text), and of those, ctrl+u / ctrl+d are claimed earlier
 	// in this switch. bubbles v2's viewport binds neither Home nor
-	// End.
+	// End. Home stays with the textarea (ctrl+l is the goto-top key);
+	// End reaches here only when the input is non-empty, in which
+	// case the textarea's LineEnd is what the operator meant.
 	var (
 		taCmd tea.Cmd
 		vpCmd tea.Cmd
