@@ -78,6 +78,14 @@ func TestRenderDiffInline_TruncatesAtMaxLines(t *testing.T) {
 	if !strings.Contains(got, "more lines") {
 		t.Errorf("expected truncation marker, got: %q", got)
 	}
+	// Issue #94: the marker used to read "… +N more lines · ctrl+o to
+	// expand (todo)". ctrl+o is bound nowhere in the package, so the
+	// only keybinding the transcript ever named was one that did
+	// nothing. Don't advertise a key we don't have — and never ship a
+	// "(todo)" to the operator.
+	if strings.Contains(got, "ctrl+") || strings.Contains(strings.ToLower(got), "todo") {
+		t.Errorf("truncation marker advertises an unbound key / leaks a todo: %q", got)
+	}
 }
 
 func TestRenderToolPreview_ApplyPatch(t *testing.T) {

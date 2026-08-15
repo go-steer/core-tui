@@ -161,8 +161,16 @@ func renderDiffInline(diff string, styles Styles, maxLines int, lang string) str
 		}
 	}
 	if truncatedAt > 0 {
+		// Count only — no expand affordance. The marker used to
+		// advertise "ctrl+o to expand (todo)", but ctrl+o is not
+		// bound anywhere in the package, so the one keybinding the
+		// transcript named was the one that did nothing (and it
+		// shipped a note-to-self in user-visible output). Row-level
+		// diff expansion needs a message cursor first
+		// (docs/inline-tool-display-design.md); until that exists the
+		// tree must not promise a key it doesn't have.
 		remaining := len(lines) - truncatedAt
-		out = append(out, indent+styles.Muted.Render("… +"+itoa(remaining)+" more lines · ctrl+o to expand (todo)"))
+		out = append(out, indent+styles.Muted.Render("… +"+itoa(remaining)+" more lines"))
 	}
 	return strings.Join(out, "\n")
 }

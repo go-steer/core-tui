@@ -1307,8 +1307,13 @@ func (m Model) handleKey(msg tea.KeyPressMsg) (tea.Model, tea.Cmd) {
 	}
 
 	// Forward unmatched keys to the input field for typing. Viewport
-	// gets the message too so PgUp/PgDn/Home/End scroll the chat
-	// even while the input is focused.
+	// gets the message too so PgUp/PgDn scroll the chat even while
+	// the input is focused. Those two are the whole chat-scroll
+	// keymap: NewModel replaces the viewport's vim-flavored default
+	// bindings with the non-letter forms only (they'd otherwise eat
+	// typed text), and of those, ctrl+u / ctrl+d are claimed earlier
+	// in this switch. bubbles v2's viewport binds neither Home nor
+	// End.
 	var (
 		taCmd tea.Cmd
 		vpCmd tea.Cmd
