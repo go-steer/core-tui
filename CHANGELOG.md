@@ -25,7 +25,9 @@ The wire protocol in [`docs/sse-event-stream-protocol.md`](./docs/sse-event-stre
 
 ## [Unreleased]
 
-_Nothing yet._
+### Fixed
+
+- **The scrollbar thumb no longer vanishes at the bottom of long content** ([#92](https://github.com/go-steer/core-tui/issues/92)). `Scrollbar` computed one more thumb position than it drew rows, so at maximum scroll the thumb landed one row past the end of the track: clipped short for a multi-row thumb, and gone entirely for the one-row thumb any content much longer than the viewport produces. The thumb now rests flush on the final row at maximum offset.
 
 ---
 

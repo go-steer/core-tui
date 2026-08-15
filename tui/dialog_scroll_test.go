@@ -182,6 +182,62 @@ func TestScrollView_WindowsAndDrawsScrollbar(t *testing.T) {
 	}
 }
 
+// Issue #92: the thumb must stay inside the drawn track at every
+// offset, and must rest on the final row at maximum scroll. The old
+// off-by-one put it one row past the end of the draw loop, which
+// clipped a tall thumb and made a one-row thumb — the common case on
+// long content — vanish exactly when the operator hit the bottom.
+func TestScrollbar_ThumbStaysInTrackAtEveryOffset(t *testing.T) {
+	styles := NewStyles(true, Branding{})
+	grids := []struct {
+		height, contentSize, viewportSize int
+	}{
+		{10, 200, 10}, // thumbSize 1 — the disappearing case
+		{10, 100, 10},
+		{10, 30, 10}, // thumbSize 3
+		{8, 9, 8},    // thumbSize 7, maxOffset 1
+		{5, 11, 5},
+		{20, 21, 20},
+	}
+	for _, g := range grids {
+		thumbSize := max(1, g.height*g.viewportSize/g.contentSize)
+		maxOffset := g.contentSize - g.viewportSize
+		for offset := 0; offset <= maxOffset; offset++ {
+			rows := strings.Split(Scrollbar(styles, g.height, g.contentSize, g.viewportSize, offset), "\n")
+			if len(rows) != g.height {
+				t.Fatalf("%+v offset=%d: %d rows, want %d", g, offset, len(rows), g.height)
+			}
+			thumbs := 0
+			for _, r := range rows {
+				if strings.Contains(r, "█") {
+					thumbs++
+				}
+			}
+			if thumbs != thumbSize {
+				t.Errorf("%+v offset=%d: %d thumb rows, want %d\n%s",
+					g, offset, thumbs, thumbSize, strings.Join(rows, "\n"))
+			}
+		}
+		bottom := strings.Split(Scrollbar(styles, g.height, g.contentSize, g.viewportSize, maxOffset), "\n")
+		if !strings.Contains(bottom[g.height-1], "█") {
+			t.Errorf("%+v at maxOffset=%d: last row is not a thumb cell\n%s",
+				g, maxOffset, strings.Join(bottom, "\n"))
+		}
+		top := strings.Split(Scrollbar(styles, g.height, g.contentSize, g.viewportSize, 0), "\n")
+		if !strings.Contains(top[0], "█") {
+			t.Errorf("%+v at offset=0: first row is not a thumb cell\n%s", g, strings.Join(top, "\n"))
+		}
+	}
+
+	// Content that fits (and a zero-height track) draw nothing.
+	if got := Scrollbar(styles, 10, 5, 10, 0); got != "" {
+		t.Errorf("content fits: Scrollbar = %q, want \"\"", got)
+	}
+	if got := Scrollbar(styles, 0, 100, 10, 0); got != "" {
+		t.Errorf("zero height: Scrollbar = %q, want \"\"", got)
+	}
+}
+
 func TestModalBodyHeight(t *testing.T) {
 	if got := modalBodyHeight(0, modalChromeRows); got != 0 {
 		t.Errorf("unknown terminal height → %d, want 0 (don't window)", got)
