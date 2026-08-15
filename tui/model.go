@@ -102,9 +102,18 @@ type Model struct {
 	themeName string
 
 	// helpOpen toggles the bottom-anchored stacked help panel
-	// (`?` to open / close). When open, the chat viewport shrinks
-	// to make room above the input.
+	// (`?` to open / page / close). When open, the chat viewport
+	// shrinks to make room above the input.
 	helpOpen bool
+
+	// helpPage is the zero-based page of the help panel on screen.
+	// The panel lays itself out to the row cap the chrome budget
+	// gives it and paginates when the content does not fit; `?`
+	// walks the pages and closes the panel after the last one
+	// (help.go). Always 0 while the panel is closed, and clamped at
+	// render time — the cap moves with the terminal, so a stored
+	// page index can go stale under a resize.
+	helpPage int
 
 	// palette is the active slash / file palette overlay (R-PAL-1 /
 	// R-PAL-2). Nil = no palette open. Triggered by typing `/` at

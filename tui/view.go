@@ -112,6 +112,21 @@ func (m Model) effectiveLayout() StatusLayout {
 	return m.statusLayout
 }
 
+// chromeWidth is the column the chrome around the chat viewport is
+// rendered in: the chat column in sidebar layout — View wraps the
+// whole left stack to it so the sidebar is not pushed off the right
+// edge — and the full terminal width otherwise. It is what View
+// passes to renderFooter / renderHelpPanel / renderPalette and what
+// resize() measures them at, so anything outside the render path that
+// needs to reason about a panel's geometry (advanceHelp, the tests)
+// asks here rather than re-deriving it.
+func (m Model) chromeWidth() int {
+	if m.effectiveLayout() == StatusSidebar {
+		return m.width - sidebarWidth - 3
+	}
+	return m.width
+}
+
 // View composes the full TUI. Returns a tea.View with AltScreen on,
 // mouse capture per Options.Mouse, and the terminal's real cursor
 // parked on whichever text surface owns input (cursor.go). Layout is
@@ -139,7 +154,7 @@ func (m Model) View() tea.View {
 		// Footer wraps to the chat column, NOT to m.width — otherwise
 		// the left block grows wider than the chat column and the
 		// sidebar gets pushed off the right edge of the terminal.
-		chatWidth := m.width - sidebarWidth - 3
+		chatWidth := m.chromeWidth()
 		footer := m.renderFooter(chatWidth)
 		help := m.renderHelpPanel(chatWidth)
 		pal := m.renderPalette(chatWidth)
@@ -1517,91 +1532,6 @@ func nonNeg(x int) int {
 		return 0
 	}
 	return x
-}
-
-// renderHelpPanel renders the bottom-anchored stacked help panel when
-// m.helpOpen is true. Returns empty string when closed so callers can
-// conditionally include it without branching on `if helpOpen` in the
-// View() composition. Width sets the column width — pass chatWidth in
-// sidebar mode and m.width in header mode.
-//
-// The panel is 38 rows tall at every width and every terminal size,
-// which is more than an 80x24 terminal has to give it (issue #119).
-// Until that is fixed the chrome budget caps it — the join at the end
-// elides whatever does not fit into m.chrome.helpCap rows — so the
-// overflow lands inside the panel rather than pushing the input box
-// and the footer out of the frame (issue #121).
-func (m Model) renderHelpPanel(width int) string {
-	if !m.helpOpen || width <= 0 {
-		return ""
-	}
-	sections := []struct {
-		title string
-		keys  [][2]string
-	}{
-		{"Input", [][2]string{
-			{"enter", "submit (or enqueue if a turn is running)"},
-			{"ctrl+j", "newline (shift+enter on terminals that distinguish it)"},
-			{"?", "toggle this menu"},
-		}},
-		{"Palettes (live filter)", [][2]string{
-			{"/ (at start)", "slash command palette"},
-			{"@ (anywhere)", "project file palette"},
-			{"↑ / ↓", "navigate palette"},
-			{"tab", "complete prefix"},
-			{"enter", "insert selection"},
-			{"esc", "close palette"},
-		}},
-		{"Side-answer modal (R-CMD-5)", [][2]string{
-			{"/btw <q>", "open a transient Glamour-rendered modal"},
-			{"↑↓ / pgup / pgdn", "scroll a long answer"},
-			{"esc / enter / space", "dismiss modal (answer doesn't land in history)"},
-		}},
-		{"Navigation", [][2]string{
-			{"pgup / pgdn", "scroll chat"},
-			{"ctrl+l", "jump to top (stops following the stream)"},
-			{"end", "jump to bottom, when the input is empty (resumes following)"},
-		}},
-		{"Layout & mode", [][2]string{
-			{"ctrl+b", "toggle header / sidebar"},
-			{"shift+tab", "cycle permission mode"},
-		}},
-		{"Modals", [][2]string{
-			{"ctrl+g", "model picker (when ModelSwapper is wired)"},
-			{"ctrl+x", "expand a tool call (args + response detail)"},
-			{"↑↓ / pgup / pgdn / mouse wheel", "scroll any modal body"},
-			{"esc", "close / cancel any open modal"},
-		}},
-		{"Interrupt / quit", [][2]string{
-			{"esc", "interrupt in-flight turn (doesn't clear queue)"},
-			{"ctrl+c, ctrl+d", "exit"},
-		}},
-	}
-
-	const keyCol = 24
-	rule := m.styles.Rule.Render(strings.Repeat(GlyphRule, width))
-	title := m.styles.Accent.Render("Help") + "  " +
-		m.styles.Muted.Render("(? to close)")
-
-	lines := []string{rule, title}
-	for i, sec := range sections {
-		if i > 0 {
-			lines = append(lines, "")
-		}
-		lines = append(lines, "  "+m.styles.SidebarHeading.Render(sec.title))
-		for _, kv := range sec.keys {
-			key := kv[0]
-			pad := keyCol - lipgloss.Width(key)
-			if pad < 1 {
-				pad = 1
-			}
-			row := "    " + m.styles.AssistantText.Bold(true).Render(key) +
-				strings.Repeat(" ", pad) + m.styles.Muted.Render(kv[1])
-			lines = append(lines, row)
-		}
-	}
-	lines = append(lines, rule)
-	return m.joinPanelRows(lines, m.chrome.helpCap, width)
 }
 
 // renderTurnErrorBlock paints a structured turn-error from a

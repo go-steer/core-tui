@@ -277,6 +277,12 @@ func keyPress(stroke string) tea.KeyPressMsg {
 	if rest, ok := strings.CutPrefix(stroke, "ctrl+"); ok && len(rest) == 1 {
 		return tea.KeyPressMsg(tea.Key{Code: rune(rest[0]), Mod: tea.ModCtrl})
 	}
+	// A bare printable rune — `?`, say. Text is set as well as Code:
+	// it is what the key reports as its String() and what the textarea
+	// inserts when the stroke falls through to it.
+	if runes := []rune(stroke); len(runes) == 1 {
+		return tea.KeyPressMsg(tea.Key{Code: runes[0], Text: stroke})
+	}
 	panic("keyPress: unmapped stroke " + stroke)
 }
 

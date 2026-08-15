@@ -323,6 +323,23 @@ func budgetStates() []frameState {
 			},
 		},
 		{
+			// Issue #119: the panel paginates itself to the cap, and
+			// pages are not all the same height — a page that breaks
+			// early on a section boundary hands the rows it did not
+			// spend back to the chat. The budget has to stay exact on
+			// a page that is not the first one.
+			name: "help-panel-paged",
+			setup: func(_ *testing.T, m Model, _, _ int) Model {
+				m = withHostileTranscript(m)
+				m.advanceHelp()
+				m.resize()
+				m.advanceHelp() // page 2, or closed if there is only one
+				m.resize()
+				m.refreshViewport()
+				return m
+			},
+		},
+		{
 			name: "tall-textarea+help-panel",
 			setup: func(_ *testing.T, m Model, _, _ int) Model {
 				m = withHostileTranscript(m)
