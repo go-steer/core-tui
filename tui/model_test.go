@@ -15,6 +15,7 @@
 package tui
 
 import (
+	"image/color"
 	"testing"
 
 	tea "charm.land/bubbletea/v2"
@@ -173,5 +174,88 @@ func TestSlashMouse_TogglesAndPropagatesToView(t *testing.T) {
 	v = m.View()
 	if v.MouseMode != tea.MouseModeCellMotion {
 		t.Errorf("after second /mouse, expected MouseModeCellMotion, got %v", v.MouseMode)
+	}
+}
+
+// TestContextFillStyle_TracksActiveTheme pins that the three-tier
+// context-fill ramp reads its colors from the active Theme's
+// semantic tokens (Success / Warning / Error) rather than fixed hex
+// literals. Runs one dark theme and two light ones so a palette
+// whose green/amber/red differ from the house default — which is
+// exactly the case a light terminal needs for contrast — is covered.
+func TestContextFillStyle_TracksActiveTheme(t *testing.T) {
+	themes := []struct {
+		name  string
+		dark  bool
+		theme Theme
+	}{
+		{"default dark", true, DefaultTheme(true)},
+		{"christmas light", false, ChristmasTheme(false)},
+		{"google light", false, GoogleTheme(false)},
+	}
+	tiers := []struct {
+		name string
+		used int
+		size int
+		want func(Theme) color.Color
+		bold bool
+	}{
+		{"below 60% picks Success", 10, 100, func(th Theme) color.Color { return th.Success }, false},
+		{"60-85% picks Warning", 70, 100, func(th Theme) color.Color { return th.Warning }, false},
+		{"at or above 85% picks Error", 90, 100, func(th Theme) color.Color { return th.Error }, true},
+	}
+	for _, tc := range themes {
+		for _, tier := range tiers {
+			t.Run(tc.name+"/"+tier.name, func(t *testing.T) {
+				m := Model{styles: NewStylesWithTheme(tc.dark, tc.theme)}
+				got := m.contextFillStyle(tier.used, tier.size)
+				want := tier.want(tc.theme)
+				if got.GetForeground() != want {
+					t.Errorf("contextFillStyle(%d, %d) foreground = %v, want theme token %v",
+						tier.used, tier.size, got.GetForeground(), want)
+				}
+				if got.GetBold() != tier.bold {
+					t.Errorf("contextFillStyle(%d, %d) bold = %v, want %v",
+						tier.used, tier.size, got.GetBold(), tier.bold)
+				}
+			})
+		}
+	}
+}
+
+// TestContextFillStyle_DiffersAcrossThemes is the regression the
+// hardcoded ramp would fail: every tier must actually change color
+// when the operator swaps themes. Christmas (light) picks pine /
+// gold / cardinal against the default's #5FD787 / #FFD75F / #FF5F5F,
+// so all three tiers have to move.
+func TestContextFillStyle_DiffersAcrossThemes(t *testing.T) {
+	dark := Model{styles: NewStylesWithTheme(true, DefaultTheme(true))}
+	light := Model{styles: NewStylesWithTheme(false, ChristmasTheme(false))}
+	tiers := []struct {
+		name string
+		used int
+	}{
+		{"success tier", 10},
+		{"warning tier", 70},
+		{"error tier", 90},
+	}
+	for _, tier := range tiers {
+		d := dark.contextFillStyle(tier.used, 100).GetForeground()
+		l := light.contextFillStyle(tier.used, 100).GetForeground()
+		if d == l {
+			t.Errorf("%s: default-dark and christmas-light both rendered %v — ramp is not theme-aware", tier.name, d)
+		}
+	}
+}
+
+// TestContextFillStyle_UnknownSizeIsMuted keeps the "context window
+// size unknown" path on the muted chrome style instead of implying a
+// usage tier.
+func TestContextFillStyle_UnknownSizeIsMuted(t *testing.T) {
+	m := Model{styles: NewStylesWithTheme(true, DefaultTheme(true))}
+	got := m.contextFillStyle(1000, 0)
+	if got.GetForeground() != m.styles.Muted.GetForeground() {
+		t.Errorf("contextFillStyle with size=0 foreground = %v, want Muted %v",
+			got.GetForeground(), m.styles.Muted.GetForeground())
 	}
 }

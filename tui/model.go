@@ -814,21 +814,24 @@ func (m Model) usageSummaryStacked() (string, string) {
 }
 
 // contextFillStyle picks a fg style for the "<used> / <size>"
-// segment based on a 3-tier color ramp: green when below 60%,
-// yellow 60-85%, red above 85% (per agentic-tui skill §17.C).
-// Lets the operator see overflow risk before it bites.
+// segment based on a 3-tier color ramp: Theme.Success below 60%,
+// Theme.Warning 60-85%, Theme.Error above 85% (per agentic-tui
+// skill §17.C). Lets the operator see overflow risk before it
+// bites. The tiers read from the active Theme rather than fixed
+// hex so the ramp keeps its contrast on light themes too.
 func (m Model) contextFillStyle(used, size int) lipgloss.Style {
 	if size <= 0 {
 		return m.styles.Muted
 	}
+	theme := m.styles.Theme
 	pct := (used * 100) / size
 	switch {
 	case pct >= 85:
-		return lipgloss.NewStyle().Foreground(lipgloss.Color("#FF5F5F")).Bold(true)
+		return lipgloss.NewStyle().Foreground(theme.Error).Bold(true)
 	case pct >= 60:
-		return lipgloss.NewStyle().Foreground(lipgloss.Color("#FFD75F"))
+		return lipgloss.NewStyle().Foreground(theme.Warning)
 	default:
-		return lipgloss.NewStyle().Foreground(lipgloss.Color("#5FD787"))
+		return lipgloss.NewStyle().Foreground(theme.Success)
 	}
 }
 
