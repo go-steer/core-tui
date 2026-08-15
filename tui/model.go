@@ -124,17 +124,30 @@ type Model struct {
 	// pendingPermission is the active PermissionRequest awaiting an
 	// operator decision (R-PERM-1). Nil = no modal open. Key
 	// handler dispatches back via opts.Prompter.dispatchDecision.
+	//
+	// permissionShownAt stamps when the modal appeared. Decision keys
+	// are inert for modalInputGrace after that — a prompt arrives
+	// asynchronously, and without the window whatever the operator
+	// happened to be typing is consumed as their answer to a modal
+	// they have not seen yet (issue #95).
 	pendingPermission *PermissionRequest
+	permissionShownAt time.Time
 
 	// pendingElicit is the active ElicitRequest awaiting form
 	// submission / decline / cancel (R-ELIC-1). Nil = no modal
 	// open. Per-field cursor + values tracked in elicitFieldIdx +
 	// elicitValues. Key handler dispatches back via
 	// opts.Elicitor.dispatchResult.
+	//
+	// elicitShownAt is the permission modal's grace stamp for the
+	// same reason: the keys that dispatch a result (submit / accept /
+	// decline) stay inert for modalInputGrace so buffered input can't
+	// answer the form before the operator has seen it.
 	pendingElicit    *ElicitRequest
 	pendingElicitSrv string         // server name for the title bar
 	elicitFieldIdx   int            // currently-focused field (Tab/Shift+Tab nav)
 	elicitValues     map[string]any // in-progress form values
+	elicitShownAt    time.Time
 
 	// modalScroll is the shared scroll offset for the modals that
 	// live inline on the Model rather than on the Overlay stack —
