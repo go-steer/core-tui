@@ -367,6 +367,89 @@ type pricingRefreshedMsg struct {
 	err     error
 }
 
+// Off-loop replies for the /cmd path and the Options.* host callbacks
+// (issue #137, the follow-up to #114). Same generation contract as the
+// group above: each carries the sessionGen its Cmd was built with and
+// Update drops it when the session has moved on.
+
+// permissionModeAppliedMsg carries the outcome of one Shift+Tab step
+// through Options.PermissionMode — Set, then Persist when Set
+// succeeded.
+//
+// prev is the mode the chip showed before the keystroke. The handler
+// rolls back to it when Set failed, so the chip never advertises a
+// policy the host declined to enforce. Both errors used to be
+// discarded; they now surface as error rows.
+type permissionModeAppliedMsg struct {
+	gen        uint64
+	prev       PermissionMode
+	mode       PermissionMode
+	err        error // Options.PermissionMode.Set
+	persistErr error // Options.PermissionMode.Persist
+}
+
+// persistDoneMsg carries the outcome of one Options persistence
+// callback (PersistModelChoice / PersistThemeChoice /
+// PersistStatusLayout). what is the row prefix — "/model", "/theme",
+// "status layout". A nil err produces no row: persistence succeeding
+// is not news.
+type persistDoneMsg struct {
+	gen  uint64
+	what string
+	err  error
+}
+
+// toolsListedMsg carries the ToolLister.Tools() catalog for /tools.
+type toolsListedMsg struct {
+	gen   uint64
+	tools []ToolInfo
+}
+
+// approvalsListedMsg carries PermissionController.SessionApprovals()
+// for /permissions.
+type approvalsListedMsg struct {
+	gen  uint64
+	logs []ApprovalLog
+}
+
+// permissionRuleAddedMsg carries the outcome of a /allow or /deny
+// mutation. op + arg are echoed back so the handler can compose the
+// same result rows the inline version wrote.
+type permissionRuleAddedMsg struct {
+	gen uint64
+	op  permissionRuleOp
+	arg string
+	err error
+}
+
+// subagentRosterMsg carries SubagentLister.Subagents() for a bare
+// /subagents. drillable was resolved at dispatch (SubagentEventReader
+// type assertion) and only decides whether the rendered list mentions
+// `/subagents <name>`.
+type subagentRosterMsg struct {
+	gen       uint64
+	subs      []SubagentInfo
+	drillable bool
+}
+
+// pricingSetMsg carries the outcome of PricingController.Set, from
+// either the positional `/pricing set <id> <in> <out>` or the huh
+// form's submit handler.
+type pricingSetMsg struct {
+	gen     uint64
+	summary string
+	err     error
+}
+
+// helpCommandsMsg carries the host's SlashProvider.SlashCommands()
+// specs for /help. The built-in section is already on screen by the
+// time this lands; the handler appends the "Agent commands:" block
+// underneath it, and appends nothing when the host exposes none.
+type helpCommandsMsg struct {
+	gen   uint64
+	specs []SlashCommandSpec
+}
+
 // ThemeChangedMsg is emitted by the /theme picker (and `/theme
 // <name>` with a known name) when the operator commits a new
 // theme. Hosts have two equivalent ways to persist:

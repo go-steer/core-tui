@@ -134,18 +134,21 @@ func (m *Model) updatePricingForm(msg tea.Msg) tea.Cmd {
 		in, _ := strconv.ParseFloat(m.pendingForm.GetString(pricingFormKeyIn), 64)
 		out, _ := strconv.ParseFloat(m.pendingForm.GetString(pricingFormKeyOut), 64)
 		m.pendingForm = nil
-		if ctrl, ok := m.opts.Agent.(PricingController); ok {
-			summary, err := ctrl.Set(modelID, in, out)
-			if err != nil {
-				m.history.Append(Message{Role: RoleError, Text: "/pricing set: " + err.Error()})
-			} else {
-				m.history.Append(Message{Role: RoleSystem, Text: summary})
-			}
-		} else {
+		ctrl, ok := m.opts.Agent.(PricingController)
+		if !ok {
 			m.history.Append(Message{Role: RoleSystem, Text: "/pricing: agent doesn't implement PricingController"})
+			m.resize()
+			m.refreshAndScroll()
+			return cmd
 		}
+		// Set is host code; it runs off the Update goroutine like the
+		// positional `/pricing set` path (issue #137). The summary
+		// arrives as pricingSetMsg. Batched with whatever huh's own
+		// Update emitted so the form's teardown Cmd isn't dropped.
+		m.history.Append(Message{Role: RoleSystem, Text: "/pricing set: applying " + modelID + "…"})
 		m.resize()
 		m.refreshAndScroll()
+		return tea.Batch(cmd, pricingSetCmd(ctrl, m.sessionGen, modelID, in, out))
 	case huh.StateAborted:
 		m.pendingForm = nil
 		m.history.Append(Message{Role: RoleSystem, Text: "/pricing set: cancelled"})

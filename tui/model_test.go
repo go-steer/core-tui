@@ -66,13 +66,28 @@ func TestUpdate_PermissionMode_Cycles(t *testing.T) {
 		},
 	})
 	shiftTab := tea.KeyPressMsg(tea.Key{Code: tea.KeyTab, Mod: tea.ModShift})
-	out, _ := m.Update(shiftTab)
+	out, cmd := m.Update(shiftTab)
 	got := out.(Model)
+	// The chip flips on the keystroke; the host callbacks ride the Cmd
+	// (issue #137), so Set has not been called yet.
 	if got.permMode != PermissionModeAcceptEdits {
 		t.Errorf("permMode = %s, want acceptEdits", got.permMode)
 	}
+	if lastSet != -1 {
+		t.Errorf("Set ran on the Update goroutine (got %s)", lastSet)
+	}
+	if cmd == nil {
+		t.Fatal("shift+tab returned no Cmd — the host would never hear about the mode")
+	}
+	msg, ok := cmd().(permissionModeAppliedMsg)
+	if !ok {
+		t.Fatalf("shift+tab Cmd produced %T, want permissionModeAppliedMsg", msg)
+	}
 	if lastSet != PermissionModeAcceptEdits {
 		t.Errorf("Set callback received %s, want acceptEdits", lastSet)
+	}
+	if msg.prev != PermissionModeDefault || msg.mode != PermissionModeAcceptEdits {
+		t.Errorf("reply = prev %s / mode %s, want default / acceptEdits", msg.prev, msg.mode)
 	}
 }
 

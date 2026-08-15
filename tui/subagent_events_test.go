@@ -95,6 +95,14 @@ func subagentModel(t *testing.T, a Agent) *Model {
 	m.seenToolIDs = make(map[string]bool)
 	m.subagentTails = make(map[string]*subagentTail)
 	m.subagentNotTail = make(map[string]bool)
+	// `/subagents <name>` resolves against the off-loop host snapshot
+	// rather than calling Subagents() from Update (issue #137), so the
+	// fixture seeds one the way the periodic refresh would.
+	if cmd := m.refreshHostSnapshotCmd(); cmd != nil {
+		if snap, ok := cmd().(hostSnapshotMsg); ok {
+			m.hostSnap = snap.snap
+		}
+	}
 	return &m
 }
 

@@ -580,8 +580,7 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			d.switching = ""
 			m.overlayStack.Close(modelPickerDialogID)
 		}
-		m.applyModelSwitch(msg)
-		return m, nil
+		return m, m.applyModelSwitch(msg)
 	case sessionsLoadedMsg:
 		if msg.gen != m.sessionGen {
 			return m, nil
@@ -636,6 +635,91 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		if text != "" {
 			m.history.Append(Message{Role: RoleSystem, Text: text})
 		}
+		m.refreshAndScroll()
+		return m, nil
+
+	// ---- off-loop /cmd + Options-callback replies (issue #137) ----
+
+	case permissionModeAppliedMsg:
+		if msg.gen != m.sessionGen {
+			return m, nil
+		}
+		if msg.err != nil {
+			// The gate refused the mode. Roll the chip back so it
+			// doesn't advertise a policy the host isn't enforcing —
+			// but only when nothing has moved on since. A second
+			// Shift+Tab landing while this was in flight owns the chip
+			// now, exactly like the `d.switching == msg.id` ownership
+			// check on the pickers.
+			if m.permMode == msg.mode {
+				m.permMode = msg.prev
+			}
+			m.history.Append(Message{Role: RoleError, Text: "permission mode: " + msg.err.Error()})
+			m.refreshAndScroll()
+			return m, nil
+		}
+		if msg.persistErr != nil {
+			// Persist failed but Set succeeded: the session is in the
+			// new mode, it just won't survive a restart. Keep the chip.
+			m.history.Append(Message{Role: RoleError, Text: "permission mode: persist failed: " + msg.persistErr.Error()})
+			m.refreshAndScroll()
+		}
+		return m, nil
+	case persistDoneMsg:
+		if msg.gen != m.sessionGen || msg.err == nil {
+			return m, nil
+		}
+		m.history.Append(Message{Role: RoleError, Text: msg.what + ": persist failed: " + msg.err.Error()})
+		m.refreshAndScroll()
+		return m, nil
+	case toolsListedMsg:
+		if msg.gen != m.sessionGen {
+			return m, nil
+		}
+		m.history.Append(Message{Role: RoleSystem, Text: m.renderToolList(msg.tools)})
+		m.refreshAndScroll()
+		return m, nil
+	case approvalsListedMsg:
+		if msg.gen != m.sessionGen {
+			return m, nil
+		}
+		m.history.Append(Message{Role: RoleSystem, Text: renderApprovalLog(msg.logs)})
+		m.refreshAndScroll()
+		return m, nil
+	case permissionRuleAddedMsg:
+		if msg.gen != m.sessionGen {
+			return m, nil
+		}
+		role := RoleSystem
+		if msg.err != nil {
+			role = RoleError
+		}
+		m.history.Append(Message{Role: role, Text: renderPermissionRuleResult(msg)})
+		m.refreshAndScroll()
+		return m, nil
+	case subagentRosterMsg:
+		if msg.gen != m.sessionGen {
+			return m, nil
+		}
+		m.history.Append(Message{Role: RoleSystem, Text: renderSubagentList(msg.subs, msg.drillable)})
+		m.refreshAndScroll()
+		return m, nil
+	case pricingSetMsg:
+		if msg.gen != m.sessionGen {
+			return m, nil
+		}
+		if msg.err != nil {
+			m.history.Append(Message{Role: RoleError, Text: "/pricing set: " + msg.err.Error()})
+		} else if msg.summary != "" {
+			m.history.Append(Message{Role: RoleSystem, Text: msg.summary})
+		}
+		m.refreshAndScroll()
+		return m, nil
+	case helpCommandsMsg:
+		if msg.gen != m.sessionGen || len(msg.specs) == 0 {
+			return m, nil
+		}
+		m.history.Append(Message{Role: RoleSystem, Text: renderHostCommandHelp(msg.specs)})
 		m.refreshAndScroll()
 		return m, nil
 
@@ -1319,22 +1403,30 @@ func (m Model) handleKey(msg tea.KeyPressMsg) (tea.Model, tea.Cmd) {
 		} else {
 			m.statusLayout = StatusHeader
 		}
-		if m.opts.PersistStatusLayout != nil {
-			_ = m.opts.PersistStatusLayout(m.statusLayout)
-		}
 		m.resize()
 		m.refreshViewport()
-		return m, nil
+		// PersistStatusLayout is host code that writes the operator's
+		// pick to the host's config; it ran inline on this bare
+		// keystroke with its error discarded (issue #137).
+		return m, persistChoiceCmd(m.sessionGen, "status layout",
+			m.opts.PersistStatusLayout, m.statusLayout)
 
 	case "shift+tab":
-		if m.permissionModeWired() {
-			m.permMode = m.permMode.Next()
-			_ = m.opts.PermissionMode.Set(m.permMode)
-			if m.opts.PermissionMode.Persist != nil {
-				_ = m.opts.PermissionMode.Persist(m.permMode)
-			}
+		// Cycle the permission-mode chip. The chip flips immediately —
+		// this is a bare keystroke and the operator expects the
+		// indicator to track the key, not the host — but
+		// Options.PermissionMode.Set and .Persist are host code, and
+		// Persist writes to the host's config file. Both ran inline
+		// here with their errors thrown away (issue #137).
+		//
+		// permissionModeAppliedMsg rolls the chip back when the host
+		// refuses the mode, and surfaces either error as a row.
+		if !m.permissionModeWired() {
+			return m, nil
 		}
-		return m, nil
+		prev := m.permMode
+		m.permMode = prev.Next()
+		return m, permissionModeCmd(m.opts.PermissionMode, m.sessionGen, prev, m.permMode)
 
 	case "ctrl+g":
 		// Open the model picker dialog. Singleton — re-press

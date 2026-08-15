@@ -67,9 +67,15 @@ func (m Model) dispatchBuiltinSlash(name, args string) (bool, tea.Model, tea.Cmd
 
 	switch name {
 	case "help", "?":
+		// The built-in catalog needs no host, so it paints on the
+		// keystroke. The host's SlashCommands() section follows as a
+		// second row when helpCommandsMsg lands (issue #137).
 		m.history.Append(Message{Role: RoleSystem, Text: m.renderBuiltinHelp()})
 		m.input.Reset()
 		m.refreshAndScroll()
+		if provider, ok := m.opts.Agent.(SlashProvider); ok {
+			return true, m, helpCommandsCmd(provider, m.sessionGen)
+		}
 		return true, m, nil
 
 	case "clear":
@@ -167,12 +173,17 @@ func (m Model) dispatchBuiltinSlash(name, args string) (bool, tea.Model, tea.Cmd
 		lister, ok := m.opts.Agent.(ToolLister)
 		if !ok {
 			m.history.Append(Message{Role: RoleSystem, Text: "/tools: agent doesn't implement ToolLister"})
-		} else {
-			m.history.Append(Message{Role: RoleSystem, Text: m.renderToolList(lister.Tools())})
+			m.input.Reset()
+			m.refreshAndScroll()
+			return true, m, nil
 		}
+		// Tools() is host code — on a remote host it is a round trip,
+		// and the catalog can be large (issue #137). Acknowledge now,
+		// render the table when toolsListedMsg lands.
+		m.history.Append(Message{Role: RoleSystem, Text: "/tools: reading the tool catalog…"})
 		m.input.Reset()
 		m.refreshAndScroll()
-		return true, m, nil
+		return true, m, toolsCmd(lister, m.sessionGen)
 
 	case "model":
 		swapper, ok := m.opts.Agent.(ModelSwapper)
@@ -320,12 +331,16 @@ func (m Model) dispatchBuiltinSlash(name, args string) (bool, tea.Model, tea.Cmd
 		ctrl, ok := m.opts.Agent.(PermissionController)
 		if !ok {
 			m.history.Append(Message{Role: RoleSystem, Text: "/permissions: agent doesn't implement PermissionController"})
-		} else {
-			m.history.Append(Message{Role: RoleSystem, Text: renderApprovalLog(ctrl.SessionApprovals())})
+			m.input.Reset()
+			m.refreshAndScroll()
+			return true, m, nil
 		}
+		// SessionApprovals() reads the host's gate, which on a remote
+		// host means a round trip (issue #137).
+		m.history.Append(Message{Role: RoleSystem, Text: "/permissions: reading the session approval log…"})
 		m.input.Reset()
 		m.refreshAndScroll()
-		return true, m, nil
+		return true, m, sessionApprovalsCmd(ctrl, m.sessionGen)
 
 	case "pricing":
 		ctrl, ok := m.opts.Agent.(PricingController)
@@ -359,13 +374,17 @@ func (m Model) dispatchBuiltinSlash(name, args string) (bool, tea.Model, tea.Cmd
 		lister, ok := m.opts.Agent.(SubagentLister)
 		if !ok {
 			m.history.Append(Message{Role: RoleSystem, Text: "/subagents: agent doesn't implement SubagentLister"})
-		} else {
-			_, drillable := m.opts.Agent.(SubagentEventReader)
-			m.history.Append(Message{Role: RoleSystem, Text: renderSubagentList(lister.Subagents(), drillable)})
+			m.input.Reset()
+			m.refreshAndScroll()
+			return true, m, nil
 		}
+		// The sidebar's copy of this read comes from hostSnapshot; the
+		// slash path wants a fresh pull, and gets it off-loop (#137).
+		_, drillable := m.opts.Agent.(SubagentEventReader)
+		m.history.Append(Message{Role: RoleSystem, Text: "/subagents: reading the roster…"})
 		m.input.Reset()
 		m.refreshAndScroll()
-		return true, m, nil
+		return true, m, subagentRosterCmd(lister, m.sessionGen, drillable)
 
 	case "keys":
 		m.history.Append(Message{Role: RoleSystem, Text: m.renderKeysDiagnostic()})
@@ -380,19 +399,12 @@ func (m Model) dispatchBuiltinSlash(name, args string) (bool, tea.Model, tea.Cmd
 		m.refreshAndScroll()
 		return true, m, nil
 
-	case "allow":
-		text := m.handleAllowDeny(args, "allow")
+	case "allow", "deny":
+		text, cmd := m.handleAllowDeny(args, name)
 		m.history.Append(Message{Role: RoleSystem, Text: text})
 		m.input.Reset()
 		m.refreshAndScroll()
-		return true, m, nil
-
-	case "deny":
-		text := m.handleAllowDeny(args, "deny")
-		m.history.Append(Message{Role: RoleSystem, Text: text})
-		m.input.Reset()
-		m.refreshAndScroll()
-		return true, m, nil
+		return true, m, cmd
 	}
 
 	return false, m, nil
@@ -514,12 +526,16 @@ func (m *Model) handleResume(args string) string {
 //	/deny  <pattern>            → AddDenyPatterns([pattern])
 //
 // bundle:<name> is allow-only because the gate has no built-in deny
-// bundles. The returned text is the system-message body the caller
-// renders.
-func (m Model) handleAllowDeny(args, op string) string {
+// bundles. Parsing and validation stay on the Update goroutine — they
+// touch no host code — but the three PermissionController mutators run
+// off-loop (issue #137), so the returned text is the immediate
+// acknowledgement and the outcome arrives as permissionRuleAddedMsg.
+// A nil Cmd means the text is the whole answer (unwired capability,
+// usage hint, or a malformed bundle name).
+func (m Model) handleAllowDeny(args, op string) (string, tea.Cmd) {
 	ctrl, ok := m.opts.Agent.(PermissionController)
 	if !ok {
-		return "/" + op + ": agent doesn't implement PermissionController"
+		return "/" + op + ": agent doesn't implement PermissionController", nil
 	}
 	args = strings.TrimSpace(args)
 	if args == "" {
@@ -527,28 +543,42 @@ func (m Model) handleAllowDeny(args, op string) string {
 		if op == "allow" {
 			hint += "   or   /allow bundle:dev_tools"
 		}
-		return "/" + op + ": usage — /" + op + " " + hint
+		return "/" + op + ": usage — /" + op + " " + hint, nil
 	}
 	if op == "allow" && strings.HasPrefix(args, "bundle:") {
 		name := strings.TrimPrefix(args, "bundle:")
 		if name == "" {
-			return "/allow bundle: empty bundle name — try /allow bundle:dev_tools"
+			return "/allow bundle: empty bundle name — try /allow bundle:dev_tools", nil
 		}
-		if err := ctrl.AddBuiltinAllowExtra(name); err != nil {
-			return "/allow bundle: " + err.Error()
+		return "/allow: enabling bundle " + name + "…",
+			permissionRuleCmd(ctrl, m.sessionGen, permissionRuleAllowBundle, name)
+	}
+	ruleOp := permissionRuleAllow
+	if op == "deny" {
+		ruleOp = permissionRuleDeny
+	}
+	return "/" + op + ": adding " + args + "…", permissionRuleCmd(ctrl, m.sessionGen, ruleOp, args)
+}
+
+// renderPermissionRuleResult composes the follow-up row for a
+// completed /allow or /deny. Wording matches what the inline version
+// wrote so operators (and host docs) see no change beyond the extra
+// acknowledgement row.
+func renderPermissionRuleResult(msg permissionRuleAddedMsg) string {
+	if msg.op == permissionRuleAllowBundle {
+		if msg.err != nil {
+			return "/allow bundle: " + msg.err.Error()
 		}
-		return "/allow: enabled bundle " + name
+		return "/allow: enabled bundle " + msg.arg
 	}
-	var err error
-	if op == "allow" {
-		err = ctrl.AddAllowPatterns([]string{args})
-	} else {
-		err = ctrl.AddDenyPatterns([]string{args})
+	op := "allow"
+	if msg.op == permissionRuleDeny {
+		op = "deny"
 	}
-	if err != nil {
-		return "/" + op + ": " + err.Error()
+	if msg.err != nil {
+		return "/" + op + ": " + msg.err.Error()
 	}
-	return "/" + op + ": added " + args
+	return "/" + op + ": added " + msg.arg
 }
 
 // handlePricing parses the /pricing subcommand and dispatches.
@@ -561,8 +591,10 @@ func (m Model) handleAllowDeny(args, op string) string {
 // The form path (no positional args) lets operators tab through
 // validated fields; the positional path keeps scripted / replay
 // flows fast. Returns the text to echo as a system message plus an
-// optional Cmd; `refresh` returns ("", cmd) because its result
-// arrives later as pricingRefreshedMsg.
+// optional Cmd. Both host-touching shapes run off the Update
+// goroutine, so for those the text is the immediate acknowledgement
+// and the outcome lands later — `refresh` as pricingRefreshedMsg,
+// `set <id> <in> <out>` as pricingSetMsg.
 func (m *Model) handlePricing(ctrl PricingController, args string) (string, tea.Cmd) {
 	args = strings.TrimSpace(args)
 	if args == "" || args == "help" {
@@ -603,24 +635,23 @@ func (m *Model) handlePricing(ctrl PricingController, args string) (string, tea.
 		if err != nil {
 			return "/pricing set: invalid output rate " + fields[2] + " — " + err.Error(), nil
 		}
-		// PricingController.Set stays on the Update goroutine: it
-		// takes no ctx and is a local table poke on every host that
-		// implements it. Tracked with the rest of the deferred
-		// slash-command-path calls.
-		summary, err := ctrl.Set(fields[0], in, out)
-		if err != nil {
-			return "/pricing set: " + err.Error(), nil
-		}
-		return summary, nil
+		// Set takes no ctx, but "no ctx" isn't a promise of speed: a
+		// host that writes its price table through to disk does that
+		// write inside Set. Off-loop like the rest (issue #137); the
+		// summary arrives as pricingSetMsg.
+		return "/pricing set: applying " + fields[0] + "…",
+			pricingSetCmd(ctrl, m.sessionGen, fields[0], in, out)
 	default:
 		return "/pricing: unknown subcommand " + sub + " — try /pricing refresh or /pricing set", nil
 	}
 }
 
-// renderBuiltinHelp produces the /help text. Lists every built-in plus
-// the host-provided commands from SlashProvider.SlashCommands(). The
-// rendered output is a single block — the renderer will glamour-ify
-// it on the next viewport refresh.
+// renderBuiltinHelp produces the built-in half of the /help text.
+// Needs no host call, so it renders on the keystroke; the host's
+// commands follow in renderHostCommandHelp once SlashCommands()
+// answers off-loop (issue #137). The rendered output is a single
+// block — the renderer will glamour-ify it on the next viewport
+// refresh.
 func (m Model) renderBuiltinHelp() string {
 	var b strings.Builder
 	b.WriteString("Built-in commands:\n")
@@ -642,20 +673,23 @@ func (m Model) renderBuiltinHelp() string {
 	b.WriteString("  /interrupt, /int     — cancel the in-flight turn\n")
 	b.WriteString("  /mouse               — toggle terminal mouse capture\n")
 
-	if provider, ok := m.opts.Agent.(SlashProvider); ok {
-		specs := provider.SlashCommands()
-		if len(specs) > 0 {
-			b.WriteString("\nAgent commands:\n")
-			for _, s := range specs {
-				name := "/" + s.Name
-				if len(s.Aliases) > 0 {
-					for _, a := range s.Aliases {
-						name += ", /" + a
-					}
-				}
-				b.WriteString("  " + padRight(name, 20) + " — " + s.Description + "\n")
-			}
+	return strings.TrimRight(b.String(), "\n")
+}
+
+// renderHostCommandHelp produces the "Agent commands:" section of
+// /help from the host's SlashCommands() specs. Rendered as its own
+// system row underneath the built-in block, because the specs arrive
+// after it (helpCommandsMsg). Never called with an empty slice — the
+// handler skips the row entirely when the host exposes no commands.
+func renderHostCommandHelp(specs []SlashCommandSpec) string {
+	var b strings.Builder
+	b.WriteString("Agent commands:\n")
+	for _, s := range specs {
+		name := "/" + s.Name
+		for _, a := range s.Aliases {
+			name += ", /" + a
 		}
+		b.WriteString("  " + padRight(name, 20) + " — " + s.Description + "\n")
 	}
 	return strings.TrimRight(b.String(), "\n")
 }

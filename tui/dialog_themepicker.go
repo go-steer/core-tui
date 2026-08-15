@@ -141,20 +141,19 @@ func (d *themePickerDialog) HandleKeyMsg(msg tea.KeyPressMsg, m *Model) DialogAc
 		pick := themes[d.idx]
 		m.applyNamedTheme(pick.Name)
 		m.history.Append(Message{Role: RoleSystem, Text: "/theme: switched to " + pick.Name})
-		// Callback persistence path (mirrors PersistModelChoice
-		// in dialog_modelpicker.go). Error surfaces as a system
-		// message but doesn't block the switch — the operator's
-		// session reflects the pick either way.
-		if m.opts.PersistThemeChoice != nil {
-			if perr := m.opts.PersistThemeChoice(pick.Name); perr != nil {
-				m.history.Append(Message{Role: RoleError, Text: "/theme: persist failed: " + perr.Error()})
-			}
-		}
 		m.refreshViewport()
 		// Also emit ThemeChangedMsg — hosts can use either the
 		// callback OR the msg observation pattern (or both).
 		name := pick.Name
-		cmd := func() tea.Msg { return ThemeChangedMsg{Name: name} }
+		// Callback persistence path (mirrors PersistModelChoice in
+		// dialog_modelpicker.go), off the Update goroutine because it
+		// is host code writing to the host's config (issue #137). A
+		// failure lands later as persistDoneMsg and doesn't block the
+		// switch — the operator's session reflects the pick either way.
+		cmd := tea.Batch(
+			func() tea.Msg { return ThemeChangedMsg{Name: name} },
+			persistChoiceCmd(m.sessionGen, "/theme", m.opts.PersistThemeChoice, name),
+		)
 		return DialogAction{Consumed: true, Close: true, Cmd: cmd}
 	}
 	// Unknown key — consume so it doesn't leak to the textarea

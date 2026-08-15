@@ -274,30 +274,31 @@ func (d *modelPickerDialog) DialogCursor(_ int, m *Model) *tea.Cursor {
 // the new agent (or report the failure), persist, and re-resolve the
 // theme. Called only after the sessionGen guard has passed, because
 // it replaces m.opts.Agent.
-func (m *Model) applyModelSwitch(msg modelSwitchedMsg) {
+//
+// Returns the Cmd that runs Options.PersistModelChoice — host code
+// that writes the pick to the host's config, so it doesn't belong on
+// the Update goroutine either (issue #137). Nil when unwired; the
+// failure row arrives later as persistDoneMsg.
+func (m *Model) applyModelSwitch(msg modelSwitchedMsg) tea.Cmd {
 	if msg.err != nil {
 		m.history.Append(Message{Role: RoleError, Text: "/model: switch failed: " + msg.err.Error()})
 		m.refreshViewport()
-		return
+		return nil
 	}
 	if msg.agent == nil {
 		m.history.Append(Message{Role: RoleError, Text: "/model: ModelSwapper returned nil Agent"})
 		m.refreshViewport()
-		return
+		return nil
 	}
 	m.opts.Agent = msg.agent
 	m.history.Append(Message{Role: RoleSystem, Text: "/model: switched to " + msg.id})
-	if m.opts.PersistModelChoice != nil {
-		if perr := m.opts.PersistModelChoice(msg.id); perr != nil {
-			m.history.Append(Message{Role: RoleError, Text: "/model: persist failed: " + perr.Error()})
-		}
-	}
 	// Refresh the theme so per-provider palettes (when
 	// AutoProviderTheme is on) track the freshly-selected
 	// model's provider. No-op when AutoProviderTheme is off
 	// — resolveStyles returns the same DefaultTheme.
 	m.refreshTheme()
 	m.refreshViewport()
+	return persistChoiceCmd(m.sessionGen, "/model", m.opts.PersistModelChoice, msg.id)
 }
 
 func (d *modelPickerDialog) Render(totalWidth int, m *Model) string {

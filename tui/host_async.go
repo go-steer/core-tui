@@ -40,6 +40,13 @@
 // Handing a host context.Background() when it has explicitly asked to
 // be cancellable is the worst version of this bug: the contract says
 // "I may be slow" and we reply "take as long as you like".
+//
+// Issue #137 extended the same treatment to the call sites that fire
+// on an explicit /cmd rather than a bare keystroke, and to the
+// Options.* host callbacks. Those callbacks are not §3.3 capabilities
+// — they are plain func fields — but they are still host-supplied
+// code, they routinely write to disk, and Shift+Tab reached two of
+// them from a bare keystroke with the error thrown away.
 
 package tui
 
@@ -170,5 +177,143 @@ func pricingRefreshCmd(ctrl PricingController, gen uint64) tea.Cmd {
 		defer cancel()
 		summary, err := ctrl.Refresh(ctx)
 		return pricingRefreshedMsg{gen: gen, summary: summary, err: err}
+	}
+}
+
+// ---- issue #137: the /cmd path and the Options.* callbacks ----
+
+// permissionModeCmd applies one Shift+Tab step of the permission-mode
+// cycle through Options.PermissionMode, off the Update goroutine.
+//
+// This is #137's headline call site and the only one in this group
+// that fires on a BARE KEYSTROKE. Both halves are host code: Set hands
+// the new policy to the gate, and Persist writes it to the host's
+// config — a disk write, on Shift+Tab, from inside Update. Both
+// returned errors used to be discarded into `_`.
+//
+// prev rides along so the handler can roll the chip back when the host
+// refuses the mode. A chip reading "bypassPermissions" while the gate
+// is still asking for every call is worse than a stale chip; it is a
+// safety claim core-tui cannot back.
+func permissionModeCmd(wiring PermissionModeWiring, gen uint64, prev, mode PermissionMode) tea.Cmd {
+	set, persist := wiring.Set, wiring.Persist
+	if set == nil {
+		return nil
+	}
+	return func() tea.Msg {
+		out := permissionModeAppliedMsg{gen: gen, prev: prev, mode: mode}
+		if out.err = set(mode); out.err != nil {
+			// Don't persist a mode the gate rejected.
+			return out
+		}
+		if persist != nil {
+			out.persistErr = persist(mode)
+		}
+		return out
+	}
+}
+
+// persistChoiceCmd runs one of the Options persistence callbacks
+// (PersistModelChoice, PersistThemeChoice, PersistStatusLayout) off
+// the Update goroutine. Each writes the operator's pick to the host's
+// config file, so each is disk I/O reached from a keystroke — Ctrl+B
+// for the layout, Enter in the theme picker, Enter in the model
+// picker.
+//
+// what is the prefix for the failure row ("/model", "/theme", …). fn
+// and v are copied into the closure, which touches nothing else; a nil
+// fn means the host didn't wire persistence and there is no Cmd.
+func persistChoiceCmd[T any](gen uint64, what string, fn func(T) error, v T) tea.Cmd {
+	if fn == nil {
+		return nil
+	}
+	return func() tea.Msg {
+		return persistDoneMsg{gen: gen, what: what, err: fn(v)}
+	}
+}
+
+// toolsCmd pulls ToolLister.Tools() for /tools off the Update
+// goroutine. The catalog can be large and, on a remote host, is a
+// round trip.
+func toolsCmd(lister ToolLister, gen uint64) tea.Cmd {
+	return func() tea.Msg {
+		return toolsListedMsg{gen: gen, tools: lister.Tools()}
+	}
+}
+
+// sessionApprovalsCmd pulls PermissionController.SessionApprovals()
+// for /permissions off the Update goroutine.
+func sessionApprovalsCmd(ctrl PermissionController, gen uint64) tea.Cmd {
+	return func() tea.Msg {
+		return approvalsListedMsg{gen: gen, logs: ctrl.SessionApprovals()}
+	}
+}
+
+// permissionRuleOp names which PermissionController mutator a
+// permissionRuleCmd should call. One Cmd covers all three because the
+// three differ only in the method name — the dispatch shape, the
+// generation guard, and the result row are identical.
+type permissionRuleOp int
+
+const (
+	permissionRuleAllow       permissionRuleOp = iota // AddAllowPatterns
+	permissionRuleDeny                                // AddDenyPatterns
+	permissionRuleAllowBundle                         // AddBuiltinAllowExtra
+)
+
+// permissionRuleCmd runs one of the PermissionController mutators for
+// /allow or /deny off the Update goroutine. These write through to the
+// host's permission gate and, on hosts that persist their rule set,
+// to disk.
+func permissionRuleCmd(ctrl PermissionController, gen uint64, op permissionRuleOp, arg string) tea.Cmd {
+	return func() tea.Msg {
+		var err error
+		switch op {
+		case permissionRuleAllowBundle:
+			err = ctrl.AddBuiltinAllowExtra(arg)
+		case permissionRuleDeny:
+			err = ctrl.AddDenyPatterns([]string{arg})
+		default:
+			err = ctrl.AddAllowPatterns([]string{arg})
+		}
+		return permissionRuleAddedMsg{gen: gen, op: op, arg: arg, err: err}
+	}
+}
+
+// subagentRosterCmd pulls SubagentLister.Subagents() for a bare
+// /subagents off the Update goroutine. The sidebar's copy of this read
+// already goes through hostSnapshot; this is the slash path, which
+// wants a fresh pull rather than a snapshot up to
+// hostSnapshotInterval old.
+//
+// drillable is resolved at construction (it is a type assertion
+// against the model's agent) so the closure only carries the answer.
+func subagentRosterCmd(lister SubagentLister, gen uint64, drillable bool) tea.Cmd {
+	return func() tea.Msg {
+		return subagentRosterMsg{gen: gen, subs: lister.Subagents(), drillable: drillable}
+	}
+}
+
+// pricingSetCmd runs PricingController.Set off the Update goroutine.
+// Shared by the positional `/pricing set <id> <in> <out>` form and the
+// huh form's submit handler, so both reach the host the same way.
+//
+// Set takes no context, so there is nothing to bound — but "no ctx" is
+// not a promise of speed, and a host that writes its price table to
+// disk (or upstream) inside Set would stall the loop for the write.
+func pricingSetCmd(ctrl PricingController, gen uint64, id string, in, out float64) tea.Cmd {
+	return func() tea.Msg {
+		summary, err := ctrl.Set(id, in, out)
+		return pricingSetMsg{gen: gen, summary: summary, err: err}
+	}
+}
+
+// helpCommandsCmd pulls SlashProvider.SlashCommands() for /help off
+// the Update goroutine. The built-in half of the help text needs no
+// host at all, so it renders on the keystroke and the host's section
+// lands as a follow-up row.
+func helpCommandsCmd(provider SlashProvider, gen uint64) tea.Cmd {
+	return func() tea.Msg {
+		return helpCommandsMsg{gen: gen, specs: provider.SlashCommands()}
 	}
 }
