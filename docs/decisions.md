@@ -569,3 +569,38 @@ plumbing in every modal. Hand-rolled modals stay possible for
 surfaces that genuinely don't fit a form (the slash-command palette
 and the file-`@`-picker, which are autocomplete UIs, not forms — they
 keep their bespoke implementations).
+
+---
+
+## D27. Picker filtering: reuse the palette's ranker, don't add a fuzzy matcher
+
+**Question:** The model / session / theme pickers had no
+type-to-filter at all ([#117](https://github.com/go-steer/core-tui/issues/117)).
+What ranks the matches — a real fuzzy matcher, or the classifier the
+slash palette already uses?
+
+**Options:**
+
+- (A) `sahilm/fuzzy`. True subsequence matching with per-rune match
+  positions, so `mgo` finds `main.go` and the highlight can pick out
+  scattered runes. One more direct dependency.
+- (B) **Lift `palette.filtered`'s ranker into a shared helper.** Four
+  case-folded tiers — exact basename, basename prefix, whole path
+  segment, substring anywhere — tiebroken by shorter name. Already
+  written, already tested, already the ordering operators see when
+  they type `/`.
+
+**Recommendation: (B), lift it.** The repo has eight direct
+dependencies and N-DEPS exists to keep that number honest; forty
+model IDs and a hundred session names do not justify a ninth. Reuse
+also means the palette and the pickers rank the same way, which is
+the kind of consistency an operator notices without being able to
+name it.
+
+**Tradeoff acknowledged:** the tiers are contiguous-substring tests,
+so `mgo` does not find `main.go`, and a match highlight is a single
+span rather than a scatter of runes. The issue's "highlight the
+matched runes" wording is fuzzy-subsequence language and was amended
+to match. Whether to adopt real fuzzy matching — for the palette and
+the pickers together, so they cannot drift — is a follow-up
+evaluation, not something to half-implement on one surface.

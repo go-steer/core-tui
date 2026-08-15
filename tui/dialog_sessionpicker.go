@@ -57,6 +57,11 @@ type sessionPickerDialog struct {
 	// so the list windows around the cursor.
 	off int
 
+	// filter is the type-to-filter row (issue #117), narrowing rows().
+	// A project with a hundred saved sessions is the case that
+	// motivates it hardest.
+	filter pickerFilter
+
 	// switching is the session ID of an in-flight SwitchToSession, or
 	// "". The dialog stays open showing progress until
 	// sessionSwitchedMsg lands.
@@ -67,7 +72,7 @@ type sessionPickerDialog struct {
 // Prefer Model.openSessionPicker, which pairs the Open with the Cmd
 // that fills it.
 func newSessionPickerDialog() *sessionPickerDialog {
-	return &sessionPickerDialog{idx: 0}
+	return &sessionPickerDialog{idx: 0, filter: newPickerFilter()}
 }
 
 // openSessionPicker pushes the session picker (singleton) and returns
@@ -84,8 +89,24 @@ func (m *Model) openSessionPicker() tea.Cmd {
 func (d *sessionPickerDialog) ID() string { return sessionPickerDialogID }
 
 // rows returns the list the cursor indexes into and Render paints —
-// the same filtering seam as modelPickerDialog.rows.
-func (d *sessionPickerDialog) rows() []SessionInfo { return d.sessions }
+// the snapshot narrowed by the filter row, through the same seam and
+// the same ranker as modelPickerDialog.rows.
+func (d *sessionPickerDialog) rows() []SessionInfo {
+	filter := d.filter.value()
+	if filter == "" {
+		return d.sessions
+	}
+	keys := make([]string, len(d.sessions))
+	for i, s := range d.sessions {
+		keys[i] = pickerKey(s.Display, s.ID)
+	}
+	idx := rankNames(keys, filter)
+	out := make([]SessionInfo, len(idx))
+	for i, at := range idx {
+		out[i] = d.sessions[at]
+	}
+	return out
+}
 
 // applySessions installs the open-time snapshot, from Update's
 // sessionsLoadedMsg handler.
@@ -96,7 +117,17 @@ func (d *sessionPickerDialog) applySessions(sessions []SessionInfo) {
 	d.off = 0
 }
 
+// HandleKey satisfies Dialog for callers holding only a normalized
+// stroke; the real handler is HandleKeyMsg, because the filter row
+// needs Key.Text and bracketed pastes that a stroke string drops.
 func (d *sessionPickerDialog) HandleKey(stroke string, m *Model) DialogAction {
+	return d.HandleKeyMsg(keyMsgFromStroke(stroke), m)
+}
+
+// HandleKeyMsg is the real key handler: navigation strokes drive the
+// list, everything else is filter input.
+func (d *sessionPickerDialog) HandleKeyMsg(msg tea.KeyPressMsg, m *Model) DialogAction {
+	stroke := msg.String()
 	if stroke == "esc" {
 		return DialogAction{Consumed: true, Close: true}
 	}
@@ -113,24 +144,33 @@ func (d *sessionPickerDialog) HandleKey(stroke string, m *Model) DialogAction {
 	if !d.loaded {
 		return DialogAction{Consumed: true}
 	}
-	sessions := d.rows()
-	if len(sessions) == 0 {
+	if len(d.sessions) == 0 {
+		// The HOST enumerated nothing — unchanged from before the
+		// filter existed. Distinct from the filter matching nothing.
 		m.history.Append(Message{Role: RoleSystem, Text: "/switch: no sessions available"})
 		m.refreshViewport()
 		return DialogAction{Consumed: true, Close: true}
 	}
-	if d.idx >= len(sessions) {
-		d.idx = len(sessions) - 1
+	if !pickerNavStroke(stroke) {
+		cmd, changed := d.filter.handleKeyMsg(msg)
+		if changed {
+			d.idx, d.off = 0, 0
+		}
+		return DialogAction{Consumed: true, Cmd: cmd}
 	}
-	if d.idx < 0 {
-		d.idx = 0
+
+	sessions := d.rows()
+	if len(sessions) == 0 {
+		// The FILTER matched nothing; stay open so it can be edited.
+		return DialogAction{Consumed: true}
 	}
+	d.idx = clampIndex(d.idx, len(sessions))
 	switch stroke {
 	case "up", "ctrl+p":
-		d.idx = (d.idx - 1 + len(sessions)) % len(sessions)
+		d.idx = stepIndex(d.idx, -1, len(sessions))
 		return DialogAction{Consumed: true}
 	case "down", "ctrl+n":
-		d.idx = (d.idx + 1) % len(sessions)
+		d.idx = stepIndex(d.idx, 1, len(sessions))
 		return DialogAction{Consumed: true}
 	case "enter":
 		pick := sessions[d.idx]
@@ -193,59 +233,62 @@ func (d *sessionPickerDialog) Render(totalWidth int, m *Model) string {
 		body = m.styles.Muted.Render("attaching to " + d.switching + "…")
 	case !d.loaded:
 		body = m.styles.Muted.Render("loading sessions…")
+	case len(d.sessions) == 0:
+		body = m.styles.Muted.Render("(no sessions advertised by the agent)")
 	default:
 		sessions := d.rows()
+		filter := d.filter.value()
+		// The filter row is the first body row and costs the +1 on
+		// modalChromeRows below.
+		lines := []string{d.filter.render(width, len(sessions), len(d.sessions), m.styles)}
 		if len(sessions) == 0 {
-			body = m.styles.Muted.Render("(no sessions advertised by the agent)")
-		} else {
-			// Clamp cursor into range in case Sessions() shrank
-			// between opens (the picker is short-lived so this
-			// is defensive, not a hot path).
-			if d.idx >= len(sessions) {
-				d.idx = len(sessions) - 1
-			}
-			if d.idx < 0 {
-				d.idx = 0
-			}
-			rows := make([]string, 0, len(sessions))
-			for i, s := range sessions {
-				disp := s.Display
-				if disp == "" {
-					disp = s.ID
-				}
-				marker := "  "
-				if i == d.idx {
-					marker = "> "
-				}
-				row := marker + disp
-				// Action rows (issue #56) carry no session identity
-				// — showing "(id)" or "(current)" next to
-				// "+ Attach to endpoint…" would read as a session
-				// that exists. Their affordance is the ▸ chevron.
-				if s.Input != nil {
-					row += "  " + m.styles.Muted.Render(GlyphCollapsed)
-				} else {
-					if s.ID != disp {
-						row += m.styles.Muted.Render("  (" + s.ID + ")")
-					}
-					if s.Current {
-						row += "  " + m.styles.Muted.Render("(current)")
-					}
-				}
-				if s.Description != "" {
-					row += "  " + m.styles.Muted.Render(s.Description)
-				}
-				if i == d.idx {
-					row = m.styles.Accent.Render(row)
-				}
-				rows = append(rows, row)
-			}
-			view := modalBodyHeight(m.height, modalChromeRows)
-			d.off = listWindow(d.off, d.idx, len(rows), view)
-			body = strings.Join(scrollView(m.styles, rows, nonNeg(width-4), view, d.off), "\n")
+			lines = append(lines, m.styles.Muted.Render("no sessions match "+quoteFilter(filter)))
+			body = strings.Join(lines, "\n")
+			break
 		}
+		// Clamp cursor into range in case Sessions() shrank
+		// between opens, or the filter shrank the list under it.
+		d.idx = clampIndex(d.idx, len(sessions))
+		rows := make([]string, 0, len(sessions))
+		for i, s := range sessions {
+			disp := s.Display
+			if disp == "" {
+				disp = s.ID
+			}
+			base := lipgloss.NewStyle()
+			marker := "  "
+			if i == d.idx {
+				marker, base = "> ", m.styles.Accent
+			}
+			row := base.Render(marker) + highlightSpan(disp, filter, base)
+			// Action rows (issue #56) carry no session identity
+			// — showing "(id)" or "(current)" next to
+			// "+ Attach to endpoint…" would read as a session
+			// that exists. Their affordance is the ▸ chevron.
+			if s.Input != nil {
+				row += "  " + m.styles.Muted.Render(GlyphCollapsed)
+			} else {
+				if s.ID != disp {
+					row += m.styles.Muted.Render("  (") +
+						highlightSpan(s.ID, filter, m.styles.Muted) +
+						m.styles.Muted.Render(")")
+				}
+				if s.Current {
+					row += "  " + m.styles.Muted.Render("(current)")
+				}
+			}
+			if s.Description != "" {
+				row += "  " + m.styles.Muted.Render(s.Description)
+			}
+			rows = append(rows, row)
+		}
+		view := modalBodyHeight(m.height, modalChromeRows+1)
+		d.off = listWindow(d.off, d.idx, len(rows), view)
+		lines = append(lines, scrollView(m.styles, rows, nonNeg(width-4), view, d.off)...)
+		body = strings.Join(lines, "\n")
 	}
-	footer := "↑↓ choose " + GlyphSeparator + " enter attach " + GlyphSeparator + " esc cancel"
+	footer := "type to filter " + GlyphSeparator + " ↑↓ choose " +
+		GlyphSeparator + " enter attach " + GlyphSeparator + " esc cancel"
 	return RenderContext{
 		Title:  "Choose a Session",
 		Body:   body,
@@ -253,6 +296,27 @@ func (d *sessionPickerDialog) Render(totalWidth int, m *Model) string {
 		Width:  width,
 		Styles: m.styles,
 	}.Render()
+}
+
+// filtering reports whether the filter row is on screen — the same
+// condition as the picker owning the caret. Loading, an in-flight
+// attach, an unwired agent and an empty enumeration all render
+// something with nothing to narrow.
+func (d *sessionPickerDialog) filtering(m *Model) bool {
+	if _, wired := m.opts.Agent.(SessionSwitcher); !wired {
+		return false
+	}
+	return d.loaded && d.switching == "" && len(d.sessions) > 0
+}
+
+// DialogCursor implements cursorDialog so the filter row gets a real
+// terminal caret rather than modalCursor's (nil, true) — see the
+// model picker's for why that matters (#105 / #123).
+func (d *sessionPickerDialog) DialogCursor(_ int, m *Model) *tea.Cursor {
+	if !d.filtering(m) {
+		return nil
+	}
+	return filterRowCursor(d.filter.cursor())
 }
 
 // sessionInputDialogID is the text-input dialog the picker stacks
@@ -307,7 +371,3 @@ func newSessionInputDialog(row SessionInfo) Dialog {
 		},
 	})
 }
-
-// Keep lipgloss import happy — RenderContext pulls it in via
-// Styles but this file's direct use is limited.
-var _ = lipgloss.Left

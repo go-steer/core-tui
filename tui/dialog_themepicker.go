@@ -23,6 +23,7 @@ import (
 	"strings"
 
 	tea "charm.land/bubbletea/v2"
+	"charm.land/lipgloss/v2"
 )
 
 const themePickerDialogID = "theme-picker"
@@ -37,6 +38,12 @@ type themePickerDialog struct {
 	// outgrows a short terminal, so the list windows around the
 	// cursor rather than painting past the bottom edge.
 	off int
+
+	// filter is the type-to-filter row (issue #117). This picker read
+	// BuiltinThemes() straight from HandleKey and Render and had no
+	// rows() accessor at all — the filter brought it into line with
+	// the other two.
+	filter pickerFilter
 }
 
 // newThemePickerDialog focuses the row matching the currently
@@ -53,18 +60,49 @@ func newThemePickerDialog(currentName string) *themePickerDialog {
 			break
 		}
 	}
-	return &themePickerDialog{idx: idx, originalName: currentName}
+	return &themePickerDialog{idx: idx, originalName: currentName, filter: newPickerFilter()}
 }
 
 func (d *themePickerDialog) ID() string { return themePickerDialogID }
 
-func (d *themePickerDialog) HandleKey(stroke string, m *Model) DialogAction {
+// rows returns the registry narrowed by the filter row, ranked by the
+// shared classifier (rank.go).
+func (d *themePickerDialog) rows() []BuiltinTheme {
 	themes := BuiltinThemes()
-	if len(themes) == 0 {
-		return DialogAction{Consumed: true, Close: true}
+	filter := d.filter.value()
+	if filter == "" {
+		return themes
 	}
-	switch stroke {
-	case "esc":
+	keys := make([]string, len(themes))
+	for i, bt := range themes {
+		keys[i] = bt.Name
+	}
+	idx := rankNames(keys, filter)
+	out := make([]BuiltinTheme, len(idx))
+	for i, at := range idx {
+		out[i] = themes[at]
+	}
+	return out
+}
+
+// HandleKey satisfies Dialog for callers holding only a normalized
+// stroke; HandleKeyMsg is the real handler, because a stroke string
+// drops Key.Text and cannot carry a paste.
+func (d *themePickerDialog) HandleKey(stroke string, m *Model) DialogAction {
+	return d.HandleKeyMsg(keyMsgFromStroke(stroke), m)
+}
+
+// HandleKeyMsg drives the list on navigation strokes and feeds
+// everything else to the filter.
+//
+// Filtering deliberately does NOT preview. The live preview is bound
+// to cursor MOVEMENT — which is what the "↑↓ preview" footer promises
+// — and repainting the whole chat in a new palette on every keystroke
+// of a filter would be a strobe, not a preview. Enter still applies
+// whatever row is highlighted, so no theme becomes unreachable.
+func (d *themePickerDialog) HandleKeyMsg(msg tea.KeyPressMsg, m *Model) DialogAction {
+	stroke := msg.String()
+	if stroke == "esc" {
 		// Restore the theme that was active when the picker
 		// opened. applyNamedTheme tolerates an empty string ("")
 		// which falls back to the auto / per-provider path —
@@ -72,12 +110,31 @@ func (d *themePickerDialog) HandleKey(stroke string, m *Model) DialogAction {
 		// explicit pick before opening the picker.
 		m.applyNamedTheme(d.originalName)
 		return DialogAction{Consumed: true, Close: true}
+	}
+	if len(BuiltinThemes()) == 0 {
+		return DialogAction{Consumed: true, Close: true}
+	}
+	if !pickerNavStroke(stroke) {
+		cmd, changed := d.filter.handleKeyMsg(msg)
+		if changed {
+			d.idx, d.off = 0, 0
+		}
+		return DialogAction{Consumed: true, Cmd: cmd}
+	}
+
+	themes := d.rows()
+	if len(themes) == 0 {
+		// The filter matched no theme; stay open so it can be edited.
+		return DialogAction{Consumed: true}
+	}
+	d.idx = clampIndex(d.idx, len(themes))
+	switch stroke {
 	case "up", "ctrl+p":
-		d.idx = (d.idx - 1 + len(themes)) % len(themes)
+		d.idx = stepIndex(d.idx, -1, len(themes))
 		m.applyNamedTheme(themes[d.idx].Name)
 		return DialogAction{Consumed: true}
 	case "down", "ctrl+n":
-		d.idx = (d.idx + 1) % len(themes)
+		d.idx = stepIndex(d.idx, 1, len(themes))
 		m.applyNamedTheme(themes[d.idx].Name)
 		return DialogAction{Consumed: true}
 	case "enter":
@@ -114,34 +171,46 @@ func (d *themePickerDialog) Render(totalWidth int, m *Model) string {
 		width = 30
 	}
 
-	themes := BuiltinThemes()
+	all := BuiltinThemes()
 	body := ""
-	if len(themes) == 0 {
+	switch {
+	case len(all) == 0:
 		body = m.styles.Muted.Render("(no themes registered)")
-	} else {
+	default:
+		themes := d.rows()
+		filter := d.filter.value()
+		// The filter row is the first body row; its cost is the +1 on
+		// modalChromeRows below.
+		lines := []string{d.filter.render(width, len(themes), len(all), m.styles)}
+		if len(themes) == 0 {
+			lines = append(lines, m.styles.Muted.Render("no themes match "+quoteFilter(filter)))
+			body = strings.Join(lines, "\n")
+			break
+		}
+		d.idx = clampIndex(d.idx, len(themes))
 		rows := make([]string, 0, len(themes))
 		for i, bt := range themes {
+			base := lipgloss.NewStyle()
 			marker := "  "
 			if i == d.idx {
-				marker = "> "
+				marker, base = "> ", m.styles.Accent
 			}
-			row := marker + bt.Name
+			row := base.Render(marker) + highlightSpan(bt.Name, filter, base)
 			if strings.EqualFold(bt.Name, m.themeName) {
 				row += "  " + m.styles.Muted.Render("(current)")
 			}
 			if bt.Description != "" {
 				row += "  " + m.styles.Muted.Render(bt.Description)
 			}
-			if i == d.idx {
-				row = m.styles.Accent.Render(row)
-			}
 			rows = append(rows, row)
 		}
-		view := modalBodyHeight(m.height, modalChromeRows)
+		view := modalBodyHeight(m.height, modalChromeRows+1)
 		d.off = listWindow(d.off, d.idx, len(rows), view)
-		body = strings.Join(scrollView(m.styles, rows, nonNeg(width-4), view, d.off), "\n")
+		lines = append(lines, scrollView(m.styles, rows, nonNeg(width-4), view, d.off)...)
+		body = strings.Join(lines, "\n")
 	}
-	footer := "↑↓ preview " + GlyphSeparator + " enter accept " + GlyphSeparator + " esc cancel"
+	footer := "type to filter " + GlyphSeparator + " ↑↓ preview " +
+		GlyphSeparator + " enter accept " + GlyphSeparator + " esc cancel"
 	return RenderContext{
 		Title:  "Choose a Theme",
 		Body:   body,
@@ -149,4 +218,14 @@ func (d *themePickerDialog) Render(totalWidth int, m *Model) string {
 		Width:  width,
 		Styles: m.styles,
 	}.Render()
+}
+
+// DialogCursor implements cursorDialog so the filter row owns the
+// terminal caret. Nil only when the registry is empty — every other
+// state of this picker renders the filter row.
+func (d *themePickerDialog) DialogCursor(_ int, _ *Model) *tea.Cursor {
+	if len(BuiltinThemes()) == 0 {
+		return nil
+	}
+	return filterRowCursor(d.filter.cursor())
 }

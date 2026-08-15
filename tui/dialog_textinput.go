@@ -264,8 +264,12 @@ func (d *textInputDialog) Render(totalWidth int, m *Model) string {
 // body. Inside the body the input is the first part unless a prompt
 // line was configured, in which case it is the second. The inline
 // validation error renders BELOW the input and never moves it.
+//
+// The column comes from textInputCursor rather than straight from the
+// widget: bubbles' own textinput.Cursor() mixes a rune index with a
+// cell width and ignores its scroll offset (issue #125, cursor.go).
 func (d *textInputDialog) DialogCursor(_ int, _ *Model) *tea.Cursor {
-	c := d.input.Cursor()
+	c := textInputCursor(d.input, d.input.Prompt)
 	if c == nil {
 		return nil // blurred
 	}
@@ -288,7 +292,13 @@ func (d *textInputDialog) syncStyles(s Styles) {
 	d.styled = true
 	d.styledDark = s.Dark
 	d.styledTheme = s.Theme.Name
+	d.input.SetStyles(textInputStyles(s))
+}
 
+// textInputStyles maps the active theme onto a bubbles textinput
+// palette. Shared with the pickers' filter row (dialog_filter.go) so
+// the two typed surfaces cannot drift apart.
+func textInputStyles(s Styles) textinput.Styles {
 	ts := textinput.DefaultStyles(s.Dark)
 	ts.Focused.Prompt = lipgloss.NewStyle().Foreground(s.Theme.BorderActive)
 	ts.Blurred.Prompt = lipgloss.NewStyle().Foreground(s.Theme.FgMuted)
@@ -302,7 +312,7 @@ func (d *textInputDialog) syncStyles(s Styles) {
 	// the widget and the Dialog contract is keystrokes-only — no msg
 	// pipe. That constraint died with the virtual cursor.
 	ts.Cursor.Blink = true
-	d.input.SetStyles(ts)
+	return ts
 }
 
 // keyMsgFromStroke rebuilds a tea.KeyPressMsg from the normalized

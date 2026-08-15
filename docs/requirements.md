@@ -328,7 +328,8 @@ listed in `/help`:
 ### 3.8 Model picker (must)
 
 - **R-MOD-1** `/model` opens a list of model IDs returned by the
-  `ModelSwapper.AvailableModels()` method. ↑/↓ + Enter to switch.
+  `ModelSwapper.AvailableModels()` method. ↑/↓ + Enter to switch;
+  type to filter (§3.24).
 - **R-MOD-2** `/model <id>` switches without opening the picker.
 - **R-MOD-3** A successful switch is persisted via
   `Options.PersistModelChoice` if non-nil.
@@ -339,8 +340,8 @@ listed in `/help`:
 
 - **R-SWITCH-1** `/switch` opens a picker of sessions returned by
   `SessionSwitcher.Sessions()`; the currently-attached row is marked
-  `(current)`. ↑/↓ + Enter attach; Esc cancels without swap. `/sess`
-  is an alias.
+  `(current)`. ↑/↓ + Enter attach; Esc cancels without swap; type to
+  filter (§3.24). `/sess` is an alias.
 - **R-SWITCH-2** `/switch <id>` attaches directly, no picker.
 - **R-SWITCH-3** Any `SlashProvider` / `AsyncSlashProvider` /
   `AsyncSlashProviderWithPreamble` return value MAY populate
@@ -626,14 +627,38 @@ listed in `/help`:
   configured cursor shape and blink apply, and what assistive
   technology follows.
 - **R-CUR-2** When a modal owns input the cursor goes with it — the
-  elicitation form's focused field, a text-input dialog. A modal
-  that takes no typed text (a permission decision, the `/btw`
-  viewer, an arrow-nav picker) and an unfocused input leave the
-  cursor unset, so the terminal hides it rather than showing it on
-  an unrelated cell.
+  elicitation form's focused field, a text-input dialog, a picker's
+  filter row (§3.24). A modal that takes no typed text (a permission
+  decision, the `/btw` viewer, a read-only detail overlay) and an
+  unfocused input leave the cursor unset, so the terminal hides it
+  rather than showing it on an unrelated cell.
 - **R-CUR-3** The cursor position is always inside the rendered
   frame. A surface clipped out of the frame yields no cursor at all
   rather than a stale position.
+- **R-CUR-4** The caret column is measured in terminal CELLS, not in
+  runes or bytes, on every surface — a value containing double-width
+  runes places the caret on the glyph it belongs to. Where an
+  upstream widget gets this wrong the library corrects it locally.
+
+### 3.24 Picker filtering (must) — issue #117
+
+- **R-FILT-1** The model, session and theme pickers each carry a
+  one-line filter input as the first row of their body. Typing
+  narrows the list as the operator types; the arrow keys, Enter and
+  Esc keep their meanings and everything else is filter text.
+- **R-FILT-2** Filtering uses the same ranking as the command
+  palette (R-PAL-3): case-insensitive, four tiers — exact basename,
+  basename prefix, whole path segment, substring anywhere — tiebroken
+  by shorter name. Matching is on contiguous substrings, so the match
+  highlight on a row is a single span.
+- **R-FILT-3** The filter row shows a `matched/total` count once a
+  filter is active. A filter that matches nothing renders a "no
+  matches" line and leaves the picker open with the filter row still
+  editable; it is not the same state as a host that advertised an
+  empty list, which still reports that in the chat and closes.
+- **R-FILT-4** The selection stays inside the filtered list at all
+  times. Narrowing the list moves the cursor to the best match, and
+  Enter commits the highlighted row of the FILTERED list.
 
 ## 4. Non-functional Requirements
 

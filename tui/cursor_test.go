@@ -31,6 +31,7 @@ import (
 	"strings"
 	"testing"
 
+	"charm.land/bubbles/v2/textinput"
 	tea "charm.land/bubbletea/v2"
 	"charm.land/lipgloss/v2"
 	"github.com/charmbracelet/x/ansi"
@@ -215,6 +216,151 @@ func TestCursor_ModalTakesCursor(t *testing.T) {
 	}
 }
 
+// TestCursor_ModalCaretCountsCells is issue #125's reproducer at the
+// frame level: a text-input dialog holding double-width runes.
+//
+// bubbles' textinput.Cursor() computes its column as
+// `m.Position() + promptWidth` — a RUNE INDEX plus a CELL WIDTH — so
+// every wide rune before the caret loses it a cell. With eight CJK
+// runes the caret lands eight columns left of the glyph it belongs
+// on, which is where an IME would open its candidate window. The
+// irony noted in the issue is that IME anchoring is the entire reason
+// the hardware cursor was wired up (#105).
+//
+// This is the same assertion as TestCursor_ModalTakesCursor with the
+// initial value swapped, which is exactly how the issue describes
+// reproducing it.
+func TestCursor_ModalCaretCountsCells(t *testing.T) {
+	for _, initial := range []string{
+		"日本語プロジェクト",   // 9 runes, 18 cells
+		"a日b語c",       // mixed widths
+		"😀😀😀",         // 3 runes, 6 cells
+		"plain-ascii", // the case that always worked
+	} {
+		t.Run(initial, func(t *testing.T) {
+			m := cursorModel(t, StatusHeader, 100, 30)
+			m.overlayStack.Open(NewTextInputDialog(TextInputConfig{
+				Title:   "Attach to Endpoint",
+				Prompt:  "Daemon URL:",
+				Initial: initial,
+			}))
+			v := m.View()
+			// "▎ " is the dialog input's own prompt rail.
+			assertCursorFollows(t, v, "▎ "+initial)
+		})
+	}
+}
+
+// TestTextInputCursor_ColumnIsCells pins the corrected column
+// directly, away from the modal chrome: prompt cells plus the cell
+// width of the value up to the caret, for a caret anywhere in the
+// value rather than only at the end.
+func TestTextInputCursor_ColumnIsCells(t *testing.T) {
+	cases := []struct {
+		name   string
+		prompt string
+		value  string
+		left   int // times to press Left from the end
+		wantX  int
+	}{
+		{name: "ascii-end", prompt: "▎ ", value: "hello", wantX: 2 + 5},
+		{name: "ascii-mid", prompt: "▎ ", value: "hello", left: 2, wantX: 2 + 3},
+		{name: "cjk-end", prompt: "▎ ", value: "日本語", wantX: 2 + 6},
+		{name: "cjk-mid", prompt: "▎ ", value: "日本語", left: 1, wantX: 2 + 4},
+		{name: "cjk-start", prompt: "▎ ", value: "日本語", left: 3, wantX: 2},
+		{name: "emoji", prompt: "▎ ", value: "😀x", left: 1, wantX: 2 + 2},
+		{name: "combining", prompt: "▎ ", value: "café", wantX: 2 + 4},
+		{name: "no-prompt", prompt: "", value: "日", wantX: 2},
+		{name: "empty-value", prompt: "▎ ", value: "", wantX: 2},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			ti := textinput.New()
+			ti.Prompt = tc.prompt
+			ti.SetVirtualCursor(false)
+			ti.SetWidth(40)
+			_ = ti.Focus()
+			ti.SetValue(tc.value)
+			ti.CursorEnd()
+			for i := 0; i < tc.left; i++ {
+				ti, _ = ti.Update(tea.KeyPressMsg(tea.Key{Code: tea.KeyLeft}))
+			}
+			c := textInputCursor(ti, tc.prompt)
+			if c == nil {
+				t.Fatal("focused input returned no cursor")
+			}
+			if c.X != tc.wantX {
+				t.Errorf("cursor X = %d, want %d (value %q, caret at rune %d)",
+					c.X, tc.wantX, tc.value, ti.Position())
+			}
+		})
+	}
+}
+
+// TestTextInputCursor_ScrolledFallsBackToUpstream pins the HALF of
+// issue #125 that cannot be fixed downstream, so the split stays
+// deliberate rather than becoming an oversight someone later "fixes"
+// with a guess.
+//
+// Bug 2 is that textinput.Cursor() ignores m.offset, the horizontal
+// scroll position. There is no exported accessor for it — no
+// Offset() on textinput.Model — so once the value is wider than the
+// box, Value() and Position() no longer describe what is on screen
+// and any column computed from them is a different wrong answer.
+// Correcting it means reimplementing handleOverflow's arithmetic
+// against state we cannot observe. So: fall through to upstream, and
+// pin that we do.
+//
+// The value that FITS is corrected, which is where the caret spends
+// almost all of its life. When the upstream fix lands, this is the
+// test that changes.
+func TestTextInputCursor_ScrolledFallsBackToUpstream(t *testing.T) {
+	ti := textinput.New()
+	ti.Prompt = "▎ "
+	ti.SetVirtualCursor(false)
+	ti.SetWidth(10)
+	_ = ti.Focus()
+	ti.SetValue("https://example.test/a/rather/long/path")
+	ti.CursorEnd()
+	for i := 0; i < 5; i++ {
+		ti, _ = ti.Update(tea.KeyPressMsg(tea.Key{Code: tea.KeyLeft}))
+	}
+
+	upstream := ti.Cursor()
+	if upstream == nil {
+		t.Fatal("focused input returned no cursor")
+	}
+	got := textInputCursor(ti, ti.Prompt)
+	if got == nil {
+		t.Fatal("textInputCursor dropped the cursor for a scrolled value")
+	}
+	if got.X != upstream.X {
+		t.Errorf("scrolled value: textInputCursor X = %d, upstream = %d — "+
+			"the scrolled case is documented as upstream's, not ours to guess",
+			got.X, upstream.X)
+	}
+
+	// The boundary: shrink the value until it fits and the correction
+	// takes over again.
+	ti.SetValue("日本語")
+	ti.CursorEnd()
+	if got := textInputCursor(ti, ti.Prompt); got == nil || got.X != 2+6 {
+		t.Fatalf("a value that fits should be corrected: got %v, want X=%d", got, 2+6)
+	}
+}
+
+// TestTextInputCursor_BlurredIsNil keeps the nil contract: a blurred
+// input owns no caret, and the correction must not manufacture one.
+func TestTextInputCursor_BlurredIsNil(t *testing.T) {
+	ti := textinput.New()
+	ti.SetVirtualCursor(false)
+	ti.SetValue("hello")
+	ti.Blur()
+	if c := textInputCursor(ti, ti.Prompt); c != nil {
+		t.Errorf("blurred input yielded a cursor at X=%d", c.X)
+	}
+}
+
 // TestCursor_ElicitFormField puts the cursor on the elicit form's
 // focused field. The form is not a bubbles widget — the caret column
 // is derived from the row format the renderer uses — so this also
@@ -338,10 +484,14 @@ func TestCursor_NilWhenNothingOwnsIt(t *testing.T) {
 			},
 		},
 		{
+			// The three pickers used to be this case. Issue #117 gave
+			// them a filter row and therefore a caret; the tool-call
+			// detail overlay is the arrow-nav dialog that remains,
+			// and it still has nothing to type into.
 			name: "arrow-nav-dialog",
 			setup: func(t *testing.T) Model {
 				m := cursorModel(t, StatusHeader, 100, 30)
-				m.overlayStack.Open(newThemePickerDialog(m.themeName))
+				m.overlayStack.Open(newToolCallDialog(0))
 				return m
 			},
 		},
