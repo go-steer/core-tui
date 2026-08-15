@@ -13,8 +13,10 @@
 // limitations under the License.
 
 // Model picker dialog — first concrete Dialog implementation.
-// Replaces the m.overlay==overlayModelPicker enum + m.modelPickerIdx
-// field with a self-contained dialog that owns its selection state.
+// Replaced the original enum-driven overlay + picker-index field on
+// Model with a self-contained dialog that owns its selection state.
+// (The enum path was deleted outright in the v1.0 pre-freeze sweep,
+// core-tui #79.)
 //
 // Permission / elicit / sideAnswer modals stay inline this PR
 // because they're tied to channel-based Prompter / Elicitor /

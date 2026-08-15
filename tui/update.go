@@ -940,10 +940,6 @@ func (m Model) handleKey(msg tea.KeyPressMsg) (tea.Model, tea.Cmd) {
 			m.refreshViewport()
 			return m, nil
 		}
-		if m.overlay != overlayNone {
-			m.overlay = overlayNone
-			return m, nil
-		}
 		if m.helpOpen {
 			m.helpOpen = false
 			m.resize()
@@ -1061,8 +1057,8 @@ func (m Model) handleKey(msg tea.KeyPressMsg) (tea.Model, tea.Cmd) {
 	}
 
 	// Dialog overlay — front-most dialog gets every keystroke
-	// before the legacy modal cascade. Returns Consumed=true when
-	// the dialog handled it; we then return early so the key
+	// before the rest of the modal cascade. Returns Consumed=true
+	// when the dialog handled it; we then return early so the key
 	// doesn't double-fire on textarea / viewport. The optional
 	// Cmd is dialogs' channel for emitting outbound msgs (e.g.
 	// theme picker fires ThemeChangedMsg here on commit).
@@ -1071,52 +1067,6 @@ func (m Model) handleKey(msg tea.KeyPressMsg) (tea.Model, tea.Cmd) {
 			m.refreshViewport()
 			return m, cmd
 		}
-	}
-
-	// Vestigial legacy model picker (no longer reachable — Ctrl+G
-	// + /model both go through the Dialog overlay now). Kept for
-	// transition safety; remove after next stable release.
-	if m.overlay == overlayModelPicker {
-		swapper, ok := m.opts.Agent.(ModelSwapper)
-		if !ok {
-			m.overlay = overlayNone
-			return m, nil
-		}
-		models := swapper.AvailableModels()
-		if len(models) == 0 {
-			m.overlay = overlayNone
-			m.history.Append(Message{Role: RoleSystem, Text: "/model: no models available"})
-			m.refreshViewport()
-			return m, nil
-		}
-		switch stroke {
-		case "up", "ctrl+p":
-			m.modelPickerIdx = (m.modelPickerIdx - 1 + len(models)) % len(models)
-			return m, nil
-		case "down", "ctrl+n":
-			m.modelPickerIdx = (m.modelPickerIdx + 1) % len(models)
-			return m, nil
-		case "enter":
-			pick := models[m.modelPickerIdx]
-			newAgent, err := swapper.SwitchModel(pick.ID)
-			m.overlay = overlayNone
-			if err != nil {
-				m.history.Append(Message{Role: RoleError, Text: "/model: switch failed: " + err.Error()})
-				m.refreshViewport()
-				return m, nil
-			}
-			m.opts.Agent = newAgent
-			m.history.Append(Message{Role: RoleSystem, Text: "/model: switched to " + pick.ID})
-			if m.opts.PersistModelChoice != nil {
-				if perr := m.opts.PersistModelChoice(pick.ID); perr != nil {
-					m.history.Append(Message{Role: RoleError, Text: "/model: persist failed: " + perr.Error()})
-				}
-			}
-			m.refreshTheme()
-			m.refreshViewport()
-			return m, nil
-		}
-		return m, nil
 	}
 
 	// Palette dispatch — when a palette is open we consume the nav

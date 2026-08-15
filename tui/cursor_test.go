@@ -338,14 +338,6 @@ func TestCursor_NilWhenNothingOwnsIt(t *testing.T) {
 			},
 		},
 		{
-			name: "model-picker",
-			setup: func(t *testing.T) Model {
-				m := cursorModel(t, StatusHeader, 100, 30)
-				m.overlay = overlayModelPicker
-				return m
-			},
-		},
-		{
 			name: "arrow-nav-dialog",
 			setup: func(t *testing.T) Model {
 				m := cursorModel(t, StatusHeader, 100, 30)

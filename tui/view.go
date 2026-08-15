@@ -227,11 +227,7 @@ func (m Model) View() tea.View {
 		modalFrame = m.renderSideAnswer()
 		body = lipgloss.Place(m.width, m.height, lipgloss.Center, lipgloss.Center, modalFrame)
 	case m.overlayStack.HasDialogs():
-		// Front-most Dialog wins over the vestigial enum overlay.
 		modalFrame = m.overlayStack.Render(m.width, &m)
-		body = lipgloss.Place(m.width, m.height, lipgloss.Center, lipgloss.Center, modalFrame)
-	case m.overlay != overlayNone:
-		modalFrame = m.renderOverlay()
 		body = lipgloss.Place(m.width, m.height, lipgloss.Center, lipgloss.Center, modalFrame)
 	}
 
@@ -1021,8 +1017,6 @@ func (m Model) footerHint() string {
 			return "MCP elicitation" + sep + "a/enter accept" + sep + "n decline" + sep + "esc cancel"
 		}
 		return "MCP elicitation" + sep + "tab next field" + sep + "enter submit" + sep + "esc cancel"
-	case m.overlay == overlayModelPicker:
-		return "Choose a model" + sep + "↑↓ navigate" + sep + "enter accept" + sep + "esc cancel"
 	case m.confirmingClear:
 		return "Confirm clear?" + sep + "type y / yes to wipe" + sep + "anything else cancels"
 	case m.sideAnswer != nil:
@@ -1043,87 +1037,6 @@ func (m Model) footerHint() string {
 		hint = "ctrl+j"
 	}
 	return "enter submit" + sep + hint + " newline" + sep + "ctrl+c quit" + sep + "? for more"
-}
-
-// renderOverlay renders the currently active enum-driven modal.
-// Today that's only the model picker (overlayModelPicker); the
-// overlayPermission / overlayElicit enum values are vestigial demo
-// hooks from the visual-preview slice — the real permission and
-// elicit modals render via renderPermissionModal / renderElicitModal
-// against pendingPermission / pendingElicit (see view.go:127-138).
-//
-// When the host's Agent doesn't implement ModelSwapper, the overlay
-// renders a one-line "not available" notice rather than an empty
-// frame so the operator knows why the picker is barren.
-func (m Model) renderOverlay() string {
-	if m.overlay != overlayModelPicker {
-		return ""
-	}
-
-	width := 64
-	if m.width > 0 && width > m.width-4 {
-		width = m.width - 4
-	}
-	if width < 30 {
-		width = 30
-	}
-
-	title := "Choose a Model"
-	var body string
-	swapper, ok := m.opts.Agent.(ModelSwapper)
-	if !ok {
-		body = m.styles.Muted.Render("agent does not implement ModelSwapper")
-	} else {
-		models := swapper.AvailableModels()
-		if len(models) == 0 {
-			body = m.styles.Muted.Render("(no models advertised by the agent)")
-		} else {
-			current := m.displayModelName()
-			rows := make([]string, 0, len(models))
-			for i, mi := range models {
-				disp := mi.Display
-				if disp == "" {
-					disp = mi.ID
-				}
-				marker := "  "
-				if i == m.modelPickerIdx {
-					marker = "> "
-				}
-				row := marker + disp
-				if mi.ID != disp {
-					row += m.styles.Muted.Render("  (" + mi.ID + ")")
-				}
-				if mi.ID == current || disp == current {
-					row += "  " + m.styles.Muted.Render("(current)")
-				}
-				if mi.Description != "" {
-					row += "  " + m.styles.Muted.Render(mi.Description)
-				}
-				if i == m.modelPickerIdx {
-					row = m.styles.Accent.Render(row)
-				}
-				rows = append(rows, row)
-			}
-			body = strings.Join(rows, "\n")
-		}
-	}
-	footer := "↑↓ choose " + GlyphSeparator + " enter accept " + GlyphSeparator + " esc cancel"
-
-	titleBar := m.styles.ModalTitle.Render(title)
-	titleRule := m.styles.ModalBorder.Render(strings.Repeat(GlyphRule, nonNeg(width-lipgloss.Width(titleBar)-3)))
-	titleLine := titleBar + " " + titleRule
-	footerRule := m.styles.ModalBorder.Render(strings.Repeat(GlyphRule, nonNeg(width-2)))
-	footerLine := m.styles.ModalFooter.Render(footer)
-
-	content := lipgloss.JoinVertical(lipgloss.Left,
-		titleLine,
-		"",
-		body,
-		"",
-		footerRule,
-		footerLine,
-	)
-	return m.styles.ModalBorder.Padding(0, 1).Width(width).Render(content)
 }
 
 // sep returns the dim ` · ` separator used in status assembly.
