@@ -266,7 +266,13 @@ func Scrollbar(s Styles, height, contentSize, viewportSize, offset int) string {
 	}
 	thumbSize := max(1, height*viewportSize/contentSize)
 	maxOffset := contentSize - viewportSize
-	trackSpace := height - thumbSize + 1
+	// Positions the thumb can occupy: rows 0 .. height-thumbSize, so
+	// at maxOffset the thumb spans height-thumbSize .. height-1 and
+	// sits flush with the bottom of the track. An extra +1 here would
+	// push the last position one row past the draw loop below — which
+	// clips a tall thumb and hides a thumbSize==1 thumb entirely, i.e.
+	// exactly the long-content case this bar exists for.
+	trackSpace := height - thumbSize
 	thumbPos := 0
 	if trackSpace > 0 && maxOffset > 0 {
 		thumbPos = min(trackSpace, offset*trackSpace/maxOffset)
