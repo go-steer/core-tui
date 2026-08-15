@@ -88,7 +88,7 @@ func (m Model) maybeAutoContinue() (Model, tea.Cmd, bool) {
 	// on the next paint. Avoids a double-append.
 	out := m.submitTurn(prompt)
 	out.history.MarkLastUserAutoContinue()
-	return out, tea.Batch(spinnerTick(), out.eventListener()), true
+	return out, tea.Batch(out.armSpinner(), out.eventListener()), true
 }
 
 // defaultAutoContinueFormatter is the fallback formatting Options.

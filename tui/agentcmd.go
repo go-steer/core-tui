@@ -232,12 +232,24 @@ func (m Model) eventListener() tea.Cmd {
 }
 
 // spinnerTick returns a Cmd that fires spinnerTickMsg after one
-// spinnerCadence. Update re-issues it on every tick while a turn is
-// in flight (R-CHAT-3).
-func spinnerTick() tea.Cmd {
+// spinnerCadence, stamped with gen. Update re-issues it on every
+// tick while a turn is in flight (R-CHAT-3).
+func spinnerTick(gen uint64) tea.Cmd {
 	return tea.Tick(spinnerCadence, func(time.Time) tea.Msg {
-		return spinnerTickMsg{}
+		return spinnerTickMsg{gen: gen}
 	})
+}
+
+// armSpinner returns the Cmd that arms the next spinner tick for the
+// current spinnerGen. Every arming site in the TUI goes through here
+// so the stamp can't be forgotten at one of them — that is the whole
+// point of the guard (issue #112). The generation itself is bumped
+// where a *new* animation begins (submitTurn for a per-turn spinner,
+// applyStreamChunk for a LiveAgent stretch); re-arming from the tick
+// handler keeps the same generation because it continues the chain
+// that is already live rather than starting another one.
+func (m Model) armSpinner() tea.Cmd {
+	return spinnerTick(m.spinnerGen)
 }
 
 // wakeListener returns a Cmd that blocks on the agent's

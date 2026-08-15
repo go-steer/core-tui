@@ -103,8 +103,12 @@ type turnErrMsg struct {
 type turnCancelledMsg struct{ gen uint64 }
 
 // spinnerTickMsg fires every spinnerCadence to rotate the
-// thinking/working verb (R-CHAT-3).
-type spinnerTickMsg struct{}
+// thinking/working verb (R-CHAT-3). gen is the spinnerGen stamp
+// taken when the tick was armed — the Update handler drops the msg
+// when it no longer matches, so a chain left over from an earlier
+// turn (or an earlier LiveAgent stretch) dies instead of re-arming
+// alongside the current one. Same guard shape as resizeReflowMsg.
+type spinnerTickMsg struct{ gen uint64 }
 
 // initialPromptMsg fires exactly once from Init() when the host set
 // Options.InitialPrompt to a non-empty value. Update routes it
