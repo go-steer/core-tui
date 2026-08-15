@@ -637,7 +637,7 @@ func (m *Model) ensureMarkdown() *markdownRenderer {
 		width = 80
 	}
 	if m.markdown == nil || m.markdown.dark != m.styles.Dark || m.markdown.width != width {
-		m.markdown = newMarkdownRenderer(m.styles.Dark, width)
+		m.markdown = newMarkdownRenderer(m.styles.Theme, m.styles.Dark, width)
 		m.inProgressStablePrefix = ""
 		m.inProgressStableRender = ""
 	}
@@ -659,7 +659,7 @@ func (m *Model) ensureModalMarkdown(width int) *markdownRenderer {
 		width = 80
 	}
 	if m.modalMarkdown == nil || m.modalMarkdown.dark != m.styles.Dark || m.modalMarkdown.width != width {
-		m.modalMarkdown = newMarkdownRenderer(m.styles.Dark, width)
+		m.modalMarkdown = newMarkdownRenderer(m.styles.Theme, m.styles.Dark, width)
 	}
 	return m.modalMarkdown
 }
@@ -737,14 +737,22 @@ func (m Model) displayProvider() string {
 }
 
 // refreshTheme re-resolves Styles (picking up the active provider
-// when AutoProviderTheme is on), invalidates the Glamour renderer
-// + list cache so the next render uses the new palette, and
+// when AutoProviderTheme is on), invalidates BOTH Glamour renderers
+// + the list cache so the next render uses the new palette, and
 // rebuilds the textarea styles for the current dark/light mode.
 // Called after any event that could change which theme applies:
 // /model swap, dark/light flip, explicit theme reset.
+//
+// Both renderers have to be dropped, not just the chat one. The
+// modal renderer was left behind here for as long as Glamour styles
+// were theme-independent, which made the omission invisible; now
+// that markdown is built from Theme tokens, a /theme swap with the
+// /btw modal open would otherwise keep painting the modal body from
+// the previous palette until its width changed.
 func (m *Model) refreshTheme() {
 	m.styles = m.resolveStyles(m.styles.Dark)
 	m.markdown = nil
+	m.modalMarkdown = nil
 	if m.listCache != nil {
 		m.listCache.reset(m.viewport.Width())
 	}

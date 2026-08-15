@@ -422,6 +422,15 @@ listed in `/help`:
 - **R-MD-1** Final assistant messages are rendered via Glamour with
   custom heading styles (bold H2–H6 with color) and code-fence
   borders.
+- **R-MD-1a** The Glamour style config is built from the active
+  `Theme`, not from the dark/light flag alone: body text takes
+  `FgBase`, H1 reverses `OnPrimary` out of a `Primary` fill, H2–H6
+  walk a derived `Accent`→`FgMuted` ramp, and code fences are
+  highlighted with the theme's own Chroma style
+  (`Theme.ChromaStyleName`) — the same style the inline diff and
+  tool-preview highlighter uses, so the two surfaces agree.
+  Switching themes must repaint the assistant text, not just the
+  chrome around it.
 - **R-MD-2** Light/dark terminal background is sourced from Bubble Tea
   v2's `tea.BackgroundColorMsg` (delivered during program startup;
   Bubble Tea v2 owns terminal I/O so we no longer pre-query stdin) and

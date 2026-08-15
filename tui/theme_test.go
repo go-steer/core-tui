@@ -216,3 +216,135 @@ func TestBuiltinThemes_IncludesNewThemes(t *testing.T) {
 		}
 	}
 }
+
+// --- theme derivation (issue #116) -----------------------------
+
+// TestNewStylesWithTheme_NormalizesBareThemeLiteral is the reason
+// the normalizer sits in NewStylesWithTheme rather than in
+// DefaultTheme.
+//
+// Two of the four ways a Theme comes into existence never touch
+// DefaultTheme: a host handing a composite literal to the exported
+// NewStylesWithTheme, and the golden corpus's goldenTheme(). Put
+// the derivation in DefaultTheme and both of those get a zero
+// ChromaStyleName, styles.Get("") silently falls back, and OnPrimary
+// stays nil for the one surface that paints on top of Primary.
+func TestNewStylesWithTheme_NormalizesBareThemeLiteral(t *testing.T) {
+	bare := Theme{Primary: lipgloss.Color("#101010")}
+	if bare.OnPrimary != nil || bare.ChromaStyleName != "" {
+		t.Fatal("test setup: the literal must start with both derived tokens unset")
+	}
+	got := NewStylesWithTheme(true, bare).Theme
+	if got.ChromaStyleName != DefaultChromaStyleName {
+		t.Errorf("ChromaStyleName = %q, want %q", got.ChromaStyleName, DefaultChromaStyleName)
+	}
+	if got.OnPrimary == nil {
+		t.Error("OnPrimary was not derived — text on a Primary fill has no color")
+	}
+	// The caller's own value must survive untouched.
+	if got.Primary != bare.Primary {
+		t.Errorf("Primary = %v, want the caller's %v", got.Primary, bare.Primary)
+	}
+}
+
+// TestNormalizeTheme_OnPrimaryFollowsLuminance — the derived
+// foreground has to flip with the brightness of Primary, or the H1
+// banner is unreadable for half the palettes.
+func TestNormalizeTheme_OnPrimaryFollowsLuminance(t *testing.T) {
+	onDark := NewStylesWithTheme(true, Theme{Primary: lipgloss.Color("#101010")}).Theme.OnPrimary
+	onLight := NewStylesWithTheme(true, Theme{Primary: lipgloss.Color("#F5F5DC")}).Theme.OnPrimary
+	if onDark == onLight {
+		t.Fatalf("OnPrimary did not flip between a near-black and a near-white Primary (both %v)", onDark)
+	}
+	if relativeLuminance(onDark) < 0.5 {
+		t.Errorf("OnPrimary over a near-black Primary = %v, want a light foreground", onDark)
+	}
+	if relativeLuminance(onLight) > 0.5 {
+		t.Errorf("OnPrimary over a near-white Primary = %v, want a dark foreground", onLight)
+	}
+}
+
+// TestNormalizeTheme_KeepsExplicitValues — "derive, do not require"
+// means the derivation is a fallback, never an override. A host that
+// spells either token out keeps it.
+func TestNormalizeTheme_KeepsExplicitValues(t *testing.T) {
+	want := lipgloss.Color("#123456")
+	got := NewStylesWithTheme(true, Theme{
+		Primary:         lipgloss.Color("#101010"),
+		OnPrimary:       want,
+		ChromaStyleName: "monokai",
+	}).Theme
+	if got.OnPrimary != want {
+		t.Errorf("OnPrimary = %v, want the explicit %v", got.OnPrimary, want)
+	}
+	if got.ChromaStyleName != "monokai" {
+		t.Errorf("ChromaStyleName = %q, want the explicit %q", got.ChromaStyleName, "monokai")
+	}
+}
+
+// TestBranding_RederivesOnPrimary — both Branding override sites
+// mutate Primary and then call NewStylesWithTheme, so the derived
+// foreground must follow the override rather than the base theme's
+// Primary. This is the property that let the normalizer live at the
+// Styles boundary with no extra call site.
+func TestBranding_RederivesOnPrimary(t *testing.T) {
+	base := NewStyles(true, Branding{}).Theme.OnPrimary
+	// A near-white brand accent has to flip the derived foreground
+	// dark; the house violet does not.
+	over := NewStyles(true, Branding{AccentColor: "#FAFAFA"}).Theme.OnPrimary
+	if base == over {
+		t.Fatalf("OnPrimary was not re-derived after a Branding override (both %v)", base)
+	}
+	if relativeLuminance(over) > 0.5 {
+		t.Errorf("OnPrimary over a near-white branded Primary = %v, want a dark foreground", over)
+	}
+}
+
+// TestBuiltinThemes_ChromaStyleNamesResolve — a typo in a theme's
+// ChromaStyleName does not fail loudly (Chroma hands back a fallback
+// style), so it has to fail here instead. Both polarities are
+// checked: every builtin that names a dark style also has to name
+// something legible for a light terminal.
+func TestBuiltinThemes_ChromaStyleNamesResolve(t *testing.T) {
+	for _, bt := range BuiltinThemes() {
+		for _, dark := range []bool{true, false} {
+			name := NewStylesWithTheme(dark, bt.Build(dark)).Theme.ChromaStyleName
+			if name == "" {
+				t.Errorf("%s (dark=%v): ChromaStyleName empty after normalization", bt.Name, dark)
+				continue
+			}
+			if got := chromaStyleByName(name); got == nil || got.Name != name {
+				t.Errorf("%s (dark=%v): ChromaStyleName %q is not a registered Chroma style", bt.Name, dark, name)
+			}
+		}
+	}
+}
+
+// TestRefreshTheme_InvalidatesBothMarkdownRenderers — refreshTheme
+// cleared m.markdown but not m.modalMarkdown. That was invisible
+// while Glamour styles were theme-independent; now that markdown is
+// built from Theme tokens, a /theme swap with the /btw modal open
+// would keep the modal body on the previous palette until its width
+// happened to change.
+func TestRefreshTheme_InvalidatesBothMarkdownRenderers(t *testing.T) {
+	m := NewModel(Options{Agent: &bareAgent{id: "theme"}})
+	m.themeName = "matrix"
+	m.refreshTheme()
+	before := m.ensureModalMarkdown(60)
+	m.ensureMarkdown()
+
+	m.themeName = "christmas"
+	m.refreshTheme()
+	if m.markdown != nil {
+		t.Error("refreshTheme left the chat markdown renderer in place")
+	}
+	if m.modalMarkdown != nil {
+		t.Error("refreshTheme left the modal markdown renderer in place — /btw would keep the old palette")
+	}
+
+	const doc = "## Section\n\nBody.\n"
+	after := m.ensureModalMarkdown(60)
+	if before.renderMarkdown(doc) == after.renderMarkdown(doc) {
+		t.Error("the rebuilt modal renderer produced identical bytes across a theme swap")
+	}
+}

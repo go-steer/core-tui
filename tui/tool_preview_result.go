@@ -295,7 +295,7 @@ func renderCodeInline(content string, styles Styles, maxLines int, lang string) 
 		}
 		body := sanitizeLine(line)
 		if lang != "" {
-			body = highlightLine(body, lang, nil)
+			body = highlightLine(body, lang, styles.Theme.ChromaStyleName, nil)
 		} else {
 			body = ctxStyle.Render(body)
 		}

@@ -118,6 +118,7 @@ func renderDiffInline(diff string, styles Styles, maxLines int, lang string) str
 	}
 	addBg := styles.Theme.DiffAddBg
 	delBg := styles.Theme.DiffDelBg
+	chromaName := styles.Theme.ChromaStyleName
 	addPrefixStyle := lipgloss.NewStyle().Foreground(styles.Theme.Success).Background(addBg).Bold(true)
 	delPrefixStyle := lipgloss.NewStyle().Foreground(styles.Theme.Error).Background(delBg).Bold(true)
 	addBodyFallback := lipgloss.NewStyle().Foreground(styles.Theme.Success).Background(addBg)
@@ -158,13 +159,13 @@ func renderDiffInline(diff string, styles Styles, maxLines int, lang string) str
 			out = append(out, indent+gutterStyle.Render(emptyGutter)+hunkStyle.Render(line))
 		case strings.HasPrefix(line, "+"):
 			body := sanitizeLine(line[1:])
-			rendered := highlightOrFlat(body, lang, addBg, addBodyFallback)
+			rendered := highlightOrFlat(body, lang, chromaName, addBg, addBodyFallback)
 			gutter := formatGutter(newNo)
 			out = append(out, indent+addGutterStyle.Render(gutter)+addPrefixStyle.Render("+")+rendered)
 			newNo++
 		case strings.HasPrefix(line, "-"):
 			body := sanitizeLine(line[1:])
-			rendered := highlightOrFlat(body, lang, delBg, delBodyFallback)
+			rendered := highlightOrFlat(body, lang, chromaName, delBg, delBodyFallback)
 			gutter := formatGutter(oldNo)
 			out = append(out, indent+delGutterStyle.Render(gutter)+delPrefixStyle.Render("-")+rendered)
 			oldNo++
@@ -195,11 +196,15 @@ func renderDiffInline(diff string, styles Styles, maxLines int, lang string) str
 // bg threaded through chroma so the tint stays continuous across
 // tokens) or as a flat color-on-bg render. The two paths produce
 // equivalent bg behavior; only fg differs.
-func highlightOrFlat(body, lang string, bg color.Color, fallback lipgloss.Style) string {
+//
+// chromaName is the active theme's Chroma style — the caller reads
+// it off the Styles it already holds, which is what keeps the
+// highlighter theme-aware without a package-level variable.
+func highlightOrFlat(body, lang, chromaName string, bg color.Color, fallback lipgloss.Style) string {
 	if lang == "" {
 		return fallback.Render(body)
 	}
-	return highlightLine(body, lang, bg)
+	return highlightLine(body, lang, chromaName, bg)
 }
 
 // formatGutter renders the 5-digit right-aligned line-number
