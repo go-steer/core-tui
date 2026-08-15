@@ -14,13 +14,25 @@
 
 name: CI
 
+# NO path filters here, deliberately. A required status check on a
+# path-filtered workflow never reports on a PR the filter excludes, and
+# GitHub parks that PR on "Expected — Waiting for status" forever. The
+# previous shape worked around this with a twin ci-docs.yml emitting four
+# identically-named no-op checks, which traded the hang for a race: on a
+# mixed Go+Markdown PR both workflows ran, and which result counted
+# depended on which finished last. Re-running the 3-second stub after a
+# red pipeline produced four green required checks on a red commit —
+# and since every PR here carries a CHANGELOG entry, "mixed" is the
+# normal case, not a corner case.
+#
+# Instead this workflow always runs and the `changes` job decides whether
+# the expensive steps execute. One workflow, one definition of
+# "docs-only", no duplicate check names, nothing to keep in sync.
 on:
   push:
     branches: [main]
-    paths-ignore: ['**/*.md']
   pull_request:
     branches: [main]
-    paths-ignore: ['**/*.md']
 
 # Cancel in-progress runs when a new commit lands on the same branch
 # so we don't queue stale tests.
@@ -40,12 +52,89 @@ env:
 # Keep the wiring boring — logic lives in dev/tools/, not in YAML.
 
 jobs:
+  # changes classifies the diff once so the four required jobs can
+  # short-circuit without each carrying its own path logic.
+  #
+  # It is deliberately NOT a required check. If it fails, the jobs that
+  # need it are skipped rather than passed, and a skipped required check
+  # blocks the merge — the safe direction.
+  changes:
+    name: changes
+    runs-on: ubuntu-latest
+    outputs:
+      docs_only: ${{ steps.classify.outputs.docs_only }}
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          # Full history: the PR classification diffs against the merge
+          # base, which a shallow clone does not have.
+          fetch-depth: 0
+
+      - name: Assert no Markdown is compiled into the binary
+        # The docs-only fast path is sound only while nothing matching
+        # the docs-only globs reaches the build. A //go:embed of a .md
+        # would make a docs-only PR skip the tests for a change that
+        # alters shipped behaviour, silently. Cheap to assert, so assert
+        # it rather than leaving it to a comment and good intentions.
+        run: |
+          set -euo pipefail
+          if grep -rn --include='*.go' 'go:embed' . \
+             | grep -Ei '\.md([[:space:]]|$)|[[:space:]]docs/'; then
+            echo "::error::a //go:embed references Markdown or docs/, which the docs-only fast path would skip" >&2
+            exit 1
+          fi
+          echo "ok: no embedded Markdown"
+
+      - name: Classify changed files
+        id: classify
+        run: |
+          set -euo pipefail
+          if [ "${{ github.event_name }}" = "pull_request" ]; then
+            files=$(git diff --name-only "origin/${{ github.base_ref }}...HEAD")
+          else
+            before="${{ github.event.before }}"
+            if [ -z "$before" ] || [ "$before" = "0000000000000000000000000000000000000000" ]; then
+              files=$(git diff --name-only HEAD~1 HEAD || true)
+            else
+              files=$(git diff --name-only "$before" HEAD)
+            fi
+          fi
+
+          echo "changed files:"
+          echo "$files" | sed 's/^/  /'
+
+          # Docs-only means every changed file is Markdown or lives under
+          # docs/. The docs/ half matters: docs/site carries hugo.yaml,
+          # package.json, go.mod and an .scss, none of which match
+          # **/*.md, so the old filter ran the entire Go pipeline for a
+          # stylesheet edit. docs/site is its own nested Go module and is
+          # not built by the root ./... , so skipping is correct there.
+          docs_only=true
+          if [ -z "$files" ]; then
+            # No detectable diff — run everything rather than guess.
+            docs_only=false
+          else
+            while IFS= read -r f; do
+              [ -z "$f" ] && continue
+              case "$f" in
+                *.md|docs/*) ;;
+                *) docs_only=false; break ;;
+              esac
+            done <<< "$files"
+          fi
+
+          echo "docs_only=$docs_only" >> "$GITHUB_OUTPUT"
+          echo "docs_only=$docs_only"
+
   test:
     name: test
+    needs: changes
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
+        if: needs.changes.outputs.docs_only != 'true'
       - uses: actions/setup-go@v5
+        if: needs.changes.outputs.docs_only != 'true'
         with:
           go-version: ${{ env.GO_VERSION }}
           check-latest: true
@@ -54,22 +143,28 @@ jobs:
           # the `tar: File exists` collision an explicit actions/cache@v4
           # caused when both tried to restore the same directories.
           cache-dependency-path: '**/go.sum'
-      - run: go mod download
+      - if: needs.changes.outputs.docs_only != 'true'
+        run: go mod download
       - name: Vet
+        if: needs.changes.outputs.docs_only != 'true'
         run: dev/ci/presubmits/vet
       - name: Build
+        if: needs.changes.outputs.docs_only != 'true'
         run: dev/ci/presubmits/build
       - name: Test
         # Provider-gated tests (anthropic-vertex) skip cleanly in CI
         # without GCP creds — see models/anthropic/vertex_test.go.
+        if: needs.changes.outputs.docs_only != 'true'
         run: dev/ci/presubmits/test-unit
       - name: Coverage summary
+        if: needs.changes.outputs.docs_only != 'true'
         run: |
           echo "## Coverage" >> "$GITHUB_STEP_SUMMARY"
           echo '```' >> "$GITHUB_STEP_SUMMARY"
           go tool cover -func=coverage.out | tee -a "$GITHUB_STEP_SUMMARY"
           echo '```' >> "$GITHUB_STEP_SUMMARY"
       - uses: actions/upload-artifact@v4
+        if: needs.changes.outputs.docs_only != 'true'
         with:
           name: coverage
           path: coverage.out
@@ -78,10 +173,13 @@ jobs:
 
   lint:
     name: lint
+    needs: changes
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
+        if: needs.changes.outputs.docs_only != 'true'
       - uses: actions/setup-go@v5
+        if: needs.changes.outputs.docs_only != 'true'
         with:
           go-version: ${{ env.GO_VERSION }}
           check-latest: true
@@ -91,36 +189,47 @@ jobs:
           # with what setup-go restores.
           cache-dependency-path: '**/go.sum'
       - uses: actions/cache@v4
+        if: needs.changes.outputs.docs_only != 'true'
         with:
           path: ~/.cache/golangci-lint
           key: ${{ runner.os }}-golangci-${{ env.GO_VERSION }}-${{ hashFiles('**/go.sum', 'dev/tools/.golangci.yml') }}
           restore-keys: |
             ${{ runner.os }}-golangci-${{ env.GO_VERSION }}-
       - name: Format
+        if: needs.changes.outputs.docs_only != 'true'
         run: dev/ci/presubmits/verify-go-format
       - name: golangci-lint
+        if: needs.changes.outputs.docs_only != 'true'
         run: dev/ci/presubmits/lint-go
 
   tidy:
     name: go mod tidy is clean
+    needs: changes
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
+        if: needs.changes.outputs.docs_only != 'true'
       - uses: actions/setup-go@v5
+        if: needs.changes.outputs.docs_only != 'true'
         with:
           go-version: ${{ env.GO_VERSION }}
           check-latest: true
       - name: Verify tidy
+        if: needs.changes.outputs.docs_only != 'true'
         run: dev/ci/presubmits/verify-mod-tidy
 
   vuln:
     name: govulncheck
+    needs: changes
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
+        if: needs.changes.outputs.docs_only != 'true'
       - uses: actions/setup-go@v5
+        if: needs.changes.outputs.docs_only != 'true'
         with:
           go-version: ${{ env.GO_VERSION }}
           check-latest: true
       - name: Vuln scan
+        if: needs.changes.outputs.docs_only != 'true'
         run: dev/ci/presubmits/verify-vuln

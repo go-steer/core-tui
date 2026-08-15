@@ -74,9 +74,21 @@ For this to actually gate merges, the repo's branch protection on
 - `go mod tidy is clean`
 - `govulncheck`
 
-Docs-only PRs (`**/*.md`) are handled by the companion `ci-docs.yml`
-workflow, which emits the same four check names trivially-green so
-branch protection is satisfied without running the full Go pipeline.
+`ci.yml` has no path filters, so those four checks report on every PR.
+A path filter on a workflow whose checks are required would leave the
+excluded PRs parked on "Expected — Waiting for status" forever.
+
+Docs-only PRs take a fast path instead: the `changes` job classifies
+the diff, and when every changed file is Markdown or lives under
+`docs/`, the four jobs skip their expensive steps and still report
+green in seconds. `docs/` matters as well as `**/*.md` — `docs/site`
+carries `hugo.yaml`, `package.json`, its own `go.mod` and an `.scss`,
+none of which are Markdown.
+
+`changes` also asserts that no `//go:embed` references Markdown or
+`docs/`. That is the invariant the fast path rests on: an embedded
+`.md` would make a docs-only PR skip the tests for a change that
+alters the built binary.
 
 ## License headers
 

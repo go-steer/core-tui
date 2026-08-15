@@ -118,9 +118,13 @@ Single long-lived branch: `main`. Work happens on short-lived feature
 branches (`feat/...`, `fix/...`, `chore/...`, `docs/...`) → PR
 against `main` → merge once CI's required status checks are green.
 Branch protection on `main` requires `test`, `lint`,
-`go mod tidy is clean`, and `govulncheck`; docs-only PRs satisfy
-these via the companion `ci-docs.yml` workflow without running the
-full Go pipeline. Commits are DCO-signed off (`git commit -s`) and
+`go mod tidy is clean` and `govulncheck`, requires a linear history,
+and requires the branch to be up to date with `main` before merging.
+Those four checks always report: `ci.yml` runs on every PR, and its
+`changes` job short-circuits the expensive steps when the diff is
+docs-only — every changed file Markdown or under `docs/` — so a docs
+PR goes green in seconds without the full Go pipeline. Commits are
+DCO-signed off (`git commit -s`) and
 follow Conventional Commits — see [`CONTRIBUTING.md`](./CONTRIBUTING.md)
 for the full contributor flow + DCO walkthrough.
 
