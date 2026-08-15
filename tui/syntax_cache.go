@@ -18,9 +18,17 @@
 // format would burn 10-50ms per redraw on a long preview block.
 //
 // Phase 2 keeps the cache simple: a sync.Map keyed by
-// `lang \x00 line`. Diff content is short-lived and bounded by
-// previewLineCap (8 lines per preview today), so we don't worry
-// about eviction yet — the working set is small.
+// `style \x00 lang \x00 bg \x00 line`. Diff content is short-lived
+// and bounded by previewLineCap (8 lines per preview today), so we
+// don't worry about eviction yet — the working set is small.
+//
+// The style component of that key is load-bearing and is why the
+// cache survives /theme. The map is never evicted, so every input
+// that can change the bytes has to be in the key; the Chroma style
+// used to be a package-level var that could not change at runtime,
+// and the moment it became theme-derived (Theme.ChromaStyleName) a
+// theme swap would otherwise have replayed the previous palette's
+// bytes out of the cache forever.
 
 package tui
 
@@ -36,10 +44,11 @@ import (
 	"github.com/alecthomas/chroma/v2/styles"
 )
 
-// syntaxCache memoizes highlighted output per (lang, line). Keyed
-// on lang+"\x00"+line so the same source line in different files
-// of different languages doesn't collide (e.g. "if x:" reads
-// differently as Python vs Cucumber).
+// syntaxCache memoizes highlighted output per
+// (style, lang, bg, line), so the same source line does not
+// collide across Chroma styles, across languages (e.g. "if x:"
+// reads differently as Python vs Cucumber), or across diff
+// backgrounds.
 var syntaxCache sync.Map
 
 // lexerCache memoizes the resolved + Coalesced chroma.Lexer per
@@ -59,11 +68,17 @@ var lexerCache sync.Map
 // never needs invalidating.
 var langCache sync.Map
 
-// chromaSyntaxStyle is the Chroma color theme used for inline
-// highlighting. github-light reads well on both light and dark
-// terminals — the foreground-only colors don't depend on the
-// terminal background to be legible.
-var chromaSyntaxStyle = styles.Get("github")
+// chromaStyleByName resolves a Theme.ChromaStyleName to a Chroma
+// style. Empty answers DefaultChromaStyleName; an unknown name
+// falls through styles.Get, which returns Chroma's own fallback
+// rather than nil — a bad name in a host theme degrades to plain
+// highlighting, it never panics the render.
+func chromaStyleByName(name string) *chroma.Style {
+	if name == "" {
+		name = DefaultChromaStyleName
+	}
+	return styles.Get(name)
+}
 
 // detectLang maps a file path / label to a Chroma lexer name,
 // returning "" when no lexer matches. Lipgloss-friendly output
@@ -102,16 +117,23 @@ func detectLangUncached(label string) string {
 // formatter so adjacent tokens render as one continuous tinted
 // strip (used for + / - lines in inline diffs). Caches every
 // successful render so subsequent calls with the same
-// (lang, bg, line) are a single map lookup.
-func highlightLine(line, lang string, bg color.Color) string {
+// (styleName, lang, bg, line) are a single map lookup.
+//
+// styleName is the active Theme.ChromaStyleName, threaded down from
+// the Styles the caller already holds. Both call sites
+// (highlightOrFlat in diff.go, renderCodeInline in
+// tool_preview_result.go) have a Styles in scope, so this stays
+// parameter passing rather than a package-level atomic that the
+// cache would then have to chase.
+func highlightLine(line, lang, styleName string, bg color.Color) string {
 	if lang == "" || line == "" {
 		return line
 	}
-	key := lang + "\x00" + bgKey(bg) + "\x00" + line
+	key := styleName + "\x00" + lang + "\x00" + bgKey(bg) + "\x00" + line
 	if v, ok := syntaxCache.Load(key); ok {
 		return v.(string)
 	}
-	out := highlightLineUncached(line, lang, bg)
+	out := highlightLineUncached(line, lang, styleName, bg)
 	syntaxCache.Store(key, out)
 	return out
 }
@@ -133,7 +155,7 @@ func bgKey(bg color.Color) string {
 // lines reuse the cached lexer. LipglossFormatter routes coloring
 // through the lipgloss color profile so 256-color / truecolor /
 // no-color terminals all get appropriate output.
-func highlightLineUncached(line, lang string, bg color.Color) string {
+func highlightLineUncached(line, lang, styleName string, bg color.Color) string {
 	lexer := getLexer(lang)
 	if lexer == nil {
 		return line
@@ -143,7 +165,7 @@ func highlightLineUncached(line, lang string, bg color.Color) string {
 		return line
 	}
 	var buf bytes.Buffer
-	if err := LipglossFormatter(bg).Format(&buf, chromaSyntaxStyle, it); err != nil {
+	if err := LipglossFormatter(bg).Format(&buf, chromaStyleByName(styleName), it); err != nil {
 		return line
 	}
 	// Chroma's tokenizer sometimes appends a trailing newline from

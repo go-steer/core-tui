@@ -228,7 +228,7 @@ func TestDetectLang_Concurrent(t *testing.T) {
 }
 
 func TestHighlightLine_EmptyLang(t *testing.T) {
-	got := highlightLine("func main() {}", "", nil)
+	got := highlightLine("func main() {}", "", goldenChromaStyle, nil)
 	if got != "func main() {}" {
 		t.Errorf("expected unchanged line for empty lang, got %q", got)
 	}
@@ -238,7 +238,7 @@ func TestHighlightLine_KnownLang_DiffersFromInput(t *testing.T) {
 	// Smoke test: highlighted output must contain the original
 	// tokens but should differ in length (ANSI codes added).
 	in := "func main() {}"
-	got := highlightLine(in, "Go", nil)
+	got := highlightLine(in, "Go", goldenChromaStyle, nil)
 	if got == in {
 		t.Errorf("expected highlighted output to differ from input for Go, got identical %q", got)
 	}
@@ -249,8 +249,8 @@ func TestHighlightLine_KnownLang_DiffersFromInput(t *testing.T) {
 
 func TestHighlightLine_CacheReturnsSameValue(t *testing.T) {
 	in := "x := 1"
-	first := highlightLine(in, "Go", nil)
-	second := highlightLine(in, "Go", nil)
+	first := highlightLine(in, "Go", goldenChromaStyle, nil)
+	second := highlightLine(in, "Go", goldenChromaStyle, nil)
 	if first != second {
 		t.Errorf("expected cache to return identical output for same (lang, line)")
 	}
@@ -260,10 +260,56 @@ func TestHighlightLine_DifferentBgsCacheSeparately(t *testing.T) {
 	// Different bg colors should produce different output (the bg
 	// SGR differs) and bucket as separate cache entries.
 	in := "x := 1"
-	noBg := highlightLine(in, "Go", nil)
-	withBg := highlightLine(in, "Go", lipgloss.Color("#1B2D1B"))
+	noBg := highlightLine(in, "Go", goldenChromaStyle, nil)
+	withBg := highlightLine(in, "Go", goldenChromaStyle, lipgloss.Color("#1B2D1B"))
 	if noBg == withBg {
 		t.Errorf("expected different output for nil vs colored bg, both:\n%q", noBg)
+	}
+}
+
+// TestHighlightLine_ChromaStyleInCacheKey — the per-line cache is a
+// sync.Map that is never evicted, so every input that can change the
+// bytes has to be in the key. The Chroma style used to be a
+// package-level var that could not change at runtime; now it is
+// theme-derived, and without the style in the key a /theme swap
+// would replay the previous palette's bytes for the rest of the
+// process.
+func TestHighlightLine_ChromaStyleInCacheKey(t *testing.T) {
+	const in = "func main() {}"
+	github := highlightLine(in, "Go", "github", nil)
+	monokai := highlightLine(in, "Go", "monokai", nil)
+	if github == monokai {
+		t.Fatalf("two chroma styles produced identical bytes:\n%q", github)
+	}
+	// Read both back: a shared key would have let the second store
+	// overwrite the first.
+	if again := highlightLine(in, "Go", "github", nil); again != github {
+		t.Errorf("cached github entry was clobbered by the monokai render:\n want %q\n  got %q", github, again)
+	}
+	if again := highlightLine(in, "Go", "monokai", nil); again != monokai {
+		t.Errorf("cached monokai entry was clobbered:\n want %q\n  got %q", monokai, again)
+	}
+}
+
+// TestRenderCodeInline_FollowsThemeChromaStyle / the diff twin below
+// pin the plumbing: both inline highlight call sites already hold a
+// Styles, so the active theme's Chroma style reaches the highlighter
+// as a parameter rather than through a package-level variable.
+func TestRenderCodeInline_FollowsThemeChromaStyle(t *testing.T) {
+	const code = "func main() {}"
+	a := renderCodeInline(code, NewStylesWithTheme(true, MatrixTheme(true)), 0, "Go")
+	b := renderCodeInline(code, NewStylesWithTheme(true, ChristmasTheme(true)), 0, "Go")
+	if a == b {
+		t.Errorf("renderCodeInline ignored the theme's chroma style:\n%q", a)
+	}
+}
+
+func TestRenderDiffInline_FollowsThemeChromaStyle(t *testing.T) {
+	const diff = "@@ -1,1 +1,1 @@\n-func main() {}\n+func run() {}\n"
+	a := renderDiffInline(diff, NewStylesWithTheme(true, MatrixTheme(true)), 0, "Go")
+	b := renderDiffInline(diff, NewStylesWithTheme(true, ChristmasTheme(true)), 0, "Go")
+	if a == b {
+		t.Errorf("renderDiffInline ignored the theme's chroma style:\n%q", a)
 	}
 }
 

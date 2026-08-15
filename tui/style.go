@@ -126,7 +126,19 @@ func NewStyles(dark bool, brand Branding) Styles {
 // one-line change (no per-field updates). UserPrefix / UserText
 // keep an explicit blue tone — the user-bubble color is semantic
 // to the operator's voice and shouldn't shift with provider.
+//
+// This is also where a Theme is normalized (normalizeTheme): the
+// derived tokens a caller may leave zero — OnPrimary,
+// ChromaStyleName — are filled in here rather than in DefaultTheme,
+// because this is the ONE funnel every Theme crosses. A bare
+// `Theme{...}` literal handed in by a host never touches
+// DefaultTheme, and the two Branding override sites mutate Primary
+// and then call this function, so re-derivation after an override
+// costs no extra call site. Styles.Theme carries the normalized
+// value, so the markdown renderer and the syntax cache read the
+// derived tokens straight off it.
 func NewStylesWithTheme(dark bool, theme Theme) Styles {
+	theme = normalizeTheme(theme)
 	var fgUser, border color.Color
 	if dark {
 		fgUser = lipgloss.Color("#87AFFF")
