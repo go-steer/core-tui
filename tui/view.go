@@ -568,17 +568,51 @@ func (m *Model) syncFollow() {
 	m.follow = m.viewport.AtBottom()
 }
 
+// turnInFlight reports whether there is output in flight for the
+// in-progress block to paint — accumulated assistant text, a spinner
+// verb line, or both.
+//
+// Two paths answer that question differently, and the difference is
+// issue #135. The per-turn Run path carries it in m.state, which
+// submitTurn sets to stateStreaming. The LiveAgent path (#22) never
+// calls submitTurn: it is driven from applyStreamChunk, which
+// accumulates m.inProgressText and flips m.spinnerActive but leaves
+// m.state at stateIdle. A gate that asks only about m.state therefore
+// answers "nothing in flight" for the whole of an autonomous stretch,
+// and the operator watches an idle-looking TUI until finalizeTurn
+// commits the message in one lump — the opposite of what the
+// capability exists to provide.
+//
+// This is a method rather than an inlined condition because
+// renderInProgress asks the question twice: once to bail out early,
+// once to decide whether to emit the body. Those two copies drifting
+// apart is the actual defect shape — widening only the outer one
+// leaves the body still skipping the text, for the same invisible
+// result.
+//
+// Deliberately NOT "set stateStreaming on the live path too". Nine
+// other reads of stateStreaming gate interrupt and submit behaviour
+// (update.go, slash_builtin.go), and cancelTurn is documented as
+// non-nil while state == stateStreaming (model.go) while the live
+// path has no cancelTurn at all. Widening the render gate keeps
+// m.state meaning "a Run-driven turn is in flight"; teaching the live
+// path to adopt that state is a separate decision with its own blast
+// radius.
+func (m Model) turnInFlight() bool {
+	return m.state == stateStreaming || (m.liveMode && m.spinnerActive)
+}
+
 // renderInProgress returns the live block at the bottom of the chat
 // while a turn is streaming: the accumulated assistant text rendered
 // through Glamour (R-CHAT-4), followed by the spinner verb line
 // (R-CHAT-3) and the prompt queue panel (R-CHAT-10). Empty string
 // when no turn is in flight AND the queue is empty.
 func (m *Model) renderInProgress() string {
-	if m.state != stateStreaming && len(m.queue) == 0 {
+	if !m.turnInFlight() && len(m.queue) == 0 {
 		return ""
 	}
 	var parts []string
-	if m.state == stateStreaming {
+	if m.turnInFlight() {
 		if strings.TrimSpace(m.inProgressText) != "" {
 			mr := m.ensureMarkdown()
 			// Incremental Glamour: reuse the cached render of the
