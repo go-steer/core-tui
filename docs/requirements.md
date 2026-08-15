@@ -74,6 +74,14 @@ documented Go interface set (see `design.md` for the shape).
   new `Event` field is required. See [`ui-references.md`](./ui-references.md)
   for the Antigravity `Loading…`/`Working…` and Claude Code
   task-aware-spinner references.
+- **R-CHAT-3a** The verb line carries an elapsed-time suffix once the
+  turn is older than one spinner cadence — `Thinking... 12s`, then
+  `1m04s`, then `1h02m` — so an operator can tell a long turn from a
+  wedged one. Coarse and fixed-width on purpose: no sub-second
+  component, a zero-padded minor unit so the line does not shift a
+  column between ticks, and minutes rather than seconds past the
+  hour. It repaints on the existing spinner cadence; no separate
+  timer is scheduled for it.
 - **R-CHAT-4** Stream partial assistant tokens into the in-progress
   assistant message as they arrive, rendering them through Glamour on
   each update so the user sees formatted markdown while the turn is

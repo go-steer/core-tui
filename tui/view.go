@@ -684,6 +684,12 @@ func (m Model) queueRowStyle(s QueueState) (string, lipgloss.Style) {
 // through a 10-frame color ramp between theme.Primary and
 // theme.Secondary (agentic-tui skill §7). The glyph reads as
 // "alive" without distracting from the verb.
+//
+// A muted elapsed-time suffix trails the verb once the turn is older
+// than turnElapsedFloor (issue #111): "alive" answers whether
+// anything is happening, the readout answers whether it is taking
+// too long. It rides the existing spinner repaint (spinnerTickMsg →
+// markViewportDirty), so there is no new timer.
 func (m *Model) renderSpinnerLine() string {
 	pool := m.thinkingPhrases()
 	if m.toolActive {
@@ -694,7 +700,7 @@ func (m *Model) renderSpinnerLine() string {
 	}
 	verb := pool[m.thinkingIdx%len(pool)]
 	glyph := m.renderBrailleFrame(m.thinkingIdx)
-	body := m.styles.Muted.Italic(true).Render(verb + GlyphTruncate)
+	body := m.styles.Muted.Italic(true).Render(verb+GlyphTruncate) + m.renderTurnElapsed()
 	if glyph == "" {
 		return body
 	}

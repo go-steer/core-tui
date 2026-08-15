@@ -1550,7 +1550,9 @@ func (m Model) submitTurn(text string) Model {
 	text = expanded
 	m.input.Reset()
 	m.state = stateStreaming
-	m.turnStarted = time.Now()
+	// Origin for the thinking line's elapsed readout (issue #111).
+	// Through m.nowFn so tests can pin it.
+	m.turnStarted = m.nowFn()
 	m.inProgressText = ""
 	m.currentUsage = nil
 	m.currentCost = 0
@@ -1618,6 +1620,14 @@ func (m *Model) applyStreamChunk(msg streamChunkMsg) {
 				// bump here too or the caller's armSpinner would
 				// re-use the previous stretch's generation (#112).
 				m.spinnerGen++
+				// Same reasoning for the elapsed readout (#111):
+				// this flip IS the start of a turn on this path, so
+				// stamp it here rather than leaving turnStarted at
+				// its zero value (a 55-year readout) or at the
+				// previous stretch's origin (a monotonically wrong
+				// one). Animation start and elapsed origin stay the
+				// same event on both paths.
+				m.turnStarted = m.nowFn()
 			}
 		} else {
 			m.liveLastCommitAt = time.Now()
@@ -1656,6 +1666,7 @@ func (m *Model) applyStreamChunk(msg streamChunkMsg) {
 				m.inProgressStableRender = ""
 			}
 			m.spinnerActive = false
+			m.turnStarted = time.Time{}
 		}
 	}
 	m.markViewportDirty()
@@ -1880,6 +1891,12 @@ func (m *Model) finalizeTurn(elapsed time.Duration, notice string) {
 	}
 	m.state = stateIdle
 	m.spinnerActive = false
+	// The turn's animation is over, so its elapsed origin goes with
+	// it (issue #111). Nothing can paint a stale value today —
+	// renderInProgress gates the spinner line on stateStreaming —
+	// but the field's invariant is "non-zero iff an animation is
+	// live", and a render-path gate is the wrong place to keep it.
+	m.turnStarted = time.Time{}
 
 	// Commit the streamed text as a Message. Skip when empty (the
 	// agent emitted only tool calls, no assistant prose).
@@ -2132,6 +2149,7 @@ func (m *Model) applySwitchTarget(tgt *SwitchTarget) tea.Cmd {
 	// itself normally after returning the switch Cmd.
 	m.state = stateIdle
 	m.spinnerActive = false
+	m.turnStarted = time.Time{}
 	m.inProgressText = ""
 	m.inProgressStablePrefix = ""
 	m.inProgressStableRender = ""
