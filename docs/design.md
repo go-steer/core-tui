@@ -781,6 +781,19 @@ present-continuous string replaces the rotation entirely. No new
   blocking goroutine reads it. Context cancellation drops the
   blocking side and starts an async drainer on the channel to avoid
   leaks.
+- **No capability method runs on the event loop** (issue #114).
+  `Update` and `View` share one goroutine, so a slow host method
+  called from either freezes the whole TUI — spinner, cursor blink,
+  and Ctrl+C included, since those all arrive as messages the frozen
+  loop cannot read. core-tui is a library and cannot assume any §3.3
+  capability is fast, so every call site returns a `tea.Cmd` that
+  does the work off-loop and delivers the result as a msg. `View`
+  reads only snapshots (`host_snapshot.go` for the status header and
+  the sidebar roster; per-dialog snapshots for the model and session
+  pickers). Capability methods that take a `context.Context` are
+  given a bounded one — the signature is the host saying it may be
+  slow, and answering with `context.Background()` inverts the
+  contract.
 
 ### 4.2 Error semantics
 

@@ -185,34 +185,19 @@ func (m Model) dispatchBuiltinSlash(name, args string) (bool, tea.Model, tea.Cmd
 		if args == "" {
 			// No-arg form opens the interactive picker dialog
 			// (mirrors Ctrl+G). Singleton — re-open while
-			// already showing is a no-op.
-			if !m.overlayStack.HasID(modelPickerDialogID) {
-				m.overlayStack.Open(newModelPickerDialog())
-			}
+			// already showing is a no-op. The list arrives via
+			// the returned Cmd, off the Update loop (issue #114).
+			cmd := m.openModelPicker()
 			m.input.Reset()
-			return true, m, nil
+			return true, m, cmd
 		}
 		// `/model <id>` switches without opening a picker — useful for
 		// scripted/replay flows and as a fallback while the picker
-		// modal is still being built.
-		newAgent, err := swapper.SwitchModel(args)
-		if err != nil {
-			m.history.Append(Message{Role: RoleError, Text: "/model: switch failed: " + err.Error()})
-			m.input.Reset()
-			m.refreshAndScroll()
-			return true, m, nil
-		}
-		m.opts.Agent = newAgent
-		m.history.Append(Message{Role: RoleSystem, Text: "/model: switched to " + args})
-		if m.opts.PersistModelChoice != nil {
-			if perr := m.opts.PersistModelChoice(args); perr != nil {
-				m.history.Append(Message{Role: RoleError, Text: "/model: persist failed: " + perr.Error()})
-			}
-		}
-		m.refreshTheme()
+		// modal is still being built. Runs through the same off-loop
+		// Cmd the picker uses; modelSwitchedMsg does the attach.
 		m.input.Reset()
 		m.refreshAndScroll()
-		return true, m, nil
+		return true, m, switchModelCmd(swapper, m.sessionGen, args)
 
 	case "switch":
 		// SessionSwitcher (issues #48 / #53) is optional. When
@@ -226,11 +211,11 @@ func (m Model) dispatchBuiltinSlash(name, args string) (bool, tea.Model, tea.Cmd
 			return false, m, nil
 		}
 		if args == "" {
-			if !m.overlayStack.HasID(sessionPickerDialogID) {
-				m.overlayStack.Open(newSessionPickerDialog())
-			}
+			// Same shape as /model: open instantly, pull
+			// Sessions() off-loop (issue #114).
+			cmd := m.openSessionPicker()
 			m.input.Reset()
-			return true, m, nil
+			return true, m, cmd
 		}
 		// `/switch <id>` naming an action row (issue #56) opens the
 		// row's text-input dialog rather than treating the row ID
@@ -320,33 +305,16 @@ func (m Model) dispatchBuiltinSlash(name, args string) (bool, tea.Model, tea.Cmd
 			m.refreshAndScroll()
 			return true, m, nil
 		}
-		res, err := reloader.Reload(context.Background())
-		if err != nil {
-			m.history.Append(Message{Role: RoleError, Text: "/reload: " + err.Error()})
-			m.input.Reset()
-			m.refreshAndScroll()
-			return true, m, nil
-		}
-		if res.Agent != nil {
-			m.opts.Agent = res.Agent
-		}
-		if res.Memory != nil {
-			m.opts.Memory = res.Memory
-		}
-		if res.MCPServers != nil {
-			m.opts.MCPServers = res.MCPServers
-		}
-		if res.Skills != nil {
-			m.opts.Skills = res.Skills
-		}
-		note := res.Note
-		if note == "" {
-			note = "/reload: reloaded"
-		}
-		m.history.Append(Message{Role: RoleSystem, Text: note})
+		// Reload rebuilds the agent from disk — Reloader takes a ctx
+		// precisely because it may be slow, and it used to be handed
+		// context.Background() from inside Update (issue #114). Now
+		// it runs off-loop under reloadTimeout; the immediate system
+		// row is the operator's acknowledgement, reloadDoneMsg is the
+		// outcome. Same shape as remoteInterruptCmd's call site.
+		m.history.Append(Message{Role: RoleSystem, Text: "/reload: rebuilding agent…"})
 		m.input.Reset()
 		m.refreshAndScroll()
-		return true, m, nil
+		return true, m, reloadCmd(reloader, m.sessionGen)
 
 	case "permissions":
 		ctrl, ok := m.opts.Agent.(PermissionController)
@@ -367,11 +335,13 @@ func (m Model) dispatchBuiltinSlash(name, args string) (bool, tea.Model, tea.Cmd
 			m.refreshAndScroll()
 			return true, m, nil
 		}
-		text := m.handlePricing(ctrl, args)
-		m.history.Append(Message{Role: RoleSystem, Text: text})
+		text, cmd := m.handlePricing(ctrl, args)
+		if text != "" {
+			m.history.Append(Message{Role: RoleSystem, Text: text})
+		}
 		m.input.Reset()
 		m.refreshAndScroll()
-		return true, m, nil
+		return true, m, cmd
 
 	case "subagents":
 		// Bare `/subagents` lists the roster; `/subagents <name>`
@@ -590,22 +560,22 @@ func (m Model) handleAllowDeny(args, op string) string {
 //
 // The form path (no positional args) lets operators tab through
 // validated fields; the positional path keeps scripted / replay
-// flows fast. Returns the text to echo as a system message; for
-// the form path returns "" because the form takes over the
-// screen (its own completion handler dispatches the result).
-func (m *Model) handlePricing(ctrl PricingController, args string) string {
+// flows fast. Returns the text to echo as a system message plus an
+// optional Cmd; `refresh` returns ("", cmd) because its result
+// arrives later as pricingRefreshedMsg.
+func (m *Model) handlePricing(ctrl PricingController, args string) (string, tea.Cmd) {
 	args = strings.TrimSpace(args)
 	if args == "" || args == "help" {
-		return "/pricing: usage — /pricing refresh OR /pricing set (form) OR /pricing set <model-id> <input-per-mtok> <output-per-mtok>"
+		return "/pricing: usage — /pricing refresh OR /pricing set (form) OR /pricing set <model-id> <input-per-mtok> <output-per-mtok>", nil
 	}
 	sub, rest, _ := strings.Cut(args, " ")
 	switch sub {
 	case "refresh":
-		summary, err := ctrl.Refresh(context.Background())
-		if err != nil {
-			return "/pricing refresh: " + err.Error()
-		}
-		return summary
+		// Refresh pulls an upstream price table over the network and
+		// takes a ctx to say so; running it inline froze the loop for
+		// the round trip (issue #114). Off-loop under
+		// pricingRefreshTimeout, with an immediate acknowledgement.
+		return "/pricing refresh: pulling the upstream price table…", pricingRefreshCmd(ctrl, m.sessionGen)
 	case "set":
 		fields := strings.Fields(rest)
 		if len(fields) == 0 {
@@ -620,26 +590,30 @@ func (m *Model) handlePricing(ctrl PricingController, args string) string {
 				formWidth = 72
 			}
 			m.pendingForm = newPricingForm(m.displayModelName(), formWidth)
-			return "/pricing: opening form (esc cancels)"
+			return "/pricing: opening form (esc cancels)", nil
 		}
 		if len(fields) != 3 {
-			return "/pricing set: want <model-id> <input-per-mtok> <output-per-mtok>, or pass nothing to open the form"
+			return "/pricing set: want <model-id> <input-per-mtok> <output-per-mtok>, or pass nothing to open the form", nil
 		}
 		in, err := strconv.ParseFloat(fields[1], 64)
 		if err != nil {
-			return "/pricing set: invalid input rate " + fields[1] + " — " + err.Error()
+			return "/pricing set: invalid input rate " + fields[1] + " — " + err.Error(), nil
 		}
 		out, err := strconv.ParseFloat(fields[2], 64)
 		if err != nil {
-			return "/pricing set: invalid output rate " + fields[2] + " — " + err.Error()
+			return "/pricing set: invalid output rate " + fields[2] + " — " + err.Error(), nil
 		}
+		// PricingController.Set stays on the Update goroutine: it
+		// takes no ctx and is a local table poke on every host that
+		// implements it. Tracked with the rest of the deferred
+		// slash-command-path calls.
 		summary, err := ctrl.Set(fields[0], in, out)
 		if err != nil {
-			return "/pricing set: " + err.Error()
+			return "/pricing set: " + err.Error(), nil
 		}
-		return summary
+		return summary, nil
 	default:
-		return "/pricing: unknown subcommand " + sub + " — try /pricing refresh or /pricing set"
+		return "/pricing: unknown subcommand " + sub + " — try /pricing refresh or /pricing set", nil
 	}
 }
 
@@ -1025,6 +999,37 @@ func truncate(s string, n int) string {
 		return s[:n]
 	}
 	return s[:n-3] + "..."
+}
+
+// applyReload installs a completed Reloader.Reload (issue #114's
+// off-loop /reload path). Called only after the sessionGen guard has
+// passed — like SwitchModel it can replace m.opts.Agent, so a reply
+// that outlived its session must not land.
+func (m *Model) applyReload(msg reloadDoneMsg) {
+	if msg.err != nil {
+		m.history.Append(Message{Role: RoleError, Text: "/reload: " + msg.err.Error()})
+		m.refreshAndScroll()
+		return
+	}
+	res := msg.result
+	if res.Agent != nil {
+		m.opts.Agent = res.Agent
+	}
+	if res.Memory != nil {
+		m.opts.Memory = res.Memory
+	}
+	if res.MCPServers != nil {
+		m.opts.MCPServers = res.MCPServers
+	}
+	if res.Skills != nil {
+		m.opts.Skills = res.Skills
+	}
+	note := res.Note
+	if note == "" {
+		note = "/reload: reloaded"
+	}
+	m.history.Append(Message{Role: RoleSystem, Text: note})
+	m.refreshAndScroll()
 }
 
 // remoteInterruptCmd runs a RemoteInterrupter.Interrupt in a

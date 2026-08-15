@@ -424,8 +424,9 @@ func TestSwitchBuiltin_SessAlias(t *testing.T) {
 }
 
 // TestSessionPickerDialog_EnterCommits — Enter on a non-current row
-// calls SwitchToSession, applies the target, and returns a non-nil
-// Cmd + Close=true DialogAction.
+// dispatches SwitchToSession off the Update loop (issue #114) and
+// stays open showing progress; the reply attaches the target and
+// closes the dialog from Update.
 func TestSessionPickerDialog_EnterCommits(t *testing.T) {
 	next := &bareAgent{id: "next"}
 	agent := &switchAgent{
@@ -439,20 +440,30 @@ func TestSessionPickerDialog_EnterCommits(t *testing.T) {
 	m := NewModel(Options{Agent: agent})
 	m.viewport.SetWidth(80)
 
-	d := newSessionPickerDialog()
+	d := readySessionPicker(&m)
+	m.overlayStack.Open(d)
 	d.idx = 1 // point at "other"
 	act := d.HandleKey("enter", &m)
-	if !act.Consumed || !act.Close {
-		t.Errorf("HandleKey(enter) = %+v, want Consumed+Close", act)
+	if !act.Consumed || act.Close {
+		t.Errorf("HandleKey(enter) = %+v, want Consumed and NOT Close", act)
 	}
 	if act.Cmd == nil {
-		t.Errorf("expected non-nil Cmd from listener batch")
+		t.Fatalf("expected the off-loop SwitchToSession Cmd")
 	}
+	if len(agent.switchCalls) != 0 {
+		t.Errorf("SwitchToSession ran inline: %v", agent.switchCalls)
+	}
+
+	out, _ := m.Update(act.Cmd())
+	m = out.(Model)
 	if m.opts.Agent != Agent(next) {
 		t.Errorf("Agent not swapped: %v", m.opts.Agent)
 	}
 	if len(agent.switchCalls) != 1 || agent.switchCalls[0] != "other" {
 		t.Errorf("switchCalls = %v, want [other]", agent.switchCalls)
+	}
+	if m.overlayStack.HasID(sessionPickerDialogID) {
+		t.Errorf("picker should close once the switch lands")
 	}
 }
 
@@ -469,7 +480,7 @@ func TestSessionPickerDialog_EnterOnCurrent(t *testing.T) {
 	m.viewport.SetWidth(80)
 	beforeAgent := m.opts.Agent
 
-	d := newSessionPickerDialog()
+	d := readySessionPicker(&m)
 	act := d.HandleKey("enter", &m)
 	if !act.Consumed || !act.Close {
 		t.Errorf("expected close on enter-current row, got %+v", act)
@@ -491,7 +502,7 @@ func TestSessionPickerDialog_EscCloses(t *testing.T) {
 	m := NewModel(Options{Agent: agent})
 	m.viewport.SetWidth(80)
 
-	d := newSessionPickerDialog()
+	d := readySessionPicker(&m)
 	d.idx = 1
 	act := d.HandleKey("esc", &m)
 	if !act.Consumed || !act.Close {
@@ -512,7 +523,7 @@ func TestSessionPickerDialog_CursorMoves(t *testing.T) {
 	m := NewModel(Options{Agent: agent})
 	m.viewport.SetWidth(80)
 
-	d := newSessionPickerDialog()
+	d := readySessionPicker(&m)
 	d.HandleKey("down", &m)
 	if d.idx != 1 {
 		t.Errorf("after down: idx = %d, want 1", d.idx)

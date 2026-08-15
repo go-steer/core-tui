@@ -78,6 +78,19 @@ type palette struct {
 	kind  paletteKind
 	items []paletteItem // all candidates (refreshed on open)
 
+	// seq is the Model.paletteSeq value stamped when this palette
+	// opened. Off-loop item fetches (the @ directory walk, the host's
+	// SlashCommands) carry it back so a reply for a palette the
+	// operator has already dismissed — or replaced by re-triggering —
+	// is dropped instead of repopulating the current one.
+	seq uint64
+
+	// loading is true while an off-loop fetch is still populating
+	// items (issue #114). The renderer shows a "scanning…" line
+	// instead of "no matches" so an empty panel on a big tree reads
+	// as work in progress rather than an empty project.
+	loading bool
+
 	// filter is the typed text AFTER the trigger char. Updated on
 	// every keystroke while the palette is open.
 	filter string
@@ -250,43 +263,78 @@ func formatFileSize(n int64) string {
 	}
 }
 
-// newSlashPalette opens a / palette at trigger position pos in
-// the current input. Items = TUI built-ins (builtinSlashItems)
-// + any agent-provided commands from SlashProvider so /btw,
-// /subagent, and other host extensions are discoverable, not
-// just executable-when-typed. Cursor starts at 0.
-func newSlashPalette(pos int, provider SlashProvider) *palette {
-	items := builtinSlashItems()
-	if provider != nil {
-		for _, spec := range provider.SlashCommands() {
-			display := "/" + spec.Name
-			for _, a := range spec.Aliases {
-				display += ", /" + a
-			}
-			items = append(items, paletteItem{
-				Name:        spec.Name,
-				Display:     display,
-				Description: spec.Description,
-				Available:   true,
-			})
+// slashProviderItems converts a host's SlashCommands() specs into
+// palette rows. Runs inside slashCommandsCmd's goroutine (off the
+// event loop) — SlashCommands() is a host method like any other and
+// gets no free pass just because it looks like a constant lookup.
+func slashProviderItems(provider SlashProvider) []paletteItem {
+	specs := provider.SlashCommands()
+	items := make([]paletteItem, 0, len(specs))
+	for _, spec := range specs {
+		display := "/" + spec.Name
+		for _, a := range spec.Aliases {
+			display += ", /" + a
 		}
+		items = append(items, paletteItem{
+			Name:        spec.Name,
+			Display:     display,
+			Description: spec.Description,
+			Available:   true,
+		})
 	}
+	return items
+}
+
+// newSlashPalette opens a / palette at trigger position pos in the
+// current input, seeded with the TUI built-ins (builtinSlashItems),
+// which are a compile-time constant and cost nothing on the keypress.
+//
+// Agent-provided commands from SlashProvider — /btw, /subagent, other
+// host extensions — are merged later by the slashCommandsMsg handler
+// so the panel appears on the `/` keystroke rather than after the
+// host has answered (issue #114). pendingHost marks that a merge is
+// expected so the panel doesn't briefly claim to be complete.
+func newSlashPalette(pos int, seq uint64, pendingHost bool) *palette {
 	return &palette{
 		kind:       paletteSlash,
-		items:      items,
+		items:      builtinSlashItems(),
+		seq:        seq,
+		loading:    pendingHost,
 		triggerPos: pos,
 	}
 }
 
-// newFilePalette opens an @ palette at trigger position pos. The
-// items are sourced from scanning every PathScope root (R-PAL-4).
-// Empty scope yields an empty palette — the renderer surfaces the
-// "no PathScope configured" hint instead of a misleading file list.
-func newFilePalette(pos int, scope PathScope) *palette {
+// newFilePalette opens an @ palette at trigger position pos, EMPTY
+// and loading. The directory walk that fills it (scanFileItems, one
+// filepath.WalkDir per PathScope root, defaulting to the whole cwd)
+// runs in scanFileItemsCmd off the Update goroutine; the panel opens
+// on the keystroke and populates when fileItemsMsg lands.
+func newFilePalette(pos int, seq uint64) *palette {
 	return &palette{
 		kind:       paletteFile,
-		items:      scanFileItems(scope),
+		seq:        seq,
+		loading:    true,
 		triggerPos: pos,
+	}
+}
+
+// applyItems merges an off-loop fetch into an open palette. Slash
+// palettes APPEND (built-ins were already there); file palettes
+// REPLACE (they opened empty). Either way the load flag clears and
+// the cursor is re-clamped against the newly-filtered list.
+func (p *palette) applyItems(items []paletteItem) {
+	if p.kind == paletteFile {
+		p.items = items
+	} else {
+		p.items = append(p.items, items...)
+	}
+	p.loading = false
+	if n := len(p.filtered()); p.cursor >= n {
+		if n > 0 {
+			p.cursor = n - 1
+		} else {
+			p.cursor = 0
+		}
 	}
 }
 
@@ -472,13 +520,24 @@ func (m Model) renderPalette(width int) string {
 	}
 
 	rule := m.styles.Rule.Render(strings.Repeat(GlyphRule, width))
-	header := m.styles.Accent.Render(title) + "  " +
-		m.styles.Muted.Render(fmt.Sprintf("(%d match%s)", len(items), pluralS(len(items))))
+	// While the off-loop fetch is in flight a match count would be a
+	// running tally presented as an answer, so say what is actually
+	// happening instead. Also keeps the header no wider than before,
+	// which the narrow-terminal frame invariants care about.
+	count := fmt.Sprintf("(%d match%s)", len(items), pluralS(len(items)))
+	if m.palette.loading {
+		count = "scanning…"
+	}
+	header := m.styles.Accent.Render(title) + "  " + m.styles.Muted.Render(count)
 
 	lines := []string{rule, header}
 
 	if len(items) == 0 {
-		lines = append(lines, "  "+m.styles.SystemText.Render("no matches"))
+		empty := "no matches"
+		if m.palette.loading {
+			empty = "scanning…"
+		}
+		lines = append(lines, "  "+m.styles.SystemText.Render(empty))
 	} else {
 		// Scrolling window: the visible slice tracks the cursor so
 		// ↑/↓ can step past the window boundary. When the cursor is

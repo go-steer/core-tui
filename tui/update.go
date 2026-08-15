@@ -543,6 +543,98 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			return m, nil
 		}
 		return m, m.refreshHostSnapshotCmd()
+
+	// ---- off-loop host-call replies (issue #114) ----
+
+	case modelsLoadedMsg:
+		// The model picker's open-time AvailableModels() snapshot.
+		// Addressed through Get, not Front: another modal may have
+		// opened on top of the picker while the host was answering,
+		// and the reply still belongs to the picker (dialog.go).
+		if msg.gen != m.sessionGen {
+			return m, nil
+		}
+		if d, ok := m.overlayStack.Get(modelPickerDialogID).(*modelPickerDialog); ok {
+			d.applyModels(msg.models)
+			m.refreshViewport()
+		}
+		return m, nil
+	case modelSwitchedMsg:
+		// SwitchModel REPLACES m.opts.Agent, so the generation guard
+		// is load-bearing here rather than merely tidy: a reply that
+		// left under the previous session would attach the outgoing
+		// session's agent to the incoming one.
+		if msg.gen != m.sessionGen {
+			return m, nil
+		}
+		// Close the picker only if it is the one that issued this
+		// switch: Esc mid-flight pops it, and the operator may have
+		// re-opened a fresh picker before the reply landed. The
+		// switch itself still applies either way — the host call was
+		// committed the moment it left.
+		if d, ok := m.overlayStack.Get(modelPickerDialogID).(*modelPickerDialog); ok && d.switching == msg.id {
+			d.switching = ""
+			m.overlayStack.Close(modelPickerDialogID)
+		}
+		m.applyModelSwitch(msg)
+		return m, nil
+	case sessionsLoadedMsg:
+		if msg.gen != m.sessionGen {
+			return m, nil
+		}
+		if d, ok := m.overlayStack.Get(sessionPickerDialogID).(*sessionPickerDialog); ok {
+			d.applySessions(msg.sessions)
+			m.refreshViewport()
+		}
+		return m, nil
+	case sessionSwitchedMsg:
+		if msg.gen != m.sessionGen {
+			return m, nil
+		}
+		// Same ownership check as modelSwitchedMsg.
+		if d, ok := m.overlayStack.Get(sessionPickerDialogID).(*sessionPickerDialog); ok && d.switching == msg.id {
+			d.switching = ""
+			m.overlayStack.Close(sessionPickerDialogID)
+		}
+		return m, m.applySessionSwitch(msg)
+	case slashCommandsMsg:
+		// Host slash commands merging into an already-open / palette.
+		if msg.gen != m.sessionGen || m.palette == nil ||
+			m.palette.kind != paletteSlash || m.palette.seq != msg.seq {
+			return m, nil
+		}
+		m.palette.applyItems(msg.items)
+		m.resize()
+		return m, nil
+	case fileItemsMsg:
+		// The @ palette's directory walk finished.
+		if msg.gen != m.sessionGen || m.palette == nil ||
+			m.palette.kind != paletteFile || m.palette.seq != msg.seq {
+			return m, nil
+		}
+		m.palette.applyItems(msg.items)
+		m.resize()
+		return m, nil
+	case reloadDoneMsg:
+		if msg.gen != m.sessionGen {
+			return m, nil
+		}
+		m.applyReload(msg)
+		return m, nil
+	case pricingRefreshedMsg:
+		if msg.gen != m.sessionGen {
+			return m, nil
+		}
+		text := msg.summary
+		if msg.err != nil {
+			text = "/pricing refresh: " + msg.err.Error()
+		}
+		if text != "" {
+			m.history.Append(Message{Role: RoleSystem, Text: text})
+		}
+		m.refreshAndScroll()
+		return m, nil
+
 	case inboxStateMsg:
 		if msg.gen != m.sessionGen {
 			return m, m.eventListener()
@@ -1237,10 +1329,15 @@ func (m Model) handleKey(msg tea.KeyPressMsg) (tea.Model, tea.Cmd) {
 
 	case "ctrl+g":
 		// Open the model picker dialog. Singleton — re-press
-		// while open is a no-op (HasID check).
-		if _, ok := m.opts.Agent.(ModelSwapper); ok && !m.overlayStack.HasID(modelPickerDialogID) {
-			m.overlayStack.Open(newModelPickerDialog())
-			m.refreshViewport()
+		// while open is a no-op (HasID check). The dialog paints
+		// a loading body immediately; AvailableModels() runs in
+		// the returned Cmd so a slow host can't stall the
+		// keystroke (issue #114).
+		if _, ok := m.opts.Agent.(ModelSwapper); ok {
+			if cmd := m.openModelPicker(); cmd != nil {
+				m.refreshViewport()
+				return m, cmd
+			}
 		}
 		return m, nil
 
@@ -1432,9 +1529,10 @@ func (m Model) handleKey(msg tea.KeyPressMsg) (tea.Model, tea.Cmd) {
 	// Refresh palette state from the updated input — opens a new
 	// palette on a fresh `/` or `@` trigger, closes the active one
 	// when the trigger is deleted, or updates the filter on any
-	// other keystroke.
-	m.refreshPalette()
-	return m, tea.Batch(taCmd, vpCmd)
+	// other keystroke. Opening returns the Cmd that fills the panel
+	// off the event loop (issue #114); re-filtering returns nil.
+	paletteCmd := m.refreshPalette()
+	return m, tea.Batch(taCmd, vpCmd, paletteCmd)
 }
 
 // refreshPalette re-derives palette state from the current textarea
@@ -1446,30 +1544,36 @@ func (m Model) handleKey(msg tea.KeyPressMsg) (tea.Model, tea.Cmd) {
 //   - `/` at the very start of input opens a slash palette.
 //   - `@` at a word boundary anywhere opens a file palette.
 //   - Deleting the trigger char closes the active palette.
-func (m *Model) refreshPalette() {
+//
+// Returns a non-nil Cmd only on the keystroke that OPENS a palette:
+// the item source is a host call (SlashProvider.SlashCommands) or a
+// full directory walk (scanFileItems), and neither may run on the
+// Update goroutine. The panel opens immediately either way and fills
+// in when the reply lands.
+func (m *Model) refreshPalette() tea.Cmd {
 	value := m.input.Value()
 
 	if m.palette == nil {
 		if strings.HasPrefix(value, "/") {
-			// Merge agent-provided SlashProvider commands so /btw,
-			// /subagent, etc. are discoverable in the palette in
-			// addition to working when typed manually.
-			var provider SlashProvider
-			if p, ok := m.opts.Agent.(SlashProvider); ok {
-				provider = p
-			}
-			m.palette = newSlashPalette(0, provider)
+			// Built-ins paint immediately; agent-provided
+			// SlashProvider commands (/btw, /subagent, …) merge in
+			// via slashCommandsMsg so they stay discoverable in the
+			// palette, not just executable when typed.
+			m.paletteSeq++
+			cmd := m.slashCommandsCmd(m.paletteSeq)
+			m.palette = newSlashPalette(0, m.paletteSeq, cmd != nil)
 			m.palette.filter = value[1:]
 			m.resize()
-			return
+			return cmd
 		}
 		if idx := lastAtTokenStart(value); idx >= 0 {
-			m.palette = newFilePalette(idx, m.opts.PathScope)
+			m.paletteSeq++
+			m.palette = newFilePalette(idx, m.paletteSeq)
 			m.palette.filter = atFilterFrom(value, idx)
 			m.resize()
-			return
+			return scanFileItemsCmd(m.opts.PathScope, m.sessionGen, m.paletteSeq)
 		}
-		return
+		return nil
 	}
 
 	// Palette is open — verify the trigger char still sits at
@@ -1477,12 +1581,12 @@ func (m *Model) refreshPalette() {
 	if m.palette.triggerPos >= len(value) {
 		m.palette = nil
 		m.resize()
-		return
+		return nil
 	}
 	if string(value[m.palette.triggerPos]) != m.palette.triggerRune() {
 		m.palette = nil
 		m.resize()
-		return
+		return nil
 	}
 	if m.palette.kind == paletteSlash {
 		m.palette.filter = value[1:]
@@ -1497,6 +1601,10 @@ func (m *Model) refreshPalette() {
 			m.palette.cursor = 0
 		}
 	}
+	// Re-filtering an already-populated palette needs no fetch: the
+	// items were snapshotted at open and the filter is pure string
+	// work over them.
+	return nil
 }
 
 // lastAtTokenStart returns the byte index of the most recent `@` in s
@@ -1548,7 +1656,9 @@ func (m Model) paletteComplete() tea.Model {
 	}
 	newValue := value[:m.palette.triggerPos] + m.palette.triggerRune() + extension + value[tokenEnd:]
 	m.input.SetValue(newValue)
-	m.refreshPalette()
+	// The trigger char is untouched, so this only re-filters the
+	// snapshot the palette already holds — never a fresh fetch.
+	_ = m.refreshPalette()
 	return m
 }
 
@@ -2806,8 +2916,9 @@ func (m Model) paletteInsert() tea.Model {
 	m.input.SetValue(newValue)
 	if isDir {
 		// Keep the palette open and re-sync the filter to the new
-		// prefix so children of the picked directory surface.
-		m.refreshPalette()
+		// prefix so children of the picked directory surface. Still
+		// the same snapshot, so no fetch Cmd comes back.
+		_ = m.refreshPalette()
 	} else {
 		m.palette = nil
 		m.resize()

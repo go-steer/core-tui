@@ -453,6 +453,16 @@ type Model struct {
 	// and a straggler stream chunk can't bleed into the new
 	// session's assistant buffer during the race window.
 	sessionGen uint64
+
+	// paletteSeq identifies the CURRENT palette instance (issue
+	// #114). Palette items are now fetched off the Update goroutine
+	// — the @ directory walk and the host's SlashCommands() — and a
+	// palette opens and closes many times within one sessionGen, so
+	// sessionGen alone can't tell whether an arriving fileItemsMsg /
+	// slashCommandsMsg still belongs to what is on screen. Bumped on
+	// every open; the reply is dropped unless it matches
+	// m.palette.seq.
+	paletteSeq uint64
 }
 
 // NewModel constructs a Model from Options. SeedHistory entries are
@@ -897,15 +907,23 @@ func formatKTokens(n int) string {
 	return fmt.Sprintf("%dK", n/1000)
 }
 
-// subagentSummary renders the sidebar's subagent rows from a wired
-// SubagentLister. Returns ("none") when the capability is unwired or
-// the list is empty so the section reads consistently.
+// subagentSummary renders the sidebar's subagent rows from the host
+// snapshot's SubagentLister read. Returns ("none") when the capability
+// is unwired or the list is empty so the section reads consistently.
+//
+// Reads hostSnap rather than calling Subagents() directly: this runs
+// from renderSidebar, i.e. from View(), which host_snapshot.go
+// guarantees never blocks on a host method. The roster refreshes on
+// the same hostSnapshotInterval tick as the header figures.
 func (m Model) subagentSummary() []string {
-	lister, ok := m.opts.Agent.(SubagentLister)
-	if !ok {
+	if _, ok := m.opts.Agent.(SubagentLister); !ok {
 		return []string{"none (no SubagentLister)"}
 	}
-	subs := lister.Subagents()
+	if !m.hostSnap.valid {
+		// Wired, but the first off-loop pull hasn't landed yet.
+		return []string{"…"}
+	}
+	subs := m.hostSnap.subagents
 	if len(subs) == 0 {
 		return []string{"none"}
 	}
