@@ -73,6 +73,22 @@ type Model struct {
 	viewport viewport.Model
 	input    textarea.Model
 
+	// follow is the operator's "keep me on the tail" intent for the
+	// chat viewport. refreshViewport re-pins to the bottom after
+	// every repaint while it is set.
+	//
+	// It is tracked rather than derived because viewport.AtBottom()
+	// is a geometric fact about the CURRENT height — shrink the
+	// viewport (terminal resize, the textarea growing a line, the
+	// help panel opening) and a viewport that was pinned to the
+	// bottom starts reporting false, silently dropping follow
+	// mid-stream (issue #93). Intent has to survive geometry
+	// changes, so only the scroll paths write it: syncFollow re-
+	// derives it right after a user-driven scroll (while the
+	// geometry is still the one the operator scrolled in), and the
+	// operator-initiated jump paths set it outright.
+	follow bool
+
 	width  int
 	height int
 
@@ -451,6 +467,7 @@ func NewModel(opts Options) Model {
 		styles:          NewStyles(initialDark, opts.Branding), // overwritten on BackgroundColorMsg unless ForceTheme is set
 		viewport:        vp,
 		input:           ta,
+		follow:          true, // start pinned to the tail
 		statusLayout:    opts.StatusLayout,
 		permMode:        opts.PermissionMode.Initial,
 		themeName:       opts.InitialThemeName,
