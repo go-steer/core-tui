@@ -444,9 +444,20 @@ func NewModel(opts Options) Model {
 	ta.Prompt = DefaultPromptGlyph
 	ta.ShowLineNumbers = false
 	ta.SetHeight(textareaMinHeight)
-	// Focus the textarea so KeyPressMsg events route to it. Focus()
-	// returns a blink Cmd we deliberately drop here — Init below
-	// returns textarea.Blink directly to start the cursor animation.
+	// Drive the TERMINAL's cursor rather than a painted one
+	// (issue #105). bubbles defaults to a "virtual cursor" — a
+	// reverse-video block drawn into the frame — which leaves the
+	// real cursor wherever the last write left it: IME candidate
+	// windows open in the wrong place, the operator's configured
+	// cursor shape / blink is ignored, and assistive tech has
+	// nothing to follow. With it off, textarea.Cursor() reports a
+	// position and View forwards it as tea.View.Cursor (cursor.go).
+	ta.SetVirtualCursor(false)
+	// Focus the textarea so KeyPressMsg events route to it — and so
+	// textarea.Cursor() reports a position at all; bubbles returns
+	// nil for a blurred widget. Focus() returns a blink Cmd we drop:
+	// with the virtual cursor off there is no painted block to
+	// animate, the terminal blinks its own caret.
 	_ = ta.Focus()
 
 	// Start the textarea with a transparent CursorLine style —

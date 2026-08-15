@@ -609,6 +609,24 @@ listed in `/help`:
   (the subagent log) stay pinned to the newest line until the user
   scrolls up, and `End` re-pins.
 
+### 3.23 Hardware cursor (must)
+
+- **R-CUR-1** The terminal's real cursor sits on the text surface
+  that currently owns input, at the caret position within it, and
+  text surfaces do not paint a caret glyph of their own. This is
+  what anchors an IME's candidate window, what lets the user's
+  configured cursor shape and blink apply, and what assistive
+  technology follows.
+- **R-CUR-2** When a modal owns input the cursor goes with it — the
+  elicitation form's focused field, a text-input dialog. A modal
+  that takes no typed text (a permission decision, the `/btw`
+  viewer, an arrow-nav picker) and an unfocused input leave the
+  cursor unset, so the terminal hides it rather than showing it on
+  an unrelated cell.
+- **R-CUR-3** The cursor position is always inside the rendered
+  frame. A surface clipped out of the frame yields no cursor at all
+  rather than a stale position.
+
 ## 4. Non-functional Requirements
 
 - **N-LANG** Go ≥ 1.23 (for `iter.Seq2`). No cgo.

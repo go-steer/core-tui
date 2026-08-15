@@ -274,7 +274,11 @@ type SessionInput struct {
 //
 // Dialogs that own a text widget implement KeyMsgDialog (optional
 // extension of Dialog) to receive the raw tea.KeyPressMsg instead
-// of the normalized stroke string.
+// of the normalized stroke string, and cursorDialog (also optional)
+// to say where the terminal cursor belongs — a position relative to
+// the dialog's own top-left cell, which View offsets by wherever it
+// composited the dialog (R-CUR-1..3). Folding that into Dialog
+// itself is part of the contract work in #115.
 
 // SwitchTarget is also reachable via SlashResult.SwitchTo, so any
 // SlashProvider / AsyncSlashProvider can request an Agent swap

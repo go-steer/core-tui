@@ -59,5 +59,12 @@ func textareaStyles(isDark bool, theme Theme) textarea.Styles {
 	// the rail doesn't shout when the input isn't taking input.
 	s.Focused.Prompt = lipgloss.NewStyle().Foreground(theme.BorderActive)
 	s.Blurred.Prompt = lipgloss.NewStyle().Foreground(theme.FgMuted)
+	// Theme the REAL cursor (issue #105). With the virtual cursor
+	// off, Cursor.Color is what textarea.Cursor() hands to
+	// tea.View.Cursor, and bubbles' default is a bare ANSI "7" that
+	// belongs to no theme. Primary matches the caret the text-input
+	// dialog already asks for (dialog_textinput.go syncStyles), so
+	// the two typing surfaces agree.
+	s.Cursor.Color = theme.Primary
 	return s
 }
