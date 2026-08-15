@@ -307,9 +307,15 @@ func TestOverlay_HandleKeyMsg_PrefersKeyMsgDialog(t *testing.T) {
 		t.Errorf("Close: true from Submit should have popped the dialog")
 	}
 
-	// A plain Dialog (the model picker) still works through the
-	// same entry point via the HandleKey fallback.
-	m.overlayStack.Open(newModelPickerDialog())
+	// A plain Dialog still works through the same entry point via
+	// the HandleKey fallback. The model picker used to be the
+	// example here; issue #117 made all three pickers KeyMsgDialogs,
+	// so the tool-call detail overlay is what exercises the fallback
+	// now.
+	m.overlayStack.Open(newToolCallDialog(0))
+	if _, ok := m.overlayStack.Front().(KeyMsgDialog); ok {
+		t.Fatal("the fallback arm needs a dialog that is NOT a KeyMsgDialog")
+	}
 	consumed, _ = m.overlayStack.HandleKeyMsg(tea.KeyPressMsg(tea.Key{Code: tea.KeyEnter}), &m)
 	if !consumed {
 		t.Errorf("plain Dialog should still consume via the HandleKey fallback")

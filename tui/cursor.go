@@ -52,8 +52,10 @@ import (
 // cursorDialog is the optional extension for a Dialog whose body
 // owns a text-editing surface and can therefore say where the
 // terminal cursor belongs. Dialogs that don't implement it get no
-// cursor, which is correct for the arrow-nav pickers: nothing in a
-// model / theme / session picker is being typed into.
+// cursor, which is correct for the tool-call and subagent detail
+// overlays: read-only bodies with a scroll position and nothing to
+// type into. The three pickers were in that category until issue
+// #117 gave them a filter row.
 //
 // This is deliberately shaped as an optional extension, exactly like
 // KeyMsgDialog, because "where does the cursor go" is slated to
@@ -127,6 +129,8 @@ func (o *Overlay) cursor(width int, m *Model) *tea.Cursor {
 // <= 0 means SetWidth was never called, which takes the same
 // early-return and is likewise unscrolled.
 //
+// Both halves are reported upstream and open: charmbracelet/bubbles
+// #906 (rune index vs cell width) and #1001 (ignored scroll offset).
 // Deleting this is a one-liner once upstream measures the prefix
 // itself: the correction becomes a no-op, not a double-correction.
 func textInputCursor(ti textinput.Model, prompt string) *tea.Cursor {
@@ -217,9 +221,12 @@ func (m Model) textareaCursor(origin inputOrigin) *tea.Cursor {
 // The switch mirrors View's z-order cascade and has to stay in
 // lockstep with it — same ordering rationale as handleEsc's cascade
 // (update.go). Read-only modals (a permission prompt answered with
-// y/n/s/v/t/a, the /btw side answer, the arrow-nav pickers) return
-// no cursor deliberately: there is nothing to type into them, so the
-// terminal should hide the caret rather than park it on a border.
+// y/n/s/v/t/a, the /btw side answer, the read-only detail overlays)
+// return no cursor deliberately: there is nothing to type into them,
+// so the terminal should hide the caret rather than park it on a
+// border. The pickers left that set in #117 — their filter row
+// implements DialogCursor, and without it this arm would answer
+// (nil, true) for a surface the operator is typing CJK into.
 func (m Model) modalCursor(modal string) (c *tea.Cursor, covered bool) {
 	switch {
 	case m.pendingPermission != nil && m.opts.PermissionLayout == PermissionOverlay:

@@ -292,7 +292,13 @@ func (d *textInputDialog) syncStyles(s Styles) {
 	d.styled = true
 	d.styledDark = s.Dark
 	d.styledTheme = s.Theme.Name
+	d.input.SetStyles(textInputStyles(s))
+}
 
+// textInputStyles maps the active theme onto a bubbles textinput
+// palette. Shared with the pickers' filter row (dialog_filter.go) so
+// the two typed surfaces cannot drift apart.
+func textInputStyles(s Styles) textinput.Styles {
 	ts := textinput.DefaultStyles(s.Dark)
 	ts.Focused.Prompt = lipgloss.NewStyle().Foreground(s.Theme.BorderActive)
 	ts.Blurred.Prompt = lipgloss.NewStyle().Foreground(s.Theme.FgMuted)
@@ -306,7 +312,7 @@ func (d *textInputDialog) syncStyles(s Styles) {
 	// the widget and the Dialog contract is keystrokes-only — no msg
 	// pipe. That constraint died with the virtual cursor.
 	ts.Cursor.Blink = true
-	d.input.SetStyles(ts)
+	return ts
 }
 
 // keyMsgFromStroke rebuilds a tea.KeyPressMsg from the normalized

@@ -154,6 +154,21 @@ func frameStates() []frameState {
 			},
 		},
 		{
+			// Issue #117: the pickers grew a filter row. It costs a
+			// body row (paid for with modalChromeRows+1) and puts a
+			// hardware caret on a modal that used to have none, so
+			// both the geometry grid and TestCursor_InsideClippedFrame
+			// — which types into whatever this returns — need a
+			// picker in the matrix. The theme picker is the one that
+			// needs no host capability to populate itself.
+			name: "theme-picker",
+			setup: func(_ *testing.T, m Model, _, _ int) Model {
+				m = withHostileTranscript(m)
+				m.overlayStack.Open(newThemePickerDialog(m.themeName))
+				return m
+			},
+		},
+		{
 			// Issue #121: the auto-grown input box. resize() used to
 			// reset the textarea to textareaMinHeight on every call,
 			// so no state in this grid could ever compose a frame

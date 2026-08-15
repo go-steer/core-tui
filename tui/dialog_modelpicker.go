@@ -71,6 +71,10 @@ type modelPickerDialog struct {
 	// the list past the bottom edge with no way to reach it.
 	off int
 
+	// filter is the type-to-filter row (issue #117). It narrows
+	// rows(), which is the only thing the rest of the dialog reads.
+	filter pickerFilter
+
 	// switching is the model ID of an in-flight SwitchModel, or "".
 	// The dialog stays open showing "switching to <id>…" until
 	// modelSwitchedMsg lands, so the operator sees the host working
@@ -83,7 +87,7 @@ type modelPickerDialog struct {
 // pairs the Open with the Cmd that fills it; the Overlay container
 // owns lifecycle.
 func newModelPickerDialog() *modelPickerDialog {
-	return &modelPickerDialog{idx: 0}
+	return &modelPickerDialog{idx: 0, filter: newPickerFilter()}
 }
 
 // openModelPicker pushes the model picker (singleton) and returns the
@@ -99,12 +103,28 @@ func (m *Model) openModelPicker() tea.Cmd {
 
 func (d *modelPickerDialog) ID() string { return modelPickerDialogID }
 
-// rows returns the list the cursor indexes into and Render paints.
-// Today that is the whole snapshot. It exists as a seam: type-to-
-// filter (issue #117) narrows the snapshot here and every other part
-// of the dialog — cursor wrap, window scroll, Enter — keeps working
-// unchanged, because none of them touch d.models directly.
-func (d *modelPickerDialog) rows() []ModelInfo { return d.models }
+// rows returns the list the cursor indexes into and Render paints:
+// the snapshot narrowed by the filter row, ranked best-first
+// (rank.go). Issue #114 built this accessor as the seam for exactly
+// this, and it held — cursor wrap, window scroll and Enter all index
+// rows() rather than d.models, so none of them needed to change when
+// the list started shrinking under them.
+func (d *modelPickerDialog) rows() []ModelInfo {
+	filter := d.filter.value()
+	if filter == "" {
+		return d.models
+	}
+	keys := make([]string, len(d.models))
+	for i, mi := range d.models {
+		keys[i] = pickerKey(mi.Display, mi.ID)
+	}
+	idx := rankNames(keys, filter)
+	out := make([]ModelInfo, len(idx))
+	for i, at := range idx {
+		out[i] = d.models[at]
+	}
+	return out
+}
 
 // applyModels installs the open-time snapshot. Called from Update's
 // modelsLoadedMsg handler, which addresses the dialog through
@@ -147,7 +167,19 @@ func indexOfModel(models []ModelInfo, current string) int {
 	return 0
 }
 
+// HandleKey satisfies Dialog for callers holding only a normalized
+// stroke. It synthesizes a KeyPressMsg and delegates, so both entry
+// points behave identically — see KeyMsgDialog's godoc for why the
+// picker wants the raw msg now that it owns a text input.
 func (d *modelPickerDialog) HandleKey(stroke string, m *Model) DialogAction {
+	return d.HandleKeyMsg(keyMsgFromStroke(stroke), m)
+}
+
+// HandleKeyMsg is the real key handler. Navigation strokes drive the
+// list; everything else — every printable grapheme, backspace, the
+// widget's own kill bindings, a bracketed paste — is filter input.
+func (d *modelPickerDialog) HandleKeyMsg(msg tea.KeyPressMsg, m *Model) DialogAction {
+	stroke := msg.String()
 	if stroke == "esc" {
 		// Esc always closes, including mid-switch: the host call is
 		// already committed, so its reply still applies the agent —
@@ -170,24 +202,38 @@ func (d *modelPickerDialog) HandleKey(stroke string, m *Model) DialogAction {
 		// textarea behind the modal, but there is nothing to move.
 		return DialogAction{Consumed: true}
 	}
-	rows := d.rows()
-	if len(rows) == 0 {
+	if len(d.models) == 0 {
+		// The HOST advertised nothing. Unchanged from before the
+		// filter existed: say so and close, on any key. Distinct from
+		// the filter matching nothing, which is handled below.
 		m.history.Append(Message{Role: RoleSystem, Text: "/model: no models available"})
 		m.refreshViewport()
 		return DialogAction{Consumed: true, Close: true}
 	}
-	if d.idx >= len(rows) {
-		d.idx = len(rows) - 1
+	if !pickerNavStroke(stroke) {
+		cmd, changed := d.filter.handleKeyMsg(msg)
+		if changed {
+			// The list under the cursor was just replaced. Land on
+			// the best match rather than trying to keep hold of a row
+			// that may not be in the new list at all.
+			d.idx, d.off = 0, 0
+		}
+		return DialogAction{Consumed: true, Cmd: cmd}
 	}
-	if d.idx < 0 {
-		d.idx = 0
+
+	rows := d.rows()
+	if len(rows) == 0 {
+		// The FILTER matched nothing. Stay open with the row on
+		// screen: the operator's next keystroke is a backspace.
+		return DialogAction{Consumed: true}
 	}
+	d.idx = clampIndex(d.idx, len(rows))
 	switch stroke {
 	case "up", "ctrl+p":
-		d.idx = (d.idx - 1 + len(rows)) % len(rows)
+		d.idx = stepIndex(d.idx, -1, len(rows))
 		return DialogAction{Consumed: true}
 	case "down", "ctrl+n":
-		d.idx = (d.idx + 1) % len(rows)
+		d.idx = stepIndex(d.idx, 1, len(rows))
 		return DialogAction{Consumed: true}
 	case "enter":
 		pick := rows[d.idx]
@@ -199,6 +245,29 @@ func (d *modelPickerDialog) HandleKey(stroke string, m *Model) DialogAction {
 	// Unhandled key — consume so it doesn't leak to the textarea
 	// behind the modal, but don't close.
 	return DialogAction{Consumed: true}
+}
+
+// filtering reports whether the filter row is on screen, which is
+// also the condition for the picker owning the terminal caret. Only
+// the loaded-list state has one: a loading line, an in-flight switch,
+// an unwired agent and a host that advertised nothing are all states
+// with nothing to narrow.
+func (d *modelPickerDialog) filtering(m *Model) bool {
+	if _, wired := m.opts.Agent.(ModelSwapper); !wired {
+		return false
+	}
+	return d.loaded && d.switching == "" && len(d.models) > 0
+}
+
+// DialogCursor implements cursorDialog. Without it modalCursor would
+// return (nil, true) for a dialog the operator is typing into, which
+// is #105 / #123 regressed on the surface most likely to see CJK —
+// no hardware caret means no IME anchor.
+func (d *modelPickerDialog) DialogCursor(_ int, m *Model) *tea.Cursor {
+	if !d.filtering(m) {
+		return nil
+	}
+	return filterRowCursor(d.filter.cursor())
 }
 
 // applyModelSwitch is the Update-side half of the Enter path: attach
@@ -251,43 +320,55 @@ func (d *modelPickerDialog) Render(totalWidth int, m *Model) string {
 		body = m.styles.Muted.Render("switching to " + d.switching + "…")
 	case !d.loaded:
 		body = m.styles.Muted.Render("loading models…")
+	case len(d.models) == 0:
+		body = m.styles.Muted.Render("(no models advertised by the agent)")
 	default:
 		models := d.rows()
+		filter := d.filter.value()
+		// The filter row is the FIRST body row, always — including
+		// when it matched nothing, since it is the thing the operator
+		// has to edit to get back. Its row is paid for with
+		// modalChromeRows+1 below.
+		lines := []string{d.filter.render(width, len(models), len(d.models), m.styles)}
 		if len(models) == 0 {
-			body = m.styles.Muted.Render("(no models advertised by the agent)")
-		} else {
-			current := m.displayModelName()
-			rows := make([]string, 0, len(models))
-			for i, mi := range models {
-				disp := mi.Display
-				if disp == "" {
-					disp = mi.ID
-				}
-				marker := "  "
-				if i == d.idx {
-					marker = "> "
-				}
-				row := marker + disp
-				if mi.ID != disp {
-					row += m.styles.Muted.Render("  (" + mi.ID + ")")
-				}
-				if mi.ID == current || disp == current {
-					row += "  " + m.styles.Muted.Render("(current)")
-				}
-				if mi.Description != "" {
-					row += "  " + m.styles.Muted.Render(mi.Description)
-				}
-				if i == d.idx {
-					row = m.styles.Accent.Render(row)
-				}
-				rows = append(rows, row)
-			}
-			view := modalBodyHeight(m.height, modalChromeRows)
-			d.off = listWindow(d.off, d.idx, len(rows), view)
-			body = strings.Join(scrollView(m.styles, rows, nonNeg(width-4), view, d.off), "\n")
+			lines = append(lines, m.styles.Muted.Render("no models match "+quoteFilter(filter)))
+			body = strings.Join(lines, "\n")
+			break
 		}
+		current := m.displayModelName()
+		d.idx = clampIndex(d.idx, len(models))
+		rows := make([]string, 0, len(models))
+		for i, mi := range models {
+			disp := mi.Display
+			if disp == "" {
+				disp = mi.ID
+			}
+			base := lipgloss.NewStyle()
+			marker := "  "
+			if i == d.idx {
+				marker, base = "> ", m.styles.Accent
+			}
+			row := base.Render(marker) + highlightSpan(disp, filter, base)
+			if mi.ID != disp {
+				row += m.styles.Muted.Render("  (") +
+					highlightSpan(mi.ID, filter, m.styles.Muted) +
+					m.styles.Muted.Render(")")
+			}
+			if mi.ID == current || disp == current {
+				row += "  " + m.styles.Muted.Render("(current)")
+			}
+			if mi.Description != "" {
+				row += "  " + m.styles.Muted.Render(mi.Description)
+			}
+			rows = append(rows, row)
+		}
+		view := modalBodyHeight(m.height, modalChromeRows+1)
+		d.off = listWindow(d.off, d.idx, len(rows), view)
+		lines = append(lines, scrollView(m.styles, rows, nonNeg(width-4), view, d.off)...)
+		body = strings.Join(lines, "\n")
 	}
-	footer := "↑↓ choose " + GlyphSeparator + " enter accept " + GlyphSeparator + " esc cancel"
+	footer := "type to filter " + GlyphSeparator + " ↑↓ choose " +
+		GlyphSeparator + " enter accept " + GlyphSeparator + " esc cancel"
 	return RenderContext{
 		Title:  "Choose a Model",
 		Body:   body,
@@ -296,7 +377,3 @@ func (d *modelPickerDialog) Render(totalWidth int, m *Model) string {
 		Styles: m.styles,
 	}.Render()
 }
-
-// Suppress unused-import lint when lipgloss isn't needed at this
-// file level — RenderContext does the lipgloss work via Styles.
-var _ = lipgloss.Left

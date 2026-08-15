@@ -484,10 +484,14 @@ func TestCursor_NilWhenNothingOwnsIt(t *testing.T) {
 			},
 		},
 		{
+			// The three pickers used to be this case. Issue #117 gave
+			// them a filter row and therefore a caret; the tool-call
+			// detail overlay is the arrow-nav dialog that remains,
+			// and it still has nothing to type into.
 			name: "arrow-nav-dialog",
 			setup: func(t *testing.T) Model {
 				m := cursorModel(t, StatusHeader, 100, 30)
-				m.overlayStack.Open(newThemePickerDialog(m.themeName))
+				m.overlayStack.Open(newToolCallDialog(0))
 				return m
 			},
 		},
