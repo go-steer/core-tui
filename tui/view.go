@@ -1559,7 +1559,8 @@ func (m Model) renderHelpPanel(width int) string {
 		}},
 		{"Navigation", [][2]string{
 			{"pgup / pgdn", "scroll chat"},
-			{"home / end", "top / bottom"},
+			{"ctrl+l", "jump to top (stops following the stream)"},
+			{"end", "jump to bottom, when the input is empty (resumes following)"},
 		}},
 		{"Layout & mode", [][2]string{
 			{"ctrl+b", "toggle header / sidebar"},

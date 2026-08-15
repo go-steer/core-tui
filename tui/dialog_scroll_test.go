@@ -269,11 +269,15 @@ func keyPress(stroke string) tea.KeyPressMsg {
 		"esc":   tea.KeyEscape,
 		"enter": tea.KeyEnter,
 	}
-	code, ok := codes[stroke]
-	if !ok {
-		panic("keyPress: unmapped stroke " + stroke)
+	if code, ok := codes[stroke]; ok {
+		return tea.KeyPressMsg(tea.Key{Code: code})
 	}
-	return tea.KeyPressMsg(tea.Key{Code: code})
+	// ctrl+<letter> — spelled generically so callers don't have to
+	// extend the table for every chord.
+	if rest, ok := strings.CutPrefix(stroke, "ctrl+"); ok && len(rest) == 1 {
+		return tea.KeyPressMsg(tea.Key{Code: rune(rest[0]), Mod: tea.ModCtrl})
+	}
+	panic("keyPress: unmapped stroke " + stroke)
 }
 
 // The chat viewport keeps the wheel when no modal is up — handleWheel
