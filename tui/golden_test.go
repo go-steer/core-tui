@@ -462,6 +462,87 @@ func TestGolden_RenderCodeInline(t *testing.T) {
 	})
 }
 
+// goldenHostile is the adversarial counterpart to goldenDiff: one
+// payload carrying every class of byte the #108 escape set has an
+// opinion about. Written with Go escapes rather than raw bytes so
+// the fixture is readable in a diff and survives a copy-paste.
+//
+//   - `ESC[2J`          erase display
+//   - `ESC]0;…BEL`      set window title
+//   - `ESC[31m…ESC[0m`  SGR color (stripped, not escaped)
+//   - `CR`              cursor to column 0, mid-row
+//   - `BS`              overwrite the character to the left
+//   - `U+009B`          the 8-bit CSI introducer, as a UTF-8 rune
+//   - TAB               the exemption, and the reason the rest of
+//     the corpus does not churn
+const goldenHostile = "clean line\n" +
+	"\x1b[2Jerased\n" +
+	"\x1b]0;pwned\x07titled\n" +
+	"\x1b[31mcolored\x1b[0m\n" +
+	"spoofed\rSUCCESS\n" +
+	"typo\x08\x08fixed\n" +
+	"\u009b31mfake-color\n" +
+	"\tindented with a tab\n"
+
+// TestGolden_HostileContent pins the RENDERED form of hostile
+// content — what an operator's terminal actually receives when a
+// tool hands the TUI a payload that is trying to draw on the screen.
+//
+// The goldens are the readable half of the assertion; the loop that
+// follows is the load-bearing half, because a golden can only prove
+// the bytes did not change, not that they are safe. assertRenderSafe
+// (sanitize_test.go) proves the second thing, so regenerating this
+// corpus cannot quietly bless an escape sequence.
+func TestGolden_HostileContent(t *testing.T) {
+	pinChromaStyle(t)
+	s := goldenStyles()
+
+	// The diff form: every hostile line arrives as an added line, so
+	// each one renders inside a background-tinted span. That is the
+	// worst case — a CR or a cursor move with the tint still active
+	// bleeds the color across whatever it lands on.
+	diff := "--- a/hostile.txt\n+++ b/hostile.txt\n@@ -1,0 +1,8 @@\n"
+	for _, line := range strings.Split(strings.TrimRight(goldenHostile, "\n"), "\n") {
+		diff += "+" + line + "\n"
+	}
+
+	// CRLF gets its own fixture: the bug is that the CR survives to
+	// end-of-line inside the tinted span, which only shows up when
+	// the lines are actually CRLF-separated.
+	crlfDiff := "--- a/crlf.go\n+++ b/crlf.go\r\n@@ -1,2 +1,2 @@\r\n-old\r\n+new\r\n context\r\n"
+
+	cases := []struct {
+		name string
+		got  string
+	}{
+		{"diff_inline", renderDiffInline(diff, s, 0, "")},
+		{"diff_inline_go", renderDiffInline(diff, s, 0, "Go")},
+		{"diff_inline_crlf", renderDiffInline(crlfDiff, s, 0, "Go")},
+		{"code_inline", renderCodeInline(goldenHostile, s, 0, "")},
+		{"result_error", renderToolPreviewWithResult(
+			"bash", map[string]any{"command": "\x1b[2Jrm -rf /"}, nil,
+			"exit 1: \x1b]0;pwned\x07\rALL CLEAR", s)},
+		{"bash_result", renderToolPreviewWithResult(
+			"bash", map[string]any{"command": "cat hostile.txt"},
+			map[string]any{"stdout": goldenHostile, "stderr": "\x1b[2Jwarning\rOK", "exit_code": 2}, "", s)},
+		{"tool_detail", renderToolDetail(
+			map[string]any{"path": "hostile.txt", "flag": "\u009b31m"},
+			map[string]any{"content": goldenHostile}, "", s)},
+		{"tool_detail_error", renderToolDetail(
+			map[string]any{"path": "hostile.txt"}, nil,
+			"open hostile.txt: \x1b[2Jno such file\rOK", s)},
+		// A line of tabs is under the byte cap and four times over
+		// the cell cap — the #107 accounting fix, captured.
+		{"tab_overflow", renderCodeInline(strings.Repeat("\t", 300), s, 0, "")},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			assertGolden(t, "hostile_"+tc.name, tc.got)
+			assertRenderSafe(t, tc.name, tc.got)
+		})
+	}
+}
+
 func TestGolden_RenderLatencyBadge(t *testing.T) {
 	s := goldenStyles()
 	for _, ms := range []int64{0, 12, 850, 2400, 95000} {

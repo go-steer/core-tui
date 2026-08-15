@@ -1,0 +1,10 @@
+[38;2;154;154;154m    args:[m
+[38;2;154;154;154m      {[m                      
+[38;2;154;154;154m        "flag": "\x9b31m",[m   
+[38;2;154;154;154m        "path": "hostile.txt"[m
+[38;2;154;154;154m      }[m                      
+
+[38;2;154;154;154m    response:[m
+[38;2;154;154;154m      {[m                                                                                                                                                                              
+[38;2;154;154;154m        "content": "clean line\n\u001b[2Jerased\n\u001b]0;pwned\u0007titled\n\u001b[31mcolored\u001b[0m\nspoofed\rSUCCESS\ntypo\b\bfixed\n\x9b31mfake-color\n\tindented with a tab\n"[m
+[38;2;154;154;154m      }[m                                                                                                                                                                              

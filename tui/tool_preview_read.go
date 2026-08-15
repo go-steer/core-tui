@@ -89,6 +89,9 @@ func renderReadFilePreview(args map[string]any, styles Styles, indent string) st
 // renderReadManyFilesPreview formats `N files · a, b, c, +K more`
 // for a batch read. Falls back to `pattern: "..."` when args only
 // carry a glob pattern instead of an explicit path list.
+//
+// Paths and pattern are model-written args, so the assembled row
+// goes through sanitizeLine before it is styled.
 func renderReadManyFilesPreview(args map[string]any, styles Styles, indent string) string {
 	if paths := stringSliceArg(args, "paths", "files"); len(paths) > 0 {
 		head := paths
@@ -99,10 +102,10 @@ func renderReadManyFilesPreview(args map[string]any, styles Styles, indent strin
 		if len(paths) > 3 {
 			body += ", +" + itoa(len(paths)-3) + " more"
 		}
-		return styles.Muted.Render(indent + body)
+		return styles.Muted.Render(indent + sanitizeLine(body))
 	}
 	if pattern := stringArg(args, "pattern", "glob"); pattern != "" {
-		return styles.Muted.Render(indent + "pattern: \"" + pattern + "\"")
+		return styles.Muted.Render(indent + sanitizeLine("pattern: \""+pattern+"\""))
 	}
 	return ""
 }
@@ -110,6 +113,9 @@ func renderReadManyFilesPreview(args map[string]any, styles Styles, indent strin
 // renderSearchPreview formats `pattern: "X" · path: Y` for grep /
 // glob. We don't have result counts yet (no tool-result event
 // stream), so the preview shows search scope only.
+//
+// Pattern and path are model-written args, so the assembled row
+// goes through sanitizeLine before it is styled.
 func renderSearchPreview(args map[string]any, styles Styles, indent string) string {
 	parts := []string{}
 	if pattern := stringArg(args, "pattern", "query", "regex"); pattern != "" {
@@ -121,7 +127,7 @@ func renderSearchPreview(args map[string]any, styles Styles, indent string) stri
 	if len(parts) == 0 {
 		return ""
 	}
-	return styles.Muted.Render(indent + strings.Join(parts, " · "))
+	return styles.Muted.Render(indent + sanitizeLine(strings.Join(parts, " · ")))
 }
 
 // intArg returns the first int-coercible value from args for any

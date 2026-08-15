@@ -33,10 +33,13 @@ import (
 	"charm.land/lipgloss/v2"
 )
 
-// perLineByteCap bounds how many bytes of one diff-line body are
-// inlined before we truncate with "…". Matches the design's open
-// Q #4 — line counts alone can't stop a 10K-character minified
+// perLineByteCap bounds how many rendered cells of one diff-line
+// body are inlined before we truncate with "…". Matches the design's
+// open Q #4 — line counts alone can't stop a 10K-character minified
 // line from blowing up the preview pane.
+//
+// The budget is counted by truncateCells (sanitize.go), which charges
+// a TAB contentTabWidth cells rather than one byte.
 const perLineByteCap = 200
 
 // summaryIndent is the 4-column prefix used on single-line tool
@@ -78,7 +81,15 @@ func countDiffStats(diff string) (added, removed int) {
 // new content with the given label as both from/to filename. Used
 // by edit_file / replace tools whose args carry old_text + new_text
 // but not the pre-computed diff.
+//
+// Both sides are CRLF-normalized BEFORE the equality check and
+// before udiff sees them (#107). Without that, a CRLF-on-disk file
+// compared against the model's LF replacement string differs on
+// every single line, and the operator gets a whole-file diff for a
+// two-line edit.
 func computeUnifiedDiff(label, oldText, newText string) string {
+	oldText = normalizeNewlines(oldText)
+	newText = normalizeNewlines(newText)
 	if oldText == newText {
 		return ""
 	}
@@ -93,8 +104,10 @@ func computeUnifiedDiff(label, oldText, newText string) string {
 // + / - lines render with a dim Success / Error background, the
 // glyph in bold Success / Error fg, and the body either through
 // the per-line syntax cache (when `lang` is non-empty) or as flat
-// colored text. Bodies longer than perLineByteCap truncate with
-// "…" so pathological minified lines stay tame.
+// colored text. Every body goes through sanitizeLine, which strips
+// ANSI sequences, escapes control characters and truncates at
+// perLineByteCap cells — the diff string is untrusted file content
+// and none of it reaches the terminal raw.
 //
 // `maxLines` caps the rendered output; lines beyond the cap are
 // dropped and replaced with a "… +N more" marker. Pass 0 for
@@ -117,7 +130,10 @@ func renderDiffInline(diff string, styles Styles, maxLines int, lang string) str
 
 	const indent = "    "
 	const emptyGutter = "       " // 7 spaces = " NNNN │ " width
-	lines := strings.Split(strings.TrimRight(diff, "\n"), "\n")
+	// CRLF is collapsed here, at the split, rather than inside
+	// sanitizeLine: the CR sits at end-of-line and the per-line cap
+	// can slice the body before ever reaching it. See sanitize.go.
+	lines := strings.Split(strings.TrimRight(normalizeNewlines(diff), "\n"), "\n")
 	out := make([]string, 0, len(lines)+1)
 	truncatedAt := -1
 
@@ -141,19 +157,19 @@ func renderDiffInline(diff string, styles Styles, maxLines int, lang string) str
 			}
 			out = append(out, indent+gutterStyle.Render(emptyGutter)+hunkStyle.Render(line))
 		case strings.HasPrefix(line, "+"):
-			body := truncateBytes(line[1:])
+			body := sanitizeLine(line[1:])
 			rendered := highlightOrFlat(body, lang, addBg, addBodyFallback)
 			gutter := formatGutter(newNo)
 			out = append(out, indent+addGutterStyle.Render(gutter)+addPrefixStyle.Render("+")+rendered)
 			newNo++
 		case strings.HasPrefix(line, "-"):
-			body := truncateBytes(line[1:])
+			body := sanitizeLine(line[1:])
 			rendered := highlightOrFlat(body, lang, delBg, delBodyFallback)
 			gutter := formatGutter(oldNo)
 			out = append(out, indent+delGutterStyle.Render(gutter)+delPrefixStyle.Render("-")+rendered)
 			oldNo++
 		default:
-			body := truncateBytes(line)
+			body := sanitizeLine(line)
 			gutter := formatGutter(newNo)
 			out = append(out, indent+gutterStyle.Render(gutter)+ctxStyle.Render(body))
 			oldNo++
@@ -184,19 +200,6 @@ func highlightOrFlat(body, lang string, bg color.Color, fallback lipgloss.Style)
 		return fallback.Render(body)
 	}
 	return highlightLine(body, lang, bg)
-}
-
-// truncateBytes shortens s to at most perLineByteCap bytes,
-// appending "…" when it had to trim. Operates on raw bytes (not
-// runes) because the cap exists to bound terminal damage from
-// pathological payloads (minified JS, encoded blobs) — a multi-
-// byte boundary split would be visually messy but not
-// catastrophic, and the cap should still hold.
-func truncateBytes(s string) string {
-	if len(s) <= perLineByteCap {
-		return s
-	}
-	return s[:perLineByteCap] + "…"
 }
 
 // formatGutter renders the 5-digit right-aligned line-number
