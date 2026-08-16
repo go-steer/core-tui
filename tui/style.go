@@ -63,6 +63,13 @@ const (
 	GlyphCursor       = "█"
 	GlyphRule         = "─"
 	GlyphColumn       = "│"
+	// GlyphSelectBar is the transcript's selection marker (issue
+	// #152): a dotted vertical bar drawn down the gutter of the
+	// selected item. Dotted rather than solid so it reads as a
+	// cursor rather than as structure — GlyphColumn is already the
+	// sidebar divider, and a solid bar next to a diff or a fenced
+	// code block would look like part of the content.
+	GlyphSelectBar = "┊"
 )
 
 // Styles bundles every resolved lipgloss style for the current

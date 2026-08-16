@@ -78,6 +78,13 @@ func (m *Model) setFocus(t focusTarget) {
 		return
 	}
 	m.input.Blur()
+	// Taking the keyboard is also what puts the cursor on an item
+	// (issue #152). The transcript's keymap is a keymap over a
+	// selection, so entering the mode has to leave one on screen —
+	// seeding here rather than on the first arrow means the marker is
+	// visible from the first frame, which is how the operator learns
+	// the mode is a selection at all.
+	m.chatSeedSelection()
 }
 
 // cycleFocus advances to the next region. With exactly two of them
@@ -100,13 +107,22 @@ func (m *Model) cycleFocus() {
 // Those belong to the frame rather than to the composer, and having
 // to leave focus mode to reach them would defeat the point of it.
 //
+// The arrows move the CURSOR, an item at a time, and shift+arrow is
+// what scrolls a line (issue #152). #155 shipped the arrows as a line
+// scroll because there was nothing else for them to move; now that
+// there is a selection they have to drive it, because a marker the
+// operator cannot move is decoration and a mode with a marker in it
+// that scrolls instead has two cursors and no way to tell which one a
+// key will move. Line scrolling keeps a binding rather than being
+// dropped: an item taller than the window can only be read by
+// scrolling within it, and pgup / pgdn alone are too coarse for that.
+//
 // Notably absent:
 //
 //   - pgup / pgdn, which are NOT claimed here. They already page the
 //     chat from either focus because handleKey forwards every
 //     unclaimed key to the viewport, and a second implementation of
 //     paging would be one more thing to keep in step with the first.
-//   - space, left unbound so #152 can have it for expand/collapse.
 //   - ctrl+d / ctrl+u, the viewport's half-page pair. ctrl+d quits
 //     unconditionally and is far too load-bearing to shadow in a
 //     mode the operator can enter by accident; a half-page keymap
@@ -128,13 +144,19 @@ func (m *Model) handleTranscriptKey(stroke string) bool {
 		// firing a half-written prompt is not an undoable mistake.
 		m.setFocus(focusInput)
 	case "up", "k":
-		m.chatScrollBy(-1)
+		m.chatSelectBy(-1)
 	case "down", "j":
+		m.chatSelectBy(1)
+	case "shift+up":
+		m.chatScrollBy(-1)
+	case "shift+down":
 		m.chatScrollBy(1)
+	case "space":
+		m.chatToggleCollapsed()
 	case "home", "g":
-		m.chatGotoTop()
+		m.chatSelectFirst()
 	case "end", "G":
-		m.chatGotoBottom()
+		m.chatSelectLast()
 	default:
 		return false
 	}

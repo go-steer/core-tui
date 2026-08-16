@@ -43,12 +43,17 @@ func chatAllLines(m Model) []string {
 }
 
 // chatViewLines splits a drawn frame back into lines with the
-// lipgloss pad removed, so it can be compared against unpadded
-// source lines.
+// selection gutter (issue #152) and the lipgloss pad removed, so it
+// can be compared against the unpadded source lines of a row.
 func chatViewLines(view string) []string {
 	lines := strings.Split(view, "\n")
 	for i, ln := range lines {
-		lines[i] = strings.TrimRight(ln, " ")
+		w := ansi.StringWidth(ln)
+		if w <= chatGutterWidth {
+			lines[i] = ""
+			continue
+		}
+		lines[i] = strings.TrimRight(ansi.Cut(ln, chatGutterWidth, w), " ")
 	}
 	return lines
 }
@@ -271,7 +276,10 @@ func TestChatView_NoLineExceedsTheWidth(t *testing.T) {
 	m.refreshViewport()
 	m.chatGotoBottom()
 
-	width := m.viewport.Width()
+	// The drawn block is a row's width plus the selection gutter the
+	// marker lives in (issue #152) — that sum is the column the frame
+	// handed the transcript, and every line has to fill it exactly.
+	width := m.viewport.Width() + chatGutterWidth
 	for i, ln := range strings.Split(m.chatView(), "\n") {
 		if got := ansi.StringWidth(ln); got != width {
 			t.Fatalf("frame line %d is %d cells wide, want exactly %d", i, got, width)

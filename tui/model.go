@@ -132,6 +132,22 @@ type Model struct {
 	// is looking at. See focus.go.
 	focus focusTarget
 
+	// selIdx is the history row the transcript's cursor sits on, and
+	// collapsed holds the folded rows by Message.ID (issue #152).
+	// Neither is a render input: the marker is prefixed at draw time
+	// and the fold is applied to the cached lines on the way out, so
+	// moving the cursor or folding a row re-renders nothing. See
+	// select.go.
+	//
+	// selIdx has no "nothing selected" sentinel. Zero — the first
+	// row, or a harmless index into an empty transcript — is right
+	// for a model nobody has focused yet, because the marker is only
+	// drawn while the transcript holds the keyboard, and
+	// chatSeedSelection places the cursor properly the moment it
+	// does.
+	selIdx    int
+	collapsed map[uint64]bool
+
 	// helpOpen toggles the bottom-anchored stacked help panel
 	// (`?` to open / page / close). When open, the chat viewport
 	// shrinks to make room above the input.

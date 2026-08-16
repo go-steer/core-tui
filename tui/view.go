@@ -391,7 +391,14 @@ func (m *Model) resize() {
 	// Set the widths before measuring: renderInputBox reads
 	// m.viewport.Width(), and every wrap-sensitive row count in the
 	// budget depends on the width it is rendered at.
-	m.viewport.SetWidth(chatWidth)
+	//
+	// The viewport's width is what a transcript ROW renders at, which
+	// is the chat column less the selection gutter (issue #152). The
+	// gutter is reserved on every row rather than appearing under the
+	// cursor, so that moving the cursor cannot re-wrap the item it
+	// lands on; chatView adds it back as it draws, and the block it
+	// returns is chatWidth wide again.
+	m.viewport.SetWidth(atLeast(chatWidth-chatGutterWidth, 1))
 	m.input.SetWidth(chatWidth - 2) // leave room for the input border
 
 	m.chrome = m.allocateChrome(layout, chromeWidth)
@@ -497,6 +504,9 @@ func (m *Model) refreshViewport() {
 	// a turn finalizing and folding the tail into history), and an
 	// offset past the end would draw an empty transcript.
 	m.clampChatOffset()
+	// The cursor is an index into the same rows and goes stale the
+	// same ways (issue #152).
+	m.clampChatSelection()
 	if m.follow {
 		m.chatGotoBottom()
 	}
