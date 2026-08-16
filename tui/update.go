@@ -1019,14 +1019,12 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		return m, nil
 	}
 
-	// Forward unhandled messages to the input + viewport so navigation
-	// keys work even when our switch above doesn't claim them.
-	var (
-		taCmd tea.Cmd
-		vpCmd tea.Cmd
-	)
+	// Forward unhandled messages to the input + transcript so
+	// navigation keys work even when our switch above doesn't claim
+	// them.
+	var taCmd tea.Cmd
 	m.input, taCmd = m.input.Update(msg)
-	m.viewport, vpCmd = m.viewport.Update(msg)
+	m.forwardChatScroll(msg)
 	// The chat wheel lands here too (handleWheel declines when no
 	// modal owns it), so this is a scroll path: re-read the follow
 	// intent from where the viewport ended up.
@@ -1041,7 +1039,7 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		m.resize()
 		m.refreshViewport()
 	}
-	return m, tea.Batch(taCmd, vpCmd)
+	return m, taCmd
 }
 
 // handleWheel routes a mouse-wheel tick to whichever modal surface
@@ -1402,7 +1400,7 @@ func (m Model) handleKey(msg tea.KeyPressMsg) (tea.Model, tea.Cmd) {
 		// away from the tail ends follow — otherwise the next repaint
 		// would drag the operator straight back down.
 		m.follow = false
-		m.viewport.GotoTop()
+		m.chatGotoTop()
 		return m, nil
 
 	case "end":
@@ -1424,7 +1422,7 @@ func (m Model) handleKey(msg tea.KeyPressMsg) (tea.Model, tea.Cmd) {
 		// end-of-line in either state.
 		if m.input.Value() == "" {
 			m.follow = true
-			m.viewport.GotoBottom()
+			m.chatGotoBottom()
 			return m, nil
 		}
 		// Non-empty input: fall through to the textarea below.
@@ -1689,14 +1687,11 @@ func (m Model) handleKey(msg tea.KeyPressMsg) (tea.Model, tea.Cmd) {
 	// handed, so this guard is not what keeps text out of the
 	// prompt — it is what stops that from being an invariant we
 	// hold on loan from bubbles' Update.
-	var (
-		taCmd tea.Cmd
-		vpCmd tea.Cmd
-	)
+	var taCmd tea.Cmd
 	if m.focus == focusInput {
 		m.input, taCmd = m.input.Update(msg)
 	}
-	m.viewport, vpCmd = m.viewport.Update(msg)
+	m.forwardChatScroll(msg)
 	// PgUp / PgDn just moved the viewport (nothing else reaches it);
 	// re-read the follow intent before anything touches the layout.
 	m.syncFollow()
@@ -1716,7 +1711,7 @@ func (m Model) handleKey(msg tea.KeyPressMsg) (tea.Model, tea.Cmd) {
 	// other keystroke. Opening returns the Cmd that fills the panel
 	// off the event loop (issue #114); re-filtering returns nil.
 	paletteCmd := m.refreshPalette()
-	return m, tea.Batch(taCmd, vpCmd, paletteCmd)
+	return m, tea.Batch(taCmd, paletteCmd)
 }
 
 // refreshPalette re-derives palette state from the current textarea
@@ -1903,7 +1898,7 @@ func (m Model) submitTurn(text string) Model {
 	// part of that: the reply streams in below, and they asked for it.
 	m.follow = true
 	m.refreshViewport()
-	m.viewport.GotoBottom()
+	m.chatGotoBottom()
 	// Spinner tick scheduled separately from event listener; both
 	// stream their own messages into Update.
 	return m
@@ -2562,7 +2557,7 @@ func (m *Model) applySwitchTarget(tgt *SwitchTarget) tea.Cmd {
 	// A fresh session starts on its tail, following.
 	m.follow = true
 	m.refreshViewport()
-	m.viewport.GotoBottom()
+	m.chatGotoBottom()
 
 	// Step 8 — return fresh listener Cmds. Old blocked listener
 	// goroutines that were reading from replaced channels are

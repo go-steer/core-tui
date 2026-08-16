@@ -128,13 +128,13 @@ func (m *Model) handleTranscriptKey(stroke string) bool {
 		// firing a half-written prompt is not an undoable mistake.
 		m.setFocus(focusInput)
 	case "up", "k":
-		m.viewport.ScrollUp(1)
+		m.chatScrollBy(-1)
 	case "down", "j":
-		m.viewport.ScrollDown(1)
+		m.chatScrollBy(1)
 	case "home", "g":
-		m.viewport.GotoTop()
+		m.chatGotoTop()
 	case "end", "G":
-		m.viewport.GotoBottom()
+		m.chatGotoBottom()
 	default:
 		return false
 	}

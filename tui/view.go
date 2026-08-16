@@ -136,7 +136,7 @@ func (m Model) View() tea.View {
 		return tea.NewView("")
 	}
 
-	chat := m.viewport.View()
+	chat := m.chatView()
 	input := m.renderInputBox()
 
 	// origin is where the input box's top-left cell lands in the
@@ -455,107 +455,52 @@ func (m *Model) refreshAndScroll() {
 	// keep them there.
 	m.follow = true
 	m.refreshViewport()
-	m.viewport.GotoBottom()
+	m.chatGotoBottom()
 }
 
 func (m *Model) refreshViewport() {
 	if m.width == 0 {
 		return
 	}
+	// History rows are NOT assembled here. They are rendered on
+	// demand by the walk in chatView, out of listCache, so this
+	// function costs what the tail costs rather than what the
+	// transcript costs — that is issue #161, and it is why there is
+	// no builder in this function any more.
+	//
+	// The tail is rebuilt BEFORE the reflow because it is a row like
+	// any other: a following operator's window is measured backward
+	// from the last row, so a tail that grew by three lines this
+	// chunk changes which history row the window starts at, and the
+	// reflow has to be told which rows those are.
+	m.chatTail = m.buildChatTail()
+	m.chatRule, m.chatRuleWidth = m.buildChatRule(), m.viewport.Width()
+
 	// Issue #104: a width change reflows the on-screen rows only, so
 	// anything the operator can see is at the current wrap width by
 	// the time it paints — including rows a mid-warm scroll just
-	// exposed. No-op (one bool read) when no resize is in flight;
-	// visLo..visHi is then empty and nothing below defers.
-	visLo, visHi := m.reflowVisible()
-
-	var b strings.Builder
-	entries := m.history.Snapshot()
-	rule := m.styles.Rule.Render(strings.Repeat(GlyphRule, m.viewport.Width()))
-
-	width := m.viewport.Width()
-	// Record each message's line span so the resize path can tell
-	// which messages are on screen without re-measuring (resize.go).
-	spans := make([]msgSpan, 0, len(entries))
-	line := 0
-	for i, msg := range entries {
-		if i > 0 {
-			// The separator's height is known statically — the rule
-			// is one line — so nothing here has to be measured.
-			if msg.Role == RoleUser {
-				b.WriteString("\n")
-				b.WriteString(rule)
-				b.WriteString("\n\n")
-				line += 3
-			} else {
-				b.WriteString("\n\n")
-				line += 2
-			}
-		}
-		// Lazy-render cache (listcache.go) — skip the Glamour /
-		// word-wrap / lipgloss work for unchanged messages.
-		item := messageItem{msg: msg, idx: i, total: len(entries)}
-		rendered, ok := m.listCache.get(item, width)
-		if !ok && m.reflowPending && (i < visLo || i > visHi) {
-			// Off screen with a resize still working through the
-			// transcript: carry the previous width's render rather
-			// than re-assembling a row nobody can see. Keeps a drag
-			// event O(visible) instead of O(history). The warm pass
-			// retires these one slice at a time (resize.go).
-			if stale, hit := m.listCache.getStale(item); hit {
-				m.listCache.putStale(item, width, stale)
-				rendered, ok = stale, true
-			}
-		}
-		if !ok {
-			rendered = m.renderMessage(msg)
-			m.listCache.put(item, width, rendered)
-		}
-		start := line
-		b.WriteString(rendered)
-		line += strings.Count(rendered, "\n")
-		spans = append(spans, msgSpan{start: start, end: line})
-	}
-	m.msgSpans = spans
-
-	if inProgress := m.renderInProgress(); inProgress != "" {
-		if m.history.Len() > 0 {
-			b.WriteString("\n\n")
-		}
-		b.WriteString(inProgress)
-	}
-
-	if m.history.Len() == 0 && m.state == stateIdle {
-		hint := m.opts.Branding.EmptyStateHint
-		if hint == "" {
-			hint = "Ask me anything to get started."
-		}
-		b.WriteString(m.styles.SystemText.Render(hint))
-	}
+	// exposed. No-op (one bool read) when no resize is in flight.
+	m.reflowVisible()
 
 	// Preserve scroll position across re-renders: only auto-scroll
 	// to the bottom when the operator is following the tail. If
 	// they've scrolled up to read backlog, an incoming stream chunk
 	// must not yank them back (parity with internal/tui:512).
 	//
-	// m.follow, not viewport.AtBottom(): sampling here read the
+	// m.follow, not a live at-bottom test: sampling here read the
 	// geometry AFTER a resize had already changed it, so a shrunken
 	// viewport reported "not at bottom" and follow was lost mid-
-	// stream (issue #93). The flag also frees this function from the
-	// second latent constraint the sample carried — it had to be
-	// taken before SetContent.
-	m.viewport.SetContent(b.String())
-	// Defensively pin horizontal scroll to 0. The viewport supports
-	// xOffset (for terminals wider than the chat column), but the
-	// TUI never wants it — we wrap to chatWidth ourselves, so any
-	// non-zero xOffset would cut chars off the left of every line
-	// (`ansi.Cut` at viewport.go:362). Catching it here neutralizes
-	// any scroll that crept in via mouse wheel, palette key, or
-	// future bindings.
-	m.viewport.SetXOffset(0)
+	// stream (issue #93).
+	//
+	// The clamp is what the flat path got for free from SetContent:
+	// rows can vanish under the offset (a /clear, a session switch,
+	// a turn finalizing and folding the tail into history), and an
+	// offset past the end would draw an empty transcript.
+	m.clampChatOffset()
 	if m.follow {
-		m.viewport.GotoBottom()
+		m.chatGotoBottom()
 	}
+	m.warmChatWindow()
 }
 
 // syncFollow re-derives the follow flag from where the viewport
@@ -565,7 +510,7 @@ func (m *Model) refreshViewport() {
 // in. Scrolling up drops follow; scrolling back down to the bottom
 // re-arms it.
 func (m *Model) syncFollow() {
-	m.follow = m.viewport.AtBottom()
+	m.follow = m.chatAtBottom()
 }
 
 // turnInFlight reports whether there is output in flight for the

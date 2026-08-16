@@ -30,7 +30,7 @@ func focusedModel(t *testing.T, rows int) Model {
 	t.Helper()
 	m := followModel(t, 100, 40, rows)
 	m.setFocus(focusTranscript)
-	m.viewport.SetYOffset(m.viewport.YOffset() / 2)
+	m.chatSetYOffset(m.chatYOffset() / 2)
 	m.syncFollow()
 	return m
 }
@@ -109,9 +109,9 @@ func TestFocus_TranscriptScrollKeys(t *testing.T) {
 	for _, tc := range cases {
 		t.Run(tc.stroke, func(t *testing.T) {
 			m := focusedModel(t, 200)
-			before := m.viewport.YOffset()
+			before := m.chatYOffset()
 			m = press(m, tc.stroke)
-			after := m.viewport.YOffset()
+			after := m.chatYOffset()
 			if !tc.want(before, after) {
 				t.Errorf("%q should scroll to %s: YOffset %d → %d", tc.stroke, tc.desc, before, after)
 			}
@@ -132,13 +132,13 @@ func TestFocus_TranscriptScrollKeys(t *testing.T) {
 func TestFocus_ComposerKeepsTheArrowsForHistoryRecall(t *testing.T) {
 	m := followModel(t, 100, 40, 200)
 	m.recordPrompt("earlier prompt")
-	before := m.viewport.YOffset()
+	before := m.chatYOffset()
 
 	m = press(m, "up")
 	if got := m.input.Value(); got != "earlier prompt" {
 		t.Errorf("up in the composer recalled %q, want the prompt history entry", got)
 	}
-	if got := m.viewport.YOffset(); got != before {
+	if got := m.chatYOffset(); got != before {
 		t.Errorf("up in the composer scrolled the transcript: YOffset %d → %d", before, got)
 	}
 }
@@ -238,8 +238,8 @@ func TestFocus_GlobalChordsStillFireFromTranscriptFocus(t *testing.T) {
 	t.Run("ctrl+l", func(t *testing.T) {
 		m := focusedModel(t, 200)
 		m = press(m, "ctrl+l")
-		if m.viewport.YOffset() != 0 || m.follow {
-			t.Errorf("ctrl+l left YOffset=%d follow=%v", m.viewport.YOffset(), m.follow)
+		if m.chatYOffset() != 0 || m.follow {
+			t.Errorf("ctrl+l left YOffset=%d follow=%v", m.chatYOffset(), m.follow)
 		}
 	})
 }
@@ -331,10 +331,10 @@ func TestHelpPanel_TranscriptFocusKeysAreAllBound(t *testing.T) {
 		}
 		t.Run(stroke, func(t *testing.T) {
 			probe := focusedModel(t, 200)
-			before := probe.viewport.YOffset()
+			before := probe.chatYOffset()
 
 			probe = press(probe, stroke)
-			if probe.viewport.YOffset() == before && probe.focus == focusTranscript {
+			if probe.chatYOffset() == before && probe.focus == focusTranscript {
 				t.Errorf("the help panel advertises %q under Transcript focus but it moved neither the viewport (YOffset=%d) nor the keyboard", stroke, before)
 			}
 		})

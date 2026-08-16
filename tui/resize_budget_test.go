@@ -255,7 +255,7 @@ func TestResize_QueuePanelIsNotChargedTwice(t *testing.T) {
 	m.refreshViewport()
 
 	// The premise: the panel lives inside the viewport.
-	if !strings.Contains(m.viewport.View(), "queue (") {
+	if !strings.Contains(m.chatView(), "queue (") {
 		t.Fatal("precondition: the queue panel should render inside the viewport content")
 	}
 	if panelRows := lipgloss.Height(m.renderQueuePanel()); panelRows < 2 {

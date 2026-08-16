@@ -25,7 +25,7 @@
 // The shape here is three-phase:
 //
 //  1. **Per event** — reflow only the messages the operator can
-//     actually see (visibleRange), then schedule a settle tick.
+//     actually see (chatVisitWindow), then schedule a settle tick.
 //     Bounded by viewport height, not by transcript length, so the
 //     cost per event no longer grows with session age.
 //  2. **On settle** — resizeSettleWindow after the LAST event, warm
@@ -42,10 +42,13 @@
 //
 // The invariant this preserves: anything ON SCREEN is rendered at
 // the current width — reflowVisible runs from refreshViewport too,
-// so a scroll into cold backlog mid-warm reflows the rows it
-// exposes in that same frame. Off-screen backlog may carry the
-// previous width's wrapping for the tail of the warm sequence; it
-// is corrected before it can be scrolled into view.
+// so a scroll into cold backlog mid-warm reflows the rows it exposes
+// in that same frame. Off-screen backlog is left at the previous
+// width until the warm sequence reaches it, and since #161 that is
+// harmless by construction rather than by timing: an item-addressed
+// transcript never draws a row it has not rendered at the current
+// width, so a row that has not been reflowed yet is a row nothing has
+// asked for.
 
 package tui
 
@@ -75,18 +78,6 @@ const (
 	// slice comfortably inside a frame budget while still retiring
 	// a 400-turn backlog in well under a second.
 	resizeWarmChunk = 8
-
-	// reflowMargin pads the visible line window on both sides when
-	// deciding which messages count as on-screen. The line spans
-	// were recorded at the PREVIOUS width, so they are an estimate
-	// after a resize; the margin covers the drift.
-	reflowMargin = 12
-
-	// reflowTailFallback is how many trailing messages count as
-	// visible when there are no recorded spans to consult (first
-	// paint after startup, or right after /clear). The tail is
-	// where an operator is by default — m.follow starts true.
-	reflowTailFallback = 12
 )
 
 // resizeReflowMsg drives both phases of the debounced reflow: the
@@ -110,15 +101,6 @@ func resizeWarmTick(gen uint64) tea.Cmd {
 	return tea.Tick(resizeWarmWindow, func(time.Time) tea.Msg {
 		return resizeReflowMsg{gen: gen}
 	})
-}
-
-// msgSpan is the [start, end) line range one history message
-// occupies in the viewport content, recorded by refreshViewport so
-// the resize path can work out which messages are on screen without
-// re-measuring the whole transcript.
-type msgSpan struct {
-	start int
-	end   int
 }
 
 // beginResizeReflow is the width-change half of the WindowSizeMsg
@@ -174,35 +156,42 @@ func (m *Model) continueResizeReflow() tea.Cmd {
 	return m.scheduleCoalescedRefresh()
 }
 
-// reflowVisible re-renders the assistant messages inside the
-// current viewport window at the current width. Bounded by viewport
-// height rather than transcript length — this is the work a resize
-// event is allowed to do synchronously. No-op unless a reflow is
-// pending, so the common repaint path pays one bool check.
-// Returns the inclusive history-index range it treated as visible
-// so the caller can render the rest from the carried-over cache;
-// (0, -1) — an empty range — when no reflow is pending.
-func (m *Model) reflowVisible() (int, int) {
+// reflowVisible re-renders the assistant messages inside the current
+// viewport window at the current width. Bounded by viewport height
+// rather than transcript length — this is the work a resize event is
+// allowed to do synchronously. No-op unless a reflow is pending, so
+// the common repaint path pays one bool check.
+//
+// The walk is chatVisitWindow's, which re-wraps a row and then
+// measures it to decide whether to continue. Ordering the two that way
+// is what keeps the pass exact: the row the budget is spent on is the
+// row at its new width, so the window it stops at is the window the
+// operator will actually see rather than a screenful-shaped guess.
+//
+// history.at, not Snapshot: this runs from every refreshViewport while
+// a reflow is pending, and copying the whole transcript to look at a
+// screenful of it costs ~220KB per repaint at 400 turns.
+func (m *Model) reflowVisible() {
 	if !m.reflowPending {
-		return 0, -1
+		return
 	}
 	mr := m.ensureMarkdown()
 	if mr == nil {
-		return 0, -1
+		return
 	}
-	// history.at, not Snapshot: this runs from every refreshViewport
-	// while a reflow is pending, and copying the whole transcript to
-	// look at a screenful of it costs ~220KB per repaint at 400
-	// turns.
-	lo, hi := m.visibleRange(m.history.Len())
-	for i := lo; i <= hi; i++ {
+	n := m.history.Len()
+	m.chatVisitWindow(func(i int) {
+		if i >= n {
+			// The live tail, which refreshViewport rebuilds from
+			// scratch every pass — it never carries a stale width.
+			return
+		}
 		msg, ok := m.history.at(i)
 		if !ok {
-			break
+			return
 		}
 		m.reflowMessage(i, msg, mr)
-	}
-	return lo, hi
+	})
 }
 
 // warmReflowSlice retires up to resizeWarmChunk still-stale messages,
@@ -214,6 +203,13 @@ func (m *Model) reflowVisible() (int, int) {
 // to the next paint would make it land as one burst the first time
 // refreshViewport ran, which is the thing this whole path exists to
 // avoid.
+//
+// Since #161 this pass is a PREFETCH rather than a repair. An
+// item-addressed window never draws a row it has not rendered at the
+// current width, so a backlog left cold is correct, just slow to
+// scroll into. Warming it here is what keeps that scroll instant, and
+// spreading it over ticks is what keeps the warming itself
+// imperceptible.
 func (m *Model) warmReflowSlice() bool {
 	mr := m.ensureMarkdown()
 	if mr == nil {
@@ -230,10 +226,12 @@ func (m *Model) warmReflowSlice() bool {
 			break
 		}
 		work := m.reflowMessage(m.reflowCursor, msg, mr)
-		// Rows the drag served from a carried-over render owe an
-		// exact re-assembly at the settled width even when their
-		// markdown didn't have to change (user cards, tool rows).
-		if m.listCache != nil && m.listCache.dropApprox(msg.ID) {
+		// A row whose markdown did not have to change can still be
+		// missing from the cache at the settled width — user cards
+		// and tool rows never touch Glamour, and the drag never drew
+		// them. They owe an assembly, and it is charged like any
+		// other so a screenful of them cannot land in one slice.
+		if !m.chatRowCached(m.reflowCursor, n, msg) {
 			work = true
 		}
 		if !work {
@@ -285,69 +283,4 @@ func (m *Model) reflowMessage(i int, msg Message, mr *markdownRenderer) bool {
 	}
 	m.history.setRenderedAt(i, mr.renderMarkdown(msg.Text), mr.width)
 	return true
-}
-
-// visibleRange returns the inclusive history-index range the
-// operator can currently see, for a history of n entries. The
-// second return is -1 when the range is empty.
-//
-// It reads the line spans recorded by the last refreshViewport. Those
-// were measured at the previous width, so after a resize they are an
-// estimate — reflowMargin pads for the drift, and being wrong costs
-// at most a few extra (or a few deferred) Glamour renders, never
-// correctness: whatever the estimate misses is corrected by the
-// reflowVisible call at the top of the NEXT refreshViewport, before
-// the rows can be seen.
-func (m *Model) visibleRange(n int) (int, int) {
-	if n <= 0 {
-		return 0, -1
-	}
-	tail := func() (int, int) {
-		lo := n - reflowTailFallback
-		if lo < 0 {
-			lo = 0
-		}
-		return lo, n - 1
-	}
-	spans := m.msgSpans
-	if len(spans) > n {
-		spans = spans[:n]
-	}
-	height := m.viewport.Height()
-	if len(spans) == 0 || height <= 0 {
-		return tail()
-	}
-	top := m.viewport.YOffset()
-	bottom := top + height
-	if m.follow {
-		// Following the tail: the window sits at the BOTTOM of the
-		// content, which the viewport's own offset does not yet
-		// reflect after a resize (GotoBottom runs at the end of
-		// refreshViewport). Derive it from the spans instead — the
-		// same reason refreshViewport trusts m.follow over
-		// viewport.AtBottom() (issue #93).
-		bottom = spans[len(spans)-1].end
-		top = bottom - height
-	}
-	top -= reflowMargin
-	bottom += reflowMargin
-	lo, hi := -1, -1
-	for i, s := range spans {
-		if s.end < top || s.start > bottom {
-			continue
-		}
-		if lo < 0 {
-			lo = i
-		}
-		hi = i
-	}
-	if lo < 0 {
-		return tail()
-	}
-	// Messages appended since the spans were recorded have no span
-	// yet. While following, they are on screen by definition.
-	if m.follow && hi < n-1 {
-		hi = n - 1
-	}
-	return lo, hi
 }

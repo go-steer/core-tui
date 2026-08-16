@@ -41,6 +41,8 @@
 
 package tui
 
+import "strings"
+
 // Item is the contract for any history entry that can be cached
 // by the renderItem cache. The current implementation has only
 // one concrete impl (messageItem wrapping a Message), but the
@@ -97,15 +99,14 @@ type listCacheEntry struct {
 	version uint64
 	frozen  bool
 	content string
-	// approx marks content carried over from a DIFFERENT width
-	// while a resize reflow is pending (issue #104). Rows off
-	// screen during a drag are not worth re-assembling on every
-	// event — their wrapping is deferred anyway — so the cache
-	// parks the previous width's render under the new width and
-	// flags it. get() refuses to serve an approximate entry, so a
-	// row that scrolls into view re-renders exactly; the warm pass
-	// retires the rest a slice at a time.
-	approx bool
+	// lines is content split on newlines and clamped to width, held
+	// alongside it because the item-addressed transcript (chatlist.go)
+	// asks for a row's HEIGHT far more often than for its text — every
+	// offset calculation does — and re-splitting a cached string per
+	// query would put back the per-row cost the cache exists to
+	// remove. Split once here, on the miss path, and every later read
+	// is a slice header.
+	lines []string
 }
 
 // listCacheKey pins an entry to one (item, width) pair. A drag
@@ -151,7 +152,7 @@ func newListCache() *listCache {
 // the caller is expected to Render and store via put.
 func (c *listCache) get(item Item, width int) (string, bool) {
 	entry, ok := c.entries[listCacheKey{id: item.Identity(), width: width}]
-	if !ok || entry.approx {
+	if !ok {
 		return "", false
 	}
 	if entry.frozen {
@@ -168,68 +169,32 @@ func (c *listCache) get(item Item, width int) (string, bool) {
 	return entry.content, true
 }
 
-// put stores rendered content for item at width. Marks frozen
-// when the item reports Finished — subsequent gets for that
-// entry skip straight to the content (until version bumps).
-func (c *listCache) put(item Item, width int, content string) {
+// getLines returns the cached render of item at width already split
+// into lines and clamped to the width. Same hit conditions as get.
+func (c *listCache) getLines(item Item, width int) ([]string, bool) {
+	entry, ok := c.entries[listCacheKey{id: item.Identity(), width: width}]
+	if !ok || entry.version != item.Version() {
+		return nil, false
+	}
+	return entry.lines, true
+}
+
+// put stores rendered content for item at width and returns the
+// stored lines, so a caller that rendered on a miss does not have to
+// look the entry straight back up. Marks frozen when the item reports
+// Finished — subsequent gets for that entry skip straight to the
+// content (until version bumps).
+func (c *listCache) put(item Item, width int, content string) []string {
 	c.touchWidth(width)
+	lines := clampChatLines(strings.Split(content, "\n"), width)
 	c.entries[listCacheKey{id: item.Identity(), width: width}] = listCacheEntry{
 		width:   width,
 		version: item.Version(),
 		frozen:  item.Finished(),
 		content: content,
+		lines:   lines,
 	}
-}
-
-// getStale returns the freshest cached render for item at ANY
-// retained width, approximate entries included. Only the resize
-// path calls it, and only for rows outside the visible window
-// (issue #104): re-assembling a row the operator cannot see, at a
-// width whose Glamour pass has been deferred anyway, is work that
-// buys nothing. The version check still applies — a row whose
-// CONTENT changed is never served from a stale entry.
-func (c *listCache) getStale(item Item) (string, bool) {
-	id := item.Identity()
-	version := item.Version()
-	// c.widths is MRU-ordered, so this finds the most recently
-	// rendered width first.
-	for _, w := range c.widths {
-		if entry, ok := c.entries[listCacheKey{id: id, width: w}]; ok && entry.version == version {
-			return entry.content, true
-		}
-	}
-	return "", false
-}
-
-// putStale parks content under width flagged approximate. get()
-// will not serve it; the caller owes an exact render before the
-// resize reflow retires (warmReflowSlice → dropApprox).
-func (c *listCache) putStale(item Item, width int, content string) {
-	c.touchWidth(width)
-	c.entries[listCacheKey{id: item.Identity(), width: width}] = listCacheEntry{
-		width:   width,
-		version: item.Version(),
-		frozen:  item.Finished(),
-		content: content,
-		approx:  true,
-	}
-}
-
-// dropApprox removes every approximate entry for id, at any
-// retained width, and reports whether it removed any. The resize
-// warm pass uses the return value to charge its per-slice budget:
-// retiring an approximate entry means the next paint pays a real
-// render for that row, so it counts as work.
-func (c *listCache) dropApprox(id uint64) bool {
-	dropped := false
-	for _, w := range c.widths {
-		key := listCacheKey{id: id, width: w}
-		if entry, ok := c.entries[key]; ok && entry.approx {
-			delete(c.entries, key)
-			dropped = true
-		}
-	}
-	return dropped
+	return lines
 }
 
 // touchWidth promotes width to the front of the MRU list and
