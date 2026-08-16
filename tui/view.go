@@ -739,6 +739,12 @@ func (m Model) queueRowStyle(s QueueState) (string, lipgloss.Style) {
 // anything is happening, the readout answers whether it is taking
 // too long. It rides the existing spinner repaint (spinnerTickMsg →
 // markViewportDirty), so there is no new timer.
+//
+// GlyphTruncate is the single authority for the trailing affordance,
+// so the verb is normalized through trimTrailingEllipsis first — a
+// phrase that punctuates itself would otherwise render "Thinking...…"
+// (issue #141). That applies to Options.ThinkingPhrases /
+// Options.WorkingPhrases exactly as it does to the built-in pools.
 func (m *Model) renderSpinnerLine() string {
 	pool := m.thinkingPhrases()
 	if m.toolActive {
@@ -747,13 +753,34 @@ func (m *Model) renderSpinnerLine() string {
 	if len(pool) == 0 {
 		return ""
 	}
-	verb := pool[m.thinkingIdx%len(pool)]
+	verb := trimTrailingEllipsis(pool[m.thinkingIdx%len(pool)])
 	glyph := m.renderBrailleFrame(m.thinkingIdx)
 	body := m.styles.Muted.Italic(true).Render(verb+GlyphTruncate) + m.renderTurnElapsed()
 	if glyph == "" {
 		return body
 	}
 	return glyph + " " + body
+}
+
+// trimTrailingEllipsis strips one trailing ellipsis — ASCII "...",
+// the "…" glyph, or any mix and repetition of the two, plus the
+// whitespace around it — from a spinner verb, so the caller can
+// append GlyphTruncate without double-punctuating (issue #141).
+//
+// Only a TRAILING run is considered: "Wait... then more" keeps its
+// mid-phrase ellipsis. A run has to actually read as an ellipsis to
+// be removed (three or more dots, or at least one "…" glyph), so a
+// phrase ending in a single sentence period keeps it. The function is
+// idempotent, and safe on an empty or all-punctuation phrase — both
+// normalize to "", leaving GlyphTruncate alone on the line.
+func trimTrailingEllipsis(s string) string {
+	trimmed := strings.TrimRight(s, ". \t"+GlyphTruncate)
+	run := s[len(trimmed):]
+	if !strings.Contains(run, GlyphTruncate) && strings.Count(run, ".") < 3 {
+		// Not an ellipsis (bare period, "..", trailing blanks only).
+		return strings.TrimRight(s, " \t")
+	}
+	return strings.TrimRight(trimmed, " \t")
 }
 
 // renderMessage renders a single Message row with the correct glyph
