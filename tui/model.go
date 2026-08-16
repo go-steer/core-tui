@@ -167,6 +167,22 @@ type Model struct {
 	// wrong copy. Cleared in handleTranscriptKey and setFocus.
 	copyNotice string
 
+	// copyGen is the generation of copyNotice: bumped every time the
+	// notice is set, replaced or cleared (issue #175). Options
+	// .ClipboardWriter runs off the loop, so its verdict can land
+	// after the operator has moved the cursor or copied something
+	// else; the reply carries the generation it was issued under and
+	// is dropped unless the notice it describes is still on screen.
+	// Strictly stronger than sessionGen for this — a notice is
+	// superseded many times within one session, and a session switch
+	// clears it anyway by way of setFocus.
+	//
+	// Note this is a stamp on the NOTICE, not on the clipboard: the
+	// write itself is never retracted, only the sentence describing
+	// it. A superseded reply loses the right to speak, not the right
+	// to have happened.
+	copyGen uint64
+
 	// helpOpen toggles the bottom-anchored stacked help panel
 	// (`?` to open / page / close). When open, the chat viewport
 	// shrinks to make room above the input.

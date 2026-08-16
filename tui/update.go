@@ -686,6 +686,13 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		m.history.Append(Message{Role: RoleError, Text: msg.what + ": persist failed: " + msg.err.Error()})
 		m.refreshAndScroll()
 		return m, nil
+	case clipboardWrittenMsg:
+		// Edits the footer notice and nothing else — no history row,
+		// no re-render of the transcript, because the operator is
+		// parked on a selection they were reading. See
+		// applyClipboardResult.
+		m.applyClipboardResult(msg)
+		return m, nil
 	case toolsListedMsg:
 		if msg.gen != m.sessionGen {
 			return m, nil

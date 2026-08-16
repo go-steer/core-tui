@@ -52,6 +52,11 @@
 // common case to protect the rare one, so this copies the whole thing
 // and says how much it sent.
 //
+// Issue #175 is what came of that caveat being larger than it looks —
+// whole terminals decline the escape, not just oversized payloads —
+// and it added the second write (Options.ClipboardWriter, see
+// clipboard.go) and the mechanism suffix on the notice below.
+//
 // # The notice clears itself on the next key
 //
 // A copy makes no visible change — that is the nature of it — so it
@@ -112,11 +117,35 @@ func (m *Model) chatCopyCode() tea.Cmd {
 	return m.copyToClipboard(strings.Join(blocks, "\n\n"), what)
 }
 
+// Mechanism suffixes on the copy notice (issue #175).
+//
+// The suffix is not decoration: OSC 52 cannot be acknowledged, so
+// "copied" on its own is a claim and not an observation, and the
+// operator whose terminal silently dropped the escape needs to be
+// able to reach the conclusion "my terminal" without reading this
+// package. So the notice names the mechanism whenever that is all we
+// have, and drops the qualifier only once a host writer has come back
+// clean — the one case where the copy is confirmed rather than
+// merely attempted.
+const (
+	copyViaOSC52  = " · osc52"
+	copyOSC52Only = " · osc52 only"
+	// copyErrMax bounds the host error quoted in the notice. The
+	// footer is one line beside the rest of the legend; an exec error
+	// carrying a full PATH would push everything else off it.
+	copyErrMax = 48
+)
+
 // copyToClipboard hands text to the terminal and leaves a notice
 // saying what went. what is a prefix naming the kind of thing copied
 // ("" for a whole item); the line count comes from the text itself,
 // because that is the number that tells the operator whether they got
 // what they were pointing at.
+//
+// Both writes are issued together (issue #175). tea.Batch rather than
+// tea.Sequence: they go to different machines' clipboards and neither
+// depends on the other, so there is nothing to order them by, and
+// ordering them would make the fast one wait for the slow one.
 func (m *Model) copyToClipboard(text, what string) tea.Cmd {
 	text = strings.TrimRight(text, "\n")
 	if strings.TrimSpace(text) == "" {
@@ -127,15 +156,62 @@ func (m *Model) copyToClipboard(text, what string) tea.Cmd {
 	if lines == 1 {
 		unit = "line"
 	}
-	m.copyNotice = fmt.Sprintf("copied %s%d %s", what, lines, unit)
-	return tea.SetClipboard(text)
+	m.copyGen++
+	m.copyNotice = fmt.Sprintf("copied %s%d %s%s", what, lines, unit, copyViaOSC52)
+	return tea.Batch(
+		tea.SetClipboard(text),
+		clipboardWriteCmd(m.opts.ClipboardWriter, m.copyGen, text),
+	)
 }
 
 // copyNothing reports why a copy did not happen. Returns a nil Cmd so
 // the caller can `return m.copyNothing(…)` on every declining path.
 func (m *Model) copyNothing(why string) tea.Cmd {
+	m.copyGen++
 	m.copyNotice = why
 	return nil
+}
+
+// clearCopyNotice retires the notice and the generation together, so
+// a host clipboard reply still in flight can no longer edit the
+// footer. Every site that drops the notice goes through here for that
+// reason (issue #175); setting the field alone would leave the door
+// open for a reply to resurrect a copy the operator has moved on from.
+func (m *Model) clearCopyNotice() {
+	m.copyNotice = ""
+	m.copyGen++
+}
+
+// applyClipboardResult folds a host writer's verdict into the notice.
+//
+// Deliberately NOT a RoleError row, which is how the other host
+// callbacks report failure (persistDoneMsg, update.go). A row would
+// append to the transcript and scroll it, and this key is pressed by
+// an operator who has a selection parked somewhere and is reading it
+// — moving their position to tell them about a clipboard is a worse
+// interruption than the failure. The notice is also the surface that
+// made the claim, so it is the one that has to take it back.
+func (m *Model) applyClipboardResult(msg clipboardWrittenMsg) {
+	if msg.gen != m.copyGen {
+		return
+	}
+	base := strings.TrimSuffix(m.copyNotice, copyViaOSC52)
+	if msg.err == nil {
+		// Confirmed by the one path that can confirm anything, so the
+		// qualifier comes off.
+		m.copyNotice = base
+		return
+	}
+	m.copyNotice = base + copyOSC52Only + " (" + truncateNotice(msg.err.Error()) + ")"
+}
+
+// truncateNotice caps a host error at copyErrMax cells.
+func truncateNotice(s string) string {
+	s = strings.TrimSpace(strings.ReplaceAll(s, "\n", " "))
+	if ansi.StringWidth(s) <= copyErrMax {
+		return s
+	}
+	return ansi.Truncate(s, copyErrMax-1, "…")
 }
 
 // rawMessageText reconstructs the source text of a history entry.

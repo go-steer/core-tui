@@ -262,6 +262,11 @@ func main() {
 		},
 		SeedHistory:       seededConversation(),
 		ToolDetailVerbose: *verboseTools,
+		// What a host on a desktop wires so y / c reach the system
+		// clipboard as well as the terminal's (issue #175). Returns
+		// nil — and is therefore a no-op — on a machine with no
+		// clipboard to write to, which is why it needs no guard.
+		ClipboardWriter: tui.SystemClipboardWriter(),
 	}
 	if err := tui.Run(context.Background(), opts); err != nil {
 		fmt.Fprintln(os.Stderr, "core-tui:", err)
