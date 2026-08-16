@@ -245,11 +245,50 @@ func spinnerTick(gen uint64) tea.Cmd {
 // so the stamp can't be forgotten at one of them — that is the whole
 // point of the guard (issue #112). The generation itself is bumped
 // where a *new* animation begins (submitTurn for a per-turn spinner,
-// applyStreamChunk for a LiveAgent stretch); re-arming from the tick
+// beginLiveStretch for a LiveAgent one); re-arming from the tick
 // handler keeps the same generation because it continues the chain
 // that is already live rather than starting another one.
 func (m Model) armSpinner() tea.Cmd {
 	return spinnerTick(m.spinnerGen)
+}
+
+// beginLiveStretch starts a LiveAgent spinner stretch and reports
+// whether it actually started one — i.e. whether the caller owes an
+// armSpinner. It is submitTurn's counterpart for the #22 path, which
+// has no submitTurn to hang this off.
+//
+// Idempotent by design. Two events can open a stretch — the operator
+// injecting a prompt and the first partial chunk of an autonomous
+// one — and in the ordinary case both happen, in that order, for the
+// same stretch. The second must not restart the animation, bump the
+// generation out from under the live chain, or move the elapsed
+// origin off the moment the operator pressed enter.
+func (m *Model) beginLiveStretch() bool {
+	if m.spinnerActive {
+		return false
+	}
+	m.spinnerActive = true
+	m.thinkingIdx = 0
+	// This flip IS where the stretch's animation begins, so it is
+	// where the generation is bumped — otherwise the caller's
+	// armSpinner would re-use the previous stretch's chain (#112).
+	m.spinnerGen++
+	// Same reasoning for the elapsed readout (#111): this flip IS
+	// the start of a turn on this path, so stamp it here rather
+	// than leaving turnStarted at its zero value (a 55-year
+	// readout) or at the previous stretch's origin (a
+	// monotonically wrong one). Animation start and elapsed origin
+	// stay the same event on both paths.
+	m.turnStarted = m.nowFn()
+	return true
+}
+
+// endLiveStretch stops a LiveAgent spinner stretch. The tick chain
+// stops on its own: spinnerTickMsg re-arms only while turnInFlight,
+// which on this path is exactly m.spinnerActive.
+func (m *Model) endLiveStretch() {
+	m.spinnerActive = false
+	m.turnStarted = time.Time{}
 }
 
 // wakeListener returns a Cmd that blocks on the agent's
