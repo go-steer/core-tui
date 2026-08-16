@@ -22,9 +22,8 @@
 //
 //	ctrl+c, ctrl+d  quit
 //	tab             move the keyboard between the composer and the
-//	                transcript; with the transcript focused, up/down
-//	                and k/j scroll a line and g/G jump to either end
-//	                (core-tui #151 / #155)
+//	                transcript (core-tui #151 / #155); tab, enter or
+//	                esc gives it back
 //	ctrl+b          toggle StatusHeader <-> StatusSidebar
 //	shift+tab       cycle the permission mode chip
 //	ctrl+p          open the (sample) command palette
@@ -36,6 +35,22 @@
 //	                endpoint…" row demos the text-input dialog
 //	                (core-tui #56)
 //	esc             close any open modal
+//
+// With the transcript holding the keyboard, the last seeded turn — a
+// wide, tall one, put there on purpose — is what the rest of the
+// keymap is worth trying on:
+//
+//	up/down, k/j    move the cursor an item at a time (core-tui #152)
+//	space           fold the selected item to its first three lines,
+//	                and unfold it again
+//	y / c           copy the item, or just the code in it, to the
+//	                clipboard via OSC 52 (core-tui #153)
+//	shift+up/down   scroll a line inside an item taller than the
+//	                window
+//	shift+left/     pan sideways over content too wide to fit — the
+//	  shift+right   footer says how far (core-tui #154)
+//	g / G           jump to the first / last item; G also re-arms
+//	                following the stream
 //
 // Flags:
 //
@@ -263,8 +278,9 @@ func seededConversation() []tui.Message {
 		{
 			Role: tui.RoleSystem,
 			Text: "Visual preview — type ? for the full keymap. Try: / for slash palette · " +
-				"@ for file palette · tab focus the transcript (then ↑↓ / k j / g G to scroll, " +
-				"tab or esc back) · ctrl+g model · ctrl+y permission · ctrl+e elicit · " +
+				"@ for file palette · tab focus the transcript (then ↑↓ / k j select an item, " +
+				"space fold it, y / c copy it, shift+↑↓ scroll a line, shift+←→ pan sideways, " +
+				"g / G first / last, tab or esc back) · ctrl+g model · ctrl+y permission · ctrl+e elicit · " +
 				"ctrl+b toggle layout · shift+tab cycle perm-mode · /btw <q> for a side-answer modal · " +
 				"/switch for the session picker (its last row types in an endpoint). " +
 				"Press enter to start a streaming turn; type ahead and press enter again to " +
@@ -336,6 +352,38 @@ func seededConversation() []tui.Message {
 			Usage:   &tui.Usage{InputTokens: 8421, OutputTokens: 2103},
 			CostUSD: 0.0124,
 			Elapsed: 4*time.Second + 200*time.Millisecond,
+		},
+		{
+			Role: tui.RoleUser,
+			Text: "Show me the table as it stands now, and the lookup that motivated the constraint.",
+		},
+		{
+			Role: tui.RoleAssistant,
+			// Deliberately wide AND tall. Preformatted blocks do not
+			// wrap, so this is the turn with something for shift+←→
+			// to pan over (core-tui #154) and enough lines for space
+			// to fold (core-tui #152); two fenced blocks, so `c`
+			// reports copying both (core-tui #153).
+			Text: "Here is the table after the migration, and the query the composite index is there for.\n\n" +
+				"```\n" +
+				"                                            Table \"public.users\"\n" +
+				"   Column    |           Type           | Collation | Nullable |              Default              | Storage  | Description\n" +
+				"-------------+--------------------------+-----------+----------+-----------------------------------+----------+--------------------------------------\n" +
+				" id          | bigint                   |           | not null | nextval('users_id_seq'::regclass) | plain    |\n" +
+				" email       | character varying(255)   |           | not null |                                   | extended | login identity, unique per tenant\n" +
+				" created_at  | timestamp with time zone |           | not null | now()                             | plain    |\n" +
+				" updated_at  | timestamp with time zone |           |          |                                   | plain    | touched by the audit trigger\n" +
+				" tenant_id   | bigint                   |           | not null |                                   | plain    | FK -> tenants(id), ON DELETE CASCADE\n" +
+				"Indexes:\n" +
+				"    \"users_pkey\" PRIMARY KEY, btree (id)\n" +
+				"    \"users_email_tenant_key\" UNIQUE CONSTRAINT, btree (email, tenant_id)\n" +
+				"Foreign-key constraints:\n" +
+				"    \"users_tenant_id_fkey\" FOREIGN KEY (tenant_id) REFERENCES tenants(id) ON DELETE CASCADE\n" +
+				"```\n\n" +
+				"The plan confirms the index is doing the work rather than a sequential scan:\n\n" +
+				"```sh\n" +
+				"psql -c 'EXPLAIN (ANALYZE, BUFFERS) SELECT id FROM users WHERE email = $1 AND tenant_id = $2'\n" +
+				"```\n",
 		},
 		{
 			Role: tui.RoleError,
