@@ -434,7 +434,7 @@ func TestSubagentDialog_ScrollByTogglesPin(t *testing.T) {
 	m.height = 40
 	d := newSubagentDialog("worker")
 	d.lastBody = 200
-	d.scroll = nonNeg(d.lastBody - detailViewportHeight(m.height))
+	d.scroll = nonNeg(d.lastBody - subagentBodyHeight(m.height))
 
 	d.ScrollBy(-wheelScrollLines, &m)
 	if d.pinned {

@@ -41,10 +41,16 @@ import (
 
 const toolCallDialogID = "tool-call-detail"
 
-// Reserved chrome height for the dialog: title line + blank +
-// header banner + blank + footer rule + footer text. Body scroll
-// area is (terminal height - this - a couple lines of margin).
-const toolCallDialogChromeHeight = 8
+// toolCallDialogChromeRows is the row budget this modal spends on
+// chrome: RenderContext's modalChromeRows (title line, blank, blank,
+// footer rule, footer text) plus the two rows this dialog puts
+// INSIDE Body — the header banner and the blank line under it.
+//
+// Counted rather than guessed, and derived from modalChromeRows
+// rather than restated, so a change to the shared chrome reaches
+// here too. The predecessor constant was a hardcoded 8 against a
+// six-item list, which is how it stayed wrong through #142.
+const toolCallDialogChromeRows = modalChromeRows + 2
 
 // Default preferred width when there's terminal room. The dialog
 // clamps down to whatever fits when the terminal is narrower.
@@ -155,6 +161,7 @@ func (d *toolCallDialog) Render(totalWidth int, m *Model) string {
 			Body:   m.styles.Muted.Render("(no tool calls in this session yet)"),
 			Footer: "esc close",
 			Width:  width,
+			Height: m.height,
 			Styles: m.styles,
 		}.Render()
 	}
@@ -178,7 +185,7 @@ func (d *toolCallDialog) Render(totalWidth int, m *Model) string {
 	}
 	bodyLines := strings.Split(detail, "\n")
 
-	viewport := detailViewportHeight(m.height)
+	viewport := toolCallBodyHeight(m.height)
 	d.lastBody, d.lastView = len(bodyLines), viewport
 	d.scroll = min(nonNeg(d.scroll), nonNeg(len(bodyLines)-viewport))
 	// Two columns on the right are reserved for the scrollbar so the
@@ -192,6 +199,7 @@ func (d *toolCallDialog) Render(totalWidth int, m *Model) string {
 		Body:   body,
 		Footer: footer,
 		Width:  width,
+		Height: m.height,
 		Styles: m.styles,
 	}.Render()
 }
@@ -256,16 +264,20 @@ func collectToolCalls(snap []Message) []Message {
 	return out
 }
 
-// detailViewportHeight computes how many body lines fit given the
-// current terminal height. Leaves generous margin so long modals
-// don't cover the input area completely. Minimum 6 so the modal
-// stays useful on tiny terminals.
-func detailViewportHeight(termHeight int) int {
-	h := termHeight - toolCallDialogChromeHeight - 6
-	if h < 6 {
-		h = 6
-	}
-	return h
+// toolCallBodyHeight is how many detail rows fit at the current
+// terminal height.
+//
+// It is modalBodyHeight like every other modal (issue #149). The
+// predecessor helper predated #142's height regime and did its own
+// arithmetic: terminal height minus a chrome constant of 8, minus an
+// unexplained further 6, floored at 6 rather than at
+// minModalBodyRows. On a 12-row terminal that floor handed back a
+// 6-row body against 7 rows of chrome — a 13-row modal in 12 rows,
+// with clipFrame taking the difference off the bottom, which is
+// where the footer is. It also never went fullscreen, so it kept
+// reserving a margin at heights where the margin was already fiction.
+func toolCallBodyHeight(termHeight int) int {
+	return modalBodyHeight(termHeight, toolCallDialogChromeRows)
 }
 
 // Bold is a helper style commonly used across renderers; if the

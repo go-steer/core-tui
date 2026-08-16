@@ -36,6 +36,7 @@
 package tui
 
 import (
+	"fmt"
 	"strconv"
 	"strings"
 	"testing"
@@ -161,6 +162,92 @@ func modalFitCases() []modalFitCase {
 			render:        func(m *Model) string { return m.renderElicitModal() },
 			footer:        "esc cancel",
 			title:         "an-mcp-server-with-a-long-name",
+			minBodyHeight: 3,
+		},
+		{
+			// Issue #149. This overlay and the subagent one below
+			// were the two the #142 table never named, which is how
+			// they kept a body allowance that predated the height
+			// regime and a RenderContext that never told
+			// fitModalContent how tall the terminal was.
+			name: "tool-call",
+			open: func(_ *testing.T, w, h int) Model {
+				m := newFrameModel(StatusHeader, w, h)
+				m.history.Append(Message{
+					Role:            RoleTool,
+					ToolName:        "read_file",
+					ToolCallID:      "call-1",
+					ToolArgsMap:     map[string]any{"path": "/etc/hosts"},
+					ToolResponseMap: map[string]any{"content": strings.Repeat("a line of the file\n", 30)},
+				})
+				m.history.Append(Message{
+					Role:        RoleTool,
+					ToolName:    "grep",
+					ToolCallID:  "call-2",
+					ToolArgsMap: map[string]any{"pattern": "TODO"},
+					ToolError:   "regex compile failed",
+				})
+				m.overlayStack.Open(newToolCallDialog(2))
+				return m
+			},
+			render: func(m *Model) string { return m.overlayStack.Render(m.width, m) },
+			footer: "esc close",
+			title:  "Tool call detail",
+			// The header banner is this dialog's first body row, and
+			// the two-of-two counter is the part of it that cannot
+			// wrap away.
+			body: "2/2",
+			// The banner wraps to two rows at 40 columns, so the
+			// shortest terminal that holds title + banner + hint is
+			// four rows, not three.
+			minBodyHeight: 4,
+		},
+		{
+			name: "subagent",
+			open: func(_ *testing.T, w, h int) Model {
+				m := newFrameModel(StatusHeader, w, h)
+				d := newSubagentDialog("auditor")
+				d.apply(subagentEventsMsg{
+					name:    "auditor",
+					info:    SubagentInfo{Name: "auditor", Status: "running"},
+					hasInfo: true,
+					page: SubagentEventPage{Events: []SubagentEvent{
+						{Seq: 1, Author: "model", Text: strings.Repeat("a turn of the subagent log. ", 12)},
+						{Seq: 2, Author: "model", Text: strings.Repeat("and another one. ", 12)},
+					}},
+				})
+				// Unpinned, i.e. an operator who has scrolled up to
+				// the top of the log. Left pinned the overlay follows
+				// the tail by design and the first body row is
+				// legitimately off-window, which would make the body
+				// assertion below measure the scroll pin rather than
+				// the shedding order.
+				d.pinned = false
+				m.overlayStack.Open(d)
+				return m
+			},
+			render: func(m *Model) string { return m.overlayStack.Render(m.width, m) },
+			footer: "esc close",
+			title:  "Subagent",
+			// The status banner is the first body row; "running" is
+			// its leading chip.
+			body:          "running",
+			minBodyHeight: 3,
+		},
+		{
+			name: "text-input",
+			open: func(_ *testing.T, w, h int) Model {
+				m := newFrameModel(StatusHeader, w, h)
+				m.overlayStack.Open(NewTextInputDialog(TextInputConfig{
+					Title:  "Attach to Endpoint",
+					Prompt: "URL:",
+				}))
+				return m
+			},
+			render:        func(m *Model) string { return m.overlayStack.Render(m.width, m) },
+			footer:        "esc cancel",
+			title:         "Attach to Endpoint",
+			body:          "URL:",
 			minBodyHeight: 3,
 		},
 		{
@@ -368,6 +455,107 @@ func TestModalFit_NoRegressionAtNormalSizes(t *testing.T) {
 			})
 		}
 	}
+}
+
+// TestModalFit_OverflowingModalTakesItsWholeAllowance is the second
+// half of issue #149: not "does it fit" but "does it fit for the
+// right reason".
+//
+// fitModalContent guarantees the footer survives, and it does that by
+// shedding rows — so a dialog that over-budgets its body still LOOKS
+// correct on screen while its own scroll geometry (lastView, the
+// "↑↓ scroll" hint, the maxScroll clamp) describes a modal nobody is
+// looking at. A dialog that under-budgets looks correct too; it just
+// leaves rows of the operator's terminal empty.
+//
+// So this asserts the allotment directly. A modal whose content
+// overflows occupies exactly the rows the shared height regime gives
+// it — terminal minus margin — with the arithmetic restated here
+// rather than called, the way TestModalFit_NoRegressionAtNormalSizes
+// restates modalBodyHeight. Heights are limited to the normal regime
+// at and above the point where minModalBodyRows stops eating into the
+// margin, which is the range where "exactly its allotment" is a
+// statement about the budget rather than about the floor.
+//
+// The tool-call overlay's predecessor arithmetic fails this in both
+// directions: 17 rows of a 24-row terminal (three wasted) and 13 rows
+// of a 14-row terminal (three over, into the margin).
+func TestModalFit_OverflowingModalTakesItsWholeAllowance(t *testing.T) {
+	cases := []struct {
+		name   string
+		chrome int
+		open   func(w, h int) Model
+	}{
+		{
+			name:   "tool-call",
+			chrome: toolCallDialogChromeRows,
+			open: func(w, h int) Model {
+				m := newFrameModel(StatusHeader, w, h)
+				m.history.Append(Message{
+					Role:            RoleTool,
+					ToolName:        "read_file",
+					ToolCallID:      "call-1",
+					ToolArgsMap:     map[string]any{"path": "/etc/hosts"},
+					ToolResponseMap: manyKeys(60),
+				})
+				m.overlayStack.Open(newToolCallDialog(1))
+				return m
+			},
+		},
+		{
+			name:   "subagent",
+			chrome: modalChromeRows,
+			open: func(w, h int) Model {
+				m := newFrameModel(StatusHeader, w, h)
+				d := newSubagentDialog("auditor")
+				events := make([]SubagentEvent, 0, 60)
+				for i := 1; i <= 60; i++ {
+					events = append(events, SubagentEvent{
+						Seq: int64(i), Author: "model", Text: fmt.Sprintf("turn %d", i),
+					})
+				}
+				d.apply(subagentEventsMsg{
+					name:    "auditor",
+					info:    SubagentInfo{Name: "auditor", Status: "running"},
+					hasInfo: true,
+					page:    SubagentEventPage{Events: events},
+				})
+				m.overlayStack.Open(d)
+				return m
+			},
+		},
+	}
+	for _, tc := range cases {
+		for _, h := range []int{modalFullscreenBelow, 14, 24, 50} {
+			// Below chrome+margin+floor the floor is what sets the
+			// body height, not the budget, and the modal is entitled
+			// to spill into the margin.
+			if h < tc.chrome+modalMarginRows+minModalBodyRows {
+				continue
+			}
+			t.Run(tc.name+"/"+strconv.Itoa(h), func(t *testing.T) {
+				m := tc.open(100, h)
+				block := m.overlayStack.Render(m.width, &m)
+				want := h - modalMarginRows
+				if got := modalRows(block); got != want {
+					t.Errorf("overflowing modal is %d rows in a %d-row terminal, want exactly %d "+
+						"(terminal minus the %d-row margin) — the body allowance disagrees with "+
+						"the shared height regime\n%s", got, h, want, modalMarginRows, ansi.Strip(block))
+				}
+			})
+		}
+	}
+}
+
+// manyKeys builds a response map that renders as one JSON line per
+// key, so the tool-call detail body overflows any terminal in the
+// table above by logical rows rather than by wrapping.
+func manyKeys(n int) map[string]any {
+	out := make(map[string]any, n)
+	for i := range n {
+		out[fmt.Sprintf("k%02d", i)] = fmt.Sprintf("v%02d", i)
+	}
+	return out
 }
 
 // ptr is the addressable-copy helper the render funcs need — they
