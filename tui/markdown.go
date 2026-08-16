@@ -15,6 +15,7 @@
 package tui
 
 import (
+	"image/color"
 	"strings"
 
 	"charm.land/glamour/v2"
@@ -23,8 +24,11 @@ import (
 )
 
 // markdownRenderer wraps a Glamour TermRenderer with the parameters
-// the TUI tracks — dark/light background and viewport width. Held by
-// Model and lazily rebuilt when either changes.
+// the TUI tracks — the active theme, dark/light background and
+// viewport width. Held by Model and lazily rebuilt when the width or
+// the dark flag changes; a theme change nils the field outright
+// (Model.refreshTheme), because Theme carries a slice and so cannot
+// be compared for equality the way dark/width can.
 //
 // R-CHAT-4 / R-MD-3: assistant text is rendered through Glamour on
 // every update (including mid-stream partials). When a render fails
@@ -37,45 +41,91 @@ type markdownRenderer struct {
 	width int
 }
 
-// newMarkdownRenderer builds a Glamour renderer with the project's
-// chosen style + a soft word-wrap at width. Returns a no-op renderer
-// on construction error so callers don't need to handle nil — any
+// newMarkdownRenderer builds a Glamour renderer from the theme's
+// tokens + a soft word-wrap at width. Returns a no-op renderer on
+// construction error so callers don't need to handle nil — any
 // markdown they pass to renderMarkdown will fall through to raw text.
-func newMarkdownRenderer(dark bool, width int) *markdownRenderer {
+func newMarkdownRenderer(theme Theme, dark bool, width int) *markdownRenderer {
 	r, _ := glamour.NewTermRenderer(
-		glamour.WithStyles(tuiStyleConfig(dark)),
+		glamour.WithStyles(tuiStyleConfig(theme, dark)),
 		glamour.WithWordWrap(width),
 		// Route Chroma syntax highlighting through Lipgloss so code
-		// fences pick up the active color profile + future per-
-		// provider theme (agentic-tui skill §11.B). Without this,
-		// Chroma emits raw 24-bit ANSI that fights our palette.
+		// fences pick up the active color profile + the active theme
+		// (agentic-tui skill §11.B). Without this, Chroma emits raw
+		// 24-bit ANSI that fights our palette.
 		glamour.WithChromaFormatter(chromaFormatterName),
 	)
 	return &markdownRenderer{r: r, dark: dark, width: width}
 }
 
-// tuiStyleConfig starts from Glamour's bundled dark/light style and
-// patches two rough edges that hit assistant streams hard:
+// tuiStyleConfig builds the Glamour style config for a theme. It
+// starts from Glamour's bundled dark/light style — for the structural
+// settings we have no opinion about (margins, indents, list level
+// indent, block prefixes) — and then repaints every color-bearing
+// element from Theme tokens.
 //
-//  1. H2-H6 in the bundled styles render with the literal "##"/"###"
-//     prefix in the output (e.g. "## Section" stays "## Section").
-//     We strip the prefix and substitute bold + color so heading
-//     depth is still visible without leaking raw markdown to the
-//     viewport. H1 is left alone — its inverted banner block already
-//     strips the "#".
+// It used to take only a `dark bool`, which collapsed all twelve
+// themes into exactly two markdown styles: H2-H6 got hardcoded
+// 256-color indices and everything else — Document, BlockQuote, H1,
+// Code, CodeBlock.Chroma, Table — was inherited verbatim from
+// Glamour. Switching to Matrix or Christmas repainted the chrome and
+// left the assistant text, which is most of what is on screen,
+// Glamour-blue (issue #116).
 //
-//  2. Code fences get static separator lines above and below so the
-//     boundary of a code block is visually obvious even when syntax
-//     highlighting is muted. Generic chrome — Glamour doesn't plumb
-//     the language tag through to the static prefix/suffix.
+// What the theme now drives:
 //
-// Lifted from internal/tui's cogoStyleConfig so behavior matches
-// what core-agent operators expect.
-func tuiStyleConfig(dark bool) ansi.StyleConfig {
+//  1. Body text — Document takes FgBase, so assistant prose is the
+//     same color as every other FgBase surface instead of Glamour's
+//     "252" / "234".
+//
+//  2. Headings — H1 reverses OnPrimary out of a Primary fill (the
+//     one surface in the TUI that paints text on a brand color, and
+//     the reason OnPrimary exists as a token). H2-H6 walk a derived
+//     ramp from Accent down to FgMuted, so heading depth still reads
+//     without six more Theme fields. The bundled H2-H6 also render
+//     the literal "##"/"###" prefix into the output; we keep
+//     stripping it and substituting bold + color so heading depth is
+//     visible without leaking raw markdown to the viewport.
+//
+//  3. Code — inline Code takes Accent on BgElevated; fenced blocks
+//     get their bars in BorderQuiet and, decisively, hand Chroma the
+//     theme's OWN style by name (CodeBlock.Theme) instead of
+//     Glamour's bundled Chroma sub-config. That last line is what
+//     unifies markdown fences with the inline diff highlighter,
+//     which reads the same Theme.ChromaStyleName. Clearing
+//     CodeBlock.Chroma is also a correctness fix, not just a
+//     re-point: Glamour registers that sub-config globally under one
+//     fixed style name and skips registration if the name is already
+//     taken, so the FIRST theme to build a renderer would have
+//     silently owned code-fence colors for every theme after it.
+//
+//  4. The remaining chrome — rules, links, list bullets, block
+//     quotes, table borders — takes BorderQuiet / Accent / Secondary
+//     / FgMuted, so a theme swap moves the whole surface rather than
+//     the frame around it.
+func tuiStyleConfig(theme Theme, dark bool) ansi.StyleConfig {
 	cfg := styles.DarkStyleConfig
 	if !dark {
 		cfg = styles.LightStyleConfig
 	}
+	theme = normalizeTheme(theme)
+
+	// Body text. Document only: cfg.Text is the innermost cascade
+	// level and setting it there would win over every enclosing
+	// block, repainting headings and links in body color too.
+	setColor(&cfg.Document.StylePrimitive, theme.FgBase)
+
+	// Block quote: muted + italic, indented by Glamour's "│ " token
+	// which inherits the same color.
+	setColor(&cfg.BlockQuote.StylePrimitive, theme.FgMuted)
+	cfg.BlockQuote.Italic = boolPtr(true)
+
+	// Headings. H1 is the inverted banner; H2-H6 walk the ramp.
+	setColor(&cfg.Heading.StylePrimitive, theme.Accent)
+	cfg.Heading.Bold = boolPtr(true)
+	setColor(&cfg.H1.StylePrimitive, theme.OnPrimary)
+	setBackground(&cfg.H1.StylePrimitive, theme.Primary)
+	cfg.H1.Bold = boolPtr(true)
 	for level, h := range map[int]*ansi.StyleBlock{
 		2: &cfg.H2,
 		3: &cfg.H3,
@@ -84,15 +134,55 @@ func tuiStyleConfig(dark bool) ansi.StyleConfig {
 		6: &cfg.H6,
 	} {
 		h.Prefix = ""
-		c := headingColor(dark, level)
-		h.Color = &c
-		t := true
-		h.Bold = &t
+		setColor(&h.StylePrimitive, headingColor(theme, level))
+		h.Bold = boolPtr(true)
 	}
+
+	// Inline code + fenced code blocks.
+	setColor(&cfg.Code.StylePrimitive, theme.Accent)
+	setBackground(&cfg.Code.StylePrimitive, theme.BgElevated)
+	setColor(&cfg.CodeBlock.StylePrimitive, theme.BorderQuiet)
 	cfg.CodeBlock.BlockPrefix = codeBlockTopBar
 	cfg.CodeBlock.BlockSuffix = codeBlockBottomBar
+	// Name the theme's Chroma style and drop Glamour's bundled
+	// sub-config — see the doc comment above for why the sub-config
+	// is not merely redundant here but actively wrong.
+	cfg.CodeBlock.Theme = theme.ChromaStyleName
+	cfg.CodeBlock.Chroma = nil
+
+	// Rules, links, lists, tables.
+	setColor(&cfg.HorizontalRule, theme.BorderQuiet)
+	setColor(&cfg.Item, theme.Accent)
+	setColor(&cfg.Enumeration, theme.Accent)
+	setColor(&cfg.Link, theme.Secondary)
+	setColor(&cfg.LinkText, theme.Accent)
+	setColor(&cfg.Image, theme.Secondary)
+	setColor(&cfg.ImageText, theme.FgMuted)
+	setColor(&cfg.Table.StylePrimitive, theme.FgBase)
+	setColor(&cfg.DefinitionTerm, theme.Accent)
+	setColor(&cfg.DefinitionDescription, theme.FgMuted)
 	return cfg
 }
+
+// setColor points a Glamour style primitive's foreground at a theme
+// token. A nil token leaves the field alone so the element inherits
+// (Glamour's Color is a *string; writing a bogus "#000000" for an
+// unset token would paint black rather than inherit).
+func setColor(p *ansi.StylePrimitive, c color.Color) {
+	if hex := hexColor(c); hex != "" {
+		p.Color = &hex
+	}
+}
+
+// setBackground is setColor for the background slot.
+func setBackground(p *ansi.StylePrimitive, c color.Color) {
+	if hex := hexColor(c); hex != "" {
+		p.BackgroundColor = &hex
+	}
+}
+
+// boolPtr is the *bool Glamour's tri-state style fields want.
+func boolPtr(b bool) *bool { return &b }
 
 // codeBlockTopBar / codeBlockBottomBar bracket fenced code blocks so
 // the boundary reads as a deliberate frame rather than disappearing
@@ -102,33 +192,23 @@ const (
 	codeBlockBottomBar = "──────────────────────"
 )
 
-// headingColor returns the 256-color index for heading level n (2-6).
-// Cool-blue palette chosen so headings stay distinct from inline code
-// and bold body text. Lighter shade per deeper level so the visual
-// hierarchy still reads.
-func headingColor(dark bool, level int) string {
-	if !dark {
-		switch level {
-		case 2:
-			return "27"
-		case 3:
-			return "33"
-		case 4:
-			return "61"
-		default:
-			return "67"
-		}
+// headingColor returns the color for heading level n (2-6) as a
+// point on a derived ramp from Accent (H2) to FgMuted (H6).
+//
+// It used to return hardcoded 256-color indices off a cool-blue
+// scale, which is why every theme's headings were Glamour-blue.
+// Deriving the ramp instead of adding five "subtle accent tier"
+// tokens to Theme keeps the exported surface flat — the tiers carry
+// no information the endpoints don't already have, and Theme is
+// being narrowed for v1.0, not grown.
+func headingColor(theme Theme, level int) color.Color {
+	// H2 = 0.0 (pure Accent) … H6 = 1.0 (pure FgMuted).
+	ratios := map[int]float64{2: 0, 3: 0.25, 4: 0.5, 5: 0.75, 6: 1}
+	ratio, ok := ratios[level]
+	if !ok {
+		ratio = 1
 	}
-	switch level {
-	case 2:
-		return "75"
-	case 3:
-		return "39"
-	case 4:
-		return "147"
-	default:
-		return "110"
-	}
+	return mixColors(theme.Accent, theme.FgMuted, ratio)
 }
 
 // renderMarkdown returns the Glamour-rendered form of text, or text

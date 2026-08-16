@@ -27,7 +27,9 @@
 package tui
 
 import (
+	"fmt"
 	"image/color"
+	"math"
 	"strings"
 
 	"charm.land/lipgloss/v2"
@@ -61,6 +63,28 @@ type Theme struct {
 	BgBase     color.Color // chat backdrop (usually nil = terminal default)
 	BgElevated color.Color // dialog / modal body
 	BgOverlay  color.Color // tooltip / floater
+
+	// OnPrimary is the foreground for text painted ON a Primary
+	// fill rather than on the terminal background — today the
+	// inverted H1 banner in assistant markdown, the one surface
+	// that reverses out of a brand color. Primary alone cannot
+	// answer "what is legible on top of this?", so the token has
+	// to exist; but it is DERIVED, not required — a nil OnPrimary
+	// is filled in by NewStylesWithTheme from a luminance check on
+	// Primary, so no builtin and no host theme has to set it.
+	OnPrimary color.Color
+
+	// ChromaStyleName names the Chroma style used for BOTH inline
+	// syntax highlighting (diff bodies, tool-result previews) and
+	// Glamour code fences in assistant markdown. Those two used to
+	// be unrelated — inline was pinned to a package-level
+	// styles.Get("github") and fences to Glamour's bundled "charm"
+	// sub-config — so a code fence and the diff under it painted
+	// from two different palettes. Naming one style per theme is
+	// what unifies them and what makes /theme reach the code.
+	// Empty is filled in with DefaultChromaStyleName; an unknown
+	// name degrades through Chroma's own fallback, never a panic.
+	ChromaStyleName string
 
 	// Borders + rules.
 	BorderActive color.Color // focused input / open dialog
@@ -105,6 +129,138 @@ type Theme struct {
 // doesn't shift the textarea's column position on theme swap.
 const DefaultPromptGlyph = "▎ "
 
+// DefaultChromaStyleName is the Chroma style a theme gets when it
+// leaves ChromaStyleName empty. github's foreground-only palette
+// reads on both light and dark terminals, which is why it was the
+// hardcoded package default before themes could pick — keeping it
+// as the fallback means a host theme written against the older
+// Theme struct renders exactly as it did.
+const DefaultChromaStyleName = "github"
+
+// chromaFor picks a theme's Chroma style by terminal polarity. The
+// bundled styles are foreground-only through LipglossFormatter, so
+// a dark-terminal style dropped on a white background is a real
+// legibility loss, not just a taste one — every builtin that names
+// a dark style names its light counterpart too (or falls back to
+// DefaultChromaStyleName, which reads on both).
+func chromaFor(dark bool, darkName, lightName string) string {
+	if dark {
+		return darkName
+	}
+	return lightName
+}
+
+// normalizeTheme fills in the derived tokens a Theme is allowed to
+// leave zero, and is the single funnel every Theme crosses on its
+// way to a Styles bundle (see NewStylesWithTheme, which calls it).
+//
+// It deliberately does NOT live in DefaultTheme. There are four
+// independent ways a Theme value comes into existence and only two
+// of them route through DefaultTheme — ThemeByName (via the
+// registry's Build closures) and the provider/brand constructors.
+// The other two do not: a bare `Theme{...}` composite literal from
+// a host calling the exported NewStylesWithTheme, and the same
+// shape in the golden corpus. Normalizing at the Styles boundary
+// instead means the twelve builtins need no edits, host themes keep
+// working, and the two Branding override sites (NewStyles and
+// Model.resolveStyles) that mutate Primary and then call
+// NewStylesWithTheme re-derive OnPrimary for free.
+func normalizeTheme(t Theme) Theme {
+	if t.ChromaStyleName == "" {
+		t.ChromaStyleName = DefaultChromaStyleName
+	}
+	if t.OnPrimary == nil {
+		t.OnPrimary = contrastOn(t.Primary)
+	}
+	return t
+}
+
+// onPrimaryLight / onPrimaryDark are the two ends contrastOn picks
+// between. Near-white and near-black rather than pure #FFFFFF /
+// #000000: the pure ends read as a harsh cut-out against a
+// saturated brand fill on most terminal palettes.
+var (
+	onPrimaryLight = lipgloss.Color("#FAFAFA")
+	onPrimaryDark  = lipgloss.Color("#0A0A0A")
+)
+
+// contrastOn returns the more legible of near-white / near-black
+// for text drawn on top of bg, using the WCAG relative-luminance
+// midpoint. A nil bg (a Theme that never set Primary) answers
+// near-white, which is the safe read on the dark terminals that
+// dominate.
+func contrastOn(bg color.Color) color.Color {
+	if bg == nil {
+		return onPrimaryLight
+	}
+	if relativeLuminance(bg) > 0.5 {
+		return onPrimaryDark
+	}
+	return onPrimaryLight
+}
+
+// relativeLuminance returns the WCAG 2.x relative luminance of c in
+// [0,1]. Alpha is ignored — every color in a Theme is opaque.
+func relativeLuminance(c color.Color) float64 {
+	r, g, b, _ := c.RGBA()
+	lin := func(v uint32) float64 {
+		s := float64(v) / 0xFFFF
+		if s <= 0.04045 {
+			return s / 12.92
+		}
+		return math.Pow((s+0.055)/1.055, 2.4)
+	}
+	return 0.2126*lin(r) + 0.7152*lin(g) + 0.0722*lin(b)
+}
+
+// mixColors blends a toward b by ratio (0 = all a, 1 = all b) in
+// sRGB space and returns the result as a lipgloss hex color. Used
+// to derive the markdown heading ramp from Accent → FgMuted so
+// heading depth stays visible without six more Theme fields.
+//
+// sRGB rather than a perceptual space on purpose: the inputs are
+// already hand-picked brand colors, the outputs are five
+// intermediate heading tints, and a gamma-correct blend would buy
+// accuracy nobody can see at terminal color depth for a chunk of
+// arithmetic and a dependency.
+func mixColors(a, b color.Color, ratio float64) color.Color {
+	switch {
+	case a == nil:
+		return b
+	case b == nil:
+		return a
+	}
+	if ratio < 0 {
+		ratio = 0
+	} else if ratio > 1 {
+		ratio = 1
+	}
+	ar, ag, ab, _ := a.RGBA()
+	br, bg, bb, _ := b.RGBA()
+	blend := func(x, y uint32) uint8 {
+		v := (float64(x)*(1-ratio) + float64(y)*ratio) / 0x101
+		return uint8(math.Round(math.Min(math.Max(v, 0), 255)))
+	}
+	return color.RGBA{R: blend(ar, br), G: blend(ag, bg), B: blend(ab, bb), A: 0xFF}
+}
+
+// hexColor renders c as "#RRGGBB" for the config surfaces that take
+// a color string rather than a color.Color — Glamour's
+// ansi.StylePrimitive.Color is a *string, so every theme token that
+// reaches the markdown renderer goes through here. Returns "" for
+// nil so callers can leave the corresponding Glamour field unset
+// and inherit rather than paint a bogus black.
+func hexColor(c color.Color) string {
+	if c == nil {
+		return ""
+	}
+	r, g, b, _ := c.RGBA()
+	// color.Color.RGBA returns alpha-premultiplied values in
+	// [0, 0xFFFF], so the high byte is exactly the 8-bit channel;
+	// the mask makes that explicit for the overflow linter.
+	return fmt.Sprintf("#%02X%02X%02X", (r>>8)&0xFF, (g>>8)&0xFF, (b>>8)&0xFF)
+}
+
 // DefaultTheme returns the canonical "core-tui" palette — the
 // purple-pink Dracula-adjacent identity used by the visual-
 // preview slice and inherited by core-agent's launchTUIv2 today.
@@ -122,6 +278,10 @@ func DefaultTheme(dark bool) Theme {
 		Info:         lipgloss.Color("#A8A8A8"),
 		BorderActive: BrandViolet,
 		BorderQuiet:  lipgloss.Color("#3A3A3A"),
+		// Dracula is the palette this theme is already named after;
+		// it has no light counterpart in Chroma's bundle, so light
+		// terminals keep the house github default.
+		ChromaStyleName: chromaFor(dark, "dracula", DefaultChromaStyleName),
 	}
 	if dark {
 		t.FgBase = lipgloss.Color("#D0D0D0")
@@ -153,6 +313,9 @@ func DefaultTheme(dark bool) Theme {
 func AnthropicTheme(dark bool) Theme {
 	t := DefaultTheme(dark)
 	t.Name = "anthropic"
+	// Gruvbox is the warm orange/brown end of Chroma's bundle —
+	// the closest match to the clay identity, in both polarities.
+	t.ChromaStyleName = chromaFor(dark, "gruvbox", "gruvbox-light")
 	t.Primary = lipgloss.Color("#D97757") // Claude clay
 	t.Secondary = lipgloss.Color("#F0B27A")
 	t.Accent = lipgloss.Color("#D97757")
@@ -165,6 +328,7 @@ func AnthropicTheme(dark bool) Theme {
 func GeminiTheme(dark bool) Theme {
 	t := DefaultTheme(dark)
 	t.Name = "gemini"
+	t.ChromaStyleName = chromaFor(dark, "tokyonight-night", "tokyonight-day")
 	t.Primary = lipgloss.Color("#4285F4")
 	t.Secondary = lipgloss.Color("#5FD7FF")
 	t.Accent = lipgloss.Color("#4285F4")
@@ -177,6 +341,9 @@ func GeminiTheme(dark bool) Theme {
 func OpenAITheme(dark bool) Theme {
 	t := DefaultTheme(dark)
 	t.Name = "openai"
+	// Monokai's green function names + teal keywords are the
+	// nearest bundled read on the OpenAI green.
+	t.ChromaStyleName = chromaFor(dark, "monokai", "monokailight")
 	t.Primary = lipgloss.Color("#10A37F")
 	t.Secondary = lipgloss.Color("#4ECCA3")
 	t.Accent = lipgloss.Color("#10A37F")
@@ -209,6 +376,9 @@ func OpenAITheme(dark bool) Theme {
 func GoogleTheme(dark bool) Theme {
 	t := DefaultTheme(dark)
 	t.Name = "google"
+	// GitHub's own palettes: the neutral, unmistakably
+	// engineering-surface read that suits the Google chrome.
+	t.ChromaStyleName = chromaFor(dark, "github-dark", "github")
 	t.Primary = lipgloss.Color("#174EA6")      // deep blue — wordmark
 	t.Secondary = lipgloss.Color("#EA4335")    // brand red — agent identity
 	t.Accent = lipgloss.Color("#F9AB00")       // brand amber — softer than bright yellow on bold modal/tool heads
@@ -284,6 +454,9 @@ func GKETheme(dark bool) Theme {
 func GopherTheme(dark bool) Theme {
 	t := DefaultTheme(dark)
 	t.Name = "gopher"
+	// Nord / solarized-light are the cool blue-teal families that
+	// sit on the Gopher Blue → Aqua gradient.
+	t.ChromaStyleName = chromaFor(dark, "nord", "solarized-light")
 	t.Primary = lipgloss.Color("#00ADD8")   // Gopher Blue
 	t.Secondary = lipgloss.Color("#5DC9E2") // Light Blue — pairs with gradient
 	t.Accent = lipgloss.Color("#00A29C")    // Aqua — far end of gradient
@@ -330,6 +503,12 @@ func GopherTheme(dark bool) Theme {
 func MatrixTheme(dark bool) Theme {
 	t := DefaultTheme(dark)
 	t.Name = "matrix"
+	// swapoff is Chroma's monochrome-terminal style: near-white
+	// keywords, cyan strings, teal comments on black. The narrow
+	// hue set is what keeps a code fence reading as phosphor
+	// rather than as a syntax rainbow parked in the middle of the
+	// green chrome.
+	t.ChromaStyleName = chromaFor(dark, "swapoff", DefaultChromaStyleName)
 	t.Primary = lipgloss.Color("#00FF41")   // bright matrix green
 	t.Secondary = lipgloss.Color("#39FF14") // lime
 	t.Accent = lipgloss.Color("#7FFF7F")    // pale green
@@ -362,6 +541,10 @@ func MatrixTheme(dark bool) Theme {
 func PrideTheme(dark bool) Theme {
 	t := DefaultTheme(dark)
 	t.Name = "pride"
+	// Catppuccin spreads the widest pastel hue set of any bundled
+	// style — the closest a code fence gets to the flag without
+	// becoming unreadable.
+	t.ChromaStyleName = chromaFor(dark, "catppuccin-mocha", "catppuccin-latte")
 	t.Primary = lipgloss.Color("#5A189A")   // deep violet — wordmark base
 	t.Secondary = lipgloss.Color("#7B2CBF") // violet — agent identity
 	t.Accent = lipgloss.Color("#FFED00")    // flag yellow
@@ -392,6 +575,9 @@ func PrideTheme(dark bool) Theme {
 func CyberpunkTheme(dark bool) Theme {
 	t := DefaultTheme(dark)
 	t.Name = "cyberpunk"
+	// witchhazel is neon mint / cyan / lilac on deep purple —
+	// the arcade-marquee palette this theme is built around.
+	t.ChromaStyleName = chromaFor(dark, "witchhazel", DefaultChromaStyleName)
 	t.Primary = lipgloss.Color("#7B007B")   // deep magenta — wordmark base
 	t.Secondary = lipgloss.Color("#00FFD0") // hot cyan
 	t.Accent = lipgloss.Color("#FCEE0A")    // neon yellow
@@ -421,6 +607,9 @@ func CyberpunkTheme(dark bool) Theme {
 func VaporwaveTheme(dark bool) Theme {
 	t := DefaultTheme(dark)
 	t.Name = "vaporwave"
+	// base16-snazzy: hot-pink keywords, mint strings, sky-blue
+	// functions — synthwave, straight out of the bundle.
+	t.ChromaStyleName = chromaFor(dark, "base16-snazzy", "rose-pine-dawn")
 	t.Primary = lipgloss.Color("#FF71CE")   // hot pink
 	t.Secondary = lipgloss.Color("#01CDFE") // cyan
 	t.Accent = lipgloss.Color("#B967FF")    // purple
@@ -453,6 +642,9 @@ func VaporwaveTheme(dark bool) Theme {
 func ChristmasTheme(dark bool) Theme {
 	t := DefaultTheme(dark)
 	t.Name = "christmas"
+	// rrt is red keywords, green comments and gold functions on
+	// black — accidentally the exact festive triad.
+	t.ChromaStyleName = chromaFor(dark, "rrt", DefaultChromaStyleName)
 	t.Primary = lipgloss.Color("#C8102E")   // holiday red
 	t.Secondary = lipgloss.Color("#0E5F40") // holiday green
 	t.Accent = lipgloss.Color("#D4AF37")    // gold

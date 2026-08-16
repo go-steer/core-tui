@@ -53,7 +53,6 @@ import (
 
 	tea "charm.land/bubbletea/v2"
 	"charm.land/lipgloss/v2"
-	"github.com/alecthomas/chroma/v2/styles"
 )
 
 // updateGolden regenerates the corpus instead of comparing to it.
@@ -61,8 +60,9 @@ var updateGolden = flag.Bool("update", false, "regenerate the golden files under
 
 // goldenChromaStyle is the chroma style name every golden that can
 // reach the syntax highlighter is pinned to. Named explicitly here
-// rather than read from chromaSyntaxStyle so a production retheme
-// is not a corpus-wide rewrite.
+// and again in goldenTheme rather than inherited from whatever the
+// builtin themes pick, so a production retheme is not a corpus-wide
+// rewrite.
 const goldenChromaStyle = "github"
 
 // goldenTheme is THE theme for the corpus: a full, explicit Theme
@@ -72,22 +72,31 @@ const goldenChromaStyle = "github"
 // (and as a reviewable golden churn), not silently inherit.
 func goldenTheme() Theme {
 	return Theme{
-		Name:            "golden",
-		Primary:         lipgloss.Color("#8B5CF6"),
-		Secondary:       lipgloss.Color("#EC4899"),
-		Accent:          lipgloss.Color("#8B5CF6"),
-		Success:         lipgloss.Color("#5FD787"),
-		Warning:         lipgloss.Color("#FFD75F"),
-		Error:           lipgloss.Color("#FF5F5F"),
-		Info:            lipgloss.Color("#A8A8A8"),
-		FgBase:          lipgloss.Color("#D0D0D0"),
-		FgMuted:         lipgloss.Color("#9A9A9A"),
-		FgSubtle:        lipgloss.Color("#6C6C6C"),
-		BgBase:          nil,
-		BgElevated:      lipgloss.Color("#1E1E1E"),
-		BgOverlay:       lipgloss.Color("#2A2A2A"),
-		BorderActive:    lipgloss.Color("#8B5CF6"),
-		BorderQuiet:     lipgloss.Color("#3A3A3A"),
+		Name:         "golden",
+		Primary:      lipgloss.Color("#8B5CF6"),
+		Secondary:    lipgloss.Color("#EC4899"),
+		Accent:       lipgloss.Color("#8B5CF6"),
+		Success:      lipgloss.Color("#5FD787"),
+		Warning:      lipgloss.Color("#FFD75F"),
+		Error:        lipgloss.Color("#FF5F5F"),
+		Info:         lipgloss.Color("#A8A8A8"),
+		FgBase:       lipgloss.Color("#D0D0D0"),
+		FgMuted:      lipgloss.Color("#9A9A9A"),
+		FgSubtle:     lipgloss.Color("#6C6C6C"),
+		BgBase:       nil,
+		BgElevated:   lipgloss.Color("#1E1E1E"),
+		BgOverlay:    lipgloss.Color("#2A2A2A"),
+		BorderActive: lipgloss.Color("#8B5CF6"),
+		BorderQuiet:  lipgloss.Color("#3A3A3A"),
+		// Pins the corpus to one chroma style. The builtins each
+		// name their own now (Theme.ChromaStyleName), and the
+		// normalizer's fallback is free to move; neither may reach
+		// the seven chroma-bearing goldens.
+		ChromaStyleName: goldenChromaStyle,
+		// OnPrimary is deliberately NOT spelled out: it is the
+		// token the normalizer derives, and leaving it zero here is
+		// what makes the corpus exercise that derivation on the one
+		// path (a bare Theme literal) that never sees DefaultTheme.
 		DiffAddBg:       lipgloss.Color("#1B2D1B"),
 		DiffDelBg:       lipgloss.Color("#3A1E1E"),
 		DiffAddGutterBg: lipgloss.Color("#102010"),
@@ -103,21 +112,24 @@ func goldenStyles() Styles {
 	return NewStylesWithTheme(true, goldenTheme())
 }
 
-// pinChromaStyle forces the package-level syntax style to
-// goldenChromaStyle for the duration of the test and restores it
-// afterwards, so a golden that reaches the highlighter can't be
-// perturbed by the production default moving.
+// pinChromaStyle asserts the corpus theme still names the pinned
+// chroma style, and is called by every golden that can reach the
+// highlighter.
+//
+// It used to swap a package-level chromaSyntaxStyle var and restore
+// it on cleanup. That var is gone: highlighting is theme-driven now
+// (Theme.ChromaStyleName), the per-line cache key carries the style
+// name so two styles can no longer read each other's entries, and
+// the pin therefore lives in goldenTheme itself. What remains worth
+// checking is that it stays there — silently dropping the field
+// from goldenTheme would re-point seven goldens at whatever the
+// normalizer defaults to, and the diff would look like a rendering
+// change rather than a lost pin.
 func pinChromaStyle(t *testing.T) {
 	t.Helper()
-	prev := chromaSyntaxStyle
-	chromaSyntaxStyle = styles.Get(goldenChromaStyle)
-	// The highlighter memoizes per (lang, bg, line); a swapped
-	// style must not read back a value cached under the other one.
-	syntaxCache.Clear()
-	t.Cleanup(func() {
-		chromaSyntaxStyle = prev
-		syntaxCache.Clear()
-	})
+	if got := goldenTheme().ChromaStyleName; got != goldenChromaStyle {
+		t.Fatalf("goldenTheme().ChromaStyleName = %q, want %q — the corpus pin was dropped", got, goldenChromaStyle)
+	}
 }
 
 // goldenDir is the absolute path to tui/testdata, resolved at
