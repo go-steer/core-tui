@@ -176,8 +176,11 @@ func helpSections() []helpSection {
 		}},
 		{"Transcript focus", [][2]string{
 			{"tab", "move the keyboard between composer and transcript"},
-			{"↑ / ↓ / k / j", "scroll a line (transcript focus only)"},
-			{"g / G", "top / bottom (G resumes following the stream)"},
+			{"↑ / ↓ / k / j", "move the selection an item at a time"},
+			{"space", "fold / unfold the selected item"},
+			{"shift+↑ / shift+↓", "scroll a line inside a long item"},
+			{"y / c", "copy the item / just the code in it, to the clipboard"},
+			{"g / G", "first / last item (G resumes following the stream)"},
 			{"enter", "back to the composer (esc does too)"},
 		}},
 		{"Layout & mode", [][2]string{

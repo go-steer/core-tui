@@ -321,9 +321,16 @@ func keyPress(stroke string) tea.KeyPressMsg {
 		"enter":  tea.KeyEnter,
 		"tab":    tea.KeyTab,
 		"pgdown": tea.KeyPgDown,
+		"space":  tea.KeySpace,
 	}
 	if code, ok := codes[stroke]; ok {
 		return tea.KeyPressMsg(tea.Key{Code: code})
+	}
+	// shift+<named key> — the transcript's line-scroll pair (#152).
+	if rest, ok := strings.CutPrefix(stroke, "shift+"); ok {
+		if code, ok := codes[rest]; ok {
+			return tea.KeyPressMsg(tea.Key{Code: code, Mod: tea.ModShift})
+		}
 	}
 	// ctrl+<letter> — spelled generically so callers don't have to
 	// extend the table for every chord.

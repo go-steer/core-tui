@@ -391,7 +391,14 @@ func (m *Model) resize() {
 	// Set the widths before measuring: renderInputBox reads
 	// m.viewport.Width(), and every wrap-sensitive row count in the
 	// budget depends on the width it is rendered at.
-	m.viewport.SetWidth(chatWidth)
+	//
+	// The viewport's width is what a transcript ROW renders at, which
+	// is the chat column less the selection gutter (issue #152). The
+	// gutter is reserved on every row rather than appearing under the
+	// cursor, so that moving the cursor cannot re-wrap the item it
+	// lands on; chatView adds it back as it draws, and the block it
+	// returns is chatWidth wide again.
+	m.viewport.SetWidth(atLeast(chatWidth-chatGutterWidth, 1))
 	m.input.SetWidth(chatWidth - 2) // leave room for the input border
 
 	m.chrome = m.allocateChrome(layout, chromeWidth)
@@ -497,6 +504,9 @@ func (m *Model) refreshViewport() {
 	// a turn finalizing and folding the tail into history), and an
 	// offset past the end would draw an empty transcript.
 	m.clampChatOffset()
+	// The cursor is an index into the same rows and goes stale the
+	// same ways (issue #152).
+	m.clampChatSelection()
 	if m.follow {
 		m.chatGotoBottom()
 	}
@@ -1031,6 +1041,13 @@ func (m Model) footerHint() string {
 			return "Side answer" + sep + "↑↓ scroll" + sep + "enter/space/esc dismiss"
 		}
 		return "Side answer" + sep + "enter/space/esc dismiss"
+	case m.focus == focusTranscript && m.copyNotice != "":
+		// A copy leaves the frame exactly as it found it, so the only
+		// evidence it happened is this line (issue #153). It takes the
+		// whole legend rather than a slot in it, because the keys are
+		// unchanged and still one `?` away, while the answer to "did
+		// that work" is only useful for the moment it is true.
+		return "Transcript" + sep + m.copyNotice + sep + "tab/esc composer"
 	case m.focus == focusTranscript:
 		// Above the streaming arm on purpose (issue #151). Reading
 		// back through the transcript while a turn runs is the case
@@ -1038,7 +1055,14 @@ func (m Model) footerHint() string {
 		// indicator — and the streaming legend would be wrong here
 		// anyway: from focus mode esc returns the keyboard and enter
 		// queues nothing.
-		return "Transcript" + sep + "↑↓ scroll" + sep + "pgup/pgdn page" + sep +
+		// Five fragments is what fits at 80 columns before the legend
+		// wraps to a second row, so the two the mode can least afford to
+		// leave unstated win the slots: what the arrows move now that
+		// they move a cursor rather than the window (issue #152), and
+		// the fold that cursor exists to aim. Paging and line scrolling
+		// are one `?` away and neither is guessed at wrongly — pgup /
+		// pgdn do here exactly what they do everywhere else.
+		return "Transcript" + sep + "↑↓ select" + sep + "space fold" + sep +
 			"g/G top/bottom" + sep + "tab/esc composer"
 	case m.state == stateStreaming:
 		return "Streaming…" + sep + "esc interrupt" + sep + "enter queues prompt" + sep + "ctrl+c cancel turn"

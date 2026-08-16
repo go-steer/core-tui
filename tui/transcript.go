@@ -351,4 +351,7 @@ func (m *Model) ApplyTranscript(t Transcript) {
 	if m.listCache != nil {
 		m.listCache.reset(m.viewport.Width())
 	}
+	// Same argument for the cursor and the folds (issue #152): this
+	// is a different transcript, so neither carries over.
+	m.resetChatSelection()
 }
