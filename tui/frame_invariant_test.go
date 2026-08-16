@@ -161,6 +161,16 @@ func frameStates() []frameState {
 			// — which types into whatever this returns — need a
 			// picker in the matrix. The theme picker is the one that
 			// needs no host capability to populate itself.
+			//
+			// Issue #142: heights 4 and 10 used to pass this grid
+			// only because clipFrame rescued them — the modal
+			// composed 11 rows regardless and the clamp trimmed the
+			// footer hint off the bottom. They pass on their own
+			// merit now. This grid still cannot tell the difference,
+			// because it measures View()'s output and View()'s output
+			// is post-clamp; dialog_fit_test.go is where the modal is
+			// measured BEFORE the clamp, which is the assertion that
+			// can.
 			name: "theme-picker",
 			setup: func(_ *testing.T, m Model, _, _ int) Model {
 				m = withHostileTranscript(m)

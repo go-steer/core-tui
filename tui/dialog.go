@@ -222,6 +222,14 @@ type RenderContext struct {
 	Body   string
 	Footer string
 	Width  int
+	// Height is the terminal height the composed modal has to fit
+	// inside — Model.height at the call site. Zero means "unknown
+	// geometry" (a pre-resize frame, or a bare Model{} in a test)
+	// and disables the fit pass, which is the historical behavior.
+	// Callers that set it get fitModalContent's guarantee: on a
+	// terminal too short for the whole modal, spacing goes before
+	// content and the footer key hint is the last thing sacrificed.
+	Height int
 
 	Styles Styles
 }
@@ -243,15 +251,109 @@ func (rc RenderContext) Render() string {
 	footerRule := rc.Styles.ModalBorder.Render(strings.Repeat(GlyphRule, nonNeg(width-2)))
 	footerLine := rc.Styles.ModalFooter.Render(rc.Footer)
 
-	content := lipgloss.JoinVertical(lipgloss.Left,
-		titleLine,
-		"",
-		rc.Body,
-		"",
-		footerRule,
-		footerLine,
-	)
+	content := fitModalContent(width, rc.Height, titleLine, rc.Body, footerRule, footerLine)
 	return rc.Styles.ModalBorder.Padding(0, 1).Width(width).Render(content)
+}
+
+// fitModalContent is the single place the six-part modal chrome —
+// title line, blank, body, blank, footer rule, footer text — is
+// joined, and the only place that knows how tall the terminal is
+// while it is being joined.
+//
+// Why it exists (issue #142). modalBodyHeight budgets the body in
+// LOGICAL rows, but a body row that is wider than the modal wraps to
+// two or three terminal rows, so the budget can be met and the
+// composed block still be taller than the terminal. The only thing
+// downstream is clipFrame, which keeps the FIRST height rows — so
+// what an overflowing modal loses is its bottom: the footer rule and
+// the footer key hint, i.e. the row that says which key closes the
+// modal. That is exactly backwards. The operator can live without a
+// blank spacer; they cannot live without "esc cancel".
+//
+// So the rows are shed here instead, cheapest first:
+//
+//  1. the blank line above the footer rule
+//  2. the blank line under the title
+//  3. the footer rule itself
+//  4. body rows, from the bottom
+//  5. the title line
+//
+// The footer key hint is never shed, which is the whole point of the
+// ordering: an operator who can see "esc cancel" and nothing else can
+// still get out, and an operator who can see the title and nothing
+// else cannot. Dropping the title last rather than first is also what
+// makes the guarantee statable — the modal fits whenever the terminal
+// is at least as tall as the footer hint wraps to.
+//
+// Below THAT there is no honest answer left: a footer hint that wraps
+// to five rows on a 40-column terminal cannot be shown in four, and
+// there is no truncation of it that keeps the close key (which is at
+// the end of the hint, not the start). So this returns the footer
+// alone and lets clipFrame trim it. It cannot return a negative
+// height and it cannot panic, which is the whole bar at that size.
+//
+// A non-positive termHeight means the geometry is unknown; the fit
+// pass is skipped and the join is exactly what it always was.
+func fitModalContent(width, termHeight int, titleLine, body, footerRule, footerLine string) string {
+	head := []string{titleLine, ""}
+	tail := []string{"", footerRule, footerLine}
+	var bodyLines []string
+	if body != "" {
+		bodyLines = strings.Split(body, "\n")
+	}
+	// The content column inside Padding(0, 1) — what the outer
+	// Render wraps to, and therefore what the row count has to be
+	// measured against.
+	inner := nonNeg(width - 2)
+	for termHeight > 0 && modalRowCount(inner, head, bodyLines, tail) > termHeight {
+		switch {
+		case len(tail) == 3:
+			tail = tail[1:]
+		case len(head) == 2:
+			head = head[:1]
+		case len(tail) == 2:
+			tail = tail[1:]
+		case len(bodyLines) > 0:
+			bodyLines = bodyLines[:len(bodyLines)-1]
+		case len(head) == 1:
+			head = nil
+		default:
+			return footerLine
+		}
+	}
+	rows := make([]string, 0, len(head)+len(bodyLines)+len(tail))
+	rows = append(rows, head...)
+	rows = append(rows, bodyLines...)
+	rows = append(rows, tail...)
+	return lipgloss.JoinVertical(lipgloss.Left, rows...)
+}
+
+// modalRowCount is how many terminal rows the given groups of
+// content lines occupy once wrapped to width. Recomputed on each
+// shedding pass rather than tracked incrementally: the body here is
+// already windowed to roughly the terminal height by
+// modalBodyHeight, so the loop is bounded by a screenful.
+func modalRowCount(width int, groups ...[]string) int {
+	n := 0
+	for _, g := range groups {
+		for _, line := range g {
+			n += wrappedContentRows(line, width)
+		}
+	}
+	return n
+}
+
+// wrappedContentRows is how many terminal rows one content line
+// occupies once the modal frame wraps it to width. It runs the line
+// through the same lipgloss width-wrap the outer Render will, rather
+// than dividing display width by the column count: lipgloss breaks
+// on word boundaries, so ceiling division under-counts, and
+// under-counting here is what lets the footer fall off the bottom.
+func wrappedContentRows(line string, width int) int {
+	if width <= 0 {
+		return 1
+	}
+	return max(1, lipgloss.Height(lipgloss.NewStyle().Width(width).Render(line)))
 }
 
 // Scrollbar renders a vertical scrollbar character column of

@@ -245,8 +245,59 @@ func TestModalBodyHeight(t *testing.T) {
 	if got := modalBodyHeight(40, modalChromeRows); got != 40-modalChromeRows-modalMarginRows {
 		t.Errorf("modalBodyHeight(40) = %d, want %d", got, 40-modalChromeRows-modalMarginRows)
 	}
-	if got := modalBodyHeight(6, modalChromeRows); got != minModalBodyRows {
-		t.Errorf("tiny terminal → %d, want the %d-row floor", got, minModalBodyRows)
+	// The last height in the normal regime: margin intact, and the
+	// floor engaging on the tallest chrome is exactly what defines
+	// the threshold (see modalFullscreenBelow).
+	if got := modalBodyHeight(modalFullscreenBelow, modalPickerChromeRows); got != minModalBodyRows {
+		t.Errorf("modalBodyHeight(%d, picker) = %d, want the %d-row floor",
+			modalFullscreenBelow, got, minModalBodyRows)
+	}
+}
+
+// TestModalFullscreen_ShedsMarginAndFloor is issue #142's arithmetic.
+// Below modalFullscreenBelow the modal takes the whole terminal: the
+// margin contributes nothing and minModalBodyRows stops applying, so
+// chrome + body is the terminal height instead of a hard 11-row floor
+// that clipFrame then decapitated from the bottom.
+func TestModalFullscreen_ShedsMarginAndFloor(t *testing.T) {
+	if modalFullscreen(0) {
+		t.Error("unknown geometry (height 0) must not count as fullscreen")
+	}
+	if modalFullscreen(modalFullscreenBelow) {
+		t.Errorf("height %d is the first NORMAL height, not a fullscreen one", modalFullscreenBelow)
+	}
+	if !modalFullscreen(modalFullscreenBelow - 1) {
+		t.Errorf("height %d is below the threshold and must be fullscreen", modalFullscreenBelow-1)
+	}
+	if got := modalMargin(modalFullscreenBelow); got != modalMarginRows {
+		t.Errorf("normal-regime margin = %d, want %d", got, modalMarginRows)
+	}
+	if got := modalMargin(modalFullscreenBelow - 1); got != 0 {
+		t.Errorf("fullscreen margin = %d, want 0", got)
+	}
+
+	for _, tc := range []struct{ h, chrome, want int }{
+		// Issue #142's worked example: shed the margin at eight rows
+		// and chrome 5 + body 3 is exactly eight.
+		{h: 8, chrome: modalChromeRows, want: 3},
+		{h: 8, chrome: modalPickerChromeRows, want: 2},
+		// Relaxed floor: two rows, then one, rather than a hard 3.
+		{h: 7, chrome: modalChromeRows, want: 2},
+		{h: 6, chrome: modalChromeRows, want: 1},
+		// Below the chrome floor nothing helps. Never zero (which
+		// scrollView reads as "don't window", i.e. render the lot)
+		// and never negative.
+		{h: 5, chrome: modalChromeRows, want: 1},
+		{h: 1, chrome: modalPickerChromeRows, want: 1},
+	} {
+		got := modalBodyHeight(tc.h, tc.chrome)
+		if got != tc.want {
+			t.Errorf("modalBodyHeight(%d, %d) = %d, want %d", tc.h, tc.chrome, got, tc.want)
+		}
+		if tc.h > tc.chrome && got+tc.chrome > tc.h {
+			t.Errorf("modalBodyHeight(%d, %d): chrome+body = %d overflows the terminal",
+				tc.h, tc.chrome, got+tc.chrome)
+		}
 	}
 }
 

@@ -1174,14 +1174,7 @@ func (m *Model) renderSideAnswer() string {
 	footerRule := m.styles.ModalBorder.Render(strings.Repeat(GlyphRule, nonNeg(width-2)))
 	footerLine := m.styles.ModalFooter.Render(dismiss)
 
-	content := lipgloss.JoinVertical(lipgloss.Left,
-		titleLine,
-		"",
-		body,
-		"",
-		footerRule,
-		footerLine,
-	)
+	content := fitModalContent(width, m.height, titleLine, body, footerRule, footerLine)
 	return m.styles.ModalBorder.Padding(0, 1).Width(width).Render(content)
 }
 
@@ -1352,14 +1345,7 @@ func (m *Model) renderPermissionModal() string {
 	}
 	footerLine := m.styles.ModalFooter.Render(hint)
 
-	content := lipgloss.JoinVertical(lipgloss.Left,
-		titleLine,
-		"",
-		body,
-		"",
-		footerRule,
-		footerLine,
-	)
+	content := fitModalContent(width, m.height, titleLine, body, footerRule, footerLine)
 	return m.styles.ModalBorder.Padding(0, 1).Width(width).Render(content)
 }
 
@@ -1491,14 +1477,7 @@ func (m *Model) renderElicitModal() string {
 
 	footerRule := m.styles.ModalBorder.Render(strings.Repeat(GlyphRule, nonNeg(width-2)))
 	footerLine := m.styles.ModalFooter.Render(footer)
-	content := lipgloss.JoinVertical(lipgloss.Left,
-		titleLine,
-		"",
-		body,
-		"",
-		footerRule,
-		footerLine,
-	)
+	content := fitModalContent(width, m.height, titleLine, body, footerRule, footerLine)
 	return m.styles.ModalBorder.Padding(0, 1).Width(width).Render(content)
 }
 

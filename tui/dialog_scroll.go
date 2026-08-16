@@ -61,13 +61,64 @@ const modalChromeRows = 5
 
 // modalMarginRows keeps a modal from painting edge-to-edge over the
 // terminal — the operator keeps a sliver of the chat visible above
-// and below so the overlay reads as an overlay.
+// and below so the overlay reads as an overlay. A nicety, and the
+// first thing modalFullscreen gives up: see modalFullscreenBelow.
 const modalMarginRows = 4
 
-// minModalBodyRows is the floor for a modal body. On a very short
+// minModalBodyRows is the floor for a modal body. On a short
 // terminal we'd rather overflow slightly than render a modal with a
-// one-row window that can't show anything useful.
+// one-row window that can't show anything useful — but only while
+// there is still a taller modal to be had. In fullscreen mode the
+// alternative to a one-row window is no window at all, so the floor
+// is relaxed there (modalBodyHeight).
 const minModalBodyRows = 3
+
+// modalPickerChromeRows is the chrome budget of the TALLEST modal:
+// the three pickers, which pay modalChromeRows+1 for the filter row
+// (issue #117). Every threshold below is derived from this rather
+// than from modalChromeRows so that all modal surfaces change regime
+// at the same terminal height — an operator resizing past the
+// threshold should not see the theme picker go fullscreen while the
+// permission modal keeps its margin.
+const modalPickerChromeRows = modalChromeRows + 1
+
+// modalFullscreenBelow is the terminal height under which a modal
+// stops reserving modalMarginRows and takes the whole terminal.
+//
+// Derived, not picked: the normal-regime body height is
+// termHeight-chrome-modalMarginRows floored at minModalBodyRows, so
+// the floor engages — i.e. the subtraction stops reflecting what
+// actually fits — at exactly
+//
+//	chrome + modalMarginRows + minModalBodyRows
+//
+// which is 6+4+3 = 13 for the tallest chrome. At 13 rows and up
+// every modal composes strictly inside the terminal with its margin
+// intact and nothing needs to change. At 12 and below the margin is
+// already fiction (the floor is quietly eating into it), and by 8
+// rows the composed modal is taller than the terminal and clipFrame
+// takes the footer hint off the bottom — the one row that tells the
+// operator how to close the thing. So the margin goes at exactly the
+// height where it stopped being real.
+const modalFullscreenBelow = modalPickerChromeRows + modalMarginRows + minModalBodyRows
+
+// modalFullscreen reports whether the terminal is too short to hold
+// a normal modal, in which case the modal takes the full terminal:
+// no margin, no body floor. A non-positive height is "unknown
+// geometry", not "tiny", and is never fullscreen.
+func modalFullscreen(termHeight int) bool {
+	return termHeight > 0 && termHeight < modalFullscreenBelow
+}
+
+// modalMargin is how many rows a modal leaves to the chat behind it
+// at this terminal height. modalMarginRows normally, zero once
+// modalFullscreen trips.
+func modalMargin(termHeight int) int {
+	if modalFullscreen(termHeight) {
+		return 0
+	}
+	return modalMarginRows
+}
 
 // modalBodyHeight is how many body rows fit at the current terminal
 // height, given how many rows that modal's chrome eats.
@@ -76,9 +127,21 @@ const minModalBodyRows = 3
 // or a bare Model{} in a test. Callers read 0 as "don't window",
 // which keeps every unsized render showing its full body exactly as
 // it did before scrolling existed.
+//
+// In fullscreen mode the body is whatever is left after chrome, with
+// no minModalBodyRows floor: a two-row window is worth having when
+// the alternative is a modal whose bottom is clipped off. Below the
+// point where chrome alone fills the terminal there is nothing left
+// to give, and this returns 1 rather than 0 or a negative — 0 means
+// "don't window" to scrollView, which would render the entire body
+// and overflow much worse. fitModalContent is what keeps the
+// composed frame honest at those sizes.
 func modalBodyHeight(termHeight, chrome int) int {
 	if termHeight <= 0 {
 		return 0
+	}
+	if modalFullscreen(termHeight) {
+		return max(1, termHeight-chrome)
 	}
 	h := termHeight - chrome - modalMarginRows
 	if h < minModalBodyRows {
