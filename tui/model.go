@@ -587,6 +587,12 @@ func NewModel(opts Options) Model {
 // not set — "Thinking..." anchors the first tick so the affordance
 // is unambiguous before the rotator wanders into the AI / sci-fi /
 // CS jokes.
+//
+// The trailing "..." on these entries is not what reaches the screen:
+// renderSpinnerLine normalizes it away and appends GlyphTruncate, so
+// the rendered line is "Thinking…" (issue #141). The entries stay
+// punctuated because they read as prose here, and because a
+// host-supplied pool gets the same normalization either way.
 func (m Model) thinkingPhrases() []string {
 	if len(m.opts.ThinkingPhrases) > 0 {
 		return m.opts.ThinkingPhrases
