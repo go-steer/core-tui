@@ -1041,6 +1041,13 @@ func (m Model) footerHint() string {
 			return "Side answer" + sep + "↑↓ scroll" + sep + "enter/space/esc dismiss"
 		}
 		return "Side answer" + sep + "enter/space/esc dismiss"
+	case m.focus == focusTranscript && m.copyNotice != "":
+		// A copy leaves the frame exactly as it found it, so the only
+		// evidence it happened is this line (issue #153). It takes the
+		// whole legend rather than a slot in it, because the keys are
+		// unchanged and still one `?` away, while the answer to "did
+		// that work" is only useful for the moment it is true.
+		return "Transcript" + sep + m.copyNotice + sep + "tab/esc composer"
 	case m.focus == focusTranscript:
 		// Above the streaming arm on purpose (issue #151). Reading
 		// back through the transcript while a turn runs is the case

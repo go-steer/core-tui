@@ -179,6 +179,7 @@ func helpSections() []helpSection {
 			{"↑ / ↓ / k / j", "move the selection an item at a time"},
 			{"space", "fold / unfold the selected item"},
 			{"shift+↑ / shift+↓", "scroll a line inside a long item"},
+			{"y / c", "copy the item / just the code in it, to the clipboard"},
 			{"g / G", "first / last item (G resumes following the stream)"},
 			{"enter", "back to the composer (esc does too)"},
 		}},

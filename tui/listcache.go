@@ -274,7 +274,9 @@ func (mi messageItem) Render(m *Model, width int) string {
 	return m.renderMessage(mi.msg)
 }
 
-// RawRender returns the unstyled Text for clipboard / transcript
-// paths. RoleAssistant uses Text (not Rendered) so the consumer
-// gets clean markdown source instead of ANSI-styled output.
-func (mi messageItem) RawRender(_ int) string { return mi.msg.Text }
+// RawRender returns the unstyled source text for clipboard /
+// transcript paths (copy.go, issue #153). RoleAssistant comes back as
+// markdown rather than as the Glamour render, and a tool row — which
+// has no Text at all — is reassembled from the structured fields the
+// renderer was given.
+func (mi messageItem) RawRender(_ int) string { return rawMessageText(mi.msg) }

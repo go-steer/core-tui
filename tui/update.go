@@ -1361,8 +1361,10 @@ func (m Model) handleKey(msg tea.KeyPressMsg) (tea.Model, tea.Cmd) {
 	// the switch below on purpose — the frame-level chords there are
 	// not the composer's, and needing to leave focus mode to press
 	// ctrl+g would defeat the mode. See handleTranscriptKey.
-	if m.focus == focusTranscript && m.handleTranscriptKey(stroke) {
-		return m, nil
+	if m.focus == focusTranscript {
+		if cmd, claimed := m.handleTranscriptKey(stroke); claimed {
+			return m, cmd
+		}
 	}
 
 	switch stroke {

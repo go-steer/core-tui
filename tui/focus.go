@@ -38,6 +38,8 @@
 
 package tui
 
+import tea "charm.land/bubbletea/v2"
+
 // focusTarget names the region that currently owns the keyboard.
 //
 // focusInput is the zero value on purpose: a bare Model{} — which
@@ -73,6 +75,11 @@ const (
 // as one changing modes, and the two states can't drift apart.
 func (m *Model) setFocus(t focusTarget) {
 	m.focus = t
+	// The copy notice belongs to the mode it was made in: it is shown
+	// in the focus legend, which the composer does not draw, so
+	// leaving it set would resurface a stale "copied 24 lines" on the
+	// next tab back in (issue #153).
+	m.copyNotice = ""
 	if t == focusInput {
 		_ = m.input.Focus()
 		return
@@ -100,8 +107,10 @@ func (m *Model) cycleFocus() {
 	m.setFocus(focusInput)
 }
 
-// handleTranscriptKey runs the transcript's own keymap. Reports
-// whether it claimed the stroke; anything it declines falls through
+// handleTranscriptKey runs the transcript's own keymap. Returns the
+// Cmd the stroke produced (nil for all but the copy keys, which write
+// the clipboard through the terminal) and whether it claimed the
+// stroke at all; anything it declines falls through
 // to handleKey's global switch, which is where the frame-level
 // chords live (ctrl+c, ctrl+b, ctrl+g, ctrl+x, shift+tab, `?`).
 // Those belong to the frame rather than to the composer, and having
@@ -127,7 +136,14 @@ func (m *Model) cycleFocus() {
 //     unconditionally and is far too load-bearing to shadow in a
 //     mode the operator can enter by accident; a half-page keymap
 //     with only one working half is worse than none.
-func (m *Model) handleTranscriptKey(stroke string) bool {
+func (m *Model) handleTranscriptKey(stroke string) (tea.Cmd, bool) {
+	// Whatever the last copy said, this key is the operator moving on
+	// (issue #153). Cleared before the switch so a copy arm can set a
+	// fresh one, and so the two copy keys in a row each report their
+	// own result rather than the first one's.
+	m.copyNotice = ""
+
+	var cmd tea.Cmd
 	switch stroke {
 	case "tab", "enter":
 		// Two ways back here and a third upstream, because being
@@ -153,12 +169,19 @@ func (m *Model) handleTranscriptKey(stroke string) bool {
 		m.chatScrollBy(1)
 	case "space":
 		m.chatToggleCollapsed()
+	case "y":
+		// y for yank, next to k / j / g / G. c is the narrower half
+		// of the same key: the code out of the item, without the
+		// prose around it (issue #153).
+		cmd = m.chatCopyItem()
+	case "c":
+		cmd = m.chatCopyCode()
 	case "home", "g":
 		m.chatSelectFirst()
 	case "end", "G":
 		m.chatSelectLast()
 	default:
-		return false
+		return nil, false
 	}
 	// Every arm above either moved the viewport or left it alone, so
 	// one syncFollow covers all of them: it reads the follow intent
@@ -167,5 +190,5 @@ func (m *Model) handleTranscriptKey(stroke string) bool {
 	// it and resumes — the same contract ctrl+l and end already have
 	// from the input side.
 	m.syncFollow()
-	return true
+	return cmd, true
 }
