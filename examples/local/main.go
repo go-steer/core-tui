@@ -21,6 +21,10 @@
 // Key bindings exposed by this slice:
 //
 //	ctrl+c, ctrl+d  quit
+//	tab             move the keyboard between the composer and the
+//	                transcript; with the transcript focused, up/down
+//	                and k/j scroll a line and g/G jump to either end
+//	                (core-tui #151 / #155)
 //	ctrl+b          toggle StatusHeader <-> StatusSidebar
 //	shift+tab       cycle the permission mode chip
 //	ctrl+p          open the (sample) command palette
@@ -259,7 +263,8 @@ func seededConversation() []tui.Message {
 		{
 			Role: tui.RoleSystem,
 			Text: "Visual preview — type ? for the full keymap. Try: / for slash palette · " +
-				"@ for file palette · ctrl+g model · ctrl+y permission · ctrl+e elicit · " +
+				"@ for file palette · tab focus the transcript (then ↑↓ / k j / g G to scroll, " +
+				"tab or esc back) · ctrl+g model · ctrl+y permission · ctrl+e elicit · " +
 				"ctrl+b toggle layout · shift+tab cycle perm-mode · /btw <q> for a side-answer modal · " +
 				"/switch for the session picker (its last row types in an endpoint). " +
 				"Press enter to start a streaming turn; type ahead and press enter again to " +
