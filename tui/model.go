@@ -148,6 +148,15 @@ type Model struct {
 	selIdx    int
 	collapsed map[uint64]bool
 
+	// copyNotice is what the last copy did, shown in place of the
+	// focus legend until the next transcript keystroke (issue #153).
+	// A copy changes nothing on screen, so it has to say so somewhere;
+	// this is a string rather than a timed toast because a tick would
+	// need a generation stamp to keep two copies from fighting, and
+	// "it says so until you do the next thing" cannot describe the
+	// wrong copy. Cleared in handleTranscriptKey and setFocus.
+	copyNotice string
+
 	// helpOpen toggles the bottom-anchored stacked help panel
 	// (`?` to open / page / close). When open, the chat viewport
 	// shrinks to make room above the input.

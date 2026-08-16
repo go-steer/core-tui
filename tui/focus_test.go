@@ -352,9 +352,13 @@ func TestHelpPanel_TranscriptFocusKeysAreAllBound(t *testing.T) {
 		"shift+↑": "shift+up", "shift+↓": "shift+down",
 	}
 	// state is everything a focus-mode key is allowed to change.
-	// Nothing moving at all is the failure this test is for.
-	state := func(m Model) [4]int {
-		return [4]int{m.chatYOffset(), m.selIdx, len(m.collapsed), int(m.focus)}
+	// Nothing moving at all is the failure this test is for. The copy
+	// keys change nothing else by design — the whole point of a copy
+	// is that the frame does not move — so what stands in for them is
+	// the notice they leave, which is also the only thing the operator
+	// sees (issue #153).
+	state := func(m Model) [5]int {
+		return [5]int{m.chatYOffset(), m.selIdx, len(m.collapsed), int(m.focus), len(m.copyNotice)}
 	}
 	for _, key := range keys {
 		stroke, ok := glyphs[key]
