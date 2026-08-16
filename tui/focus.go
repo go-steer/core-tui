@@ -83,7 +83,7 @@ func (m *Model) setFocus(t focusTarget) {
 	// mode, so a composer that inherited one would be showing a
 	// sideways transcript with no key bound to bring it back
 	// (issue #154).
-	m.copyNotice = ""
+	m.clearCopyNotice()
 	m.chatResetPan()
 	if t == focusInput {
 		_ = m.input.Focus()
@@ -146,7 +146,7 @@ func (m *Model) handleTranscriptKey(stroke string) (tea.Cmd, bool) {
 	// (issue #153). Cleared before the switch so a copy arm can set a
 	// fresh one, and so the two copy keys in a row each report their
 	// own result rather than the first one's.
-	m.copyNotice = ""
+	m.clearCopyNotice()
 
 	var cmd tea.Cmd
 	switch stroke {

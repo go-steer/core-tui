@@ -399,6 +399,19 @@ type persistDoneMsg struct {
 	err  error
 }
 
+// clipboardWrittenMsg carries the outcome of one
+// Options.ClipboardWriter call (issue #175). Unlike persistDoneMsg a
+// nil err IS news: it is the only acknowledgement a copy can get, so
+// it is what lets the notice stop hedging about OSC 52.
+//
+// gen is Model.copyGen at the time of the copy, not sessionGen — the
+// message edits a notice, and the notice turns over far faster than
+// the session does.
+type clipboardWrittenMsg struct {
+	gen uint64
+	err error
+}
+
 // toolsListedMsg carries the ToolLister.Tools() catalog for /tools.
 type toolsListedMsg struct {
 	gen   uint64

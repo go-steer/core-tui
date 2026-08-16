@@ -106,6 +106,28 @@ type Options struct {
 	// Options field needed).
 	PersistThemeChoice func(name string) error
 
+	// ClipboardWriter puts a copied transcript item on the clipboard of
+	// the machine the HOST runs on (issue #175). It is called in
+	// addition to core-tui's OSC 52 write, not instead of it: the two
+	// target different machines — the escape reaches the terminal the
+	// operator is sitting at, this reaches the process's own desktop —
+	// so a local host wants both and a remote one is unaffected.
+	//
+	// Nil (the default) leaves OSC 52 as the only path, which is what
+	// core-tui shipped before this option and remains correct for
+	// remote hosts. Hosts on a desktop get the stdlib-backed default in
+	// one line, nil and all:
+	//
+	//	opts.ClipboardWriter = tui.SystemClipboardWriter()
+	//
+	// Called off the Update goroutine, so it may block; it is bounded
+	// only by the host. A returned error reaches the operator in the
+	// copy notice — which is the other half of why this exists. OSC 52
+	// has no acknowledgement, so a copy that goes out only as an escape
+	// can never be confirmed; a host writer that returns nil is the
+	// only way the TUI can say "copied" and mean it.
+	ClipboardWriter func(text string) error
+
 	// PermissionMode wires the permission-mode chip (R-PERM-6 / R-PERM-7).
 	// Zero value hides the chip and disables Shift+Tab cycling.
 	PermissionMode PermissionModeWiring

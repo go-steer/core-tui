@@ -594,18 +594,38 @@ listed in `/help`:
 
 ### 3.21 System clipboard (should)
 
-- **R-CLIP-1** A bound key (default `Ctrl+Y`) copies the focused
-  content — a rendered code block, a tool-call payload, a system
-  message, or the in-flight assistant reply — to the system
-  clipboard via OSC 52 (Operating System Command sequence 52). OSC 52
-  works across iTerm2, GNOME Terminal, kitty, alacritty, Windows
+- **R-CLIP-1** A bound key copies the selected transcript item — its
+  source text, not the frame it was drawn into — to the system
+  clipboard via OSC 52 (Operating System Command sequence 52). As
+  shipped the keys are `y` (the whole item) and `c` (just its fenced
+  code blocks) in transcript focus mode. OSC 52 works across iTerm2
+  (behind a preference), GNOME Terminal, kitty, alacritty, Windows
   Terminal, plus `tmux`/`screen` with the standard `set-clipboard
   on`/`alternate-screen on` settings, and over SSH without local
-  clipboard tooling. When the terminal rejects the escape (rare on
-  modern terminals) the TUI emits a system message naming the
-  fallback (`pbcopy`/`xclip`/`wl-copy`) it tried if any were
-  resolvable, or instructions for the user otherwise. No host
-  configuration required; works out of the box.
+  clipboard tooling — which is why it is the default: it reaches the
+  clipboard of the machine the operator is sitting at rather than the
+  one the process runs on. No host configuration required; works out
+  of the box wherever the terminal allows it.
+- **R-CLIP-2** The escape has no acknowledgement, so the TUI does not
+  claim a result it cannot observe: the copy notice names the
+  mechanism (`copied 24 lines · osc52`) whenever OSC 52 is the only
+  write, and the help panel says the terminal has to allow clipboard
+  writes. Terminals that decline the escape outright — Terminal.app,
+  iTerm2 with the preference off, some remote and web terminals — are
+  common enough that a silent no-op has to be diagnosable from the UI.
+- **R-CLIP-3** `Options.ClipboardWriter` lets a host also write the
+  clipboard of the machine the *process* runs on, called in addition
+  to the escape rather than instead of it — the two target different
+  machines, so neither is a fallback for the other.
+  `tui.SystemClipboardWriter()` supplies one out of `os/exec`
+  (`pbcopy` / `wl-copy` / `xclip` / `xsel` / `clip.exe`) and returns
+  nil — a no-op, indistinguishable from leaving the field unset —
+  where there is no clipboard to write to, including a Unix box with
+  no display. core-tui takes no clipboard library dependency: as a
+  library that would put windowing-system bindings in every host's
+  module graph. A host writer's error reaches the operator in the
+  notice, and its success is the only thing that lets the notice drop
+  the `· osc52` qualifier.
 
 ### 3.22 Modal scrolling (must)
 

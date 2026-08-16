@@ -181,6 +181,7 @@ func helpSections() []helpSection {
 			{"shift+↑ / shift+↓", "scroll a line inside a long item"},
 			{"shift+← / shift+→", "pan sideways over a wide table or diff"},
 			{"y / c", "copy the item / just the code in it, to the clipboard"},
+			{"(osc 52)", "a copy is sent to the terminal, which has to allow clipboard writes"},
 			{"g / G", "first / last item (G resumes following the stream)"},
 			{"enter", "back to the composer (esc does too)"},
 		}},
