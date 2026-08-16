@@ -250,6 +250,7 @@ func (d *textInputDialog) Render(totalWidth int, m *Model) string {
 		Body:   lipgloss.JoinVertical(lipgloss.Left, parts...),
 		Footer: footer,
 		Width:  width,
+		Height: m.height,
 		Styles: m.styles,
 	}.Render()
 }

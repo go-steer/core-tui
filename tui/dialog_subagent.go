@@ -43,6 +43,16 @@ const subagentDialogID = "subagent-detail"
 // benefit from the room.
 const subagentDialogPreferredWidth = 96
 
+// subagentBodyHeight is how many log rows fit at the current terminal
+// height. Unlike the tool-call overlay this dialog puts nothing extra
+// inside Body, so its chrome is exactly RenderContext's own.
+//
+// Shared with the tool-call overlay until issue #149; the two have
+// different chrome, and the helper they shared knew neither of them.
+func subagentBodyHeight(termHeight int) int {
+	return modalBodyHeight(termHeight, modalChromeRows)
+}
+
 // subagentDialog is one open drill-down. Everything the host sent
 // lives here rather than on the Model: the overlay is the only
 // consumer, and closing it should drop the accumulated log.
@@ -81,7 +91,7 @@ func newSubagentDialog(name string) *subagentDialog {
 func (d *subagentDialog) ID() string { return subagentDialogID }
 
 func (d *subagentDialog) HandleKey(stroke string, m *Model) DialogAction {
-	viewport := detailViewportHeight(m.height)
+	viewport := subagentBodyHeight(m.height)
 	maxScroll := nonNeg(d.lastBody - viewport)
 	switch stroke {
 	case "esc":
@@ -124,7 +134,7 @@ func (d *subagentDialog) HandleKey(stroke string, m *Model) DialogAction {
 // and scrolling up off the bottom releases the follow-the-tail pin
 // exactly as the arrow keys do.
 func (d *subagentDialog) ScrollBy(delta int, m *Model) {
-	maxScroll := nonNeg(d.lastBody - detailViewportHeight(m.height))
+	maxScroll := nonNeg(d.lastBody - subagentBodyHeight(m.height))
 	d.scroll = min(nonNeg(d.scroll+delta), maxScroll)
 	d.pinned = d.scroll >= maxScroll
 }
@@ -181,7 +191,7 @@ func (d *subagentDialog) Render(totalWidth int, m *Model) string {
 	bodyLines := d.bodyLines(m.styles, content)
 	d.lastBody = len(bodyLines)
 
-	viewport := detailViewportHeight(m.height)
+	viewport := subagentBodyHeight(m.height)
 	maxScroll := nonNeg(len(bodyLines) - viewport)
 	if d.pinned {
 		d.scroll = maxScroll
@@ -195,6 +205,7 @@ func (d *subagentDialog) Render(totalWidth int, m *Model) string {
 		Body:   strings.Join(visible, "\n"),
 		Footer: subagentDialogFooter(len(bodyLines), viewport, d.pinned),
 		Width:  width,
+		Height: m.height,
 		Styles: m.styles,
 	}.Render()
 }
