@@ -8,12 +8,6 @@
 [3;38;2;168;168;168mℹ  session started[m                                                                                  
                                                                                                     
                                                                                                     
-                                                                                                    
-                                                                                                    
-                                                                                                    
-                                                                                                    
-                                                                                                    
-                                                                                                    
 [38;2;58;58;58m────────────────────────────────────────────────────────────────────────────────────────────────────[m
 [1;38;2;139;92;246mHelp[m  [38;2;154;154;154m(? to close)[m                                                                                  
   [1;38;2;154;154;154mInput[m                                                                                             
@@ -38,6 +32,12 @@
     [1;38;2;208;208;208mpgup / pgdn[m             [38;2;154;154;154mscroll chat[m                                                             
     [1;38;2;208;208;208mctrl+l[m                  [38;2;154;154;154mjump to top (stops following the stream)[m                                
     [1;38;2;208;208;208mend[m                     [38;2;154;154;154mjump to bottom, when the input is empty (resumes following)[m             
+                                                                                                    
+  [1;38;2;154;154;154mTranscript focus[m                                                                                  
+    [1;38;2;208;208;208mtab[m                     [38;2;154;154;154mmove the keyboard between composer and transcript[m                       
+    [1;38;2;208;208;208m↑ / ↓ / k / j[m           [38;2;154;154;154mscroll a line (transcript focus only)[m                                   
+    [1;38;2;208;208;208mg / G[m                   [38;2;154;154;154mtop / bottom (G resumes following the stream)[m                           
+    [1;38;2;208;208;208menter[m                   [38;2;154;154;154mback to the composer (esc does too)[m                                     
                                                                                                     
   [1;38;2;154;154;154mLayout & mode[m                                                                                     
     [1;38;2;208;208;208mctrl+b[m                  [38;2;154;154;154mtoggle header / sidebar[m                                                 

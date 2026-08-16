@@ -206,6 +206,13 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			}
 			return m, nil
 		}
+		// No dialog wanted it and the transcript holds the keyboard:
+		// take focus back before the paste falls through to the
+		// forwarding tail. bubbles drops every message a blurred
+		// textarea gets, so the alternative is a paste that vanishes
+		// without a trace — and pasting is about as unambiguous a
+		// "I am composing now" gesture as there is (issue #151).
+		m.setFocus(focusInput)
 
 	case streamChunkMsg:
 		// Straggler from an outgoing session (issue #48 / #53) —
@@ -1176,6 +1183,18 @@ func (m Model) handleKey(msg tea.KeyPressMsg) (tea.Model, tea.Cmd) {
 			m.refreshViewport()
 			return m, nil
 		}
+		// Hand the keyboard back to the composer (issue #151).
+		// Placed here — below every open surface, above the two
+		// cancel arms — because focus is a mode the operator is
+		// inside of, and esc's contract is to back out of the
+		// innermost thing first. The cost is that interrupting a
+		// turn from focus mode takes two presses; the alternative
+		// costs the operator a mode they can't escape from with the
+		// key that escapes everything else.
+		if m.focus != focusInput {
+			m.setFocus(focusInput)
+			return m, nil
+		}
 		// Issue #13 bonus: Esc cancels an in-flight async slash
 		// via the cancellable ctx we stashed in dispatchSlash.
 		// Hosts that honor the AsyncSlashProvider ctx contract
@@ -1339,6 +1358,15 @@ func (m Model) handleKey(msg tea.KeyPressMsg) (tea.Model, tea.Cmd) {
 		m.pendingExit = false
 	}
 
+	// Transcript focus (issue #151) gets first refusal on everything
+	// the modal cascade above left. Keys it declines fall through to
+	// the switch below on purpose — the frame-level chords there are
+	// not the composer's, and needing to leave focus mode to press
+	// ctrl+g would defeat the mode. See handleTranscriptKey.
+	if m.focus == focusTranscript && m.handleTranscriptKey(stroke) {
+		return m, nil
+	}
+
 	switch stroke {
 	case "ctrl+c":
 		// Three-step ladder (mirrors internal/tui:626-641 + Claude Code):
@@ -1423,6 +1451,16 @@ func (m Model) handleKey(msg tea.KeyPressMsg) (tea.Model, tea.Cmd) {
 		// keystroke with its error discarded (issue #137).
 		return m, persistChoiceCmd(m.sessionGen, "status layout",
 			m.opts.PersistStatusLayout, m.statusLayout)
+
+	case "tab":
+		// Move the keyboard between the composer and the transcript
+		// (issue #151). Tab is the one navigation key bubbles'
+		// textarea does NOT claim, so taking it costs the composer
+		// nothing; the palette claims it earlier in this function
+		// for prefix completion, which is the more local meaning
+		// while a palette is up.
+		m.cycleFocus()
+		return m, nil
 
 	case "shift+tab":
 		// Cycle the permission-mode chip. The chip flips immediately —
@@ -1621,7 +1659,13 @@ func (m Model) handleKey(msg tea.KeyPressMsg) (tea.Model, tea.Cmd) {
 		// makes it safe to page on, and why the panel does not have to
 		// take pgup / pgdn away from the chat to be height-aware
 		// (issue #119, help.go).
-		if strings.TrimSpace(m.input.Value()) == "" {
+		//
+		// The empty-input condition exists to protect typing, so it
+		// lapses when the transcript holds the keyboard and there is
+		// no typing to protect (issue #151). Without that, `?` would
+		// be the one key the focus-mode legend advertises that a
+		// half-written draft could silently disable.
+		if m.focus == focusTranscript || strings.TrimSpace(m.input.Value()) == "" {
 			m.advanceHelp()
 			m.resize()
 			m.refreshViewport()
@@ -1639,11 +1683,19 @@ func (m Model) handleKey(msg tea.KeyPressMsg) (tea.Model, tea.Cmd) {
 	// End. Home stays with the textarea (ctrl+l is the goto-top key);
 	// End reaches here only when the input is non-empty, in which
 	// case the textarea's LineEnd is what the operator meant.
+	//
+	// The composer is fed only when it holds the keyboard (issue
+	// #151). A blurred textarea already drops everything it is
+	// handed, so this guard is not what keeps text out of the
+	// prompt — it is what stops that from being an invariant we
+	// hold on loan from bubbles' Update.
 	var (
 		taCmd tea.Cmd
 		vpCmd tea.Cmd
 	)
-	m.input, taCmd = m.input.Update(msg)
+	if m.focus == focusInput {
+		m.input, taCmd = m.input.Update(msg)
+	}
 	m.viewport, vpCmd = m.viewport.Update(msg)
 	// PgUp / PgDn just moved the viewport (nothing else reaches it);
 	// re-read the follow intent before anything touches the layout.
@@ -2185,7 +2237,14 @@ func (m *Model) finalizeTurn(elapsed time.Duration, notice string) {
 		m.markInFlightTerminal(true, "")
 	}
 
-	_ = m.input.Focus()
+	// Re-arm the textarea, but only if it is the region that owns
+	// the keyboard. A turn ending is not a reason to yank focus out
+	// of a transcript the operator deliberately moved it to, and
+	// re-focusing without moving m.focus would put the hardware
+	// cursor back on a composer that is still inert (issue #151).
+	if m.focus == focusInput {
+		_ = m.input.Focus()
+	}
 	m.refreshViewport()
 }
 
@@ -2488,7 +2547,11 @@ func (m *Model) applySwitchTarget(tgt *SwitchTarget) tea.Cmd {
 	// provider under AutoProviderTheme) + re-focus the input so
 	// the operator can type into the new session immediately.
 	m.refreshTheme()
-	_ = m.input.Focus()
+	// Unlike the turn-end re-arm this one resets the focus mode
+	// outright (issue #151): a session switch replaces the
+	// transcript the operator had focused, so leaving the keyboard
+	// parked on someone else's history is not continuity.
+	m.setFocus(focusInput)
 
 	// Step 7 — optional post-switch system row so the operator
 	// sees which session they landed on.

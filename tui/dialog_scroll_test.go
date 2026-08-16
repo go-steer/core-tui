@@ -311,14 +311,16 @@ func wheel(button tea.MouseButton) tea.MouseWheelMsg {
 // handful of navigation keys these tests drive.
 func keyPress(stroke string) tea.KeyPressMsg {
 	codes := map[string]rune{
-		"up":    tea.KeyUp,
-		"down":  tea.KeyDown,
-		"pgup":  tea.KeyPgUp,
-		"pgdn":  tea.KeyPgDown,
-		"home":  tea.KeyHome,
-		"end":   tea.KeyEnd,
-		"esc":   tea.KeyEscape,
-		"enter": tea.KeyEnter,
+		"up":     tea.KeyUp,
+		"down":   tea.KeyDown,
+		"pgup":   tea.KeyPgUp,
+		"pgdn":   tea.KeyPgDown,
+		"home":   tea.KeyHome,
+		"end":    tea.KeyEnd,
+		"esc":    tea.KeyEscape,
+		"enter":  tea.KeyEnter,
+		"tab":    tea.KeyTab,
+		"pgdown": tea.KeyPgDown,
 	}
 	if code, ok := codes[stroke]; ok {
 		return tea.KeyPressMsg(tea.Key{Code: code})

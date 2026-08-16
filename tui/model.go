@@ -101,6 +101,14 @@ type Model struct {
 	// the operator on a half-painted UI.
 	themeName string
 
+	// focus is the region that owns the keyboard: the composer (the
+	// zero value, and what every path assumed before issue #151) or
+	// the transcript. Move it with Model.setFocus rather than
+	// assigning here — the textarea's own focus flag has to track
+	// it, and that is what keeps stray text out of a prompt nobody
+	// is looking at. See focus.go.
+	focus focusTarget
+
 	// helpOpen toggles the bottom-anchored stacked help panel
 	// (`?` to open / page / close). When open, the chat viewport
 	// shrinks to make room above the input.

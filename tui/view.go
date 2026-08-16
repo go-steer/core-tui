@@ -1017,12 +1017,25 @@ func (m Model) renderPermissionChip() string {
 
 // renderInputBox renders the textarea with a thin top border
 // (style.md §5).
+//
+// The border doubles as the focus indicator (issue #151): it drops to
+// the quiet border token while the transcript holds the keyboard.
+// That is the theme's own vocabulary — BorderActive is documented as
+// "focused input / open dialog" and BorderQuiet as the passive edge —
+// so the indicator needs no new style field and follows every theme
+// for free. It is the second of three signals, alongside the footer
+// legend and the hardware cursor setFocus takes away: a mode reachable
+// in one keystroke has to be visible without one.
 func (m Model) renderInputBox() string {
 	width := m.viewport.Width()
 	if width <= 0 {
 		width = m.width
 	}
-	top := m.styles.InputBorderTop.Render(strings.Repeat(GlyphRule, width))
+	border := m.styles.InputBorderTop
+	if m.focus != focusInput {
+		border = m.styles.Rule
+	}
+	top := border.Render(strings.Repeat(GlyphRule, width))
 	return top + "\n" + m.input.View()
 }
 
@@ -1073,6 +1086,15 @@ func (m Model) footerHint() string {
 			return "Side answer" + sep + "↑↓ scroll" + sep + "enter/space/esc dismiss"
 		}
 		return "Side answer" + sep + "enter/space/esc dismiss"
+	case m.focus == focusTranscript:
+		// Above the streaming arm on purpose (issue #151). Reading
+		// back through the transcript while a turn runs is the case
+		// this mode exists for, so it is the last moment to drop the
+		// indicator — and the streaming legend would be wrong here
+		// anyway: from focus mode esc returns the keyboard and enter
+		// queues nothing.
+		return "Transcript" + sep + "↑↓ scroll" + sep + "pgup/pgdn page" + sep +
+			"g/G top/bottom" + sep + "tab/esc composer"
 	case m.state == stateStreaming:
 		return "Streaming…" + sep + "esc interrupt" + sep + "enter queues prompt" + sep + "ctrl+c cancel turn"
 	case m.palette != nil:
