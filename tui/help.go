@@ -174,6 +174,12 @@ func helpSections() []helpSection {
 			{"ctrl+l", "jump to top (stops following the stream)"},
 			{"end", "jump to bottom, when the input is empty (resumes following)"},
 		}},
+		{"Transcript focus", [][2]string{
+			{"tab", "move the keyboard between composer and transcript"},
+			{"↑ / ↓ / k / j", "scroll a line (transcript focus only)"},
+			{"g / G", "top / bottom (G resumes following the stream)"},
+			{"enter", "back to the composer (esc does too)"},
+		}},
 		{"Layout & mode", [][2]string{
 			{"ctrl+b", "toggle header / sidebar"},
 			{"shift+tab", "cycle permission mode"},
