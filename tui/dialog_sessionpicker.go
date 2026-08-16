@@ -294,6 +294,7 @@ func (d *sessionPickerDialog) Render(totalWidth int, m *Model) string {
 		Body:   body,
 		Footer: footer,
 		Width:  width,
+		Height: m.height,
 		Styles: m.styles,
 	}.Render()
 }

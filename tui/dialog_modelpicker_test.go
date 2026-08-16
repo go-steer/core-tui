@@ -285,14 +285,16 @@ func TestModelPicker_HighlightsTheMatchedSpan(t *testing.T) {
 // of the list's allowance rather than added to the modal, so the
 // modal is exactly as tall as it was before the filter existed.
 //
-// Nine rows is the floor for that being true. Below it
-// modalBodyHeight stops subtracting and returns minModalBodyRows
-// instead (dialog_scroll.go), at which point the modal is taller than
-// the terminal whatever chrome figure it was given — clipFrame is the
-// backstop there, and TestFrameInvariants_Grid drives the picker
-// across heights 4 and 10 to prove it.
+// It used to hold only from nine rows up: below that modalBodyHeight
+// stopped subtracting and returned minModalBodyRows, so the modal was
+// taller than the terminal whatever chrome figure it was given and
+// clipFrame took the footer off the bottom. Issue #142 sheds the
+// margin and the floor below modalFullscreenBelow, so the range now
+// runs down to three rows — title, one body row, footer hint. Two
+// rows drops the body entirely and is covered by
+// TestModalFit_ShortTerminal.
 func TestModelPicker_BodyFitsTheTerminal(t *testing.T) {
-	for _, h := range []int{9, 10, 14, 24, 50} {
+	for _, h := range []int{3, 4, 6, 8, 9, 10, 12, 13, 14, 24, 50} {
 		m, d := openModelPickerFixture(t)
 		m.height = h
 		rendered := d.Render(100, &m)

@@ -252,6 +252,39 @@ func TestGolden_Frame(t *testing.T) {
 	}
 }
 
+// TestGolden_ModalFrame pins the composed frame with a modal open.
+//
+// The corpus had no capture of a modal at all before issue #142,
+// which is a gap: modal sizing is the one place in the layout where a
+// change is meant to bite only where the modal did not fit, and
+// "meant to" is not a test.
+//
+// All three captures are 24 rows, well above modalFullscreenBelow, so
+// the fullscreen degradation must not appear in any of them. The
+// widths do different jobs. At 100 and 160 the modal has room and the
+// bytes are identical to what main produced — that is the
+// no-regression control. At 60 they are not, and deliberately: the
+// theme descriptions wrap hard enough that the modal composed 26 rows
+// in a 24-row terminal, so clipFrame took the footer rule and the key
+// hint off the bottom. That is issue #142's defect at a perfectly
+// normal HEIGHT, reached through width instead, and this capture is
+// where it is now visibly fixed.
+//
+// The theme picker is the subject because it needs no host capability
+// to populate itself and it is the tallest chrome of the four
+// (modalChromeRows+1 for the filter row, issue #117).
+func TestGolden_ModalFrame(t *testing.T) {
+	pinChromaStyle(t)
+	pinCwd(t)
+	for _, w := range goldenWidths {
+		t.Run("width-"+strconv.Itoa(w), func(t *testing.T) {
+			m := goldenModel(t, w, 24)
+			m.overlayStack.Open(newThemePickerDialog(m.themeName))
+			assertGolden(t, "modal_frame_w"+strconv.Itoa(w), m.View().Content)
+		})
+	}
+}
+
 // TestGolden_LiveFrame pins the composed frame mid-LiveAgent stretch
 // (issue #135).
 //

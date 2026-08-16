@@ -1,0 +1,421 @@
+// Copyright 2026 The go-steer team
+//
+// Licensed under the Apache License, Version 2.0 (the "License");
+// you may not use this file except in compliance with the License.
+// You may obtain a copy of the License at
+//
+//     http://www.apache.org/licenses/LICENSE-2.0
+//
+// Unless required by applicable law or agreed to in writing, software
+// distributed under the License is distributed on an "AS IS" BASIS,
+// WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+// See the License for the specific language governing permissions and
+// limitations under the License.
+
+// Modal fit on a short terminal (issue #142).
+//
+// The frame invariants (frame_invariant_test.go) only ever measured
+// View()'s output, which is clipFrame's output — so a modal composed
+// three rows too tall passed the grid on clipFrame's merit rather
+// than its own, and what clipFrame trimmed was the bottom: the footer
+// rule and the footer key hint. The operator was left with a
+// decapitated modal and no on-screen indication of which key closes
+// it.
+//
+// This file measures the modal BEFORE the clamp, across every modal
+// surface, at every height from "roomy" down to "two rows". Two
+// things are asserted at each cell:
+//
+//	1. the composed block is <= the terminal height wherever that is
+//	   achievable at all
+//	2. the footer key hint is still in it
+//
+// (2) is the one that would have caught the defect. (1) alone is
+// satisfied by clipping, which is exactly what was happening.
+
+package tui
+
+import (
+	"strconv"
+	"strings"
+	"testing"
+
+	tea "charm.land/bubbletea/v2"
+	"charm.land/lipgloss/v2"
+	"github.com/charmbracelet/x/ansi"
+)
+
+// modalFitHeights brackets the two regimes and the boundary between
+// them. 24 and 14 are normal (margin intact); 12 is the first
+// fullscreen height; 8 is the brief's worked example (chrome 5 + body
+// 3 fits exactly once the margin goes); 6 is where chrome alone fills
+// the terminal; 3 and 2 are below that, where the honest answer is a
+// title and a footer hint and nothing else.
+var modalFitHeights = []int{24, 14, 13, 12, 11, 10, 8, 6, 4, 3, 2}
+
+// modalFitCase is one modal surface: how to open it, how to render
+// just its own block, and a token from its footer hint that must
+// survive to whatever height the modal renders at.
+type modalFitCase struct {
+	name string
+	// open returns a model sized to (w, h) with the modal open.
+	open func(t *testing.T, w, h int) Model
+	// render returns the modal's composed block — the string
+	// lipgloss.Place centers, before clipFrame sees it.
+	render func(m *Model) string
+	// footer is a substring of the modal's footer key hint. It is
+	// deliberately the CLOSE key in every case: that is the row whose
+	// loss strands the operator.
+	footer string
+	// title is a substring of the modal's title line — the row shed
+	// LAST before the footer, and the marker for "this cell is below
+	// the floor where anything but the hint fits".
+	title string
+	// minBodyHeight is the shortest terminal at which this modal
+	// still renders a body row (as opposed to title + footer only).
+	// Below it the body assertion is skipped, not relaxed.
+	minBodyHeight int
+	// body, when non-empty, is a substring of the first body row —
+	// the row the shedding order promises to keep longest.
+	body string
+}
+
+func modalFitCases() []modalFitCase {
+	return []modalFitCase{
+		{
+			name: "theme-picker",
+			open: func(_ *testing.T, w, h int) Model {
+				m := newFrameModel(StatusHeader, w, h)
+				m.overlayStack.Open(newThemePickerDialog(m.themeName))
+				return m
+			},
+			render:        func(m *Model) string { return m.overlayStack.Render(m.width, m) },
+			footer:        "esc cancel",
+			title:         "Choose a Theme",
+			body:          filterPlaceholder,
+			minBodyHeight: 3,
+		},
+		{
+			name: "model-picker",
+			open: func(t *testing.T, w, h int) Model {
+				m, _ := openModelPickerFixture(t)
+				return resizeModel(m, w, h)
+			},
+			render:        func(m *Model) string { return m.overlayStack.Render(m.width, m) },
+			footer:        "esc cancel",
+			title:         "Choose a Model",
+			body:          filterPlaceholder,
+			minBodyHeight: 3,
+		},
+		{
+			name: "session-picker",
+			open: func(t *testing.T, w, h int) Model {
+				m, _ := openSessionPickerFixture(t)
+				return resizeModel(m, w, h)
+			},
+			render:        func(m *Model) string { return m.overlayStack.Render(m.width, m) },
+			footer:        "esc cancel",
+			title:         "Choose a Session",
+			body:          filterPlaceholder,
+			minBodyHeight: 3,
+		},
+		{
+			name: "permission-modal",
+			open: func(_ *testing.T, w, h int) Model {
+				m := newFrameModel(StatusHeader, w, h)
+				out, _ := m.Update(permissionRequestMsg{req: PermissionRequest{
+					Kind:     PermissionKindBash,
+					ToolName: "bash",
+					Verb:     "rm",
+					Detail: "rm -rf /tmp/a-really-quite-long-path/that/keeps/going/" +
+						"well/past/any/sensible/terminal/width",
+				}})
+				return out.(Model)
+			},
+			render: func(m *Model) string { return m.renderPermissionModal() },
+			// permissionKeyHint glues each key to its action with a
+			// non-breaking space so the pair never wraps apart.
+			footer:        "esc\u00a0deny",
+			title:         "Permission required",
+			minBodyHeight: 3,
+		},
+		{
+			name: "elicit-modal",
+			open: func(_ *testing.T, w, h int) Model {
+				m := newFrameModel(StatusHeader, w, h)
+				out, _ := m.Update(elicitRequestMsg{
+					serverName: "an-mcp-server-with-a-long-name",
+					req: ElicitRequest{
+						Mode:        ElicitFormMode,
+						Title:       "Confirm the deployment target for this rollout",
+						Description: "The server needs a project and a region first.",
+						Fields: []ElicitField{
+							{Name: "project", Description: "GCP project id", Type: ElicitFieldString, Required: true},
+							{Name: "region", Description: "Compute region", Type: ElicitFieldEnum,
+								EnumChoices: []string{"us-central1", "europe-west4"}},
+						},
+					},
+				})
+				return out.(Model)
+			},
+			render:        func(m *Model) string { return m.renderElicitModal() },
+			footer:        "esc cancel",
+			title:         "an-mcp-server-with-a-long-name",
+			minBodyHeight: 3,
+		},
+		{
+			name: "side-answer",
+			open: func(_ *testing.T, w, h int) Model {
+				m := newFrameModel(StatusHeader, w, h)
+				m.sideAnswer = &SideAnswer{
+					Question: "what does the scheduler do when a node goes unready",
+					Answer: strings.Repeat("The node controller marks the node NotReady "+
+						"and the pods are evicted after the toleration expires. ", 6),
+				}
+				return m
+			},
+			render:        func(m *Model) string { return m.renderSideAnswer() },
+			footer:        "dismiss",
+			title:         "by the way",
+			minBodyHeight: 3,
+		},
+	}
+}
+
+// resizeModel drives a WindowSizeMsg through Update so the model
+// re-derives its budget the way a real resize does, rather than
+// having m.height poked behind resize()'s back.
+func resizeModel(m Model, w, h int) Model {
+	out, _ := m.Update(tea.WindowSizeMsg{Width: w, Height: h})
+	return out.(Model)
+}
+
+// modalRows is the modal block's height in terminal rows, ignoring a
+// trailing newline the way assertFrameFits does.
+func modalRows(block string) int {
+	lines := strings.Split(block, "\n")
+	if n := len(lines); n > 0 && lines[n-1] == "" {
+		lines = lines[:n-1]
+	}
+	return len(lines)
+}
+
+// TestModalFit_ShortTerminal is issue #142's table. Every modal
+// surface, at every height in modalFitHeights, in both a narrow and a
+// wide terminal — narrow because the defect's real magnitude comes
+// from body rows WRAPPING, which is invisible in the logical-row
+// arithmetic modalBodyHeight does.
+func TestModalFit_ShortTerminal(t *testing.T) {
+	for _, w := range []int{40, 100} {
+		for _, tc := range modalFitCases() {
+			for _, h := range modalFitHeights {
+				name := tc.name + "/" + strconv.Itoa(w) + "x" + strconv.Itoa(h)
+				t.Run(name, func(t *testing.T) {
+					m := tc.open(t, w, h)
+					block := tc.render(&m)
+					if block == "" {
+						t.Fatalf("%s rendered nothing at %dx%d", tc.name, w, h)
+					}
+					plain := ansi.Strip(block)
+					hasTitle := strings.Contains(plain, tc.title)
+
+					// (1) The modal composes inside the terminal
+					// "wherever that is achievable". The floor is the
+					// footer hint's own wrapped height: on a
+					// 40-column terminal the permission modal's six
+					// key bindings wrap to five rows, and no amount of
+					// shedding makes those fit in four. Overflow is
+					// therefore tolerated in exactly one shape —
+					// everything else already gone, footer alone.
+					if got := modalRows(block); got > h && hasTitle {
+						t.Errorf("modal is %d rows in a %d-row terminal (overflow %d) with the "+
+							"title still on it — a sheddable row was not shed\n%s",
+							got, h, got-h, plain)
+					}
+					// (2) The footer key hint survives. This is the
+					// row that says how to close the modal, and
+					// clipFrame took it first.
+					if !strings.Contains(plain, tc.footer) {
+						t.Errorf("footer hint %q was sacrificed at %dx%d\n%s",
+							tc.footer, w, h, plain)
+					}
+					// (3) Where there is a body at all, its first row
+					// is the one that survives — the shedding order
+					// takes spacing before content and content from
+					// the bottom.
+					if tc.body != "" && h >= tc.minBodyHeight && hasTitle &&
+						!strings.Contains(plain, tc.body) {
+						t.Errorf("first body row %q went missing at %dx%d\n%s",
+							tc.body, w, h, plain)
+					}
+				})
+			}
+		}
+	}
+}
+
+// TestModalFit_BelowTheChromeFloor pins the honest degradation at
+// sizes where nothing helps. Below the height the footer key hint
+// itself wraps to, fitModalContent has nothing left to give: it sheds
+// the title too and returns the hint alone, and clipFrame trims what
+// still doesn't fit. What matters here is that it does not panic, does
+// not compose a negative height, spends its last row on the CLOSE key
+// rather than on the title, and that View() still emits a frame that
+// fits the terminal.
+func TestModalFit_BelowTheChromeFloor(t *testing.T) {
+	for _, w := range []int{40, 100} {
+		for _, h := range []int{1, 2} {
+			t.Run(strconv.Itoa(w)+"x"+strconv.Itoa(h), func(t *testing.T) {
+				m := newFrameModel(StatusHeader, w, h)
+				m.overlayStack.Open(newThemePickerDialog(m.themeName))
+				block := m.overlayStack.Render(m.width, &m)
+				plain := ansi.Strip(block)
+				if !strings.Contains(plain, "esc cancel") {
+					t.Errorf("the last row spent is not the close key\n%s", plain)
+				}
+				if h == 1 && strings.Contains(plain, "Choose a Theme") {
+					t.Errorf("a one-row terminal cannot hold both the title and the hint; "+
+						"the title should have been shed\n%s", plain)
+				}
+				// View() must still produce a frame that fits.
+				assertFrameFits(t, m.View().Content, w, h)
+			})
+		}
+	}
+}
+
+// TestModalFit_ComposesExactly is the invariant issue #142 says
+// frame_invariant_test.go could not assert: with a modal open the
+// PRE-clip frame is exactly m.height rows.
+//
+// View composes a modal by centering its block over the terminal with
+// lipgloss.Place(m.width, m.height, ...), which pads a short block up
+// to m.height and leaves a tall one alone. So measuring the placed
+// block is a direct test of "the modal fit without clipFrame's help":
+// anything other than m.height means the block was taller than the
+// terminal and the clamp was doing the work.
+//
+// The one exemption is the case documented on fitModalContent — a
+// footer key hint that wraps to more rows than the terminal has. It is
+// recognizable rather than hand-waved: the modal is down to the hint
+// alone, with no title on it.
+func TestModalFit_ComposesExactly(t *testing.T) {
+	for _, w := range []int{40, 100} {
+		for _, tc := range modalFitCases() {
+			for _, h := range modalFitHeights {
+				name := tc.name + "/" + strconv.Itoa(w) + "x" + strconv.Itoa(h)
+				t.Run(name, func(t *testing.T) {
+					m := tc.open(t, w, h)
+					block := tc.render(&m)
+					placed := lipgloss.Place(m.width, m.height,
+						lipgloss.Center, lipgloss.Center, block)
+					got := lipgloss.Height(placed)
+					if got == h {
+						return
+					}
+					if got > h && !strings.Contains(ansi.Strip(block), tc.title) {
+						t.Logf("height %d: the footer hint alone wraps to %d rows here, "+
+							"which is below the floor — clipFrame trims %d", h, got, got-h)
+						return
+					}
+					t.Errorf("placed frame is %d rows in a %d-row terminal, want exactly %d "+
+						"— clipFrame would have to trim %d", got, h, h, got-h)
+				})
+			}
+		}
+	}
+}
+
+// TestModalFit_NoRegressionAtNormalSizes is the other half of the
+// trade: above modalFullscreenBelow the fix must be invisible. The
+// margin is still reserved, the body allowance is still the old
+// arithmetic to the row, and fitModalContent sheds nothing — the two
+// blank spacer rows and the footer rule are all still on the block.
+//
+// (TestGolden_ModalFrame pins the same claim at the byte level.)
+func TestModalFit_NoRegressionAtNormalSizes(t *testing.T) {
+	for _, h := range []int{modalFullscreenBelow, 14, 24, 50} {
+		// The pre-#142 arithmetic, restated rather than called, so
+		// this fails if modalBodyHeight's normal branch is touched.
+		for _, chrome := range []int{modalChromeRows, modalPickerChromeRows} {
+			want := max(minModalBodyRows, h-chrome-modalMarginRows)
+			if got := modalBodyHeight(h, chrome); got != want {
+				t.Errorf("modalBodyHeight(%d, %d) = %d, want %d — the normal regime moved",
+					h, chrome, got, want)
+			}
+		}
+		if got := modalMargin(h); got != modalMarginRows {
+			t.Errorf("height %d: margin = %d, want the full %d", h, got, modalMarginRows)
+		}
+	}
+	for _, tc := range modalFitCases() {
+		for _, h := range []int{modalFullscreenBelow, 14, 24, 50} {
+			t.Run(tc.name+"/"+strconv.Itoa(h), func(t *testing.T) {
+				block := ansi.Strip(tc.render(ptr(tc.open(t, 100, h))))
+				// The blank row under the title and the blank row
+				// above the footer rule: two empty content rows,
+				// present iff fitModalContent shed nothing.
+				if got := blankContentRows(block); got < 2 {
+					t.Errorf("height %d: modal has %d blank spacer rows, want 2 — "+
+						"spacing was shed on a terminal that had room\n%s", h, got, block)
+				}
+				if !strings.Contains(block, tc.title) {
+					t.Errorf("height %d: the title line was shed on a roomy terminal\n%s", h, block)
+				}
+				if !strings.Contains(block, strings.Repeat(GlyphRule, 20)) {
+					t.Errorf("height %d: the footer rule was shed on a roomy terminal\n%s", h, block)
+				}
+			})
+		}
+	}
+}
+
+// ptr is the addressable-copy helper the render funcs need — they
+// take *Model because View's own modal renderers do.
+func ptr(m Model) *Model { return &m }
+
+// blankContentRows counts the modal rows that carry no printable
+// content. The modal frame pads every row to its width, so "blank"
+// means "nothing but spaces once the escapes are stripped".
+func blankContentRows(block string) int {
+	n := 0
+	for _, line := range strings.Split(block, "\n") {
+		if strings.TrimSpace(ansi.Strip(line)) == "" {
+			n++
+		}
+	}
+	return n
+}
+
+// TestModalFit_ScrollStillWorksWhenDegraded checks the fullscreen
+// mode shrinks the scroll window rather than removing it. A modal
+// that fits by giving up scrolling would fit by hiding its content,
+// which is the defect wearing a different hat.
+func TestModalFit_ScrollStillWorksWhenDegraded(t *testing.T) {
+	m := newFrameModel(StatusHeader, 100, 8)
+	if !modalFullscreen(m.height) {
+		t.Fatalf("height %d should be in the fullscreen regime", m.height)
+	}
+	m.sideAnswer = &SideAnswer{
+		Question: "explain the eviction path",
+		Answer:   strings.Repeat("a distinct line of the answer\n\n", 40),
+	}
+	first := ansi.Strip(m.renderSideAnswer())
+
+	sc := m.scroll()
+	if !sc.overflows() {
+		t.Fatalf("a 40-paragraph answer in an 8-row terminal must overflow; "+
+			"total=%d view=%d", sc.total, sc.view)
+	}
+	if sc.view <= 0 {
+		t.Fatalf("degraded mode left no scroll window at all (view=%d)", sc.view)
+	}
+	sc.to(sc.maxOffset())
+	last := ansi.Strip(m.renderSideAnswer())
+	if first == last {
+		t.Errorf("scrolling to the bottom changed nothing in the degraded body:\n%s", last)
+	}
+	if !strings.Contains(last, "dismiss") {
+		t.Errorf("the footer hint went missing once scrolled:\n%s", last)
+	}
+}
