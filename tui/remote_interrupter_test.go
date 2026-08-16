@@ -173,3 +173,44 @@ func TestInterrupt_NoLocalNoRemote_FallsBackToNoTurnMessage(t *testing.T) {
 		t.Errorf("expected 'no turn in flight' fallback, got %q", last.Text)
 	}
 }
+
+// TestInterrupt_RemoteSuccessStopsTheLiveSpinner — on the live path
+// there is no commit chunk coming to close the stretch a cancelled
+// turn was animating, so the cancel has to close it (issue #148).
+//
+// The error arm is the interesting half: a failed cancel means the
+// remote turn is still running, so the spinner must survive.
+func TestInterrupt_RemoteSuccessStopsTheLiveSpinner(t *testing.T) {
+	cases := []struct {
+		name        string
+		err         error
+		wantSpinner bool
+	}{
+		{"cancel-landed", nil, false},
+		{"cancel-failed", errors.New("endpoint returned 500"), true},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			m := NewModel(Options{Agent: &remoteInterrupterAgent{}})
+			if !m.liveMode {
+				t.Fatal("setup: expected liveMode for a LiveAgent host")
+			}
+			// Put a live stretch up, the way an operator submission
+			// or an autonomous chunk would.
+			if !m.beginLiveStretch() {
+				t.Fatal("setup: expected to open a stretch on a fresh model")
+			}
+
+			out, _ := m.Update(remoteInterruptDoneMsg{err: tc.err})
+			got := out.(Model)
+
+			if got.spinnerActive != tc.wantSpinner {
+				t.Errorf("spinnerActive = %v after interrupt (err=%v), want %v",
+					got.spinnerActive, tc.err, tc.wantSpinner)
+			}
+			if got.turnInFlight() != tc.wantSpinner {
+				t.Errorf("turnInFlight() = %v, want %v", got.turnInFlight(), tc.wantSpinner)
+			}
+		})
+	}
+}

@@ -325,6 +325,10 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		// via the eventListener path.
 		if isPermanentStreamErr(msg.err) {
 			m.liveDisconnected = true
+			// Nothing further is coming on this stream, so a
+			// spinner left turning is now claiming otherwise
+			// (issue #148).
+			m.endLiveStretch()
 			m.history.Append(Message{
 				Role: RoleError,
 				Text: "session unavailable: " + msg.err.Error() + " — relaunch to start a fresh session",
@@ -355,6 +359,9 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		// banner can render; keep the program alive so the
 		// operator can read scrollback and choose to quit.
 		m.liveDisconnected = true
+		// Same as the permanent-error arm: the iterator has
+		// returned, so stop claiming a turn is in flight (#148).
+		m.endLiveStretch()
 		m.history.Append(Message{
 			Role: RoleSystem,
 			Text: "Disconnected from live stream. Press Ctrl+C to quit.",
@@ -891,6 +898,12 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			m.history.Append(Message{Role: RoleError, Text: "/interrupt: " + msg.err.Error()})
 		} else {
 			m.history.Append(Message{Role: RoleSystem, Text: "/interrupt: remote turn cancelled"})
+			// The cancel landed, so the stretch this spinner was
+			// animating is over — and on the live path there is no
+			// commit chunk coming to close it (issue #148). The
+			// error arm deliberately does not do this: a failed
+			// cancel means the remote turn is still running.
+			m.endLiveStretch()
 		}
 		m.refreshAndScroll()
 		return m, nil
@@ -1529,14 +1542,32 @@ func (m Model) handleKey(msg tea.KeyPressMsg) (tea.Model, tea.Cmd) {
 				// in scrollback like everything else.
 				if err := injector.Inject(text); err != nil {
 					m.history.Append(Message{Role: RoleError, Text: "inject failed: " + err.Error()})
-				} else {
-					// Render the typed prompt as a normal user row
-					// so the operator sees what they sent — the
-					// host's event stream may not echo it back.
-					m.history.Append(Message{Role: RoleUser, Text: text})
+					m.refreshViewport()
+					return m, nil
+				}
+				// Render the typed prompt as a normal user row
+				// so the operator sees what they sent — the
+				// host's event stream may not echo it back.
+				m.history.Append(Message{Role: RoleUser, Text: text})
+				// Issue #148: the submit IS the start of the turn,
+				// so it is where the waiting indicator starts.
+				// Waiting for the first partial chunk to open the
+				// stretch leaves the one window the operator most
+				// needs an indicator for — prompt sent, host
+				// thinking, nothing on screen yet — completely
+				// blank, and leaves a host that only ever emits
+				// committed messages with no indicator at all.
+				//
+				// Only the false→true flip arms a tick chain; an
+				// Inject during a stretch that is already running
+				// (the host is mid-answer and the operator adds a
+				// steer) rides the live one.
+				var spin tea.Cmd
+				if m.beginLiveStretch() {
+					spin = m.armSpinner()
 				}
 				m.refreshViewport()
-				return m, nil
+				return m, spin
 			}
 			if !m.liveReadOnlyNoted {
 				m.liveReadOnlyNoted = true
@@ -1852,24 +1883,10 @@ func (m *Model) applyStreamChunk(msg streamChunkMsg) {
 	if m.liveMode {
 		if msg.partial {
 			m.liveLastPartialAt = time.Now()
-			// Spinner active while tokens flow.
-			if !m.spinnerActive {
-				m.spinnerActive = true
-				m.thinkingIdx = 0
-				// LiveAgent has no submitTurn, so this false→true
-				// flip is where the stretch's animation begins —
-				// bump here too or the caller's armSpinner would
-				// re-use the previous stretch's generation (#112).
-				m.spinnerGen++
-				// Same reasoning for the elapsed readout (#111):
-				// this flip IS the start of a turn on this path, so
-				// stamp it here rather than leaving turnStarted at
-				// its zero value (a 55-year readout) or at the
-				// previous stretch's origin (a monotonically wrong
-				// one). Animation start and elapsed origin stay the
-				// same event on both paths.
-				m.turnStarted = m.nowFn()
-			}
+			// Spinner active while tokens flow. A no-op when the
+			// operator's own Inject already opened this stretch
+			// (issue #148) — see beginLiveStretch.
+			m.beginLiveStretch()
 		} else {
 			m.liveLastCommitAt = time.Now()
 			// Commit: freeze the Glamour render on the just-
@@ -1906,8 +1923,7 @@ func (m *Model) applyStreamChunk(msg streamChunkMsg) {
 				m.inProgressStablePrefix = ""
 				m.inProgressStableRender = ""
 			}
-			m.spinnerActive = false
-			m.turnStarted = time.Time{}
+			m.endLiveStretch()
 		}
 	}
 	m.markViewportDirty()

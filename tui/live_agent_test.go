@@ -69,11 +69,21 @@ func (a *liveAgentStub) Events(ctx context.Context) iter.Seq2[Event, error] {
 type injectableLiveAgentStub struct {
 	*liveAgentStub
 	injectsOut chan string
+	// injectErr, when set, is what Inject returns — the host
+	// refusing the submission. The call is still recorded.
+	injectErr error
 }
 
 func (a *injectableLiveAgentStub) Inject(msg string) error {
 	a.injectsOut <- msg
-	return nil
+	return a.injectErr
+}
+
+func newInjectableLiveAgentStub() *injectableLiveAgentStub {
+	return &injectableLiveAgentStub{
+		liveAgentStub: newLiveAgentStub(),
+		injectsOut:    make(chan string, 4),
+	}
 }
 
 func newLiveAgentStub() *liveAgentStub {

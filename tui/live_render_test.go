@@ -24,6 +24,7 @@
 package tui
 
 import (
+	"errors"
 	"strings"
 	"testing"
 	"time"
@@ -44,8 +45,15 @@ const liveVerb = "LIVEVERB-thinking"
 // hand-built Model with a zero-width viewport.
 func liveRenderModel(t *testing.T, at *time.Time) Model {
 	t.Helper()
+	return liveRenderModelWith(t, at, newLiveAgentStub())
+}
+
+// liveRenderModelWith is liveRenderModel over a caller-supplied host,
+// for the tests that need one implementing InjectableAgent as well.
+func liveRenderModelWith(t *testing.T, at *time.Time, agent Agent) Model {
+	t.Helper()
 	m := NewModel(Options{
-		Agent:           newLiveAgentStub(),
+		Agent:           agent,
 		ThinkingPhrases: []string{liveVerb},
 	})
 	if !m.liveMode {
@@ -317,4 +325,181 @@ func TestRenderInProgress_NonLivePathsUnchanged(t *testing.T) {
 			t.Errorf("renderInProgress() on a live model between stretches = %q, want empty", got)
 		}
 	})
+}
+
+// liveSubmit types text into a live-mode Model and presses enter,
+// returning the resulting Model and the Cmd Update handed back. It
+// drains the stub's injectsOut so a test can assert the host was
+// actually called.
+func liveSubmit(t *testing.T, m Model, text string) (Model, tea.Cmd) {
+	t.Helper()
+	m.input.SetValue(text)
+	out, cmd := m.Update(tea.KeyPressMsg(tea.Key{Code: tea.KeyEnter}))
+	next := out.(Model)
+	next.refreshViewport()
+	return next, cmd
+}
+
+// TestLiveRender_InjectStartsTheSpinnerBeforeTheFirstToken is issue
+// #148's repro. The window between "operator pressed enter" and "the
+// host's first token arrives" is the one they most need an indicator
+// for, and it was the one window with none: the stretch was opened by
+// applyStreamChunk, which by definition cannot run before the first
+// chunk.
+func TestLiveRender_InjectStartsTheSpinnerBeforeTheFirstToken(t *testing.T) {
+	agent := newInjectableLiveAgentStub()
+	m := liveRenderModelWith(t, nil, agent)
+	before := m.spinnerGen
+
+	m, cmd := liveSubmit(t, m, "do the thing")
+
+	select {
+	case <-agent.injectsOut:
+	default:
+		t.Fatal("setup: expected Inject to be called")
+	}
+	if !m.spinnerActive {
+		t.Error("submit did not start a spinner stretch")
+	}
+	if !m.turnInFlight() {
+		t.Error("the in-progress block is still gated shut after a submit")
+	}
+	if m.spinnerGen == before {
+		t.Errorf("spinnerGen not bumped for the new stretch (still %d) — issue #112", before)
+	}
+	if cmd == nil {
+		t.Error("no Cmd returned to arm the tick chain — the glyph would never rotate")
+	}
+	if got := m.View().Content; !strings.Contains(got, liveVerb) {
+		t.Error("no waiting indicator on screen between submit and the first token — issue #148")
+	}
+}
+
+// TestLiveRender_InjectThenFirstPartialIsOneStretch pins the seam the
+// fix creates: two events can now open a stretch, and the second must
+// not restart it. A restart would bump spinnerGen out from under the
+// live tick chain (#112) and move the elapsed origin off the moment
+// the operator pressed enter (#111).
+func TestLiveRender_InjectThenFirstPartialIsOneStretch(t *testing.T) {
+	clock := time.Date(2026, 8, 16, 12, 0, 0, 0, time.UTC)
+	m := liveRenderModelWith(t, &clock, newInjectableLiveAgentStub())
+
+	m, _ = liveSubmit(t, m, "do the thing")
+	gen, started := m.spinnerGen, m.turnStarted
+
+	// Host takes eight seconds to produce its first token.
+	clock = clock.Add(8 * time.Second)
+	m = livePartial(t, m, "first token")
+
+	if m.spinnerGen != gen {
+		t.Errorf("the first partial restarted the stretch: spinnerGen %d → %d", gen, m.spinnerGen)
+	}
+	if !m.turnStarted.Equal(started) {
+		t.Errorf("the first partial moved the elapsed origin: %v → %v", started, m.turnStarted)
+	}
+	// The readout must measure from the submit, not from the token:
+	// 8s is the whole point, 0s is what a restart would show.
+	if got := m.View().Content; !strings.Contains(got, "8s") {
+		t.Error("elapsed readout is measuring from the first token rather than from the submit")
+	}
+}
+
+// TestLiveRender_CommitOnlyHostGetsASpinner covers the second half of
+// #148: a host that emits whole messages and never a partial. Under
+// the old arming rule that host showed a spinner literally never,
+// because the only site that opened a stretch required msg.partial.
+func TestLiveRender_CommitOnlyHostGetsASpinner(t *testing.T) {
+	m := liveRenderModelWith(t, nil, newInjectableLiveAgentStub())
+
+	m, _ = liveSubmit(t, m, "do the thing")
+	if got := m.View().Content; !strings.Contains(got, liveVerb) {
+		t.Fatal("setup: expected the spinner to be up after the submit")
+	}
+
+	// The host's entire reply, in one committed chunk.
+	out, _ := m.Update(streamChunkMsg{gen: m.sessionGen, text: "SENTINEL whole reply", partial: false})
+	m = out.(Model)
+	m.refreshViewport()
+
+	if m.spinnerActive {
+		t.Error("the commit left the spinner running")
+	}
+	frame := m.View().Content
+	if strings.Contains(frame, liveVerb) {
+		t.Error("spinner verb still on screen after the reply committed")
+	}
+	if !strings.Contains(frame, "SENTINEL") {
+		t.Error("committed reply missing from the frame")
+	}
+}
+
+// TestLiveRender_FailedInjectDoesNotStartASpinner — the host refused
+// the submission, so there is nothing to wait for. Showing a spinner
+// under the error row would be the same lie in the other direction.
+func TestLiveRender_FailedInjectDoesNotStartASpinner(t *testing.T) {
+	agent := newInjectableLiveAgentStub()
+	agent.injectErr = errors.New("channel closed")
+	m := liveRenderModelWith(t, nil, agent)
+
+	m, cmd := liveSubmit(t, m, "do the thing")
+
+	if m.spinnerActive {
+		t.Error("a rejected submission started a spinner stretch")
+	}
+	if cmd != nil {
+		t.Error("a rejected submission armed a tick chain")
+	}
+	frame := m.View().Content
+	if strings.Contains(frame, liveVerb) {
+		t.Error("waiting indicator on screen for a submission the host refused")
+	}
+	if !strings.Contains(frame, "inject failed") {
+		t.Error("the inject error is not on screen")
+	}
+	// The typed text must not be echoed as a user row when the host
+	// never took it — pre-existing behaviour, guarded here because
+	// the fix restructured this branch.
+	for _, e := range m.history.Snapshot() {
+		if e.Role == RoleUser {
+			t.Errorf("rejected submission echoed as a user row: %q", e.Text)
+		}
+	}
+}
+
+// TestLiveRender_DisconnectStopsTheSpinner — once the stream is gone
+// no chunk is coming to close the stretch, so the disconnect has to.
+// Reachable only now that a submit can leave a spinner running with
+// no tokens ever having arrived.
+func TestLiveRender_DisconnectStopsTheSpinner(t *testing.T) {
+	cases := []struct {
+		name string
+		msg  func(gen uint64) tea.Msg
+	}{
+		{"iterator-returned", func(gen uint64) tea.Msg {
+			return liveStreamEndedMsg{gen: gen}
+		}},
+		{"permanent-error", func(gen uint64) tea.Msg {
+			return liveStreamErrMsg{gen: gen, err: errors.New("status 404: session not found")}
+		}},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			m := liveRenderModelWith(t, nil, newInjectableLiveAgentStub())
+			m, _ = liveSubmit(t, m, "do the thing")
+			if !m.spinnerActive {
+				t.Fatal("setup: expected a live stretch after the submit")
+			}
+
+			out, _ := m.Update(tc.msg(m.sessionGen))
+			m = out.(Model)
+			m.refreshViewport()
+
+			if m.spinnerActive {
+				t.Error("spinner still running after the stream went away")
+			}
+			if got := m.View().Content; strings.Contains(got, liveVerb) {
+				t.Error("waiting indicator still on screen after disconnect")
+			}
+		})
+	}
 }
