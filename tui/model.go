@@ -22,9 +22,7 @@ import (
 	"strings"
 	"time"
 
-	"charm.land/bubbles/v2/key"
 	"charm.land/bubbles/v2/textarea"
-	"charm.land/bubbles/v2/viewport"
 	tea "charm.land/bubbletea/v2"
 	"charm.land/huh/v2"
 	"charm.land/lipgloss/v2"
@@ -58,8 +56,33 @@ type Model struct {
 	styles  Styles
 	history History
 
-	viewport viewport.Model
+	// viewport is the transcript's window — its size and its scroll
+	// position, as a (row, line) pair rather than a flat line offset
+	// into a concatenated blob. It holds no content: rows are
+	// rendered on demand by the walk in chatlist.go, which is what
+	// bounds a repaint by what is on screen instead of by how long
+	// the session has been running (issue #161).
+	viewport chatViewport
 	input    textarea.Model
+
+	// chatTail is the rendered live tail of the transcript — the
+	// in-progress assistant block, the spinner line, or the
+	// empty-state hint — as lines, separator included. Rebuilt by
+	// refreshViewport (buildChatTail) rather than cached per item:
+	// it changes on essentially every event, so there is nothing to
+	// memoize, and rebuilding it there keeps chatView pure enough to
+	// run under View's value receiver.
+	chatTail []string
+
+	// chatRule is the separator rule drawn above a user turn, and
+	// chatRuleWidth is the width it was rendered at. Rebuilt by
+	// refreshViewport as well: the rule belongs to the gap between
+	// two rows rather than to either of them, so it is the one piece
+	// of a row the per-item cache does not hold, and without a memo
+	// every walk over the window would re-render one per user turn on
+	// screen.
+	chatRule      string
+	chatRuleWidth int
 
 	// follow is the operator's "keep me on the tail" intent for the
 	// chat viewport. refreshViewport re-pins to the bottom after
@@ -349,9 +372,12 @@ type Model struct {
 	// drag's callback can't clobber a newer resize. reflowPending
 	// says a width change is still working its way through the
 	// transcript; reflowCursor is how far the incremental warm walk
-	// has got. msgSpans is the per-message line range recorded by
-	// the last refreshViewport, used to work out which messages are
-	// on screen (and therefore must reflow in this frame).
+	// has got. Which rows are on screen comes from the transcript's
+	// own scroll offset now (chatVisitWindow) rather than from
+	// recorded line spans — an item-addressed window knows the row
+	// it starts at, so it can re-wrap a row and measure the result
+	// instead of estimating from measurements taken at the previous
+	// width.
 	// reflowMaxID is the highest Message.ID that existed when the
 	// width changed — rows appended after it are committed at the
 	// current width and must not be re-rendered.
@@ -359,7 +385,6 @@ type Model struct {
 	reflowPending bool
 	reflowCursor  int
 	reflowMaxID   uint64
-	msgSpans      []msgSpan
 
 	// markdown is the lazily-built Glamour renderer; rebuilt when
 	// dark/light or width changes. nil until first use.
@@ -520,28 +545,6 @@ func NewModel(opts Options) Model {
 	// resolved theme once BackgroundColorMsg lands.
 	ta.SetStyles(textareaStyles(true, DefaultTheme(true)))
 
-	vp := viewport.New()
-	// The viewport's default KeyMap is full of vim conventions
-	// (h/j/k/l + arrows for scroll; b/f for page; space for page
-	// down; u/d for half-page; ctrl+u for half-page) — every one
-	// of those collides with normal text input. handleKey forwards
-	// every keystroke to the viewport at the end so typing "b"
-	// into the prompt would PgUp, " " into the prompt would PgDn,
-	// etc. We also can't rely on Right being safe: it sets
-	// xOffset which then cuts chars off the LEFT of every line
-	// (`ansi.Cut` at viewport.go:362).
-	//
-	// Override every binding with the non-letter form ONLY so the
-	// page keys still work for power users but text-input letters
-	// pass through cleanly. Mouse wheel is handled separately by
-	// MouseMode.
-	vp.KeyMap = viewport.KeyMap{
-		PageDown:     newKeyBinding("pgdown"),
-		PageUp:       newKeyBinding("pgup"),
-		HalfPageDown: newKeyBinding("ctrl+d"),
-		HalfPageUp:   newKeyBinding("ctrl+u"),
-	}
-
 	// Seed styles.Dark from ForceTheme up front when the host has
 	// chosen explicitly; otherwise start in dark mode (the most
 	// common terminal default) and let BackgroundColorMsg overwrite
@@ -557,7 +560,6 @@ func NewModel(opts Options) Model {
 	m := Model{
 		opts:            opts,
 		styles:          NewStyles(initialDark, opts.Branding), // overwritten on BackgroundColorMsg unless ForceTheme is set
-		viewport:        vp,
 		input:           ta,
 		follow:          true, // start pinned to the tail
 		statusLayout:    opts.StatusLayout,
@@ -689,15 +691,6 @@ func (m Model) wordmark() string {
 		return m.opts.Branding.Wordmark
 	}
 	return "core-tui"
-}
-
-// newKeyBinding is a tiny helper that builds a key.Binding from
-// a single literal key name. Used in NewModel to replace the
-// viewport's default KeyMap entries with non-letter-only forms
-// so vim conventions (h/j/k/l/b/f/space/u/d) don't fire on
-// every forwarded keystroke.
-func newKeyBinding(k string) key.Binding {
-	return key.NewBinding(key.WithKeys(k))
 }
 
 // defaultNewlineHint picks the most-likely-to-work newline

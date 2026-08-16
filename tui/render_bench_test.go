@@ -47,8 +47,13 @@ var benchTurnCounts = []int{10, 100, 400}
 // benchModel builds a sized model carrying n user/assistant turns
 // of realistic prose. The theme is pinned so a palette change can't
 // move the numbers.
-func benchModel(b *testing.B, turns, w, h int) Model {
-	b.Helper()
+//
+// testing.TB rather than *testing.B so the transcript tests in
+// chatlist_test.go can assert on the same fixture the benchmarks
+// measure — a boundedness property that holds only for a fixture
+// nobody times is not the property anyone cares about.
+func benchModel(tb testing.TB, turns, w, h int) Model {
+	tb.Helper()
 	m := NewModel(Options{Agent: &bareAgent{id: "bench"}})
 	m.styles = NewStylesWithTheme(true, goldenTheme())
 	out, _ := m.Update(tea.WindowSizeMsg{Width: w, Height: h})

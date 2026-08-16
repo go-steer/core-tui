@@ -251,7 +251,7 @@ func TestResizeDrag_KeepsFollow(t *testing.T) {
 	if !m.follow {
 		t.Fatal("settle dropped the operator off the tail")
 	}
-	if !m.viewport.AtBottom() {
+	if !m.chatAtBottom() {
 		t.Error("following model is not scrolled to the bottom after a drag")
 	}
 }
@@ -261,7 +261,7 @@ func TestResizeDrag_KeepsFollow(t *testing.T) {
 // resize, and the rows they are looking at must still reflow.
 func TestResizeDrag_KeepsScrollbackDetached(t *testing.T) {
 	m := newBenchDragModel(40)
-	m.viewport.SetYOffset(0)
+	m.chatSetYOffset(0)
 	m.syncFollow()
 	if m.follow {
 		t.Fatal("setup: expected follow to drop after scrolling to the top")
@@ -272,7 +272,7 @@ func TestResizeDrag_KeepsScrollbackDetached(t *testing.T) {
 	if m.follow {
 		t.Error("resize re-armed follow for an operator reading scrollback")
 	}
-	if m.viewport.AtBottom() {
+	if m.chatAtBottom() {
 		t.Error("resize yanked a detached operator to the tail")
 	}
 
@@ -342,39 +342,43 @@ func TestResize_ListCacheKeepsEarlierWidth(t *testing.T) {
 	}
 }
 
-// TestResizeSettle_RetiresCarriedOverRenders — during a drag,
-// off-screen rows are painted from the previous width's render
-// rather than re-assembled. Those carried-over entries are
-// approximate by construction: the settle must retire every one of
-// them, and the transcript must end up byte-identical to a cold
-// render at the final width.
-func TestResizeSettle_RetiresCarriedOverRenders(t *testing.T) {
+// TestResizeSettle_WarmsTheBacklogTheDragSkipped — the two halves of
+// the resize contract, in order.
+//
+// An item-addressed window (#161) only ever asks for the rows it is
+// about to draw, so a drag does not re-assemble the backlog at each
+// intermediate width — those rows are simply absent from the cache
+// there. That absence IS the bound on the per-event cost, and it is
+// what the first half asserts. The settle then owes the backlog: after
+// it, every row must be present at the settled width and byte-
+// identical to a cold render, so nothing carries the drag's
+// intermediate state into a later scroll.
+func TestResizeSettle_WarmsTheBacklogTheDragSkipped(t *testing.T) {
 	m := newBenchDragModel(40)
 	for _, w := range []int{112, 100, 92, 84} {
 		out, _ := m.Update(tea.WindowSizeMsg{Width: w, Height: 40})
 		m = out.(Model)
 	}
-	carried := 0
-	for _, e := range m.listCache.entries {
-		if e.approx {
-			carried++
+	width := m.viewport.Width()
+	drawn := 0
+	for key := range m.listCache.entries {
+		if key.width == width {
+			drawn++
 		}
 	}
-	if carried == 0 {
-		t.Fatal("expected the drag to carry off-screen rows over rather than re-assembling them")
+	snap := m.history.Snapshot()
+	if drawn == 0 {
+		t.Fatal("the drag drew nothing at the settled width — the visible window must render immediately")
+	}
+	if drawn >= len(snap) {
+		t.Fatalf("the drag assembled %d of %d rows at width %d; it is supposed to draw only the visible window", drawn, len(snap), width)
 	}
 
 	m = settleResizeReflow(t, m)
 
-	for key, e := range m.listCache.entries {
-		if e.approx {
-			t.Fatalf("approximate cache entry for message %d survived the settle", key.id)
-		}
-	}
 	// Byte-for-byte equality with a cold render at the settled
 	// width: nothing is left carrying the drag's intermediate state.
-	width := m.viewport.Width()
-	snap := m.history.Snapshot()
+	snap = m.history.Snapshot()
 	for i, msg := range snap {
 		item := messageItem{msg: msg, idx: i, total: len(snap)}
 		got, ok := m.listCache.get(item, width)
@@ -400,7 +404,7 @@ func TestResizeMidWarm_ScrollExposesExactRows(t *testing.T) {
 	}
 
 	// Jump to the top of the transcript — the coldest region.
-	m.viewport.GotoTop()
+	m.chatGotoTop()
 	m.syncFollow()
 	m.refreshViewport()
 

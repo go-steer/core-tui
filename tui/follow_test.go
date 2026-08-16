@@ -34,8 +34,8 @@ func followModel(t *testing.T, w, h, rows int) Model {
 		m.history.Append(Message{Role: RoleAssistant, Text: "line " + strconv.Itoa(i), Rendered: "line " + strconv.Itoa(i)})
 	}
 	m.refreshViewport()
-	if !m.viewport.AtBottom() {
-		t.Fatalf("setup: expected the viewport pinned to the tail, YOffset=%d", m.viewport.YOffset())
+	if !m.chatAtBottom() {
+		t.Fatalf("setup: expected the viewport pinned to the tail, YOffset=%d", m.chatYOffset())
 	}
 	return m
 }
@@ -55,15 +55,15 @@ func TestFollow_SurvivesWindowResizeMidStream(t *testing.T) {
 	if !m.follow {
 		t.Error("follow cleared by a resize; it is operator intent and must survive geometry changes")
 	}
-	if !m.viewport.AtBottom() {
-		t.Errorf("viewport left off the tail by the resize itself, YOffset=%d", m.viewport.YOffset())
+	if !m.chatAtBottom() {
+		t.Errorf("viewport left off the tail by the resize itself, YOffset=%d", m.chatYOffset())
 	}
 
 	// The next chunk lands.
 	m.history.Append(Message{Role: RoleAssistant, Text: "fresh chunk", Rendered: "fresh chunk"})
 	m.refreshViewport()
-	if !m.viewport.AtBottom() {
-		t.Errorf("follow lost: new content appended below the visible region, YOffset=%d", m.viewport.YOffset())
+	if !m.chatAtBottom() {
+		t.Errorf("follow lost: new content appended below the visible region, YOffset=%d", m.chatYOffset())
 	}
 
 	// Growing back is equally fine.
@@ -71,8 +71,8 @@ func TestFollow_SurvivesWindowResizeMidStream(t *testing.T) {
 	m = out.(Model)
 	m.history.Append(Message{Role: RoleAssistant, Text: "another", Rendered: "another"})
 	m.refreshViewport()
-	if !m.viewport.AtBottom() {
-		t.Errorf("follow lost across a grow, YOffset=%d", m.viewport.YOffset())
+	if !m.chatAtBottom() {
+		t.Errorf("follow lost across a grow, YOffset=%d", m.chatYOffset())
 	}
 }
 
@@ -95,8 +95,8 @@ func TestFollow_SurvivesTextareaGrowth(t *testing.T) {
 	}
 	m.history.Append(Message{Role: RoleAssistant, Text: "fresh chunk", Rendered: "fresh chunk"})
 	m.refreshViewport()
-	if !m.viewport.AtBottom() {
-		t.Errorf("follow lost while typing, YOffset=%d", m.viewport.YOffset())
+	if !m.chatAtBottom() {
+		t.Errorf("follow lost while typing, YOffset=%d", m.chatYOffset())
 	}
 }
 
@@ -111,26 +111,26 @@ func TestFollow_ScrollUpReleasesAndBottomReArms(t *testing.T) {
 	if m.follow {
 		t.Fatal("PgUp did not release follow")
 	}
-	before := m.viewport.YOffset()
+	before := m.chatYOffset()
 	m.history.Append(Message{Role: RoleAssistant, Text: "fresh chunk", Rendered: "fresh chunk"})
 	m.refreshViewport()
-	if m.viewport.YOffset() != before {
-		t.Errorf("operator reading backlog was yanked to the tail: YOffset %d → %d", before, m.viewport.YOffset())
+	if m.chatYOffset() != before {
+		t.Errorf("operator reading backlog was yanked to the tail: YOffset %d → %d", before, m.chatYOffset())
 	}
 
 	// Page back down to the bottom: follow re-arms and the next
 	// chunk pins again.
-	for i := 0; i < 10 && !m.viewport.AtBottom(); i++ {
+	for i := 0; i < 10 && !m.chatAtBottom(); i++ {
 		out, _ = m.Update(tea.KeyPressMsg(tea.Key{Code: tea.KeyPgDown}))
 		m = out.(Model)
 	}
 	if !m.follow {
-		t.Fatalf("scrolling back to the bottom did not re-arm follow (AtBottom=%v)", m.viewport.AtBottom())
+		t.Fatalf("scrolling back to the bottom did not re-arm follow (AtBottom=%v)", m.chatAtBottom())
 	}
 	m.history.Append(Message{Role: RoleAssistant, Text: "newer", Rendered: "newer"})
 	m.refreshViewport()
-	if !m.viewport.AtBottom() {
-		t.Errorf("re-armed follow did not pin the next chunk, YOffset=%d", m.viewport.YOffset())
+	if !m.chatAtBottom() {
+		t.Errorf("re-armed follow did not pin the next chunk, YOffset=%d", m.chatYOffset())
 	}
 }
 
@@ -151,7 +151,7 @@ func TestFollow_ResizeDoesNotReArmWhileScrolledUp(t *testing.T) {
 	}
 	m.history.Append(Message{Role: RoleAssistant, Text: "fresh chunk", Rendered: "fresh chunk"})
 	m.refreshViewport()
-	if m.viewport.AtBottom() {
+	if m.chatAtBottom() {
 		t.Error("new content jumped the operator to the tail after a resize")
 	}
 }
@@ -179,8 +179,8 @@ func TestFollow_ExplicitJumpsSetTheFlag(t *testing.T) {
 	}
 	m.history.Append(Message{Role: RoleAssistant, Text: "fresh chunk", Rendered: "fresh chunk"})
 	m.refreshViewport()
-	if m.viewport.YOffset() != 0 {
-		t.Errorf("after ctrl+l the next repaint moved the viewport to YOffset=%d, want 0", m.viewport.YOffset())
+	if m.chatYOffset() != 0 {
+		t.Errorf("after ctrl+l the next repaint moved the viewport to YOffset=%d, want 0", m.chatYOffset())
 	}
 }
 
@@ -197,7 +197,7 @@ func TestFollow_EndJumpsToTailAndReArms(t *testing.T) {
 	if m.follow {
 		t.Fatal("setup: PgUp did not release follow")
 	}
-	if m.viewport.AtBottom() {
+	if m.chatAtBottom() {
 		t.Fatal("setup: PgUp did not move the viewport off the tail")
 	}
 
@@ -206,8 +206,8 @@ func TestFollow_EndJumpsToTailAndReArms(t *testing.T) {
 	if !m.follow {
 		t.Error("end jumped to the tail but left follow released — the next repaint would drag the operator back off it")
 	}
-	if !m.viewport.AtBottom() {
-		t.Errorf("end did not reach the tail, YOffset=%d", m.viewport.YOffset())
+	if !m.chatAtBottom() {
+		t.Errorf("end did not reach the tail, YOffset=%d", m.chatYOffset())
 	}
 	if cmd != nil {
 		t.Error("end returned a command; a pure scroll should not schedule work")
@@ -216,8 +216,8 @@ func TestFollow_EndJumpsToTailAndReArms(t *testing.T) {
 	// The re-armed flag survives into the next chunk.
 	m.history.Append(Message{Role: RoleAssistant, Text: "fresh chunk", Rendered: "fresh chunk"})
 	m.refreshViewport()
-	if !m.viewport.AtBottom() {
-		t.Errorf("follow re-armed by end did not pin the next chunk, YOffset=%d", m.viewport.YOffset())
+	if !m.chatAtBottom() {
+		t.Errorf("follow re-armed by end did not pin the next chunk, YOffset=%d", m.chatYOffset())
 	}
 }
 
@@ -242,10 +242,10 @@ func TestFollow_EndLeavesTheInputAlone(t *testing.T) {
 // was and follow released.
 func TestFollow_EndYieldsToTheInputWhenComposing(t *testing.T) {
 	m := followModel(t, 100, 40, 200)
-	m.viewport.GotoTop()
+	m.chatGotoTop()
 	m.follow = false
 	m.input.SetValue("a half-typed prompt")
-	before := m.viewport.YOffset()
+	before := m.chatYOffset()
 
 	out, _ := m.Update(keyPress("end"))
 	m = out.(Model)
@@ -253,7 +253,7 @@ func TestFollow_EndYieldsToTheInputWhenComposing(t *testing.T) {
 	if m.follow {
 		t.Error("end re-armed follow while the operator was composing; want the textarea to own the key")
 	}
-	if got := m.viewport.YOffset(); got != before {
+	if got := m.chatYOffset(); got != before {
 		t.Errorf("end scrolled the transcript while composing: YOffset %d -> %d", before, got)
 	}
 }
@@ -262,7 +262,7 @@ func TestFollow_EndYieldsToTheInputWhenComposing(t *testing.T) {
 // conditional does not quietly disable the binding.
 func TestFollow_EndClaimedWhenInputEmpty(t *testing.T) {
 	m := followModel(t, 100, 40, 200)
-	m.viewport.GotoTop()
+	m.chatGotoTop()
 	m.follow = false
 	m.input.SetValue("")
 
@@ -272,8 +272,8 @@ func TestFollow_EndClaimedWhenInputEmpty(t *testing.T) {
 	if !m.follow {
 		t.Error("end did not re-arm follow with an empty input")
 	}
-	if !m.viewport.AtBottom() {
-		t.Errorf("end did not reach the tail: YOffset=%d", m.viewport.YOffset())
+	if !m.chatAtBottom() {
+		t.Errorf("end did not reach the tail: YOffset=%d", m.chatYOffset())
 	}
 }
 
@@ -331,12 +331,12 @@ func TestHelpPanel_NavigationKeysAreAllBound(t *testing.T) {
 			// Park mid-transcript so a key can prove itself by
 			// moving in either direction.
 			probe := followModel(t, 100, 40, 200)
-			probe.viewport.SetYOffset(probe.viewport.YOffset() / 2)
-			before := probe.viewport.YOffset()
+			probe.chatSetYOffset(probe.chatYOffset() / 2)
+			before := probe.chatYOffset()
 
 			out, _ := probe.Update(keyPress(stroke))
 			probe = out.(Model)
-			if probe.viewport.YOffset() == before {
+			if probe.chatYOffset() == before {
 				t.Errorf("help panel advertises %q under Navigation but it left the viewport at YOffset=%d", stroke, before)
 			}
 		})
