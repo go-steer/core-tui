@@ -793,7 +793,20 @@ present-continuous string replaces the rotation entirely. No new
   pickers). Capability methods that take a `context.Context` are
   given a bounded one — the signature is the host saying it may be
   slow, and answering with `context.Background()` inverts the
-  contract.
+  contract. The rule covers the `/cmd` path as well as bare keystrokes
+  (issue #137): a slash command the operator asked for still can't be
+  allowed to freeze the loop.
+- **Nor do the `Options.*` host callbacks** (issue #137).
+  `PersistModelChoice`, `PersistThemeChoice`, `PersistStatusLayout`
+  and `PermissionMode.Set` / `.Persist` are plain func fields rather
+  than §3.3 capabilities, but they are still host code and the
+  persistence ones write to the host's config file. They run in a
+  `tea.Cmd` for the same reason, and their errors surface as rows
+  instead of being discarded. `PermissionMode` is the sharp case:
+  Shift+Tab flips the chip immediately (a bare keystroke's indicator
+  must track the key), and the chip rolls back if the host declines
+  the mode — a chip reading `bypassPermissions` while the gate is
+  still asking is a safety claim core-tui cannot back.
 
 ### 4.2 Error semantics
 

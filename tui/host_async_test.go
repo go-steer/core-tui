@@ -24,9 +24,12 @@ package tui
 
 import (
 	"context"
+	"errors"
+	"fmt"
 	"iter"
 	"os"
 	"path/filepath"
+	"reflect"
 	"strings"
 	"sync/atomic"
 	"testing"
@@ -52,13 +55,22 @@ const nonBlockingBudget = slowHostDelay / 10
 type slowAgent struct {
 	id string
 
-	models   []ModelInfo
-	sessions []SessionInfo
-	subs     []SubagentInfo
-	specs    []SlashCommandSpec
+	models    []ModelInfo
+	sessions  []SessionInfo
+	subs      []SubagentInfo
+	specs     []SlashCommandSpec
+	tools     []ToolInfo
+	approvals []ApprovalLog
 
 	nextAgent Agent
 	switchErr error
+	ruleErr   error
+
+	// What the PermissionController mutators recorded, so a test can
+	// prove the rule reached the host and not just the transcript.
+	allowed []string
+	denied  []string
+	bundles []string
 
 	// calls counts every capability method entered, so a test can
 	// prove a call happened (or didn't) without racing the sleep.
@@ -117,6 +129,47 @@ func (a *slowAgent) InvokeSlash(context.Context, string, string) (SlashResult, e
 	return SlashResult{}, nil
 }
 
+// The /cmd-path capabilities issue #137 moved off the loop. Same
+// contract as the ones above: sleep, then answer.
+
+func (a *slowAgent) Tools() []ToolInfo {
+	a.sleep()
+	return a.tools
+}
+
+func (a *slowAgent) SessionApprovals() []ApprovalLog {
+	a.sleep()
+	return a.approvals
+}
+
+func (a *slowAgent) AddAllowPatterns(p []string) error {
+	a.sleep()
+	a.allowed = append(a.allowed, p...)
+	return a.ruleErr
+}
+
+func (a *slowAgent) AddDenyPatterns(p []string) error {
+	a.sleep()
+	a.denied = append(a.denied, p...)
+	return a.ruleErr
+}
+
+func (a *slowAgent) AddBuiltinAllowExtra(bundle string) error {
+	a.sleep()
+	a.bundles = append(a.bundles, bundle)
+	return a.ruleErr
+}
+
+func (a *slowAgent) Refresh(context.Context) (string, error) {
+	a.sleep()
+	return "prices refreshed", nil
+}
+
+func (a *slowAgent) Set(id string, in, out float64) (string, error) {
+	a.sleep()
+	return fmt.Sprintf("/pricing set: %s = $%.2f in / $%.2f out", id, in, out), nil
+}
+
 // readyModelPicker builds a model picker with the host list already
 // snapshotted — the test-side shorthand for Open + the
 // modelsLoadedMsg round trip, for tests about what happens AFTER the
@@ -154,6 +207,30 @@ func mustBeFast(t *testing.T, what string, fn func()) {
 func pressKey(m Model, key tea.Key) (Model, tea.Cmd) {
 	out, cmd := m.Update(tea.KeyPressMsg(key))
 	return out.(Model), cmd
+}
+
+// drainBatch runs cmd and flattens whatever it produced into the
+// individual msgs, recursing into tea.BatchMsg. Several of the
+// off-loop rewrites pair a host call with a second Cmd — the theme
+// picker emits ThemeChangedMsg alongside its persist call — so a test
+// that only ran the outer Cmd would see a BatchMsg and nothing else.
+func drainBatch(t *testing.T, cmd tea.Cmd) []tea.Msg {
+	t.Helper()
+	if cmd == nil {
+		return nil
+	}
+	switch msg := cmd().(type) {
+	case nil:
+		return nil
+	case tea.BatchMsg:
+		var out []tea.Msg
+		for _, c := range msg {
+			out = append(out, drainBatch(t, c)...)
+		}
+		return out
+	default:
+		return []tea.Msg{msg}
+	}
 }
 
 // TestView_NeverCallsHost — View() must return promptly even when
@@ -727,4 +804,465 @@ func lastText(m Model) string {
 		return ""
 	}
 	return snap[len(snap)-1].Text
+}
+
+// ---- issue #137: the /cmd path and the Options.* callbacks ----
+
+// slowPermissionMode is an Options.PermissionMode wiring whose Set and
+// Persist both sleep — Persist because on a real host it writes the
+// mode to a config file. Shift+Tab reached both from inside Update.
+type slowPermissionMode struct {
+	calls   atomic.Int64
+	set     []PermissionMode
+	persist []PermissionMode
+	setErr  error
+}
+
+func (p *slowPermissionMode) wiring() PermissionModeWiring {
+	return PermissionModeWiring{
+		Set: func(mode PermissionMode) error {
+			p.calls.Add(1)
+			time.Sleep(slowHostDelay)
+			if p.setErr != nil {
+				return p.setErr
+			}
+			p.set = append(p.set, mode)
+			return nil
+		},
+		Persist: func(mode PermissionMode) error {
+			p.calls.Add(1)
+			time.Sleep(slowHostDelay)
+			p.persist = append(p.persist, mode)
+			return nil
+		},
+	}
+}
+
+// TestShiftTab_PermissionModeRunsOffLoop — the highest-priority call
+// site in issue #137. Shift+Tab is a BARE KEYSTROKE that reaches two
+// host callbacks, one of which writes to disk. The chip must flip on
+// the keystroke and the callbacks must ride the Cmd.
+func TestShiftTab_PermissionModeRunsOffLoop(t *testing.T) {
+	host := &slowPermissionMode{}
+	m := NewModel(Options{Agent: &bareAgent{id: "a"}, PermissionMode: host.wiring()})
+	m.viewport.SetWidth(80)
+
+	var cmd tea.Cmd
+	mustBeFast(t, "shift+tab", func() {
+		m, cmd = pressKey(m, tea.Key{Code: tea.KeyTab, Mod: tea.ModShift})
+	})
+	if m.permMode != PermissionModeAcceptEdits {
+		t.Fatalf("chip = %s, want acceptEdits — it must track the key, not the host", m.permMode)
+	}
+	if got := host.calls.Load(); got != 0 {
+		t.Fatalf("%d host callback(s) ran on the Update goroutine", got)
+	}
+	if cmd == nil {
+		t.Fatal("shift+tab returned no Cmd — the host would never hear about the mode")
+	}
+
+	msg, ok := cmd().(permissionModeAppliedMsg)
+	if !ok {
+		t.Fatalf("shift+tab Cmd produced %T, want permissionModeAppliedMsg", msg)
+	}
+	if len(host.set) != 1 || host.set[0] != PermissionModeAcceptEdits {
+		t.Errorf("Set got %v, want [acceptEdits]", host.set)
+	}
+	if len(host.persist) != 1 || host.persist[0] != PermissionModeAcceptEdits {
+		t.Errorf("Persist got %v, want [acceptEdits]", host.persist)
+	}
+	if msg.prev != PermissionModeDefault {
+		t.Errorf("reply carried prev = %s, want default", msg.prev)
+	}
+
+	out, _ := m.Update(msg)
+	m = out.(Model)
+	if m.permMode != PermissionModeAcceptEdits {
+		t.Errorf("chip moved on a clean reply: %s", m.permMode)
+	}
+	for _, row := range m.history.Snapshot() {
+		if row.Role == RoleError {
+			t.Errorf("a successful mode change wrote an error row: %q", row.Text)
+		}
+	}
+}
+
+// TestPermissionModeApplied_SetFailureRollsBackTheChip — a chip that
+// reads "bypassPermissions" while the gate refused to enter it is a
+// safety claim core-tui can't back, so a failed Set rewinds it. The
+// error also stops being swallowed.
+func TestPermissionModeApplied_SetFailureRollsBackTheChip(t *testing.T) {
+	m := NewModel(Options{Agent: &bareAgent{id: "a"}})
+	m.viewport.SetWidth(80)
+	m.permMode = PermissionModeBypass
+
+	out, _ := m.Update(permissionModeAppliedMsg{
+		gen:  m.sessionGen,
+		prev: PermissionModePlan,
+		mode: PermissionModeBypass,
+		err:  errors.New("gate refuses bypass"),
+	})
+	m = out.(Model)
+	if m.permMode != PermissionModePlan {
+		t.Fatalf("chip = %s, want the rollback to plan", m.permMode)
+	}
+	if last := lastText(m); !strings.Contains(last, "gate refuses bypass") {
+		t.Errorf("Set failure was swallowed, last row = %q", last)
+	}
+
+	// A second Shift+Tab that landed while the first was in flight owns
+	// the chip now — the late failure must not rewind past it.
+	m.permMode = PermissionModeDefault
+	out, _ = m.Update(permissionModeAppliedMsg{
+		gen:  m.sessionGen,
+		prev: PermissionModePlan,
+		mode: PermissionModeBypass,
+		err:  errors.New("late refusal"),
+	})
+	m = out.(Model)
+	if m.permMode != PermissionModeDefault {
+		t.Errorf("a superseded failure rewound the chip to %s", m.permMode)
+	}
+}
+
+// TestPermissionModeApplied_PersistFailureKeepsTheMode — Set worked,
+// only the config write failed: the session IS in the new mode, it
+// just won't survive a restart. Say so, keep the chip.
+func TestPermissionModeApplied_PersistFailureKeepsTheMode(t *testing.T) {
+	m := NewModel(Options{Agent: &bareAgent{id: "a"}})
+	m.viewport.SetWidth(80)
+	m.permMode = PermissionModePlan
+
+	out, _ := m.Update(permissionModeAppliedMsg{
+		gen:        m.sessionGen,
+		prev:       PermissionModeAcceptEdits,
+		mode:       PermissionModePlan,
+		persistErr: errors.New("read-only config"),
+	})
+	m = out.(Model)
+	if m.permMode != PermissionModePlan {
+		t.Errorf("chip = %s, want plan — Set succeeded", m.permMode)
+	}
+	if last := lastText(m); !strings.Contains(last, "persist failed") {
+		t.Errorf("persist failure was swallowed, last row = %q", last)
+	}
+}
+
+// TestSlashCommandsRunOffLoop — every /cmd in issue #137's inventory
+// must return from Update before its host method has been entered,
+// with a Cmd that carries the call and a row that says work started.
+func TestSlashCommandsRunOffLoop(t *testing.T) {
+	tests := []struct {
+		name    string
+		cmd     string
+		args    string
+		ack     string // substring of the immediate acknowledgement row
+		want    string // substring of the row the reply produces
+		wantMsg any
+	}{
+		{"tools", "tools", "", "reading the tool catalog", "shell", toolsListedMsg{}},
+		{"permissions", "permissions", "", "reading the session approval log", "bash", approvalsListedMsg{}},
+		{"subagents", "subagents", "", "reading the roster", "probe", subagentRosterMsg{}},
+		{"allow", "allow", "bash:git *", "adding bash:git *", "added bash:git *", permissionRuleAddedMsg{}},
+		{"deny", "deny", "bash:rm *", "adding bash:rm *", "added bash:rm *", permissionRuleAddedMsg{}},
+		{"allow bundle", "allow", "bundle:dev_tools", "enabling bundle dev_tools", "enabled bundle dev_tools", permissionRuleAddedMsg{}},
+		{"pricing set", "pricing", "set m1 1.25 5", "applying m1", "$1.25 in", pricingSetMsg{}},
+		{"help", "help", "", "Built-in commands", "host command", helpCommandsMsg{}},
+	}
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			agent := &slowAgent{
+				id:        "slow",
+				tools:     []ToolInfo{{Name: "shell", Description: "run a command"}},
+				approvals: []ApprovalLog{{Tool: "bash", Key: "git status", Decision: "allow-session"}},
+				subs:      []SubagentInfo{{Name: "probe", Status: "running"}},
+				specs:     []SlashCommandSpec{{Name: "btw", Description: "host command"}},
+			}
+			m := NewModel(Options{Agent: agent})
+			m.viewport.SetWidth(80)
+
+			var (
+				handled bool
+				out     tea.Model
+				cmd     tea.Cmd
+			)
+			mustBeFast(t, "/"+tc.cmd+" "+tc.args, func() {
+				handled, out, cmd = m.dispatchBuiltinSlash(tc.cmd, tc.args)
+			})
+			if !handled {
+				t.Fatalf("/%s not handled", tc.cmd)
+			}
+			m = out.(Model)
+			if got := agent.calls.Load(); got != 0 {
+				t.Fatalf("%d host call(s) ran on the Update goroutine", got)
+			}
+			if last := lastText(m); !strings.Contains(last, tc.ack) {
+				t.Errorf("acknowledgement row = %q, want it to contain %q", last, tc.ack)
+			}
+			if cmd == nil {
+				t.Fatalf("/%s returned no Cmd — the host would never be asked", tc.cmd)
+			}
+
+			msg := cmd()
+			if reflect.TypeOf(msg) != reflect.TypeOf(tc.wantMsg) {
+				t.Fatalf("Cmd produced %T, want %T", msg, tc.wantMsg)
+			}
+			if got := agent.calls.Load(); got != 1 {
+				t.Errorf("Cmd made %d host call(s), want 1", got)
+			}
+			out, _ = m.Update(msg)
+			m = out.(Model)
+			if last := lastText(m); !strings.Contains(last, tc.want) {
+				t.Errorf("reply row = %q, want it to contain %q", last, tc.want)
+			}
+			mustBeFast(t, "View after /"+tc.cmd, func() { _ = m.View() })
+		})
+	}
+}
+
+// TestPermissionRules_ReachTheHost — the /allow and /deny rewrites
+// still hand the pattern to the right PermissionController mutator.
+func TestPermissionRules_ReachTheHost(t *testing.T) {
+	agent := &slowAgent{id: "slow"}
+	m := NewModel(Options{Agent: agent})
+	m.viewport.SetWidth(80)
+
+	for _, step := range []struct{ cmd, args string }{
+		{"allow", "bash:git *"},
+		{"deny", "bash:rm *"},
+		{"allow", "bundle:dev_tools"},
+	} {
+		_, out, cmd := m.dispatchBuiltinSlash(step.cmd, step.args)
+		m = out.(Model)
+		if cmd == nil {
+			t.Fatalf("/%s %s returned no Cmd", step.cmd, step.args)
+		}
+		out, _ = m.Update(cmd())
+		m = out.(Model)
+	}
+	if len(agent.allowed) != 1 || agent.allowed[0] != "bash:git *" {
+		t.Errorf("AddAllowPatterns got %v", agent.allowed)
+	}
+	if len(agent.denied) != 1 || agent.denied[0] != "bash:rm *" {
+		t.Errorf("AddDenyPatterns got %v", agent.denied)
+	}
+	if len(agent.bundles) != 1 || agent.bundles[0] != "dev_tools" {
+		t.Errorf("AddBuiltinAllowExtra got %v", agent.bundles)
+	}
+}
+
+// TestPermissionRuleAdded_FailureRendersAsAnError — the failure
+// wording the inline version produced survives the move, on the error
+// row rather than the system row.
+func TestPermissionRuleAdded_FailureRendersAsAnError(t *testing.T) {
+	m := NewModel(Options{Agent: &slowAgent{id: "slow", ruleErr: errors.New("gate is read-only")}})
+	m.viewport.SetWidth(80)
+
+	_, out, cmd := m.dispatchBuiltinSlash("deny", "bash:rm *")
+	m = out.(Model)
+	out, _ = m.Update(cmd())
+	m = out.(Model)
+
+	snap := m.history.Snapshot()
+	last := snap[len(snap)-1]
+	if last.Role != RoleError {
+		t.Errorf("failure row role = %v, want RoleError", last.Role)
+	}
+	if !strings.Contains(last.Text, "/deny: gate is read-only") {
+		t.Errorf("failure row = %q", last.Text)
+	}
+}
+
+// TestHelpCommands_HostSectionArrivesSeparately — /help paints the
+// built-ins on the keystroke and only the "Agent commands" block waits
+// on the host. A host with no commands produces no second row.
+func TestHelpCommands_HostSectionArrivesSeparately(t *testing.T) {
+	m := NewModel(Options{Agent: &slowAgent{id: "slow"}}) // no specs
+	m.viewport.SetWidth(80)
+
+	_, out, cmd := m.dispatchBuiltinSlash("help", "")
+	m = out.(Model)
+	before := len(m.history.Snapshot())
+	if !strings.Contains(lastText(m), "/pricing refresh|set") {
+		t.Errorf("built-in help did not render on the keystroke: %q", lastText(m))
+	}
+	out, _ = m.Update(cmd())
+	m = out.(Model)
+	if got := len(m.history.Snapshot()); got != before {
+		t.Errorf("an empty SlashCommands() still appended a row (%d → %d)", before, got)
+	}
+}
+
+// TestSubagentDetail_ResolvesFromTheSnapshot — `/subagents <name>`
+// resolves against the off-loop hostSnapshot roster instead of calling
+// Subagents() from Update.
+func TestSubagentDetail_ResolvesFromTheSnapshot(t *testing.T) {
+	agent := &slowSubagentHost{slowAgent: slowAgent{
+		id:   "slow",
+		subs: []SubagentInfo{{Name: "auditor", Status: "running"}},
+	}}
+	m := NewModel(Options{Agent: agent})
+	m.width, m.height = 120, 40
+	m.viewport.SetWidth(80)
+	m.resize()
+
+	// Seed the snapshot the way the periodic refresh does.
+	out, _ := m.Update(m.refreshHostSnapshotCmd()())
+	m = out.(Model)
+	before := agent.calls.Load()
+
+	var (
+		text string
+		cmd  tea.Cmd
+	)
+	mustBeFast(t, "/subagents auditor", func() {
+		text, cmd = m.openSubagentDetail("audit")
+	})
+	if text != "" || cmd == nil {
+		t.Fatalf("openSubagentDetail = (%q, %v), want the overlay + a fetch", text, cmd)
+	}
+	if got := agent.calls.Load(); got != before {
+		t.Errorf("name resolution made %d host call(s) from Update", got-before)
+	}
+	d, ok := m.overlayStack.Get(subagentDialogID).(*subagentDialog)
+	if !ok {
+		t.Fatal("no subagent overlay opened")
+	}
+	if d.name != "auditor" {
+		t.Errorf("overlay targets %q, want the snapshot's auditor", d.name)
+	}
+}
+
+// slowSubagentHost adds SubagentEventReader to slowAgent so the
+// drill-down path is reachable.
+type slowSubagentHost struct{ slowAgent }
+
+func (h *slowSubagentHost) SubagentEvents(context.Context, string, int64) (SubagentEventPage, error) {
+	h.sleep()
+	return SubagentEventPage{}, nil
+}
+
+// TestIssue137Msgs_StaleGenDropped — every message type this change
+// introduced carries gen and is guarded, so a reply that outlived its
+// session leaves no trace in the transcript.
+func TestIssue137Msgs_StaleGenDropped(t *testing.T) {
+	msgs := []struct {
+		name  string
+		msg   tea.Msg
+		probe string // text that must NOT appear
+	}{
+		{"persistDone", persistDoneMsg{gen: 1, what: "/model", err: errors.New("ghost-persist")}, "ghost-persist"},
+		{"toolsListed", toolsListedMsg{gen: 1, tools: []ToolInfo{{Name: "ghost-tool"}}}, "ghost-tool"},
+		{"approvalsListed", approvalsListedMsg{gen: 1, logs: []ApprovalLog{{Tool: "ghost-approval"}}}, "ghost-approval"},
+		{"permissionRuleAdded", permissionRuleAddedMsg{gen: 1, op: permissionRuleAllow, arg: "ghost-rule"}, "ghost-rule"},
+		{"subagentRoster", subagentRosterMsg{gen: 1, subs: []SubagentInfo{{Name: "ghost-sub"}}}, "ghost-sub"},
+		{"pricingSet", pricingSetMsg{gen: 1, summary: "ghost-price"}, "ghost-price"},
+		{"helpCommands", helpCommandsMsg{gen: 1, specs: []SlashCommandSpec{{Name: "ghost-cmd"}}}, "ghost-cmd"},
+	}
+	for _, tc := range msgs {
+		t.Run(tc.name, func(t *testing.T) {
+			m := NewModel(Options{Agent: &bareAgent{id: "a"}})
+			m.viewport.SetWidth(80)
+			m.sessionGen = 2 // the msg left under gen 1
+
+			out, _ := m.Update(tc.msg)
+			m = out.(Model)
+			for _, row := range m.history.Snapshot() {
+				if strings.Contains(row.Text, tc.probe) {
+					t.Fatalf("stale %s leaked a transcript row: %q", tc.name, row.Text)
+				}
+			}
+		})
+	}
+
+	// permissionModeApplied is guarded the same way, but its damage
+	// would be to the chip rather than the transcript.
+	m := NewModel(Options{Agent: &bareAgent{id: "a"}})
+	m.viewport.SetWidth(80)
+	m.sessionGen = 2
+	m.permMode = PermissionModeBypass
+	out, _ := m.Update(permissionModeAppliedMsg{
+		gen: 1, prev: PermissionModeDefault, mode: PermissionModeBypass,
+		err: errors.New("stale refusal"),
+	})
+	if got := out.(Model).permMode; got != PermissionModeBypass {
+		t.Errorf("stale permissionModeAppliedMsg rewound the chip to %s", got)
+	}
+}
+
+// TestPersistCallbacks_RunOffLoop — the three Options persistence
+// callbacks are host code that writes to the host's config, and all
+// three were reached inline. Ctrl+B is the bare-keystroke one.
+func TestPersistCallbacks_RunOffLoop(t *testing.T) {
+	var layouts []StatusLayout
+	m := NewModel(Options{
+		Agent: &bareAgent{id: "a"},
+		PersistStatusLayout: func(l StatusLayout) error {
+			time.Sleep(slowHostDelay)
+			layouts = append(layouts, l)
+			return nil
+		},
+	})
+	m.width, m.height = 120, 40
+	m.viewport.SetWidth(80)
+	m.resize()
+
+	var cmd tea.Cmd
+	mustBeFast(t, "ctrl+b", func() {
+		m, cmd = pressKey(m, tea.Key{Code: 'b', Mod: tea.ModCtrl})
+	})
+	if len(layouts) != 0 {
+		t.Fatalf("PersistStatusLayout ran on the Update goroutine: %v", layouts)
+	}
+	if cmd == nil {
+		t.Fatal("ctrl+b returned no Cmd — the layout would never persist")
+	}
+	if msg, ok := cmd().(persistDoneMsg); !ok || msg.what != "status layout" {
+		t.Fatalf("ctrl+b Cmd produced %#v, want a persistDoneMsg for the layout", msg)
+	}
+	if len(layouts) != 1 || layouts[0] != StatusSidebar {
+		t.Errorf("PersistStatusLayout got %v, want [sidebar]", layouts)
+	}
+
+	// A failure now surfaces instead of vanishing into `_`.
+	out, _ := m.Update(persistDoneMsg{
+		gen: m.sessionGen, what: "status layout", err: errors.New("disk full"),
+	})
+	if last := lastText(out.(Model)); !strings.Contains(last, "status layout: persist failed: disk full") {
+		t.Errorf("persist failure row = %q", last)
+	}
+}
+
+// TestModelSwitch_PersistsOffLoop — PersistModelChoice was the other
+// Options callback in issue #137's list; applyModelSwitch now hands it
+// back as a Cmd.
+func TestModelSwitch_PersistsOffLoop(t *testing.T) {
+	var persisted []string
+	m := NewModel(Options{
+		Agent: &bareAgent{id: "cur"},
+		PersistModelChoice: func(id string) error {
+			time.Sleep(slowHostDelay)
+			persisted = append(persisted, id)
+			return nil
+		},
+	})
+	m.viewport.SetWidth(80)
+
+	var cmd tea.Cmd
+	mustBeFast(t, "modelSwitchedMsg", func() {
+		out, c := m.Update(modelSwitchedMsg{gen: m.sessionGen, id: "m2", agent: &bareAgent{id: "m2"}})
+		m, cmd = out.(Model), c
+	})
+	if len(persisted) != 0 {
+		t.Fatalf("PersistModelChoice ran on the Update goroutine: %v", persisted)
+	}
+	if cmd == nil {
+		t.Fatal("no persist Cmd returned")
+	}
+	if msg, ok := cmd().(persistDoneMsg); !ok || msg.what != "/model" {
+		t.Fatalf("Cmd produced %#v, want a persistDoneMsg for /model", msg)
+	}
+	if len(persisted) != 1 || persisted[0] != "m2" {
+		t.Errorf("PersistModelChoice got %v, want [m2]", persisted)
+	}
 }

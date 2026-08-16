@@ -425,11 +425,15 @@ func (m *Model) openSubagentDetail(query string) (string, tea.Cmd) {
 		return "/subagents: agent doesn't implement SubagentEventReader — no turn log to show", nil
 	}
 	lister, _ := m.opts.Agent.(SubagentLister)
-	var subs []SubagentInfo
-	if lister != nil {
-		subs = lister.Subagents()
-	}
-	name, candidates := resolveSubagentName(query, subs)
+	// Resolve the name against the cached roster rather than calling
+	// Subagents() from Update (issue #137). hostSnapshot refreshes it
+	// off-loop every hostSnapshotInterval, and a name that isn't in a
+	// one-second-old roster falls through to the "ask the host anyway"
+	// branch below — which is also what happens for a name that was
+	// never in it. subagentEventsCmd re-pulls the roster in its own
+	// goroutine, so the overlay's header still gets a fresh
+	// SubagentInfo.
+	name, candidates := resolveSubagentName(query, m.hostSnap.subagents)
 	if len(candidates) > 0 {
 		return fmt.Sprintf("/subagents: %q is ambiguous — did you mean %s?",
 			query, strings.Join(candidates, ", ")), nil

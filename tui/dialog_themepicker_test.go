@@ -130,14 +130,30 @@ func TestThemePicker_EnterCommitsTheFilteredRow(t *testing.T) {
 	if m.themeName != "cyberpunk" {
 		t.Errorf("theme = %q, want cyberpunk", m.themeName)
 	}
+	if act.Cmd == nil {
+		t.Fatal("expected a Cmd carrying ThemeChangedMsg + the persist call")
+	}
+	// Persistence is host code and runs in the Cmd now (issue #137),
+	// so the callback has NOT fired at the point Enter returns.
+	if len(persisted) != 0 {
+		t.Errorf("PersistThemeChoice ran on the Update goroutine: %v", persisted)
+	}
+	var announced bool
+	for _, msg := range drainBatch(t, act.Cmd) {
+		switch v := msg.(type) {
+		case ThemeChangedMsg:
+			announced = v.Name == "cyberpunk"
+		case persistDoneMsg:
+			if v.err != nil {
+				t.Errorf("persistDoneMsg carried %v", v.err)
+			}
+		}
+	}
+	if !announced {
+		t.Error("no ThemeChangedMsg{cyberpunk} in the Cmd batch")
+	}
 	if len(persisted) != 1 || persisted[0] != "cyberpunk" {
 		t.Errorf("PersistThemeChoice got %v, want [cyberpunk]", persisted)
-	}
-	if act.Cmd == nil {
-		t.Fatal("expected a ThemeChangedMsg Cmd")
-	}
-	if msg, ok := act.Cmd().(ThemeChangedMsg); !ok || msg.Name != "cyberpunk" {
-		t.Errorf("Cmd emitted %#v, want ThemeChangedMsg{cyberpunk}", act.Cmd())
 	}
 }
 
