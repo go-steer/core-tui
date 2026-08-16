@@ -313,6 +313,8 @@ func keyPress(stroke string) tea.KeyPressMsg {
 	codes := map[string]rune{
 		"up":     tea.KeyUp,
 		"down":   tea.KeyDown,
+		"left":   tea.KeyLeft,
+		"right":  tea.KeyRight,
 		"pgup":   tea.KeyPgUp,
 		"pgdn":   tea.KeyPgDown,
 		"home":   tea.KeyHome,
@@ -326,7 +328,8 @@ func keyPress(stroke string) tea.KeyPressMsg {
 	if code, ok := codes[stroke]; ok {
 		return tea.KeyPressMsg(tea.Key{Code: code})
 	}
-	// shift+<named key> — the transcript's line-scroll pair (#152).
+	// shift+<named key> — the transcript's line-scroll pair (#152)
+	// and the pan pair on the other axis (#154).
 	if rest, ok := strings.CutPrefix(stroke, "shift+"); ok {
 		if code, ok := codes[rest]; ok {
 			return tea.KeyPressMsg(tea.Key{Code: code, Mod: tea.ModShift})

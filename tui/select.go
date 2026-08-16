@@ -94,6 +94,7 @@ func (m *Model) chatSelectBy(delta int) {
 		return
 	}
 	m.selIdx = min(atLeast(m.selIdx+delta, 0), n-1)
+	m.chatResetPan()
 	m.chatRevealSelection()
 }
 
@@ -103,11 +104,13 @@ func (m *Model) chatSelectBy(delta int) {
 // — rather than the minimal scroll that would reveal the item.
 func (m *Model) chatSelectFirst() {
 	m.selIdx = 0
+	m.chatResetPan()
 	m.chatGotoTop()
 }
 
 func (m *Model) chatSelectLast() {
 	m.selIdx = atLeast(m.history.Len()-1, 0)
+	m.chatResetPan()
 	m.chatGotoBottom()
 }
 
@@ -216,6 +219,7 @@ func (m *Model) clampChatSelection() {
 func (m *Model) resetChatSelection() {
 	m.selIdx = 0
 	m.collapsed = nil
+	m.chatResetPan()
 }
 
 // ---------------------------------------------------------------
@@ -268,7 +272,8 @@ func (m Model) chatSelectedMessage() (Message, bool) {
 // would have to discover by pressing space twice.
 //
 // The lines it returns are a fresh slice: the ones it copies from
-// belong to the render cache, and clampChatLines writes in place.
+// belong to the render cache, and a returned slice that aliased them
+// would let a later append write into the memo.
 func (m Model) chatCollapsedRow(lines []string) []string {
 	if len(lines) <= chatCollapsedLines+1 {
 		return lines
@@ -276,7 +281,7 @@ func (m Model) chatCollapsedRow(lines []string) []string {
 	out := make([]string, 0, chatCollapsedLines+1)
 	out = append(out, lines[:chatCollapsedLines]...)
 	summary := fmt.Sprintf("%s %d more lines", GlyphCollapsed, len(lines)-chatCollapsedLines)
-	return append(out, clampChatLines([]string{m.styles.Muted.Render(summary)}, m.viewport.Width())...)
+	return append(out, m.styles.Muted.Render(summary))
 }
 
 // chatRowCollapsed reports whether history row i is folded.

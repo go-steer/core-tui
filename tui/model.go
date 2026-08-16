@@ -148,6 +148,16 @@ type Model struct {
 	selIdx    int
 	collapsed map[uint64]bool
 
+	// chatX is how far right the transcript window is panned, in
+	// cells (issue #154). Zero for all but the moments an operator is
+	// reading a wide table or an unwrapped diff: it is dropped by a
+	// selection move, a resize and a focus change, so it never
+	// outlives the one thing it was opened for. Unlike selIdx it IS a
+	// render input — chatView cuts every line at [chatX, chatX+width)
+	// — but it changes nothing about the cache, since the cut happens
+	// after the lookup.
+	chatX int
+
 	// copyNotice is what the last copy did, shown in place of the
 	// focus legend until the next transcript keystroke (issue #153).
 	// A copy changes nothing on screen, so it has to say so somewhere;
