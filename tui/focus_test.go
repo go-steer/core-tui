@@ -350,6 +350,7 @@ func TestHelpPanel_TranscriptFocusKeysAreAllBound(t *testing.T) {
 	glyphs := map[string]string{
 		"↑": "up", "↓": "down",
 		"shift+↑": "shift+up", "shift+↓": "shift+down",
+		"shift+←": "shift+left", "shift+→": "shift+right",
 	}
 	// state is everything a focus-mode key is allowed to change.
 	// Nothing moving at all is the failure this test is for. The copy
@@ -357,8 +358,8 @@ func TestHelpPanel_TranscriptFocusKeysAreAllBound(t *testing.T) {
 	// is that the frame does not move — so what stands in for them is
 	// the notice they leave, which is also the only thing the operator
 	// sees (issue #153).
-	state := func(m Model) [5]int {
-		return [5]int{m.chatYOffset(), m.selIdx, len(m.collapsed), int(m.focus), len(m.copyNotice)}
+	state := func(m Model) [6]int {
+		return [6]int{m.chatYOffset(), m.selIdx, len(m.collapsed), int(m.focus), len(m.copyNotice), m.chatX}
 	}
 	for _, key := range keys {
 		stroke, ok := glyphs[key]
@@ -370,11 +371,21 @@ func TestHelpPanel_TranscriptFocusKeysAreAllBound(t *testing.T) {
 		}
 		t.Run(stroke, func(t *testing.T) {
 			probe := focusedModel(t, 200)
+			// The pan pair is the one binding whose effect is a
+			// property of the CONTENT: over rows that fit, there is
+			// nowhere to pan to and staying put is the right answer
+			// (issue #154). So they are probed against a transcript
+			// that overruns the window, already panned one step in so
+			// that the leftward key has somewhere to come back from.
+			if strings.HasSuffix(stroke, "left") || strings.HasSuffix(stroke, "right") {
+				probe = panModel(t)
+				probe.chatPanBy(chatPanStep)
+			}
 			before := state(probe)
 
 			probe = press(probe, stroke)
 			if state(probe) == before {
-				t.Errorf("the help panel advertises %q under Transcript focus but it moved nothing: window/cursor/folds/focus are all still %v", stroke, before)
+				t.Errorf("the help panel advertises %q under Transcript focus but it moved nothing: window/cursor/folds/focus/notice/pan are all still %v", stroke, before)
 			}
 		})
 	}

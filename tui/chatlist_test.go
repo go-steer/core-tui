@@ -34,10 +34,16 @@ import (
 // the pair offset replaced. Tests use it as the oracle: chatView must
 // draw a window of exactly this sequence. EXHAUSTIVE by definition, so
 // it belongs in a test and nowhere else.
+//
+// Cut to the window's width the way chatView cuts, since #154 moved
+// that from the cache to the draw: a cached row is now as wide as its
+// content, and the oracle has to be what reaches the frame.
 func chatAllLines(m Model) []string {
 	var out []string
 	for i := range m.chatRowCount() {
-		out = append(out, m.chatRowLines(i)...)
+		for _, ln := range m.chatRowLines(i) {
+			out = append(out, chatCutLine(ln, 0, m.viewport.Width()))
+		}
 	}
 	return out
 }
@@ -261,9 +267,10 @@ func TestChatRowLines_LiveTailIsTheLastRow(t *testing.T) {
 
 // TestChatView_NoLineExceedsTheWidth — without the viewport there is
 // nothing downstream that cuts an over-wide line, so a row that
-// overruns would shift the panel beside it. clampChatLines is the
-// guard; this is the assertion that it is actually reached, including
-// on the live tail.
+// overruns would shift the panel beside it. chatCutLine is the guard;
+// this is the assertion that it is actually reached, including on the
+// live tail — which since #154 is cut at draw time like everything
+// else rather than on its own.
 func TestChatView_NoLineExceedsTheWidth(t *testing.T) {
 	m := benchModel(t, 6, 60, 20)
 	m.history.Append(Message{
@@ -342,7 +349,7 @@ func TestChatRowLines_CachedRowIsTheColdRender(t *testing.T) {
 	snap := m.history.Snapshot()
 	for i, msg := range snap {
 		lines := m.chatMessageLines(i, len(snap), msg)
-		want := clampChatLines(strings.Split(m.renderMessage(msg), "\n"), m.viewport.Width())
+		want := strings.Split(m.renderMessage(msg), "\n")
 		if strings.Join(lines, "\n") != strings.Join(want, "\n") {
 			t.Fatalf("row %d does not match its cold render", i)
 		}

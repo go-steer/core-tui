@@ -324,7 +324,7 @@ func (m Model) chatView() string {
 			if len(out) == h {
 				break
 			}
-			out = append(out, gutter+ln)
+			out = append(out, gutter+chatCutLine(ln, m.chatX, w))
 		}
 	}
 	return lipgloss.NewStyle().
@@ -377,33 +377,51 @@ func (m *Model) buildChatTail() []string {
 	if b.Len() == 0 {
 		return nil
 	}
-	return clampChatLines(strings.Split(b.String(), "\n"), m.viewport.Width())
+	// Not cut to width here: chatView cuts every line it draws, this
+	// one included (issue #154).
+	return strings.Split(b.String(), "\n")
 }
 
-// clampChatLines enforces the transcript's half of the width
-// contract: no line leaves a row wider than the width it was rendered
-// at.
+// chatCutLine enforces the transcript's half of the width contract —
+// no line reaches the frame wider than the window — and applies the
+// horizontal pan (issue #154) in the same operation, because they are
+// the same operation: both are "which cells of this line are on
+// screen".
 //
 // Rows overrun, and not because they are careless — Glamour adds a
 // margin the wrap width does not account for, a tool row prefixes its
-// result lines. The flat path never had to care because the viewport
-// cut every line on the way out; without it, an oversized line
-// reaches the compositor, shifts everything to its right and the
-// frame clip eats a panel.
+// result lines, and a table or a diff does not wrap at all. The flat
+// path never had to care because the viewport cut every line on the
+// way out; without it, an oversized line reaches the compositor,
+// shifts everything to its right and the frame clip eats a panel.
 //
-// Truncation rather than re-wrapping, deliberately: it is the only
-// bound that leaves the LINE COUNT alone, and the line count is what
-// the whole lazy walk budgets against. It runs on a cache miss only.
-func clampChatLines(lines []string, width int) []string {
+// This used to happen on the way INTO the render cache, which is what
+// made panning impossible: the columns to pan to had already been
+// thrown away. Doing it here instead is strictly stronger — every
+// line the frame contains passes through this function, including the
+// live tail and the fold summary, which the cache-side version had to
+// be applied to separately — and costs one cut per drawn line per
+// frame, which is bounded by the window, like everything else on this
+// path.
+//
+// Cutting rather than re-wrapping, deliberately: it is the only bound
+// that leaves the LINE COUNT alone, and the line count is what the
+// whole lazy walk budgets against.
+//
+// The unpanned case keeps using ansi.Truncate rather than a
+// zero-origin Cut so the frame is byte-identical to what it was
+// before panning existed.
+func chatCutLine(ln string, x, width int) string {
 	if width <= 0 {
-		return lines
+		return ln
 	}
-	for i, ln := range lines {
-		if ansi.StringWidth(ln) > width {
-			lines[i] = ansi.Truncate(ln, width, "")
-		}
+	if x > 0 {
+		return ansi.Cut(ln, x, x+width)
 	}
-	return lines
+	if ansi.StringWidth(ln) > width {
+		return ansi.Truncate(ln, width, "")
+	}
+	return ln
 }
 
 // ---------------------------------------------------------------

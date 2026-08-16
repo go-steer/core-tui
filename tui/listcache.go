@@ -99,7 +99,9 @@ type listCacheEntry struct {
 	version uint64
 	frozen  bool
 	content string
-	// lines is content split on newlines and clamped to width, held
+	// lines is content split on newlines — at its natural width, not
+	// cut to the window's: the cut happens per drawn line in chatView
+	// so that there is something left to pan to (issue #154). Held
 	// alongside it because the item-addressed transcript (chatlist.go)
 	// asks for a row's HEIGHT far more often than for its text — every
 	// offset calculation does — and re-splitting a cached string per
@@ -186,7 +188,7 @@ func (c *listCache) getLines(item Item, width int) ([]string, bool) {
 // content (until version bumps).
 func (c *listCache) put(item Item, width int, content string) []string {
 	c.touchWidth(width)
-	lines := clampChatLines(strings.Split(content, "\n"), width)
+	lines := strings.Split(content, "\n")
 	c.entries[listCacheKey{id: item.Identity(), width: width}] = listCacheEntry{
 		width:   width,
 		version: item.Version(),

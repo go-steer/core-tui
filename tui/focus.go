@@ -78,8 +78,13 @@ func (m *Model) setFocus(t focusTarget) {
 	// The copy notice belongs to the mode it was made in: it is shown
 	// in the focus legend, which the composer does not draw, so
 	// leaving it set would resurface a stale "copied 24 lines" on the
-	// next tab back in (issue #153).
+	// next tab back in (issue #153). The pan offset goes with it for
+	// the same reason and one more: it is only reachable from this
+	// mode, so a composer that inherited one would be showing a
+	// sideways transcript with no key bound to bring it back
+	// (issue #154).
 	m.copyNotice = ""
+	m.chatResetPan()
 	if t == focusInput {
 		_ = m.input.Focus()
 		return
@@ -167,6 +172,12 @@ func (m *Model) handleTranscriptKey(stroke string) (tea.Cmd, bool) {
 		m.chatScrollBy(-1)
 	case "shift+down":
 		m.chatScrollBy(1)
+	case "shift+left":
+		// The other axis of the same modifier: shift is "move the
+		// window", unshifted is "move the cursor" (issue #154).
+		m.chatPanBy(-chatPanStep)
+	case "shift+right":
+		m.chatPanBy(chatPanStep)
 	case "space":
 		m.chatToggleCollapsed()
 	case "y":

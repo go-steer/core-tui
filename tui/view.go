@@ -398,6 +398,12 @@ func (m *Model) resize() {
 	// cursor, so that moving the cursor cannot re-wrap the item it
 	// lands on; chatView adds it back as it draws, and the block it
 	// returns is chatWidth wide again.
+	if m.viewport.Width() != atLeast(chatWidth-chatGutterWidth, 1) {
+		// A pan is an offset into a specific set of line lengths, and
+		// a width change re-wraps every one of them. Keeping the
+		// number would point it at different text (issue #154).
+		m.chatResetPan()
+	}
 	m.viewport.SetWidth(atLeast(chatWidth-chatGutterWidth, 1))
 	m.input.SetWidth(chatWidth - 2) // leave room for the input border
 
@@ -1048,6 +1054,14 @@ func (m Model) footerHint() string {
 		// unchanged and still one `?` away, while the answer to "did
 		// that work" is only useful for the moment it is true.
 		return "Transcript" + sep + m.copyNotice + sep + "tab/esc composer"
+	case m.focus == focusTranscript && m.chatX > 0:
+		// A panned frame has no left edge to compare against, so
+		// nothing on screen says the text is missing its first
+		// columns (issue #154). The legend says it, and names the key
+		// that undoes it — the operator who panned by accident is
+		// exactly the one who cannot tell what happened.
+		return "Transcript" + sep + fmt.Sprintf("panned %d cols", m.chatX) + sep +
+			"shift+←→ pan" + sep + "tab/esc composer"
 	case m.focus == focusTranscript:
 		// Above the streaming arm on purpose (issue #151). Reading
 		// back through the transcript while a turn runs is the case
