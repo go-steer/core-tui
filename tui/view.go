@@ -1048,7 +1048,14 @@ func (m Model) footerHint() string {
 		// indicator — and the streaming legend would be wrong here
 		// anyway: from focus mode esc returns the keyboard and enter
 		// queues nothing.
-		return "Transcript" + sep + "↑↓ scroll" + sep + "pgup/pgdn page" + sep +
+		// Five fragments is what fits at 80 columns before the legend
+		// wraps to a second row, so the two the mode can least afford to
+		// leave unstated win the slots: what the arrows move now that
+		// they move a cursor rather than the window (issue #152), and
+		// the fold that cursor exists to aim. Paging and line scrolling
+		// are one `?` away and neither is guessed at wrongly — pgup /
+		// pgdn do here exactly what they do everywhere else.
+		return "Transcript" + sep + "↑↓ select" + sep + "space fold" + sep +
 			"g/G top/bottom" + sep + "tab/esc composer"
 	case m.state == stateStreaming:
 		return "Streaming…" + sep + "esc interrupt" + sep + "enter queues prompt" + sep + "ctrl+c cancel turn"

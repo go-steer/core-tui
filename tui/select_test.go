@@ -297,6 +297,21 @@ func TestSelect_SeedKeepsAVisibleCursor(t *testing.T) {
 	}
 }
 
+// The legend is where an operator learns what the arrows do without
+// pressing one to find out, so it has to describe the keymap this
+// issue left behind rather than the one it replaced.
+func TestSelect_TheLegendNamesWhatTheArrowsDo(t *testing.T) {
+	hint := focusedModel(t, 20).footerHint()
+	for _, want := range []string{"↑↓ select", "space fold"} {
+		if !strings.Contains(hint, want) {
+			t.Errorf("legend %q does not mention %q", hint, want)
+		}
+	}
+	if strings.Contains(hint, "↑↓ scroll") {
+		t.Errorf("legend still says the arrows scroll: %q", hint)
+	}
+}
+
 // A cleared transcript is a different transcript: the cursor and the
 // folds go with it rather than being reapplied to whatever lands next.
 func TestSelect_ClearForgetsTheCursorAndTheFolds(t *testing.T) {
