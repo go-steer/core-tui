@@ -1543,6 +1543,7 @@ func (m Model) handleKey(msg tea.KeyPressMsg) (tea.Model, tea.Cmd) {
 			lower := strings.ToLower(text)
 			if text == "" || lower == "y" || lower == "yes" {
 				m.history.Reset()
+				m.resetChatSelection()
 				m.refreshViewport()
 				return m, nil
 			}
@@ -2501,11 +2502,12 @@ func (m *Model) applySwitchTarget(tgt *SwitchTarget) tea.Cmd {
 	m.inFlightSlash = nil
 	m.toast = ""
 
-	// Step 3 — wipe history + list cache.
+	// Step 3 — wipe history + list cache + the transcript cursor.
 	m.history.Reset()
 	if m.listCache != nil {
 		m.listCache.reset(m.viewport.Width())
 	}
+	m.resetChatSelection()
 
 	// Step 4 — swap opts fields per SwitchTarget contract
 	// (non-nil / non-zero replaces; nil / zero keeps).

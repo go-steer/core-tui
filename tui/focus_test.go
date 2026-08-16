@@ -29,9 +29,12 @@ import (
 func focusedModel(t *testing.T, rows int) Model {
 	t.Helper()
 	m := followModel(t, 100, 40, rows)
-	m.setFocus(focusTranscript)
 	m.chatSetYOffset(m.chatYOffset() / 2)
 	m.syncFollow()
+	// Focus last: seeding the cursor is part of entering the mode
+	// (issue #152) and it seeds from the window the operator is
+	// looking at, so the scroll has to have happened first.
+	m.setFocus(focusTranscript)
 	return m
 }
 
@@ -87,39 +90,63 @@ func TestFocus_TranscriptKeepsTypedTextOutOfTheComposer(t *testing.T) {
 	}
 }
 
-// Issue #155. The arrows and j/k scroll by a line, g/G and home/end
-// jump, and G re-arms follow — the same contract ctrl+l and end
-// already had from the composer side.
-func TestFocus_TranscriptScrollKeys(t *testing.T) {
+// Issues #155 and #152. The arrows and j/k move the CURSOR an item at
+// a time, g/G jump to the ends, and G re-arms follow — the same
+// contract ctrl+l and end already had from the composer side.
+func TestFocus_TranscriptSelectionKeys(t *testing.T) {
 	cases := []struct {
 		stroke string
-		want   func(before, after int) bool
+		want   func(before, after, last int) bool
 		desc   string
 		follow bool
 	}{
-		{stroke: "up", desc: "one line up", want: func(b, a int) bool { return a == b-1 }},
-		{stroke: "k", desc: "one line up", want: func(b, a int) bool { return a == b-1 }},
-		{stroke: "down", desc: "one line down", want: func(b, a int) bool { return a == b+1 }},
-		{stroke: "j", desc: "one line down", want: func(b, a int) bool { return a == b+1 }},
-		{stroke: "home", desc: "top", want: func(_, a int) bool { return a == 0 }},
-		{stroke: "g", desc: "top", want: func(_, a int) bool { return a == 0 }},
-		{stroke: "end", desc: "bottom", want: func(b, a int) bool { return a > b }, follow: true},
-		{stroke: "G", desc: "bottom", want: func(b, a int) bool { return a > b }, follow: true},
+		{stroke: "up", desc: "the previous item", want: func(b, a, _ int) bool { return a == b-1 }},
+		{stroke: "k", desc: "the previous item", want: func(b, a, _ int) bool { return a == b-1 }},
+		{stroke: "down", desc: "the next item", want: func(b, a, _ int) bool { return a == b+1 }},
+		{stroke: "j", desc: "the next item", want: func(b, a, _ int) bool { return a == b+1 }},
+		{stroke: "home", desc: "the first item", want: func(_, a, _ int) bool { return a == 0 }},
+		{stroke: "g", desc: "the first item", want: func(_, a, _ int) bool { return a == 0 }},
+		{stroke: "end", desc: "the last item", want: func(_, a, l int) bool { return a == l }, follow: true},
+		{stroke: "G", desc: "the last item", want: func(_, a, l int) bool { return a == l }, follow: true},
 	}
 	for _, tc := range cases {
 		t.Run(tc.stroke, func(t *testing.T) {
 			m := focusedModel(t, 200)
-			before := m.chatYOffset()
+			before := m.selIdx
 			m = press(m, tc.stroke)
-			after := m.chatYOffset()
-			if !tc.want(before, after) {
-				t.Errorf("%q should scroll to %s: YOffset %d → %d", tc.stroke, tc.desc, before, after)
+			if last := m.history.Len() - 1; !tc.want(before, m.selIdx, last) {
+				t.Errorf("%q should select %s: selection %d → %d (last is %d)", tc.stroke, tc.desc, before, m.selIdx, last)
 			}
 			if m.follow != tc.follow {
 				t.Errorf("%q left follow=%v, want %v", tc.stroke, m.follow, tc.follow)
 			}
 			if m.focus != focusTranscript {
 				t.Errorf("%q dropped out of transcript focus", tc.stroke)
+			}
+		})
+	}
+}
+
+// Line scrolling survives the arrows being repurposed, on shift: an
+// item taller than the window can only be read by scrolling inside
+// it, and pgup / pgdn are a screenful too coarse for that.
+func TestFocus_TranscriptLineScrollKeys(t *testing.T) {
+	for _, tc := range []struct {
+		stroke string
+		delta  int
+	}{
+		{"shift+up", -1},
+		{"shift+down", 1},
+	} {
+		t.Run(tc.stroke, func(t *testing.T) {
+			m := focusedModel(t, 200)
+			before, sel := m.chatYOffset(), m.selIdx
+			m = press(m, tc.stroke)
+			if got := m.chatYOffset(); got != before+tc.delta {
+				t.Errorf("%q moved the window to %d, want %d", tc.stroke, got, before+tc.delta)
+			}
+			if m.selIdx != sel {
+				t.Errorf("%q moved the cursor (%d → %d); scrolling is not selecting", tc.stroke, sel, m.selIdx)
 			}
 		})
 	}
@@ -306,8 +333,8 @@ func TestFocus_SurvivesTurnEndAndResetsOnSessionSwitch(t *testing.T) {
 
 // The sibling of TestHelpPanel_NavigationKeysAreAllBound: the panel
 // must not advertise a focus-mode key that does nothing. Every row
-// under "Transcript focus" has to either move the viewport or move
-// the keyboard.
+// under "Transcript focus" has to move the window, the cursor, a fold
+// or the keyboard — the four things the mode can do.
 func TestHelpPanel_TranscriptFocusKeysAreAllBound(t *testing.T) {
 	m := focusedModel(t, 200)
 	m.helpOpen = true
@@ -320,7 +347,15 @@ func TestHelpPanel_TranscriptFocusKeysAreAllBound(t *testing.T) {
 	// The panel spells the arrows as glyphs; the keymap spells them
 	// as strokes. Parenthesised prose ("(esc" from the enter row)
 	// is not a binding.
-	glyphs := map[string]string{"↑": "up", "↓": "down"}
+	glyphs := map[string]string{
+		"↑": "up", "↓": "down",
+		"shift+↑": "shift+up", "shift+↓": "shift+down",
+	}
+	// state is everything a focus-mode key is allowed to change.
+	// Nothing moving at all is the failure this test is for.
+	state := func(m Model) [4]int {
+		return [4]int{m.chatYOffset(), m.selIdx, len(m.collapsed), int(m.focus)}
+	}
 	for _, key := range keys {
 		stroke, ok := glyphs[key]
 		if !ok {
@@ -331,11 +366,11 @@ func TestHelpPanel_TranscriptFocusKeysAreAllBound(t *testing.T) {
 		}
 		t.Run(stroke, func(t *testing.T) {
 			probe := focusedModel(t, 200)
-			before := probe.chatYOffset()
+			before := state(probe)
 
 			probe = press(probe, stroke)
-			if probe.chatYOffset() == before && probe.focus == focusTranscript {
-				t.Errorf("the help panel advertises %q under Transcript focus but it moved neither the viewport (YOffset=%d) nor the keyboard", stroke, before)
+			if state(probe) == before {
+				t.Errorf("the help panel advertises %q under Transcript focus but it moved nothing: window/cursor/folds/focus are all still %v", stroke, before)
 			}
 		})
 	}

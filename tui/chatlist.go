@@ -210,13 +210,20 @@ func (m Model) buildChatRule() string {
 // A window that only asks for the rows it draws does not need any of
 // that: an off-screen row at a stale width is simply never
 // requested, and there is nothing to retire.
+// A fold (issue #152) is applied on the way out rather than being
+// rendered: it is the head of the ordinary render plus a count, so
+// the cache neither knows nor needs to know that the row is folded.
 func (m Model) chatMessageLines(i, total int, msg Message) []string {
 	width := m.viewport.Width()
 	item := messageItem{msg: msg, idx: i, total: total}
-	if lines, ok := m.listCache.getLines(item, width); ok {
-		return lines
+	lines, ok := m.listCache.getLines(item, width)
+	if !ok {
+		lines = m.listCache.put(item, width, m.renderMessage(msg))
 	}
-	return m.listCache.put(item, width, m.renderMessage(msg))
+	if m.chatRowCollapsed(msg) {
+		return m.chatCollapsedRow(lines)
+	}
+	return lines
 }
 
 // chatRowCached reports whether history row i already has an exact
@@ -281,8 +288,14 @@ func (m *Model) chatVisitWindow(visit func(i int)) {
 // stop the moment it is spent. That loop is the whole mechanism: what
 // it costs is bounded by what is on screen, not by what exists.
 //
+// The selection gutter (issue #152) is prefixed here, per line, as
+// the lines are collected. It is the reason the block is padded to
+// width + chatGutterWidth: the viewport's width is what a ROW renders
+// at, the gutter is reserved on top of it, and the sum is the column
+// the frame gave the transcript.
+//
 // The lipgloss pad at the end reproduces what the viewport did — the
-// transcript block is always exactly height rows of exactly width
+// transcript block is always exactly height rows of exactly that many
 // columns, so the frame it is joined into does not shift when the
 // transcript is short.
 func (m Model) chatView() string {
@@ -290,6 +303,7 @@ func (m Model) chatView() string {
 	if w <= 0 || h <= 0 {
 		return ""
 	}
+	marked, plain := m.chatGutterPrefixes()
 	out := make([]string, 0, h)
 	skip := m.viewport.offsetLine
 	for i := m.viewport.offsetIdx; i < m.chatRowCount() && len(out) < h; i++ {
@@ -302,14 +316,21 @@ func (m Model) chatView() string {
 			lines = lines[skip:]
 			skip = 0
 		}
+		gutter := plain
+		if m.chatRowMarked(i) {
+			gutter = marked
+		}
 		for _, ln := range lines {
 			if len(out) == h {
 				break
 			}
-			out = append(out, ln)
+			out = append(out, gutter+ln)
 		}
 	}
-	return lipgloss.NewStyle().Width(w).Height(h).Render(strings.Join(out, "\n"))
+	return lipgloss.NewStyle().
+		Width(w + chatGutterWidth).
+		Height(h).
+		Render(strings.Join(out, "\n"))
 }
 
 // warmChatWindow renders the rows the window is about to draw, so
@@ -401,8 +422,17 @@ func (m Model) chatBottomOffset() (int, int) {
 	if n == 0 {
 		return 0, 0
 	}
+	return m.chatEndOffset(n - 1)
+}
+
+// chatEndOffset is the (idx, line) pair that puts the last line of
+// row `last` on the window's last row. The generalization of
+// chatBottomOffset, and bounded for the same reason: it stops as soon
+// as it has covered a window's worth of lines. The selection reveal
+// (issue #152) uses it to scroll an item just far enough into view.
+func (m Model) chatEndOffset(last int) (int, int) {
 	need := m.viewport.Height()
-	for i := n - 1; i >= 0; i-- {
+	for i := last; i >= 0; i-- {
 		h := len(m.chatRowLines(i))
 		if h >= need {
 			return i, h - need
