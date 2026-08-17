@@ -98,7 +98,7 @@ func TestElicitor_RoundTripsResult(t *testing.T) {
 	if flow.serverName != "srv" {
 		t.Errorf("serverName = %q, want srv", flow.serverName)
 	}
-	e.dispatchResult(ElicitResult{Action: ElicitActionSubmit})
+	e.dispatchResult(ElicitResult{Action: ElicitActionSubmit}, nil)
 
 	select {
 	case got := <-resultCh:

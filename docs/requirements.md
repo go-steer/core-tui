@@ -379,16 +379,24 @@ listed in `/help`:
     browser, `a`/Enter accepts, `n` declines, `Esc` cancels.
 - **R-ELIC-2** Form fields support Tab/Shift-Tab navigation,
   Space/arrows for enums and booleans, Enter to submit with
-  validation, Esc to decline.
+  validation, `ctrl+d` to decline and Esc to cancel. Decline is
+  `ctrl+d` rather than a letter because every printable key belongs
+  to the focused field.
 - **R-ELIC-3** Schemas with nested objects or unsupported types are
-  declined automatically with a "schema unsupported" system message.
+  refused automatically with a "schema unsupported" system message.
+  The refusal reaches the server as an error matching
+  `ErrElicitUnsupported`, paired with `ElicitActionCancel`, and
+  **never** as `ElicitActionDecline`: no operator was consulted, and
+  a decline is an operator's word. The system message says as much,
+  so the operator is not left believing an answer went out over their
+  name.
 - **R-ELIC-4** The keys that dispatch a result — URL-mode `a`/Enter
-  accept and `n` decline, form-mode Enter submit — observe the same
-  grace period as the permission modal (R-PERM-8), for the same
-  reason: the form is opened by a server, not by the operator. Field
-  editing and navigation stay live throughout; they are visible and
-  reversible, and nothing leaves the TUI until a result is
-  dispatched.
+  accept and `n` decline, form-mode Enter submit and `ctrl+d` decline
+  — observe the same grace period as the permission modal (R-PERM-8),
+  for the same reason: the form is opened by a server, not by the
+  operator. Field editing and navigation stay live throughout; they
+  are visible and reversible, and nothing leaves the TUI until a
+  result is dispatched.
 
 ### 3.10 Usage tracking & display (must)
 

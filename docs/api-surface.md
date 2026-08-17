@@ -258,24 +258,25 @@ library without these. Frozen at 1.0.
 | `DetailKind` | type | `prompter.go:56` | `PermissionRequest.DetailKind`. |
 | `DetailPlain` | const (`DetailKind`) | `prompter.go:59` | `PermissionRequest.DetailKind`. |
 | `DetailShell` | const (`DetailKind`) | `prompter.go:61` | `PermissionRequest.DetailKind`. |
-| `ElicitAction` | type | `elicitor.go:103` | `ElicitResult.Action`. |
-| `ElicitActionCancel` | const (`ElicitAction`) | `elicitor.go:108` | `ElicitResult.Action`. |
-| `ElicitActionDecline` | const (`ElicitAction`) | `elicitor.go:107` | `ElicitResult.Action`. |
-| `ElicitActionSubmit` | const (`ElicitAction`) | `elicitor.go:106` | `ElicitResult.Action`. |
-| `ElicitField` | type | `elicitor.go:59` | `Elicitor.Elicit` argument / result. |
-| `ElicitFieldBoolean` | const (`ElicitFieldType`) | `elicitor.go:52` | `ElicitField.Type`. |
-| `ElicitFieldEnum` | const (`ElicitFieldType`) | `elicitor.go:53` | `ElicitField.Type`. |
-| `ElicitFieldInteger` | const (`ElicitFieldType`) | `elicitor.go:51` | `ElicitField.Type`. |
-| `ElicitFieldNumber` | const (`ElicitFieldType`) | `elicitor.go:50` | `ElicitField.Type`. |
-| `ElicitFieldString` | const (`ElicitFieldType`) | `elicitor.go:49` | `ElicitField.Type`. |
-| `ElicitFieldType` | type | `elicitor.go:46` | `ElicitField.Type`. |
-| `ElicitFormMode` | const (`ElicitMode`) | `elicitor.go:41` | `ElicitRequest.Mode`. |
-| `ElicitMode` | type | `elicitor.go:38` | `ElicitRequest.Mode`. |
-| `ElicitRequest` | type | `elicitor.go:80` | `Elicitor.Elicit` argument / result. |
-| `ElicitResult` | type | `elicitor.go:97` | `Elicitor.Elicit` argument / result. |
-| `ElicitURLMode` | const (`ElicitMode`) | `elicitor.go:42` | `ElicitRequest.Mode`. |
-| `Elicitor` | type | `elicitor.go:30` | §3.5 interface the host may replace. |
-| `NewElicitor` | func | `elicitor.go:144` | §3.5 built-in implementation; wired into `Options.Elicitor`. |
+| `ElicitAction` | type | `elicitor.go:122` | `ElicitResult.Action`. |
+| `ElicitActionCancel` | const (`ElicitAction`) | `elicitor.go:127` | `ElicitResult.Action`. |
+| `ElicitActionDecline` | const (`ElicitAction`) | `elicitor.go:126` | `ElicitResult.Action`. |
+| `ElicitActionSubmit` | const (`ElicitAction`) | `elicitor.go:125` | `ElicitResult.Action`. |
+| `ElicitField` | type | `elicitor.go:68` | `Elicitor.Elicit` argument / result. |
+| `ElicitFieldBoolean` | const (`ElicitFieldType`) | `elicitor.go:61` | `ElicitField.Type`. |
+| `ElicitFieldEnum` | const (`ElicitFieldType`) | `elicitor.go:62` | `ElicitField.Type`. |
+| `ElicitFieldInteger` | const (`ElicitFieldType`) | `elicitor.go:60` | `ElicitField.Type`. |
+| `ElicitFieldNumber` | const (`ElicitFieldType`) | `elicitor.go:59` | `ElicitField.Type`. |
+| `ElicitFieldString` | const (`ElicitFieldType`) | `elicitor.go:58` | `ElicitField.Type`. |
+| `ElicitFieldType` | type | `elicitor.go:55` | `ElicitField.Type`. |
+| `ElicitFormMode` | const (`ElicitMode`) | `elicitor.go:50` | `ElicitRequest.Mode`. |
+| `ElicitMode` | type | `elicitor.go:47` | `ElicitRequest.Mode`. |
+| `ElicitRequest` | type | `elicitor.go:89` | `Elicitor.Elicit` argument / result. |
+| `ElicitResult` | type | `elicitor.go:106` | `Elicitor.Elicit` argument / result. |
+| `ElicitURLMode` | const (`ElicitMode`) | `elicitor.go:51` | `ElicitRequest.Mode`. |
+| `Elicitor` | type | `elicitor.go:39` | §3.5 interface the host may replace. |
+| `ErrElicitUnsupported` | var (`error`) | `elicitor.go:150` | `Elicitor.Elicit` result; matched with `errors.Is` (R-ELIC-3). |
+| `NewElicitor` | func | `elicitor.go:185` | §3.5 built-in implementation; wired into `Options.Elicitor`. |
 | `NewPrompter` | func | `prompter.go:151` | §3.5 built-in implementation; wired into `Options.Prompter`. |
 | `PermissionDecision` | type | `prompter.go:100` | `PermissionPrompter.AskApproval` result. |
 | `PermissionKind` | type | `prompter.go:36` | `PermissionRequest.Kind`. |
@@ -693,13 +694,13 @@ thirteen are constants, and all thirteen are in the contract bucket:
 | `RoleSystem` | `history.go:26` | as above |
 | `RoleError` | `history.go:27` | as above |
 | `RoleTool` | `history.go:28` | as above |
-| `ElicitFormMode` | `elicitor.go:41` | `ElicitMode`'s comment describes both modes |
-| `ElicitURLMode` | `elicitor.go:42` | as above |
-| `ElicitFieldString` | `elicitor.go:49` | `ElicitFieldType`'s comment covers the set generically, not per value |
-| `ElicitFieldNumber` | `elicitor.go:50` | as above |
-| `ElicitFieldInteger` | `elicitor.go:51` | as above; the `Number` / `Integer` distinction is exactly what a per-value comment would carry |
-| `ElicitFieldBoolean` | `elicitor.go:52` | as above |
-| `ElicitFieldEnum` | `elicitor.go:53` | as above |
+| `ElicitFormMode` | `elicitor.go:50` | `ElicitMode`'s comment describes both modes |
+| `ElicitURLMode` | `elicitor.go:51` | as above |
+| `ElicitFieldString` | `elicitor.go:58` | `ElicitFieldType`'s comment covers the set generically, not per value |
+| `ElicitFieldNumber` | `elicitor.go:59` | as above |
+| `ElicitFieldInteger` | `elicitor.go:60` | as above; the `Number` / `Integer` distinction is exactly what a per-value comment would carry |
+| `ElicitFieldBoolean` | `elicitor.go:61` | as above |
+| `ElicitFieldEnum` | `elicitor.go:62` | as above |
 | `DetailPlain` | `prompter.go:59` | `DetailKind`'s comment mentions it; the four siblings in the same block carry trailing line comments and this one does not |
 
 Every other exported symbol in all three buckets has a doc comment, including

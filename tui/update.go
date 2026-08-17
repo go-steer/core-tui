@@ -1110,19 +1110,27 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		return m, forceRenderTick()
 	case elicitRequestMsg:
 		r := msg.req
-		// R-ELIC-3: a schema the modal cannot draw is declined
-		// automatically, and the operator is told it happened.
+		// R-ELIC-3: a schema the modal cannot draw is refused
+		// automatically, and both parties are told which way it went.
 		// Screening here rather than inside Elicit is what makes the
-		// second half possible — only the loop can append to the
+		// operator's half possible — only the loop can append to the
 		// transcript (issue #209). A request refused with no trace is
 		// indistinguishable, from where the operator sits, from a
 		// server that never asked.
+		//
+		// The server's half is an error, not an action. Nobody was
+		// consulted, so no ElicitAction is true here; Cancel rides
+		// along because the result type has an Action field, and
+		// ErrElicitUnsupported is what a host actually branches on.
 		if !supportedElicit(r) {
 			m.history.Append(Message{
 				Role: RoleSystem,
 				Text: elicitUnsupportedNotice(msg.serverName, r),
 			})
-			m.dispatchElicit(ElicitResult{Action: ElicitActionDecline})
+			m.dispatchElicitErr(
+				ElicitResult{Action: ElicitActionCancel},
+				elicitUnsupportedError(r),
+			)
 			m.refreshAndScroll()
 			return m, tea.Batch(m.elicitListener(), forceRenderTick())
 		}
@@ -2959,10 +2967,23 @@ func permissionDecisionLabel(d PermissionDecision) string {
 }
 
 // dispatchElicit writes the operator's elicit result back to the
-// pending elicitor flow and clears the modal state.
+// pending elicitor flow and clears the modal state. Every caller of
+// this one is relaying a keystroke, so the error is nil: the operator
+// answered, and an answer is not a failure.
 func (m *Model) dispatchElicit(r ElicitResult) {
+	m.dispatchElicitErr(r, nil)
+}
+
+// dispatchElicitErr is dispatchElicit for the case where the TUI is
+// answering on its own account — err says why, and the Action beside
+// it is a placeholder rather than a decision anyone made (issue
+// #209). Kept separate rather than adding a second parameter to
+// dispatchElicit, because four of the five call sites relay an
+// operator and would all read `, nil`, which is exactly the sort of
+// argument that stops being read.
+func (m *Model) dispatchElicitErr(r ElicitResult, err error) {
 	if e, ok := m.opts.Elicitor.(*elicitor); ok {
-		e.dispatchResult(r)
+		e.dispatchResult(r, err)
 	}
 	m.pendingElicit = nil
 	m.pendingElicitSrv = ""

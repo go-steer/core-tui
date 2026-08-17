@@ -16,6 +16,8 @@ package tui
 
 import (
 	"context"
+	"errors"
+	"fmt"
 	"sync"
 )
 
@@ -24,6 +26,13 @@ import (
 // they need structured operator input mid-tool-call; the call
 // blocks on the TUI's modal until the operator submits, declines,
 // or cancels (ctx done).
+//
+// A non-nil error means no operator was consulted: either ctx
+// cancelled, or the request is one this TUI cannot draw and was
+// refused before any modal opened (ErrElicitUnsupported). Both pair
+// the error with ElicitActionCancel, which is a placeholder and not
+// an answer — a host forwarding the result to an MCP server should
+// check err first (R-ELIC-3, issue #209).
 //
 // See R-ELIC-1 / R-ELIC-2 / R-ELIC-3 in requirements.md and
 // design.md §3.5.
@@ -99,7 +108,9 @@ type ElicitResult struct {
 	Values map[string]any
 }
 
-// ElicitAction is the operator's top-level decision.
+// ElicitAction is the operator's top-level decision. Every value of
+// it reports a keystroke an operator actually made; the TUI never
+// synthesizes one on their behalf.
 //
 // Decline and Cancel are different answers and the server that asked
 // may act on the difference: Decline is "I read this and I am saying
@@ -115,6 +126,28 @@ const (
 	ElicitActionDecline                     // form: ctrl+d; url: n
 	ElicitActionCancel                      // both: Esc
 )
+
+// ErrElicitUnsupported is returned by Elicit, wrapped, when the
+// request is one this TUI has no way to draw — see supportedElicit
+// for the screen. The result carries ElicitActionCancel, but the
+// error is the real answer and the Action is only there because the
+// return type has one.
+//
+// It exists because the alternative was worse. The refusal used to
+// travel as a bare ElicitActionDecline, so "I could not render this"
+// and "the operator read it and said no" reached the server as one
+// word, in the one case where no operator was consulted at all
+// (issue #209). MCP's vocabulary is three actions wide — accept,
+// decline, cancel — so a fourth ElicitAction would have to be
+// collapsed back onto one of them at the host boundary anyway; the
+// error return is already in Elicit's signature, already paired with
+// Cancel for the ctx path, and is where Go puts "this could not be
+// carried out".
+//
+// Hosts match it with errors.Is. The wrapped message names which
+// part of the request could not be drawn, and is the same reason the
+// operator sees in the transcript.
+var ErrElicitUnsupported = errors.New("elicit request is not renderable by this TUI")
 
 // elicitFlow couples one ElicitRequest with the response channel.
 // Same pattern as permissionFlow in prompter.go.
@@ -174,9 +207,10 @@ func (e *elicitor) Elicit(ctx context.Context, serverName string, req ElicitRequ
 
 // supportedElicit screens out schemas the modal can't render
 // (R-ELIC-3): nested objects, unsupported field types. Those are
-// declined automatically rather than opening a broken modal. For
-// form mode the host has already flattened to ElicitField; we trust
-// the conversion. For URL mode the URL must be non-empty.
+// refused automatically rather than opening a broken modal — as an
+// ErrElicitUnsupported, not as an operator's decline. For form mode
+// the host has already flattened to ElicitField; we trust the
+// conversion. For URL mode the URL must be non-empty.
 //
 // The screen runs on the Bubble Tea loop, in the elicitRequestMsg
 // handler, and not here in Elicit. R-ELIC-3 asks for the automatic
@@ -198,33 +232,52 @@ func supportedElicit(req ElicitRequest) bool {
 	}
 }
 
+// elicitUnsupportedReason names the part of the request the modal
+// could not draw, in one clause. It mirrors supportedElicit's own
+// arms rather than reading anything the server sent, so the screen
+// and the explanation cannot describe different failures — a reason
+// naming a cause the screen does not test for would be worse than no
+// reason at all. Both the operator's transcript row and the host's
+// error are built from this one function, which is what keeps the
+// two accounts of a refusal identical.
+func elicitUnsupportedReason(req ElicitRequest) string {
+	switch req.Mode {
+	case ElicitFormMode:
+		return "the form has no fields"
+	case ElicitURLMode:
+		return "the URL is empty"
+	default:
+		return "the request mode is not one this TUI renders"
+	}
+}
+
+// elicitUnsupportedError is what the server gets: ErrElicitUnsupported
+// so a host can match it with errors.Is, wrapping the same reason the
+// operator reads.
+func elicitUnsupportedError(req ElicitRequest) error {
+	return fmt.Errorf("%w: %s", ErrElicitUnsupported, elicitUnsupportedReason(req))
+}
+
 // elicitUnsupportedNotice is the R-ELIC-3 system message: what was
 // refused, which server asked, and which part of the request the
-// modal could not draw. The reason is derived from supportedElicit's
-// own arms rather than from anything the server sent, so the two
-// cannot describe different failures — a notice naming a cause the
-// screen does not test for would be worse than no notice.
+// modal could not draw.
+//
+// It says "without asking you" because that is the fact the operator
+// cannot otherwise recover. A refusal row that read "declined" would
+// leave them believing a decline had gone out over their name, which
+// is the same words-in-your-mouth problem one layer up (issue #209).
 //
 // The server name is the host's own label for the connection and is
 // spliced in as-is, the same way the modal title bar already renders
 // it. It is omitted rather than left as an empty gap when the host
 // passes nothing.
 func elicitUnsupportedNotice(serverName string, req ElicitRequest) string {
-	var reason string
-	switch req.Mode {
-	case ElicitFormMode:
-		reason = "the form has no fields"
-	case ElicitURLMode:
-		reason = "the URL is empty"
-	default:
-		reason = "the request mode is not one this TUI renders"
-	}
 	from := ""
 	if serverName != "" {
 		from = " from " + serverName
 	}
-	return "MCP elicitation" + from + ": schema unsupported (" + reason +
-		") — declined automatically"
+	return "MCP elicitation" + from + ": schema unsupported (" +
+		elicitUnsupportedReason(req) + ") — refused without asking you"
 }
 
 // nextRequest is the Bubble Tea side's blocking read; mirrors the
@@ -241,9 +294,15 @@ func (e *elicitor) nextRequest(ctx context.Context) (elicitFlow, bool) {
 	}
 }
 
-// dispatchResult writes the operator's submit / decline / cancel
-// to the pending flow. No-op when no flow is pending.
-func (e *elicitor) dispatchResult(r ElicitResult) {
+// dispatchResult writes the operator's submit / decline / cancel to
+// the pending flow. No-op when no flow is pending.
+//
+// err is non-nil only when the TUI is answering on its own account
+// rather than relaying an operator: today that is the
+// ErrElicitUnsupported refusal, which never opens a modal at all.
+// The elicitResponse.err field has carried this since the type was
+// written and nothing had ever set it (issue #209).
+func (e *elicitor) dispatchResult(r ElicitResult, err error) {
 	e.mu.Lock()
 	flow := e.pending
 	e.pending = nil
@@ -251,5 +310,5 @@ func (e *elicitor) dispatchResult(r ElicitResult) {
 	if flow == nil {
 		return
 	}
-	flow.response <- elicitResponse{result: r}
+	flow.response <- elicitResponse{result: r, err: err}
 }
