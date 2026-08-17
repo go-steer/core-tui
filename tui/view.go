@@ -218,17 +218,16 @@ func (m Model) View() tea.View {
 	// centered modal flip Options.PermissionLayout = PermissionOverlay.
 	//
 	// modalFrame retains the front-most modal's rendered block. It is
-	// what the cursor path measures to re-derive the origin
-	// lipgloss.Place gave it — a centered block's top-left cell is a
-	// function of its own size, so it has to be computed, not guessed.
+	// what the cursor path measures to re-derive the modal's origin —
+	// a centered block's top-left cell is a function of its own size,
+	// so it has to be computed, not guessed.
 	var modalFrame string
+	var hasModal bool
 	switch {
 	case m.pendingPermission != nil && m.opts.PermissionLayout == PermissionOverlay:
-		modalFrame = m.renderPermissionModal()
-		body = lipgloss.Place(m.width, m.height, lipgloss.Center, lipgloss.Center, modalFrame)
+		modalFrame, hasModal = m.renderPermissionModal(), true
 	case m.pendingElicit != nil:
-		modalFrame = m.renderElicitModal()
-		body = lipgloss.Place(m.width, m.height, lipgloss.Center, lipgloss.Center, modalFrame)
+		modalFrame, hasModal = m.renderElicitModal(), true
 	case m.pendingForm != nil:
 		// Embedded huh.Form (e.g. /pricing set) takes priority
 		// over all other overlays — its keystrokes are routed
@@ -236,14 +235,20 @@ func (m Model) View() tea.View {
 		// View returns a string (not bubbletea v2's tea.View),
 		// so wrap directly.
 		formView := m.pendingForm.View()
-		modalFrame = m.styles.ModalBorder.Padding(1, 2).Render(formView)
-		body = lipgloss.Place(m.width, m.height, lipgloss.Center, lipgloss.Center, modalFrame)
+		modalFrame, hasModal = m.styles.ModalBorder.Padding(1, 2).Render(formView), true
 	case m.sideAnswer != nil:
-		modalFrame = m.renderSideAnswer()
-		body = lipgloss.Place(m.width, m.height, lipgloss.Center, lipgloss.Center, modalFrame)
+		modalFrame, hasModal = m.renderSideAnswer(), true
 	case m.overlayStack.HasDialogs():
-		modalFrame = m.overlayStack.Render(m.width, &m)
-		body = lipgloss.Place(m.width, m.height, lipgloss.Center, lipgloss.Center, modalFrame)
+		modalFrame, hasModal = m.overlayStack.Render(m.width, &m), true
+	}
+	if hasModal {
+		// Composited over the body rather than placed instead of it
+		// (issue #156). This used to be five identical
+		// lipgloss.Place(m.width, m.height, Center, Center, ...)
+		// calls, which do not layer — Place discards the block handed
+		// to it and returns a fresh one — so opening any dialog wiped
+		// the transcript behind it. See composite.go.
+		body = compositeModal(body, modalFrame, m.width, m.height)
 	}
 
 	// Clamp the composed frame to the terminal (issue #102). Every
