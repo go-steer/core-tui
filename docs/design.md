@@ -796,6 +796,18 @@ present-continuous string replaces the rotation entirely. No new
   contract. The rule covers the `/cmd` path as well as bare keystrokes
   (issue #137): a slash command the operator asked for still can't be
   allowed to freeze the loop.
+- **A reply that has been overtaken is dropped, not rendered.** Every
+  off-loop reply carries the generation it left under, and `Update`
+  drops it when that generation has turned over — `sessionGen` for
+  anything session-scoped, `paletteSeq` for a palette fill, `slashSeq`
+  for a slash dispatch. `slashSeq` exists because slash commands are
+  typed back to back within one session: with the `SlashCommands()`
+  name match off-loop, an "unknown command /foo" verdict can arrive
+  after the operator has moved on, and a row blaming `/foo` printed
+  under `/help`'s output is worse than no row at all. The same stamp
+  keeps the multi-stage flows honest — `/switch <id>` enumerates
+  before it switches, and a superseded enumerate must never be allowed
+  to drive the switch.
 - **Nor do the `Options.*` host callbacks** (issue #137).
   `PersistModelChoice`, `PersistThemeChoice`, `PersistStatusLayout`
   and `PermissionMode.Set` / `.Persist` are plain func fields rather

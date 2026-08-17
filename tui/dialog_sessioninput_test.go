@@ -308,8 +308,7 @@ func TestSlashSwitch_ActionRowByID(t *testing.T) {
 	m := NewModel(Options{Agent: agent})
 	m.viewport.SetWidth(80)
 
-	out, _ := m.dispatchSlash("/switch +attach")
-	m = out.(Model)
+	m, _ = submitSwitch(t, m, "/switch +attach")
 
 	if !m.overlayStack.HasID(sessionInputDialogID) {
 		t.Errorf("/switch <action-id> should open the text input")
@@ -326,8 +325,7 @@ func TestSlashSwitch_PlainIDStillDirectJumps(t *testing.T) {
 	m := NewModel(Options{Agent: agent})
 	m.viewport.SetWidth(80)
 
-	out, _ := m.dispatchSlash("/switch other")
-	m = out.(Model)
+	m, _ = submitSwitch(t, m, "/switch other")
 
 	if m.overlayStack.HasDialogs() {
 		t.Errorf("a real session ID should switch directly, not open a dialog")

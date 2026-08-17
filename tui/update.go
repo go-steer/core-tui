@@ -743,6 +743,22 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		m.history.Append(Message{Role: RoleSystem, Text: renderHostCommandHelp(msg.specs)})
 		m.refreshAndScroll()
 		return m, nil
+	case switchLookupMsg:
+		// Stage one of `/switch <id>`. seq as well as gen: an
+		// enumerate the operator has already moved past must not be
+		// allowed to drive stage two.
+		if msg.gen != m.sessionGen || msg.seq != m.slashSeq {
+			return m, nil
+		}
+		return m, m.applySwitchLookup(msg)
+	case slashDispatchedMsg:
+		// The host's name match, and its InvokeSlash when the provider
+		// was the plain synchronous shape. Same seq guard, and here it
+		// is load-bearing for the NEGATIVE case — see the msg's godoc.
+		if msg.gen != m.sessionGen || msg.seq != m.slashSeq {
+			return m, nil
+		}
+		return m.applySlashDispatch(msg)
 
 	case inboxStateMsg:
 		if msg.gen != m.sessionGen {
@@ -2264,6 +2280,13 @@ func (m Model) dispatchSlash(text string) (tea.Model, tea.Cmd) {
 	name = strings.ToLower(name)
 	args = strings.TrimSpace(args)
 
+	// Every submitted /cmd turns the slash generation over, built-ins
+	// included: what makes a pending reply stale is the operator
+	// having moved on, and /help is as much moving on as /btw is.
+	// The two-stage paths stamp their Cmds with this and Update drops
+	// anything overtaken (model.go's slashSeq).
+	m.slashSeq++
+
 	if handled, model, cmd := m.dispatchBuiltinSlash(name, args); handled {
 		return model, cmd
 	}
@@ -2279,24 +2302,52 @@ func (m Model) dispatchSlash(text string) (tea.Model, tea.Cmd) {
 		return m, nil
 	}
 
-	matched := false
-	for _, spec := range provider.SlashCommands() {
-		if spec.Name == name || sliceContains(spec.Aliases, name) {
-			matched = true
-			break
-		}
-	}
-	if !matched {
+	// The name match reads the host's SlashCommands() and the
+	// synchronous InvokeSlash below took context.Background() — both
+	// on the event loop, the second one also with the contract
+	// inverted (issue #137). They move off together: the match is only
+	// ever asked in order to decide whether to invoke.
+	//
+	// Which of the three provider shapes will run is decided HERE, on
+	// the loop, by type assertion; the closure never asks the model
+	// anything. Only the plain synchronous shape can be driven to
+	// completion off-loop — the async ones return through Update so
+	// applySlashDispatch can arm the cancel func, the in-flight record
+	// and the toast, none of which a goroutine may touch.
+	_, bareAsync := provider.(AsyncSlashProvider)
+	_, preambleAsync := provider.(AsyncSlashProviderWithPreamble)
+	m.input.Reset()
+	m.refreshViewport()
+	return m, slashDispatchCmd(provider, m.sessionGen, m.slashSeq, name, args, !bareAsync && !preambleAsync)
+}
+
+// applySlashDispatch is the Update-side half of a host /cmd (issue
+// #137). Runs only once the gen and seq guards have passed, so an
+// "unknown command" row can no longer land under the output of
+// whatever the operator typed while the host was answering.
+//
+// The three shapes: no match at all, a plain provider already invoked
+// out of line, or an async provider still to be started.
+func (m Model) applySlashDispatch(msg slashDispatchedMsg) (tea.Model, tea.Cmd) {
+	if !msg.matched {
 		m.history.Append(Message{
 			Role: RoleSystem,
-			Text: "unknown command /" + name + " — type / to see what's available",
+			Text: "unknown command /" + msg.name + " — type / to see what's available",
 		})
-		m.input.Reset()
 		m.refreshViewport()
 		return m, nil
 	}
-
-	m.input.Reset()
+	if msg.invoked {
+		return m.applySlashResult(msg.name, msg.res, msg.err)
+	}
+	provider, ok := m.opts.Agent.(SlashProvider)
+	if !ok {
+		// The agent was replaced mid-match by one with no slash
+		// surface. Nothing to invoke and nothing worth saying — the
+		// swap itself already wrote its own row.
+		return m, nil
+	}
+	name, args := msg.name, msg.args
 	// Issue #10: hosts that implement AsyncSlashProvider (or the
 	// preamble variant from #16) get the non-blocking path so any
 	// network / file I/O the call needs runs off the Update
@@ -2343,8 +2394,12 @@ func (m Model) dispatchSlash(text string) (tea.Model, tea.Cmd) {
 		m.refreshViewport()
 		return m, m.invokeSlashAsync(asyncProv, ctx, name, args)
 	}
-	res, err := provider.InvokeSlash(context.Background(), name, args)
-	return m.applySlashResult(name, res, err)
+	// Neither async shape, and the match Cmd didn't invoke: the agent
+	// was swapped for a plain provider while the match was in flight.
+	// Re-issue under the current stamp rather than reaching for
+	// InvokeSlash from here — this is the one path back to the loop,
+	// and it is not going to become an unbounded inline call again.
+	return m, slashDispatchCmd(provider, m.sessionGen, m.slashSeq, name, args, true)
 }
 
 // refuseConcurrentSlash applies issue #13's concurrent-slash policy:
