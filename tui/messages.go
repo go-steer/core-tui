@@ -495,6 +495,29 @@ type switchLookupMsg struct {
 	row *SessionInfo
 }
 
+// sessionInputSubmittedMsg carries the outcome of a SessionInfo
+// action row's SessionInput.Submit — the "+ Attach to endpoint…"
+// closure, which the picker used to run inline from its text input's
+// Enter handler (issue #194).
+//
+// Stamped with the same gen + seq pair as switchLookupMsg, and for
+// the same reason: the dialog it answers can be dismissed, and the
+// operator can be somewhere else entirely by the time a wedged
+// endpoint gives up. rowID and value identify the dialog that asked
+// — see applySessionInputSubmit for why the stamp alone isn't enough
+// when the picker, which bumps no counter, is the way in.
+//
+// Success is applied through the ordinary sessionSwitchedMsg path
+// rather than carrying its own attach logic.
+type sessionInputSubmittedMsg struct {
+	gen    uint64
+	seq    uint64
+	rowID  string
+	value  string
+	target SwitchTarget
+	err    error
+}
+
 // slashDispatchedMsg carries the host-provider half of a `/cmd`: the
 // SlashCommands() name match, plus — for a plain SlashProvider — the
 // InvokeSlash that follows it, both inside one off-loop Cmd.

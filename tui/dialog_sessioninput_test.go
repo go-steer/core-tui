@@ -98,6 +98,36 @@ func pressEnter(m *Model) (bool, tea.Cmd) {
 	return m.overlayStack.HandleKeyMsg(tea.KeyPressMsg(tea.Key{Code: tea.KeyEnter}), m)
 }
 
+// commitAttach presses Enter on the text input and drives the commit
+// all the way through: SessionInput.Submit runs off the Update
+// goroutine now (issue #194), so Enter yields only a Cmd, and nothing
+// reaches the Model until that Cmd's reply has been fed back through
+// Update. Returns whatever the applied reply produced — the listener
+// batch, on a successful attach.
+//
+// The tests that care about the STAGING itself — that Enter is cheap,
+// that a second Enter is refused, that a dismissed dialog drops its
+// reply — drive the two halves by hand over in host_async_test.go.
+// This is for the ones that only care where the flow ends up.
+func commitAttach(t *testing.T, m *Model) tea.Cmd {
+	t.Helper()
+	consumed, cmd := pressEnter(m)
+	if !consumed {
+		t.Fatalf("enter on the text input was not consumed")
+	}
+	if cmd == nil {
+		t.Fatalf("enter produced no Cmd — SessionInput.Submit would never run")
+	}
+	msg := cmd()
+	sub, ok := msg.(sessionInputSubmittedMsg)
+	if !ok {
+		t.Fatalf("enter produced %T, want sessionInputSubmittedMsg", msg)
+	}
+	out, next := m.Update(sub)
+	*m = out.(Model)
+	return next
+}
+
 // TestSessionPicker_ActionRowOpensTextInput — Enter on a row with
 // Input set stacks a text input and leaves the picker underneath;
 // SwitchToSession never sees the action row's ID.
@@ -132,11 +162,8 @@ func TestSessionPicker_ActionRowSubmitAttaches(t *testing.T) {
 
 	openAttachRow(t, &m)
 	typeInto(t, m.overlayStack.Front(), &m, "http://otherhost:7778")
-	consumed, cmd := pressEnter(&m)
+	cmd := commitAttach(t, &m)
 
-	if !consumed {
-		t.Errorf("enter on the text input was not consumed")
-	}
 	if cmd == nil {
 		t.Errorf("expected the applySwitchTarget listener batch as a Cmd")
 	}
@@ -162,7 +189,7 @@ func TestSessionPicker_ActionRowSubmitError(t *testing.T) {
 
 	openAttachRow(t, &m)
 	typeInto(t, m.overlayStack.Front(), &m, "http://dead:1")
-	pressEnter(&m)
+	commitAttach(t, &m)
 
 	if m.opts.Agent != before {
 		t.Errorf("Agent must not swap when Submit fails")
@@ -186,7 +213,7 @@ func TestSessionPicker_ActionRowNilAgent(t *testing.T) {
 
 	openAttachRow(t, &m)
 	typeInto(t, m.overlayStack.Front(), &m, "x")
-	pressEnter(&m)
+	commitAttach(t, &m)
 
 	last := m.history.Snapshot()[m.history.Len()-1]
 	if last.Role != RoleError || !strings.Contains(last.Text, "nil Agent") {
