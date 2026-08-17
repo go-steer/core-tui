@@ -33,13 +33,55 @@ const sidebarWidth = 32
 // can't fit useful chat content next to a 32-col sidebar.
 const sidebarMinChatWidth = 40
 
-// wordWrap word-wraps s at width cols, preserving ANSI escapes from
-// any prior lipgloss styling. Width <= 0 returns s unchanged.
+// wordWrap wraps s to width cells, preferring to break at a space or
+// a hyphen and breaking mid-token when there is no other way to stay
+// inside the budget. Preserves ANSI escapes from any prior lipgloss
+// styling. Width <= 0 returns s unchanged.
+//
+// The two passes are both load-bearing and neither subsumes the
+// other. ansi.Wordwrap alone honours the breakpoints and then gives
+// up: a token with no space and no hyphen in it comes back whole, at
+// whatever width it happens to be, so the function bounded nothing at
+// all for exactly the inputs that most need bounding — a file path, a
+// URL, a base64 blob, a run of CJK, which has no breakpoints in it by
+// construction. ansi.Wrap alone bounds everything but is a poorer
+// wrapper for prose. Composing them is what lipgloss's own width
+// treatment does, and the second pass is a no-op on every line the
+// first one already fitted, so this changes nothing except the lines
+// that were over.
+//
+// Callers rely on the bound rather than on the backstops downstream
+// (chatCutLine in the transcript, fitRow in a modal body, clipFrame at
+// the frame edge). Those still catch an overrun; they just should not
+// be the only thing that does, and a wrapper that silently declines
+// to wrap is worse than no wrapper because it reads at every call
+// site as if the width has been dealt with.
 func wordWrap(s string, width int) string {
 	if width <= 0 {
 		return s
 	}
-	return ansi.Wordwrap(s, width, " -")
+	return ansi.Wrap(ansi.Wordwrap(s, width, " -"), width, " -")
+}
+
+// renderedWidth reports the cells s will occupy once lipgloss has
+// rendered it, which is not what lipgloss.Width reports.
+//
+// ansi.StringWidth — and so lipgloss.Width — prices a TAB at zero,
+// while lipgloss's own Render expands one to contentTabWidth spaces
+// on the way to the terminal. Measure with the first and pad with the
+// answer and the row comes out contentTabWidth cells too wide per tab,
+// because the measurement was taken against a string that was about to
+// get wider. Every caller that pads a line it has NOT yet rendered
+// wants this function; a caller measuring output that lipgloss has
+// already been through wants lipgloss.Width, since the expansion has
+// happened and there are no tabs left to price.
+//
+// This deliberately prices rather than expands, per the note on
+// contentTabWidth: the expansion belongs to lipgloss, and doing it
+// here as well is how a row ends up measured at one width and drawn
+// at another.
+func renderedWidth(s string) int {
+	return lipgloss.Width(s) + strings.Count(s, "\t")*contentTabWidth
 }
 
 // wordWrapIndent wraps s line-by-line at width and prefixes each
@@ -835,7 +877,11 @@ func (m Model) renderMessage(msg Message) string {
 			if i == 0 {
 				padTo = width - lipgloss.Width(prefixStyled)
 			}
-			pad := padTo - lipgloss.Width(line)
+			// renderedWidth, not lipgloss.Width: the pad is
+			// computed here and the tabs are expanded by the
+			// Render on the next line, so measuring the raw line
+			// measures a string that is about to get wider.
+			pad := padTo - renderedWidth(line)
 			if pad < 0 {
 				pad = 0
 			}
