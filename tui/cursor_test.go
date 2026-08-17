@@ -27,6 +27,7 @@
 package tui
 
 import (
+	"fmt"
 	"strconv"
 	"strings"
 	"testing"
@@ -627,4 +628,194 @@ func TestPlaceCenterOffset(t *testing.T) {
 func lipglossPlaceHorizontalPad(block string, width int) int {
 	placed := lipgloss.PlaceHorizontal(width, lipgloss.Center, block)
 	return len(placed) - len(strings.TrimLeft(placed, " "))
+}
+
+// --- the sidebar column (issue #203) -------------------------------
+
+// stackColumnReference is the width-setting lipgloss Style that
+// stackColumn replaced, kept verbatim as the oracle the substitution
+// is checked against. Written out rather than called through
+// stackColumn: a test whose expected value comes from the code under
+// test proves only that the code agrees with itself.
+func stackColumnReference(parts []string, width int) string {
+	return lipgloss.NewStyle().Width(width).Render(
+		lipgloss.JoinVertical(lipgloss.Left, parts...),
+	)
+}
+
+// columnParts are stacks shaped like the ones View hands the sidebar
+// branch — a multi-row block, a one-row block, styling that is closed
+// and styling that is left open, wide runes, and the empty part a
+// conditional panel contributes when it is closed.
+var columnParts = []struct {
+	name  string
+	parts []string
+	// diverges names the one input where stackColumn is deliberately
+	// not byte-identical to the Style it replaced, and why. Empty
+	// means the two must agree exactly.
+	diverges string
+}{
+	{name: "one short row", parts: []string{"hi"}},
+	{name: "several short rows", parts: []string{"a\nb\nc", "d"}},
+	{name: "a row at exactly the width", parts: []string{"0123456789"}},
+	{name: "a blank part", parts: []string{"a", "", "b"}},
+	{name: "trailing spaces", parts: []string{"ab   "}},
+	{name: "closed sgr", parts: []string{"\x1b[31mred\x1b[0m"}},
+	{
+		name:  "open sgr",
+		parts: []string{"\x1b[31mred"},
+		diverges: "fitRow closes styling the row left open; " +
+			"see TestStackColumn_ClosesStylingBeforeTheDivider",
+	},
+	{name: "wide runes", parts: []string{"日本語"}},
+	{name: "combining", parts: []string{"éx"}},
+	{name: "one row over the width", parts: []string{"a", strings.Repeat("wide ", 6), "b"}},
+	{name: "every row over the width", parts: []string{strings.Repeat("x", 40), strings.Repeat("y", 40)}},
+	{name: "styled and over the width", parts: []string{"\x1b[31m" + strings.Repeat("red ", 8) + "\x1b[0m"}},
+	{name: "wide runes over the width", parts: []string{strings.Repeat("日", 20)}},
+}
+
+// TestStackColumn_KeepsTheRowCount is the invariant the input-box
+// origin rests on, and the one the lipgloss Style did not hold.
+//
+// View computes that origin from the PARTS, before they are joined —
+// it has to, because which parts get emitted is a run-time decision.
+// The composition is therefore only allowed to pad and to cut, never
+// to reflow: one row in, one row out, whatever the row contains. A
+// wrap here moves the composer down the frame and leaves the caret
+// pointing at whatever used to be there.
+func TestStackColumn_KeepsTheRowCount(t *testing.T) {
+	for _, tc := range columnParts {
+		t.Run(tc.name, func(t *testing.T) {
+			for _, width := range []int{1, 5, 10, 20, 65} {
+				want := stackedHeight(tc.parts)
+				got := lipgloss.Height(stackColumn(tc.parts, width))
+				if got != want {
+					t.Errorf("width %d: column is %d rows, stackedHeight predicted %d",
+						width, got, want)
+				}
+			}
+		})
+	}
+}
+
+// TestStackColumn_IsExactlyTheWidth pins the other half of what the
+// Style was there for: the sidebar lands at a fixed column only
+// because the left block is padded out to chatWidth however short its
+// rows are.
+func TestStackColumn_IsExactlyTheWidth(t *testing.T) {
+	for _, tc := range columnParts {
+		t.Run(tc.name, func(t *testing.T) {
+			for _, width := range []int{1, 5, 10, 20, 65} {
+				for i, row := range strings.Split(stackColumn(tc.parts, width), "\n") {
+					if got := ansi.StringWidth(row); got != width {
+						t.Errorf("width %d: row %d is %d cells (%q)", width, i, got, row)
+					}
+				}
+			}
+		})
+	}
+}
+
+// TestStackColumn_MatchesTheStyleItReplaced checks the substitution
+// where it is supposed to be invisible. Wrapping is the only
+// behaviour being removed, so on any stack whose rows already fit,
+// stackColumn must produce the same bytes the Style did — otherwise
+// the change is not "stop wrapping", it is a reskin of the sidebar
+// nobody asked for.
+func TestStackColumn_MatchesTheStyleItReplaced(t *testing.T) {
+	const width = 20
+	for _, tc := range columnParts {
+		t.Run(tc.name, func(t *testing.T) {
+			if tc.diverges != "" {
+				t.Skip(tc.diverges)
+			}
+			joined := lipgloss.JoinVertical(lipgloss.Left, tc.parts...)
+			for _, row := range strings.Split(joined, "\n") {
+				if ansi.StringWidth(row) > width {
+					t.Skip("this stack overflows the column; equivalence is not claimed there")
+				}
+			}
+			want := stackColumnReference(tc.parts, width)
+			if got := stackColumn(tc.parts, width); got != want {
+				t.Errorf("stackColumn = %q\n     Style = %q", got, want)
+			}
+		})
+	}
+}
+
+// TestStackColumn_ClosesStylingBeforeTheDivider pins the one place
+// the substitution is deliberately NOT byte-identical to the Style it
+// replaced.
+//
+// JoinHorizontal glues the sidebar divider onto the right of every
+// row of this column, so a row that ended with a colour still
+// switched on used to bleed it across the divider and into the
+// sidebar. fitRow closes it, which is why the equivalence test above
+// exempts that one input rather than pretending the two agree.
+func TestStackColumn_ClosesStylingBeforeTheDivider(t *testing.T) {
+	const width = 20
+	got := stackColumn([]string{"\x1b[31mred"}, width)
+	if !strings.HasSuffix(got, "\x1b[m") && !strings.HasSuffix(got, "\x1b[0m") {
+		t.Errorf("row with an open colour is %q; it must close before the divider", got)
+	}
+	if plain := stackColumn([]string{"red"}, width); strings.Contains(plain, "\x1b") {
+		t.Errorf("row with no styling picked up an escape: %q", plain)
+	}
+}
+
+// TestCursor_OverlongPaletteRowDoesNotMoveTheCaret is the regression
+// witness, and it is a live one rather than a hypothetical: the
+// palette composes its rows as `marker + display + pad + description`
+// and clamps the pad at one space without ever truncating, so a host
+// whose SlashCommandSpec carries a long Description — or an @-palette
+// entry with a long path — hands the sidebar column a row wider than
+// the column.
+//
+// Before the fix the caret landed on the input box's TOP RULE with
+// one such row and, with three, inside the palette itself, two rows
+// above where the operator was typing. The distance is a function of
+// how many rows overflowed and by how much, which is why this is
+// checked against the composed frame rather than against an offset.
+//
+// StatusHeader is the control. Its stack is joined without a
+// width-setting Style, so an over-wide row is truncated by clipFrame
+// at the end and the row count never moves; if this arm ever starts
+// failing, the header branch has grown the same defect.
+func TestCursor_OverlongPaletteRowDoesNotMoveTheCaret(t *testing.T) {
+	const w, h = 100, 40
+	for _, layout := range []struct {
+		name string
+		lay  StatusLayout
+	}{{"sidebar", StatusSidebar}, {"header", StatusHeader}} {
+		for _, rows := range []int{0, 1, 3} {
+			t.Run(fmt.Sprintf("%s/%d-overlong-rows", layout.name, rows), func(t *testing.T) {
+				m := typeIntoModel(cursorModel(t, layout.lay, w, h), "/zz")
+				if m.palette == nil {
+					t.Fatal("typing / did not open the slash palette")
+				}
+				if rows > 0 {
+					m.palette.applyItems(overlongPaletteItems(rows))
+				}
+				assertCursorFollows(t, m.View(), DefaultPromptGlyph+"/zz")
+			})
+		}
+	}
+}
+
+// overlongPaletteItems builds n rows whose description alone is wider
+// than the chat column at the width the test drives, which is how a
+// host-supplied command reaches the frame over-wide today.
+func overlongPaletteItems(n int) []paletteItem {
+	out := make([]paletteItem, 0, n)
+	for i := range n {
+		name := "zz" + strconv.Itoa(i)
+		out = append(out, paletteItem{
+			Name:        name,
+			Display:     "/" + name,
+			Description: strings.Repeat("a long host-supplied description ", 4),
+			Available:   true,
+		})
+	}
+	return out
 }

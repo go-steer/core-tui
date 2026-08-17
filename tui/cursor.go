@@ -43,6 +43,8 @@
 package tui
 
 import (
+	"strings"
+
 	"charm.land/bubbles/v2/textinput"
 	tea "charm.land/bubbletea/v2"
 	"charm.land/lipgloss/v2"
@@ -167,6 +169,42 @@ func stackedHeight(parts []string) int {
 		n += lipgloss.Height(p)
 	}
 	return n
+}
+
+// stackColumn joins parts into a column exactly width cells wide,
+// WITHOUT changing the row count. It is the other half of
+// stackedHeight's contract and lives beside it for that reason: one
+// predicts where a part lands, the other composes the column, and the
+// prediction is only true if the composition cannot move a row.
+//
+// This used to be
+//
+//	lipgloss.NewStyle().Width(width).Render(lipgloss.JoinVertical(...))
+//
+// and the swap is issue #203 — the same substitution fitRow made for
+// the modal body in #157, for the same reason. A width-setting
+// lipgloss Style is a WORD-WRAPPER, not a padder: handed a row wider
+// than the column it breaks it onto a second line, and the caller's
+// row arithmetic — computed from the parts, before the join — never
+// hears about it. Every part below the break shifts down by as many
+// rows as the wrap added, which is a function of the CONTENT, so the
+// error is not a constant anyone could correct for downstream.
+//
+// The row that overflows is a defect wherever it came from; what this
+// function guarantees is only that it stays one row, so the geometry
+// around it survives. Truncation is what buys that. Widening the
+// column instead would push the sidebar off the right edge, and
+// wrapping is exactly what is being removed.
+func stackColumn(parts []string, width int) string {
+	joined := lipgloss.JoinVertical(lipgloss.Left, parts...)
+	if width <= 0 {
+		return joined
+	}
+	rows := strings.Split(joined, "\n")
+	for i, row := range rows {
+		rows[i] = fitRow(row, width)
+	}
+	return strings.Join(rows, "\n")
 }
 
 // frameCursor resolves tea.View.Cursor for the frame View has just
