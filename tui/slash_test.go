@@ -247,27 +247,40 @@ func TestSlashClear_OtherTextCancels(t *testing.T) {
 }
 
 // asyncSlashAgent stubs SlashProvider + AsyncSlashProvider so the
-// dispatch tests can exercise the non-blocking path (issue #10).
-// The channel is buffered + pre-loaded so the goroutine spawned by
-// invokeSlashAsync drains immediately and the test doesn't need to
-// orchestrate timing.
+// dispatch tests can exercise the non-blocking path (issues #10 and
+// #16).
+//
+// One stub for the whole interface: preamble "" is the no-preamble
+// case, and a test that wants the result back immediately pre-loads
+// out, while a test that wants the in-flight state to sit still
+// (issue #13) leaves the buffered channel empty. Until v0.21.0 there
+// were three of these, one per shape the two interfaces could be
+// satisfied in.
 type asyncSlashAgent struct {
-	specs []SlashCommandSpec
-	out   chan SlashResultOrErr
-	calls int
+	specs    []SlashCommandSpec
+	preamble string
+	out      chan SlashResultOrErr
+	calls    int
+	ctx      context.Context // captured at InvokeSlashAsync time
 }
 
 func (a *asyncSlashAgent) Run(_ context.Context, _ string) iter.Seq2[Event, error] {
 	return func(_ func(Event, error) bool) {}
 }
 func (a *asyncSlashAgent) SlashCommands() []SlashCommandSpec { return a.specs }
+
+// InvokeSlash is the SlashProvider fallback. dispatchSlash requires
+// SlashProvider for command-name lookup before it type-asserts to
+// the async interface; an error here is a tripwire — the async path
+// should always win on an agent satisfying both.
 func (a *asyncSlashAgent) InvokeSlash(_ context.Context, _, _ string) (SlashResult, error) {
 	a.calls++
 	return SlashResult{}, errors.New("should not be called when AsyncSlashProvider is satisfied")
 }
-func (a *asyncSlashAgent) InvokeSlashAsync(_ context.Context, _, _ string) <-chan SlashResultOrErr {
+func (a *asyncSlashAgent) InvokeSlashAsync(ctx context.Context, _, _ string) (string, <-chan SlashResultOrErr) {
 	a.calls++
-	return a.out
+	a.ctx = ctx
+	return a.preamble, a.out
 }
 
 func TestDispatchSlash_AsyncPathReturnsCmd(t *testing.T) {
@@ -336,29 +349,8 @@ func TestDispatchSlash_SyncFallbackWhenNoAsync(t *testing.T) {
 	}
 }
 
-// blockingAsyncSlashAgent stubs AsyncSlashProvider with a channel
-// the test controls — useful for verifying the in-flight state
-// (issue #13) without racing the result back too quickly.
-type blockingAsyncSlashAgent struct {
-	specs []SlashCommandSpec
-	out   chan SlashResultOrErr
-	ctx   context.Context // captured at InvokeSlashAsync time
-}
-
-func (a *blockingAsyncSlashAgent) Run(_ context.Context, _ string) iter.Seq2[Event, error] {
-	return func(_ func(Event, error) bool) {}
-}
-func (a *blockingAsyncSlashAgent) SlashCommands() []SlashCommandSpec { return a.specs }
-func (a *blockingAsyncSlashAgent) InvokeSlash(_ context.Context, _, _ string) (SlashResult, error) {
-	return SlashResult{}, errors.New("should not be called")
-}
-func (a *blockingAsyncSlashAgent) InvokeSlashAsync(ctx context.Context, _, _ string) <-chan SlashResultOrErr {
-	a.ctx = ctx
-	return a.out
-}
-
 func TestDispatchSlash_Async_ArmsInFlightAndStickyToast(t *testing.T) {
-	agent := &blockingAsyncSlashAgent{
+	agent := &asyncSlashAgent{
 		specs: []SlashCommandSpec{{Name: "compact"}},
 		out:   make(chan SlashResultOrErr, 1),
 	}
@@ -420,7 +412,7 @@ func TestUpdate_SlashResultMsg_ClearsInFlightAndToast(t *testing.T) {
 func TestDispatchSlash_Async_RefusesConcurrent(t *testing.T) {
 	// First /compact arms the in-flight state. The follow-up /btw
 	// must be refused with a system note instead of dispatching.
-	agent := &blockingAsyncSlashAgent{
+	agent := &asyncSlashAgent{
 		specs: []SlashCommandSpec{{Name: "compact"}, {Name: "btw"}},
 		out:   make(chan SlashResultOrErr, 1),
 	}
@@ -553,43 +545,14 @@ func TestRenderStatusLine_NoSegmentWhenIdle(t *testing.T) {
 	}
 }
 
-// preambleAsyncSlashAgent stubs the AsyncSlashProviderWithPreamble
-// variant (issue #16). The host pre-computes the preamble string,
-// then returns it alongside the result channel. The channel is
-// buffered so the goroutine spawned by awaitSlashChannel drains
-// immediately without orchestration.
-type preambleAsyncSlashAgent struct {
-	specs    []SlashCommandSpec
-	preamble string
-	out      chan SlashResultOrErr
-	ctx      context.Context // captured at dispatch
-}
-
-func (a *preambleAsyncSlashAgent) Run(_ context.Context, _ string) iter.Seq2[Event, error] {
-	return func(_ func(Event, error) bool) {}
-}
-func (a *preambleAsyncSlashAgent) SlashCommands() []SlashCommandSpec { return a.specs }
-
-// InvokeSlash is the SlashProvider fallback. dispatchSlash requires
-// SlashProvider for command-name lookup before it type-asserts to
-// the async variant; an error here is a tripwire — the preamble
-// path should always win on agents satisfying both.
-func (a *preambleAsyncSlashAgent) InvokeSlash(_ context.Context, _, _ string) (SlashResult, error) {
-	return SlashResult{}, errors.New("should not be called when AsyncSlashProviderWithPreamble is satisfied")
-}
-func (a *preambleAsyncSlashAgent) InvokeSlashAsync(ctx context.Context, _, _ string) (string, <-chan SlashResultOrErr) {
-	a.ctx = ctx
-	return a.preamble, a.out
-}
-
-func TestDispatchSlash_PreambleVariant_AppendsAtDispatch(t *testing.T) {
+func TestDispatchSlash_Async_PreambleAppendsAtDispatch(t *testing.T) {
 	// Preamble is a non-empty string → core-tui should append a
 	// RoleSystem row to history at dispatch time (before the result
 	// channel is drained). Solves issue #16: operator sees chat-
 	// visible feedback immediately instead of just the bottom toast.
 	ch := make(chan SlashResultOrErr, 1)
 	ch <- SlashResultOrErr{Res: SlashResult{SystemMessage: "done"}}
-	agent := &preambleAsyncSlashAgent{
+	agent := &asyncSlashAgent{
 		specs:    []SlashCommandSpec{{Name: "done"}},
 		preamble: "ℹ Capturing checkpoint summary…",
 		out:      ch,
@@ -611,7 +574,7 @@ func TestDispatchSlash_PreambleVariant_AppendsAtDispatch(t *testing.T) {
 	if !strings.Contains(last.Text, "Capturing checkpoint summary") {
 		t.Errorf("preamble text not preserved, got: %q", last.Text)
 	}
-	// In-flight state armed identically to the bare variant.
+	// In-flight state armed the same as a dispatch with no preamble.
 	if got.inFlightSlash == nil || got.inFlightSlash.name != "done" {
 		t.Errorf("expected inFlightSlash{name=done}, got %+v", got.inFlightSlash)
 	}
@@ -620,12 +583,13 @@ func TestDispatchSlash_PreambleVariant_AppendsAtDispatch(t *testing.T) {
 	}
 }
 
-func TestDispatchSlash_PreambleVariant_EmptyPreambleSkipsRow(t *testing.T) {
+func TestDispatchSlash_Async_EmptyPreambleSkipsRow(t *testing.T) {
 	// Empty preamble is the "no preamble" signal — the row is
-	// skipped and behavior matches the bare AsyncSlashProvider.
+	// skipped and everything else about the dispatch is unchanged.
+	// This is the case the deleted bare interface used to serve.
 	ch := make(chan SlashResultOrErr, 1)
 	ch <- SlashResultOrErr{Res: SlashResult{SystemMessage: "ok"}}
-	agent := &preambleAsyncSlashAgent{
+	agent := &asyncSlashAgent{
 		specs:    []SlashCommandSpec{{Name: "compact"}},
 		preamble: "",
 		out:      ch,
@@ -642,13 +606,13 @@ func TestDispatchSlash_PreambleVariant_EmptyPreambleSkipsRow(t *testing.T) {
 	}
 }
 
-func TestDispatchSlash_PreambleVariant_DrainsResultChannel(t *testing.T) {
-	// The Cmd returned by the preamble path must drain one value
-	// from the host's result channel — same single-shot semantics
-	// as the bare variant.
+func TestDispatchSlash_Async_PreambleDrainsResultChannel(t *testing.T) {
+	// The Cmd returned by a dispatch with a preamble must still
+	// drain one value from the host's result channel — the preamble
+	// does not change the single-shot semantics.
 	ch := make(chan SlashResultOrErr, 1)
 	ch <- SlashResultOrErr{Res: SlashResult{ModalAnswer: &SideAnswer{Question: "q?", Answer: "a."}}}
-	agent := &preambleAsyncSlashAgent{
+	agent := &asyncSlashAgent{
 		specs:    []SlashCommandSpec{{Name: "done"}},
 		preamble: "checkpointing…",
 		out:      ch,
@@ -667,13 +631,12 @@ func TestDispatchSlash_PreambleVariant_DrainsResultChannel(t *testing.T) {
 	}
 }
 
-func TestDispatchSlash_PreambleVariant_PassesCancellableCtx(t *testing.T) {
-	// The preamble variant must thread a cancellable ctx to the
-	// host (same as the bare variant) so Esc can cancel — and
-	// the post-dispatch Model's cancelSlash, when fired, must
-	// propagate cancellation to that ctx.
+func TestDispatchSlash_Async_PassesCancellableCtx(t *testing.T) {
+	// Dispatch must thread a cancellable ctx to the host so Esc
+	// can cancel — and the post-dispatch Model's cancelSlash, when
+	// fired, must propagate cancellation to that ctx.
 	ch := make(chan SlashResultOrErr, 1)
-	agent := &preambleAsyncSlashAgent{
+	agent := &asyncSlashAgent{
 		specs:    []SlashCommandSpec{{Name: "done"}},
 		preamble: "running…",
 		out:      ch,
@@ -702,12 +665,13 @@ func TestDispatchSlash_PreambleVariant_PassesCancellableCtx(t *testing.T) {
 	}
 }
 
-func TestDispatchSlash_PreambleVariant_RefusesConcurrent(t *testing.T) {
-	// Concurrent-slash refusal (#13) applies equally to the
-	// preamble path — second dispatch while one is in flight must
-	// log a system note and return nil Cmd.
+func TestDispatchSlash_Async_RefusalAddsNoSecondPreamble(t *testing.T) {
+	// Concurrent-slash refusal (#13) fires BEFORE the preamble is
+	// computed: a second dispatch while one is in flight logs the
+	// refusal and returns a nil Cmd, and must not also append a
+	// second "running…" row for a call that never started.
 	ch1 := make(chan SlashResultOrErr, 1)
-	agent := &preambleAsyncSlashAgent{
+	agent := &asyncSlashAgent{
 		specs:    []SlashCommandSpec{{Name: "done"}, {Name: "compact"}},
 		preamble: "first running…",
 		out:      ch1,

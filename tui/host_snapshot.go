@@ -21,7 +21,7 @@ import (
 )
 
 // hostSnapshot caches the host's StatusReporter + UsageTracker +
-// SubagentLister reads so the render path never calls the host from
+// SubagentReporter reads so the render path never calls the host from
 // inside View().
 //
 // Why this matters: bubble-tea runs Update and View on a single event-
@@ -48,11 +48,11 @@ type hostSnapshot struct {
 	winUsed   int // UsageTracker.ContextWindowUsed()
 	winSize   int // UsageTracker.ContextWindowSize()
 
-	// hasSubagents reports that a SubagentLister was wired, so an
+	// hasSubagents reports that a SubagentReporter was wired, so an
 	// empty subagents slice means "none running" rather than "no
 	// capability". The sidebar renders a different row for each.
 	hasSubagents bool
-	subagents    []SubagentInfo // SubagentLister.Subagents()
+	subagents    []SubagentInfo // SubagentReporter.Subagents()
 }
 
 // hostSnapshotMsg carries a completed off-loop refresh back into Update.
@@ -80,10 +80,10 @@ const hostSnapshotInterval = time.Second
 // pullHostSnapshot reads the host capabilities once. Runs inside the
 // refresh Cmd's goroutine (off the event loop), never from View(). Every
 // argument is nil-safe: a host may implement none, some, or all.
-func pullHostSnapshot(reporter StatusReporter, tracker UsageTracker, lister SubagentLister) hostSnapshot {
+func pullHostSnapshot(status StatusReporter, tracker UsageTracker, subs SubagentReporter) hostSnapshot {
 	snap := hostSnapshot{valid: true}
-	if reporter != nil {
-		s := reporter.Status()
+	if status != nil {
+		s := status.Status()
 		snap.modelName = s.ModelName
 		snap.provider = s.Provider
 	}
@@ -94,9 +94,9 @@ func pullHostSnapshot(reporter StatusReporter, tracker UsageTracker, lister Suba
 		snap.winUsed = tracker.ContextWindowUsed()
 		snap.winSize = tracker.ContextWindowSize()
 	}
-	if lister != nil {
+	if subs != nil {
 		snap.hasSubagents = true
-		snap.subagents = lister.Subagents()
+		snap.subagents = subs.Subagents()
 	}
 	return snap
 }
@@ -107,15 +107,15 @@ func pullHostSnapshot(reporter StatusReporter, tracker UsageTracker, lister Suba
 // sessionGen are captured at construction so the closure doesn't touch the
 // model from its goroutine.
 func (m Model) refreshHostSnapshotCmd() tea.Cmd {
-	reporter, _ := m.opts.Agent.(StatusReporter)
-	lister, _ := m.opts.Agent.(SubagentLister)
+	status, _ := m.opts.Agent.(StatusReporter)
+	subs, _ := m.opts.Agent.(SubagentReporter)
 	tracker := m.opts.UsageTracker
-	if reporter == nil && tracker == nil && lister == nil {
+	if status == nil && tracker == nil && subs == nil {
 		return nil
 	}
 	gen := m.sessionGen
 	return func() tea.Msg {
-		return hostSnapshotMsg{gen: gen, snap: pullHostSnapshot(reporter, tracker, lister)}
+		return hostSnapshotMsg{gen: gen, snap: pullHostSnapshot(status, tracker, subs)}
 	}
 }
 

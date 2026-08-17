@@ -132,6 +132,11 @@ func (a *slowAgent) Subagents() []SubagentInfo {
 	return a.subs
 }
 
+func (a *slowAgent) SubagentEvents(context.Context, string, int64) (SubagentEventPage, error) {
+	a.sleep()
+	return SubagentEventPage{}, nil
+}
+
 func (a *slowAgent) SlashCommands() []SlashCommandSpec {
 	a.sleep()
 	return a.specs
@@ -676,7 +681,7 @@ func TestSidebarSubagents_ReadsTheSnapshot(t *testing.T) {
 
 	cmd := m.refreshHostSnapshotCmd()
 	if cmd == nil {
-		t.Fatalf("a wired SubagentLister must start the snapshot cycle")
+		t.Fatalf("a wired SubagentReporter must start the snapshot cycle")
 	}
 	out, _ := m.Update(cmd())
 	m = out.(Model)
@@ -1111,10 +1116,10 @@ func TestHelpCommands_HostSectionArrivesSeparately(t *testing.T) {
 // resolves against the off-loop hostSnapshot roster instead of calling
 // Subagents() from Update.
 func TestSubagentDetail_ResolvesFromTheSnapshot(t *testing.T) {
-	agent := &slowSubagentHost{slowAgent: slowAgent{
+	agent := &slowAgent{
 		id:   "slow",
 		subs: []SubagentInfo{{Name: "auditor", Status: "running"}},
-	}}
+	}
 	m := NewModel(Options{Agent: agent})
 	m.width, m.height = 120, 40
 	m.viewport.SetWidth(80)
@@ -1145,15 +1150,6 @@ func TestSubagentDetail_ResolvesFromTheSnapshot(t *testing.T) {
 	if d.name != "auditor" {
 		t.Errorf("overlay targets %q, want the snapshot's auditor", d.name)
 	}
-}
-
-// slowSubagentHost adds SubagentEventReader to slowAgent so the
-// drill-down path is reachable.
-type slowSubagentHost struct{ slowAgent }
-
-func (h *slowSubagentHost) SubagentEvents(context.Context, string, int64) (SubagentEventPage, error) {
-	h.sleep()
-	return SubagentEventPage{}, nil
 }
 
 // TestIssue137Msgs_StaleGenDropped — every message type this change

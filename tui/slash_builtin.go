@@ -358,20 +358,19 @@ func (m Model) dispatchBuiltinSlash(name, args string) (bool, tea.Model, tea.Cmd
 			m.refreshAndScroll()
 			return true, m, cmd
 		}
-		lister, ok := m.opts.Agent.(SubagentLister)
+		reporter, ok := m.opts.Agent.(SubagentReporter)
 		if !ok {
-			m.history.Append(Message{Role: RoleSystem, Text: "/subagents: agent doesn't implement SubagentLister"})
+			m.history.Append(Message{Role: RoleSystem, Text: "/subagents: agent doesn't implement SubagentReporter"})
 			m.input.Reset()
 			m.refreshAndScroll()
 			return true, m, nil
 		}
 		// The sidebar's copy of this read comes from hostSnapshot; the
 		// slash path wants a fresh pull, and gets it off-loop (#137).
-		_, drillable := m.opts.Agent.(SubagentEventReader)
 		m.history.Append(Message{Role: RoleSystem, Text: "/subagents: reading the roster…"})
 		m.input.Reset()
 		m.refreshAndScroll()
-		return true, m, subagentRosterCmd(lister, m.sessionGen, drillable)
+		return true, m, subagentRosterCmd(reporter, m.sessionGen)
 
 	case "keys":
 		m.history.Append(Message{Role: RoleSystem, Text: m.renderKeysDiagnostic()})
@@ -844,73 +843,47 @@ func (m Model) renderStats() string {
 	if model := m.displayModelName(); model != "" {
 		fmt.Fprintf(&b, "  Model:      %s\n", model)
 	}
-	// Per-model breakdown rows. Two sources, push wins (issue #38):
+	// Per-model breakdown rows, from m.sessionUsage.ByModel —
+	// populated by push-mode SSE usage-update events from a remote
+	// daemon (v0.9.0+, issue #38). Authoritative in remote/attach
+	// mode because it reflects the daemon's own tracker, which the
+	// local UsageTracker can't observe directly.
 	//
-	//  1. m.sessionUsage.ByModel — populated by push-mode SSE
-	//     usage-update events from a remote daemon (v0.9.0+).
-	//     Authoritative in remote/attach mode because it reflects
-	//     the daemon's own tracker, which the local UsageTracker
-	//     can't observe directly.
-	//  2. tracker.SessionByModel() — local tracker implementing
-	//     SessionByModelTracker (issue #18 path). Used in embedded
-	//     mode where the local tracker IS the source of truth,
-	//     and as fallback when the push path hasn't populated
-	//     sessionUsage yet.
+	// Until v0.21.0 there was a second source: a local tracker
+	// implementing the optional SessionByModelTracker (issue #18).
+	// Nothing ever implemented it — not the reference host, not
+	// either example adapter — so the fallback branch was dead in
+	// every configuration, and embedded mode has been reading the
+	// push path all along. See docs/api-audit.md §5.2.
 	//
-	// Single-entry / empty maps in either source are skipped — the
-	// breakdown row would just restate SessionTotals.
-	switch {
-	case m.sessionUsage != nil && len(m.sessionUsage.ByModel) > 1:
-		b.WriteString(formatModelBreakdown(usageByModelToTotals(m.sessionUsage.ByModel)))
-	default:
-		if mt, ok := tracker.(SessionByModelTracker); ok {
-			if breakdown := mt.SessionByModel(); len(breakdown) > 1 {
-				b.WriteString(formatModelBreakdown(breakdown))
-			}
-		}
+	// Single-entry / empty maps are skipped — the breakdown row
+	// would just restate SessionTotals.
+	if m.sessionUsage != nil && len(m.sessionUsage.ByModel) > 1 {
+		b.WriteString(formatModelBreakdown(m.sessionUsage.ByModel))
 	}
 	return strings.TrimRight(b.String(), "\n")
 }
 
-// usageByModelToTotals converts a push-mode UsageByModel map
-// (the SSE usage-update payload's per-model breakdown) to the
-// pull-mode ModelTotals map so formatModelBreakdown can render
-// both sources through the same code path. Field mapping is
-// direct (TokensIn→InputTokens, TokensOut→OutputTokens; Turns +
-// CostUSD identical).
-func usageByModelToTotals(byModel map[string]UsageByModel) map[string]ModelTotals {
-	out := make(map[string]ModelTotals, len(byModel))
-	for name, u := range byModel {
-		out[name] = ModelTotals{
-			Turns:        u.Turns,
-			InputTokens:  u.TokensIn,
-			OutputTokens: u.TokensOut,
-			CostUSD:      u.CostUSD,
-		}
-	}
-	return out
-}
-
-// formatModelBreakdown renders the SessionByModel map as a
+// formatModelBreakdown renders the per-model usage map as a
 // "Models:" block under /stats. Entries are sorted by descending
 // CostUSD (priciest first) so the operator's eye lands on the
 // dominant tier; ties broken by descending output tokens, then
 // by model name for stable order.
-func formatModelBreakdown(breakdown map[string]ModelTotals) string {
+func formatModelBreakdown(breakdown map[string]UsageByModel) string {
 	type modelRow struct {
 		name string
-		ModelTotals
+		UsageByModel
 	}
 	rows := make([]modelRow, 0, len(breakdown))
 	for name, t := range breakdown {
-		rows = append(rows, modelRow{name: name, ModelTotals: t})
+		rows = append(rows, modelRow{name: name, UsageByModel: t})
 	}
 	sort.Slice(rows, func(i, j int) bool {
 		if rows[i].CostUSD != rows[j].CostUSD {
 			return rows[i].CostUSD > rows[j].CostUSD
 		}
-		if rows[i].OutputTokens != rows[j].OutputTokens {
-			return rows[i].OutputTokens > rows[j].OutputTokens
+		if rows[i].TokensOut != rows[j].TokensOut {
+			return rows[i].TokensOut > rows[j].TokensOut
 		}
 		return rows[i].name < rows[j].name
 	})
@@ -921,7 +894,7 @@ func formatModelBreakdown(breakdown map[string]ModelTotals) string {
 			prefix = "              + "
 		}
 		fmt.Fprintf(&b, "%s%s (%d turn%s, %d in / %d out, $%.4f)\n",
-			prefix, r.name, r.Turns, plural(r.Turns), r.InputTokens, r.OutputTokens, r.CostUSD)
+			prefix, r.name, r.Turns, plural(r.Turns), r.TokensIn, r.TokensOut, r.CostUSD)
 	}
 	return b.String()
 }
@@ -980,10 +953,16 @@ func renderApprovalLog(logs []ApprovalLog) string {
 
 // renderSubagentList renders the roster. Reports stay clipped to one
 // line here — the list is a scan surface, and a subagent that just
-// wrote three paragraphs shouldn't bury the others. drillable adds
-// the pointer to where the rest of it lives (issue #70): the
+// wrote three paragraphs shouldn't bury the others. The trailing hint
+// points at where the rest of it lives (issue #70): the
 // `/subagents <name>` overlay, which renders the report in full.
-func renderSubagentList(subs []SubagentInfo, drillable bool) string {
+//
+// The hint is unconditional. Until v0.21.0 it was gated on a
+// `drillable` bool threaded from a second type assertion at dispatch,
+// against a SubagentEventReader that was separate from the lister; a
+// roster can only be rendered by a SubagentReporter, which serves the
+// turn log too, so the gate is now always open.
+func renderSubagentList(subs []SubagentInfo) string {
 	if len(subs) == 0 {
 		return "/subagents: none running"
 	}
@@ -1002,13 +981,11 @@ func renderSubagentList(subs []SubagentInfo, drillable bool) string {
 		}
 		b.WriteString(line + "\n")
 	}
-	if drillable {
-		hint := "  /subagents <name> for the full report and turn log"
-		if !clipped {
-			hint = "  /subagents <name> for its turn log"
-		}
-		b.WriteString(hint + "\n")
+	hint := "  /subagents <name> for the full report and turn log"
+	if !clipped {
+		hint = "  /subagents <name> for its turn log"
 	}
+	b.WriteString(hint + "\n")
 	return strings.TrimRight(b.String(), "\n")
 }
 

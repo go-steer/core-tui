@@ -20,9 +20,9 @@ import (
 	"time"
 )
 
-// bareTracker satisfies UsageTracker only — used to verify the
-// /stats fallback path (no Models: row) when the host hasn't
-// opted into the SessionByModelTracker capability (issue #18).
+// bareTracker satisfies UsageTracker — /stats reads its aggregate
+// rows, and the per-model breakdown comes from m.sessionUsage rather
+// than from the tracker.
 type bareTracker struct {
 	totals Usage
 	cost   float64
@@ -36,14 +36,6 @@ func (t *bareTracker) ContextWindowUsed() int         { return 0 }
 func (t *bareTracker) SessionTurns() int              { return 1 }
 func (t *bareTracker) SessionDuration() time.Duration { return time.Second }
 
-// modelAwareTracker also satisfies SessionByModelTracker.
-type modelAwareTracker struct {
-	bareTracker
-	byModel map[string]ModelTotals
-}
-
-func (t *modelAwareTracker) SessionByModel() map[string]ModelTotals { return t.byModel }
-
 func TestRenderStats_BareTracker_NoModelsRow(t *testing.T) {
 	m := NewModel(Options{UsageTracker: &bareTracker{
 		totals: Usage{InputTokens: 100, OutputTokens: 50},
@@ -55,62 +47,15 @@ func TestRenderStats_BareTracker_NoModelsRow(t *testing.T) {
 	}
 }
 
-func TestRenderStats_EmptyByModelMap_NoRow(t *testing.T) {
-	m := NewModel(Options{UsageTracker: &modelAwareTracker{
-		bareTracker: bareTracker{totals: Usage{InputTokens: 100, OutputTokens: 50}, cost: 0.01},
-		byModel:     map[string]ModelTotals{},
-	}})
-	got := m.renderStats()
-	if strings.Contains(got, "Models:") {
-		t.Errorf("empty by-model map: no row expected, got:\n%s", got)
-	}
-}
-
-func TestRenderStats_SingleEntryByModelMap_NoRow(t *testing.T) {
-	// One model means the breakdown duplicates SessionTotals —
-	// skip rendering per the issue contract.
-	m := NewModel(Options{UsageTracker: &modelAwareTracker{
-		bareTracker: bareTracker{totals: Usage{InputTokens: 100, OutputTokens: 50}, cost: 0.01},
-		byModel: map[string]ModelTotals{
-			"only-model": {Turns: 1, InputTokens: 100, OutputTokens: 50, CostUSD: 0.01},
-		},
-	}})
-	got := m.renderStats()
-	if strings.Contains(got, "Models:") {
-		t.Errorf("single-entry by-model map: no row expected, got:\n%s", got)
-	}
-}
-
-func TestRenderStats_MultiEntryByModelMap_RendersBreakdown(t *testing.T) {
-	m := NewModel(Options{UsageTracker: &modelAwareTracker{
-		bareTracker: bareTracker{totals: Usage{InputTokens: 1200, OutputTokens: 200}, cost: 0.012},
-		byModel: map[string]ModelTotals{
-			"gemini-3.1-pro":   {Turns: 5, InputTokens: 1000, OutputTokens: 150, CostUSD: 0.010},
-			"gemini-2.5-flash": {Turns: 2, InputTokens: 200, OutputTokens: 50, CostUSD: 0.002},
-		},
-	}})
-	got := m.renderStats()
-	if !strings.Contains(got, "Models:") {
-		t.Fatalf("expected Models: row, got:\n%s", got)
-	}
-	if !strings.Contains(got, "gemini-3.1-pro") || !strings.Contains(got, "gemini-2.5-flash") {
-		t.Errorf("expected both model names in breakdown, got:\n%s", got)
-	}
-	// Priciest leads — pro should appear before flash.
-	if idxPro, idxFlash := strings.Index(got, "gemini-3.1-pro"), strings.Index(got, "gemini-2.5-flash"); idxPro > idxFlash {
-		t.Errorf("expected priciest model first (pro before flash), got pro at %d flash at %d:\n%s", idxPro, idxFlash, got)
-	}
-}
-
 func TestRenderStats_SortByCostDescending(t *testing.T) {
-	m := NewModel(Options{UsageTracker: &modelAwareTracker{
-		bareTracker: bareTracker{totals: Usage{InputTokens: 0, OutputTokens: 0}, cost: 0.06},
-		byModel: map[string]ModelTotals{
+	m := NewModel(Options{UsageTracker: &bareTracker{cost: 0.06}})
+	m.sessionUsage = &UsageUpdate{CostUSDTotal: 0.06, TurnsTotal: 3,
+		ByModel: map[string]UsageByModel{
 			"cheap":  {Turns: 1, CostUSD: 0.01},
 			"mid":    {Turns: 1, CostUSD: 0.02},
 			"costly": {Turns: 1, CostUSD: 0.03},
 		},
-	}})
+	}
 	got := m.renderStats()
 	iCostly := strings.Index(got, "costly")
 	iMid := strings.Index(got, "mid")
@@ -122,13 +67,13 @@ func TestRenderStats_SortByCostDescending(t *testing.T) {
 }
 
 func TestRenderStats_TurnsPluralization(t *testing.T) {
-	m := NewModel(Options{UsageTracker: &modelAwareTracker{
-		bareTracker: bareTracker{totals: Usage{}, cost: 0.05},
-		byModel: map[string]ModelTotals{
+	m := NewModel(Options{UsageTracker: &bareTracker{cost: 0.05}})
+	m.sessionUsage = &UsageUpdate{CostUSDTotal: 0.05, TurnsTotal: 4,
+		ByModel: map[string]UsageByModel{
 			"single": {Turns: 1, CostUSD: 0.04},
 			"multi":  {Turns: 3, CostUSD: 0.01},
 		},
-	}})
+	}
 	got := m.renderStats()
 	if !strings.Contains(got, "1 turn,") {
 		t.Errorf("expected '1 turn,' (singular) for single, got:\n%s", got)
@@ -139,7 +84,7 @@ func TestRenderStats_TurnsPluralization(t *testing.T) {
 }
 
 func TestFormatModelBreakdown_FirstPrefixDiffersFromContinuation(t *testing.T) {
-	got := formatModelBreakdown(map[string]ModelTotals{
+	got := formatModelBreakdown(map[string]UsageByModel{
 		"a": {Turns: 1, CostUSD: 0.02},
 		"b": {Turns: 1, CostUSD: 0.01},
 	})
@@ -222,69 +167,16 @@ func TestRenderStats_PushSessionUsage_SingleEntry_NoRow(t *testing.T) {
 	}
 }
 
-func TestRenderStats_PushWinsOverPull_WhenBothPopulated(t *testing.T) {
-	// In remote/attach mode both sources may have data (the local
-	// pull tracker may keep its own per-model totals from observed
-	// usageMsg events). Push must win because it reflects the
-	// daemon's own tracker — the authoritative source.
-	pullTracker := &modelAwareTracker{
-		bareTracker: bareTracker{totals: Usage{InputTokens: 100, OutputTokens: 50}, cost: 0.01},
-		byModel: map[string]ModelTotals{
-			"pull-only-model-A": {Turns: 1, InputTokens: 50, OutputTokens: 25, CostUSD: 0.005},
-			"pull-only-model-B": {Turns: 1, InputTokens: 50, OutputTokens: 25, CostUSD: 0.005},
-		},
-	}
-	m := NewModel(Options{UsageTracker: pullTracker})
-	m.sessionUsage = &UsageUpdate{
-		TokensInTotal:  100,
-		TokensOutTotal: 50,
-		CostUSDTotal:   0.01,
-		TurnsTotal:     2,
-		ByModel: map[string]UsageByModel{
-			"push-model-X": {Turns: 1, TokensIn: 60, TokensOut: 30, CostUSD: 0.006},
-			"push-model-Y": {Turns: 1, TokensIn: 40, TokensOut: 20, CostUSD: 0.004},
-		},
-	}
-	got := m.renderStats()
-	if !strings.Contains(got, "push-model-X") || !strings.Contains(got, "push-model-Y") {
-		t.Errorf("expected push-source models in breakdown, got:\n%s", got)
-	}
-	if strings.Contains(got, "pull-only-model-A") || strings.Contains(got, "pull-only-model-B") {
-		t.Errorf("push must win over pull when both populated — pull names should NOT appear, got:\n%s", got)
-	}
-}
-
-func TestRenderStats_PullPathStillWorks_WhenPushAbsent(t *testing.T) {
-	// Regression: the pre-#38 pull path must keep working when
-	// sessionUsage is nil (embedded mode with no push events).
-	pullTracker := &modelAwareTracker{
-		bareTracker: bareTracker{totals: Usage{InputTokens: 1200, OutputTokens: 200}, cost: 0.012},
-		byModel: map[string]ModelTotals{
-			"gemini-3.1-pro":   {Turns: 5, InputTokens: 1000, OutputTokens: 150, CostUSD: 0.010},
-			"gemini-2.5-flash": {Turns: 2, InputTokens: 200, OutputTokens: 50, CostUSD: 0.002},
-		},
-	}
-	m := NewModel(Options{UsageTracker: pullTracker})
-	// sessionUsage stays nil — embedded-mode shape.
-	got := m.renderStats()
-	if !strings.Contains(got, "Models:") {
-		t.Fatalf("expected pull-path Models: row when sessionUsage nil, got:\n%s", got)
-	}
-	if !strings.Contains(got, "gemini-3.1-pro") || !strings.Contains(got, "gemini-2.5-flash") {
-		t.Errorf("expected both pull-source model names, got:\n%s", got)
-	}
-}
-
-func TestUsageByModelToTotals_FieldMapping(t *testing.T) {
-	in := map[string]UsageByModel{
+// TestFormatModelBreakdown_TokenFieldsRenderInOrder pins the token
+// mapping the deleted usageByModelToTotals conversion used to own:
+// TokensIn is the "in" figure and TokensOut the "out" one. They are
+// both ints on the same struct, so a transposition compiles and only
+// a rendered-order assertion catches it.
+func TestFormatModelBreakdown_TokenFieldsRenderInOrder(t *testing.T) {
+	got := formatModelBreakdown(map[string]UsageByModel{
 		"m1": {Turns: 3, TokensIn: 100, TokensOut: 40, CostUSD: 0.005},
-	}
-	out := usageByModelToTotals(in)
-	if len(out) != 1 {
-		t.Fatalf("expected 1 entry, got %d", len(out))
-	}
-	got := out["m1"]
-	if got.Turns != 3 || got.InputTokens != 100 || got.OutputTokens != 40 || got.CostUSD != 0.005 {
-		t.Errorf("field mapping mismatch: got %+v", got)
+	})
+	if !strings.Contains(got, "m1 (3 turns, 100 in / 40 out, $0.0050)") {
+		t.Errorf("token / turn / cost fields did not render as expected, got:\n%s", got)
 	}
 }

@@ -1404,7 +1404,7 @@ func TestFrameInvariants_RenderersHonorWidth(t *testing.T) {
 
 // TestRenderSidebar_BoundsHostSuppliedContent is the case the grid
 // above cannot reach: the sidebar's content comes from the HOST — a
-// model id from displayModelName, a roster from SubagentLister — and
+// model id from displayModelName, a roster from SubagentReporter — and
 // the grid drives a bare agent that supplies neither, so every cell of
 // it renders a sidebar whose longest line is the word "subagents".
 //

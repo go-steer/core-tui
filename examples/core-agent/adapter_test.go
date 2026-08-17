@@ -440,7 +440,7 @@ func TestAttachAsyncSlashAndInterrupt(t *testing.T) {
 
 	preamble, results := a.InvokeSlashAsync(t.Context(), "btw", "what changed?")
 	if preamble == "" {
-		t.Error("the preamble variant exists to put a row in the chat at dispatch time")
+		t.Error("attach commands are slow enough to owe the operator a dispatch-time row")
 	}
 	select {
 	case got := <-results:

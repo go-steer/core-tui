@@ -280,17 +280,14 @@ func permissionRuleCmd(ctrl PermissionController, gen uint64, op permissionRuleO
 	}
 }
 
-// subagentRosterCmd pulls SubagentLister.Subagents() for a bare
+// subagentRosterCmd pulls SubagentReporter.Subagents() for a bare
 // /subagents off the Update goroutine. The sidebar's copy of this read
 // already goes through hostSnapshot; this is the slash path, which
 // wants a fresh pull rather than a snapshot up to
 // hostSnapshotInterval old.
-//
-// drillable is resolved at construction (it is a type assertion
-// against the model's agent) so the closure only carries the answer.
-func subagentRosterCmd(lister SubagentLister, gen uint64, drillable bool) tea.Cmd {
+func subagentRosterCmd(reporter SubagentReporter, gen uint64) tea.Cmd {
 	return func() tea.Msg {
-		return subagentRosterMsg{gen: gen, subs: lister.Subagents(), drillable: drillable}
+		return subagentRosterMsg{gen: gen, subs: reporter.Subagents()}
 	}
 }
 

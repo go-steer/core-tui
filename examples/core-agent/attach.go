@@ -58,17 +58,16 @@ func newAttachAdapter(client *fakehost.Client, sessionPath string) *attachAdapte
 // ---------------------------------------------------------------
 
 var (
-	_ tui.Agent                          = (*attachAdapter)(nil)
-	_ tui.LiveAgent                      = attachObserver{}
-	_ tui.InjectableAgent                = (*attachAdapter)(nil)
-	_ tui.RemoteInterrupter              = (*attachAdapter)(nil)
-	_ tui.ToolLister                     = (*attachAdapter)(nil)
-	_ tui.SubagentLister                 = (*attachAdapter)(nil)
-	_ tui.SubagentEventReader            = (*attachAdapter)(nil)
-	_ tui.StatusReporter                 = (*attachAdapter)(nil)
-	_ tui.SessionSwitcher                = (*attachAdapter)(nil)
-	_ tui.UsageTracker                   = (*attachAdapter)(nil)
-	_ tui.AsyncSlashProviderWithPreamble = (*attachAdapter)(nil)
+	_ tui.Agent              = (*attachAdapter)(nil)
+	_ tui.LiveAgent          = attachObserver{}
+	_ tui.InjectableAgent    = (*attachAdapter)(nil)
+	_ tui.RemoteInterrupter  = (*attachAdapter)(nil)
+	_ tui.ToolLister         = (*attachAdapter)(nil)
+	_ tui.SubagentReporter   = (*attachAdapter)(nil)
+	_ tui.StatusReporter     = (*attachAdapter)(nil)
+	_ tui.SessionSwitcher    = (*attachAdapter)(nil)
+	_ tui.UsageTracker       = (*attachAdapter)(nil)
+	_ tui.AsyncSlashProvider = (*attachAdapter)(nil)
 )
 
 // Capabilities this flavor deliberately does NOT implement, matching
@@ -223,7 +222,8 @@ func (a *attachAdapter) Tools() []tui.ToolInfo {
 	return out
 }
 
-// Subagents implements tui.SubagentLister over one round trip.
+// Subagents implements the roster half of tui.SubagentReporter over
+// one round trip.
 func (a *attachAdapter) Subagents() []tui.SubagentInfo {
 	ctx, cancel := context.WithTimeout(context.Background(), 3*time.Second)
 	defer cancel()
@@ -240,11 +240,12 @@ func (a *attachAdapter) Subagents() []tui.SubagentInfo {
 	return out
 }
 
-// SubagentEvents implements tui.SubagentEventReader — the paged,
-// cursored drill-down behind `/subagents <name>`. The contract's
-// sharp edge is the error type: an unresolvable name must come back
-// as *tui.SubagentNotFoundError, not an empty page, or the UI shows
-// a convincing empty log for a typo.
+// SubagentEvents implements the drill-down half of
+// tui.SubagentReporter — the paged, cursored turn log behind
+// `/subagents <name>`. The contract's sharp edge is the error type:
+// an unresolvable name must come back as *tui.SubagentNotFoundError,
+// not an empty page, or the UI shows a convincing empty log for a
+// typo.
 func (a *attachAdapter) SubagentEvents(ctx context.Context, name string, since int64) (tui.SubagentEventPage, error) {
 	resp, err := a.client.SubagentEvents(ctx, a.sessionPath, name, since)
 	var unknown *fakehost.UnknownSubagentError
@@ -256,21 +257,11 @@ func (a *attachAdapter) SubagentEvents(ctx context.Context, name string, since i
 	if err != nil {
 		return tui.SubagentEventPage{}, err
 	}
-	page := tui.SubagentEventPage{NextSince: resp.NextSince, Truncated: resp.Truncated}
-	for _, t := range resp.Events {
-		ev := tui.SubagentEvent{Seq: t.Seq, Timestamp: t.At, Author: t.Author, Text: t.Text}
-		for _, c := range t.Calls {
-			ev.ToolCalls = append(ev.ToolCalls, tui.SubagentToolCall{ID: c.ID, Name: c.Name, Args: c.Args})
-		}
-		for _, r := range t.Results {
-			response, errText := splitFunctionResponse(&r)
-			ev.ToolResults = append(ev.ToolResults, tui.SubagentToolResult{
-				ID: r.ID, Name: r.Name, Response: response, Error: errText,
-			})
-		}
-		page.Events = append(page.Events, ev)
-	}
-	return page, nil
+	return tui.SubagentEventPage{
+		Events:    translateSubagentTurns(resp.Events),
+		NextSince: resp.NextSince,
+		Truncated: resp.Truncated,
+	}, nil
 }
 
 // Status implements tui.StatusReporter. The contract says cheap and
@@ -373,11 +364,11 @@ func (a *attachAdapter) SwitchToSession(id string) (tui.SwitchTarget, error) {
 	}, nil
 }
 
-// SlashCommands / InvokeSlashAsync implement
-// tui.AsyncSlashProviderWithPreamble. The async variant is the right
-// one for attach mode: every command is a network call, and the
-// preamble lands a "this is running" row in the chat so a slow round
-// trip doesn't look like a dropped keystroke.
+// SlashCommands / InvokeSlashAsync implement tui.AsyncSlashProvider.
+// The async shape is the right one for attach mode: every command is
+// a network call, and the preamble lands a "this is running" row in
+// the chat so a slow round trip doesn't look like a dropped
+// keystroke.
 func (a *attachAdapter) SlashCommands() []tui.SlashCommandSpec {
 	return []tui.SlashCommandSpec{
 		{Name: "btw", Aliases: []string{"by-the-way"}, Description: "ask the remote agent a side question"},

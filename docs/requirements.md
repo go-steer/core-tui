@@ -343,9 +343,9 @@ listed in `/help`:
   `(current)`. ↑/↓ + Enter attach; Esc cancels without swap; type to
   filter (§3.24). `/sess` is an alias.
 - **R-SWITCH-2** `/switch <id>` attaches directly, no picker.
-- **R-SWITCH-3** Any `SlashProvider` / `AsyncSlashProvider` /
-  `AsyncSlashProviderWithPreamble` return value MAY populate
-  `SlashResult.SwitchTo` to trigger the same detach + attach.
+- **R-SWITCH-3** Any `SlashProvider` / `AsyncSlashProvider` return
+  value MAY populate `SlashResult.SwitchTo` to trigger the same
+  detach + attach.
 - **R-SWITCH-4** Applying a switch: wipe history, reset streaming /
   modal / queue state, cancel LOCAL contexts on turn / async slash /
   live stream (releases sockets / halts in-process model calls), swap
@@ -504,14 +504,15 @@ listed in `/help`:
 
 ### 3.16 Sub-agent awareness (should)
 
-- **R-SUB-1** If the agent implements `SubagentLister`, expose a
+- **R-SUB-1** If the agent implements `SubagentReporter`, expose a
   `/subagents` slash command listing names + statuses + last reports.
   No driving / scheduling — read-only awareness.
-- **R-SUB-2** If the agent also implements `SubagentEventReader`,
-  `/subagents <name>` opens a detail overlay: the untruncated
-  `LastReport` above a scrollable log of that subagent's turns,
-  live-tailed while it stays open. An unresolvable name reports the
-  names that would have resolved rather than rendering an empty log.
+- **R-SUB-2** `/subagents <name>` opens a detail overlay: the
+  untruncated `LastReport` above a scrollable log of that subagent's
+  turns, live-tailed while it stays open. An unresolvable name reports
+  the names that would have resolved rather than rendering an empty
+  log. Available whenever R-SUB-1 is — one capability serves both, so
+  a host cannot offer the roster without the drill-down it points at.
 - **R-SUB-3** While a SYNC subagent's tool call is in flight, its
   tool row carries a live preview of the newest turns, so the
   operator sees progress instead of a spinner. The block collapses
@@ -531,17 +532,14 @@ listed in `/help`:
   `PricingController` methods that return human-readable summary lines
   for the chat.
 
-- **R-CHAT-12** Hosts whose agent supports structured-prompt entry
-  (a list of `[]Content` fragments instead of a single prompt
-  string) MAY implement the optional `ContentRunner` capability.
-  When present, adapters can drive turns from a pre-built
-  conversation context — used for retry / replay flows where the
-  host has constructed the prompt programmatically rather than
-  reading it from the input box. The TUI's default Enter-submit
-  flow still uses `Agent.Run(ctx, prompt)`; `RunWithContents` is
-  invoked only by host-supplied affordances. Adapters translate
-  their host-native content shape (ADK `Content`, Anthropic
-  `Message`, etc.) into / out of `tui.Content`.
+- **R-CHAT-12** *(withdrawn in v0.21.0, issue #77.)* It reserved an
+  optional `ContentRunner` capability for driving turns from a
+  structured `[]Content` slice instead of a prompt string. Nothing in
+  `package tui` ever asserted it and no host ever implemented it: the
+  submit path is `Agent.Run(ctx, prompt)`, and a capability the
+  library never calls is a type two hosts would have had to agree on
+  privately anyway. A structured-prompt entry path can be specified
+  again when something concrete needs one.
 - **R-CHAT-11** Operator-typed-during-streaming prompts route by
   `Options.MidTurnInjectionMode`:
   - **`QueueForNext`** (default) — the entry buffers as a `Queued`

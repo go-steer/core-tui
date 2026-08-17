@@ -83,3 +83,39 @@
 # which leaked github.com/alecthomas/chroma/v2 into the library's API and
 # pinned its major version for every host. No host called it.
 ./tui.LipglossFormatter: removed
+#
+# #77: the capability consolidation. Twenty optional capability interfaces
+# went to sixteen — three deleted because nothing anywhere implemented them,
+# two merged because nothing ever implemented one without the other. The
+# per-symbol reasoning is in docs/api-audit.md §5.
+#
+# The two async slash interfaces shared the method name InvokeSlashAsync and
+# differed only in return type, so no single Go type could satisfy both. The
+# preamble form was a documented strict superset — an empty preamble behaved
+# identically to the bare one — and it is the form both core-agent adapters
+# chose, so the superset kept the name and the bare variant went.
+./tui.AsyncSlashProvider.InvokeSlashAsync: changed from func(context.Context, string, string) <-chan SlashResultOrErr to func(context.Context, string, string) (string, <-chan SlashResultOrErr)
+./tui.AsyncSlashProviderWithPreamble: removed
+#
+# ContentRunner was never asserted anywhere in package tui — the library
+# declared an interface purely so hosts could call each other through it. The
+# submit path is and remains Agent.Run(ctx, prompt). Content and ContentPart
+# existed only as its argument type. R-CHAT-12 is withdrawn with them.
+./tui.Content: removed
+./tui.ContentPart: removed
+./tui.ContentRunner: removed
+#
+# SessionByModelTracker had zero implementations since it shipped. The
+# per-model /stats breakdown it was supposed to back has been read from the
+# push-mode usage stream all along, so the feature survives its removal;
+# ModelTotals was its argument type and has no other reader.
+./tui.ModelTotals: removed
+./tui.SessionByModelTracker: removed
+#
+# SubagentLister + SubagentEventReader → SubagentReporter. A host that could
+# list its subagents but not say what they did left the roster's only
+# affordance — drill in — pointing at nothing, and no implementation ever
+# had one without the other. Hosts rename the interface in their var _
+# assertions; no method signature changed.
+./tui.SubagentEventReader: removed
+./tui.SubagentLister: removed
