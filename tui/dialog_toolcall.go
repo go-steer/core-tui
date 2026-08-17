@@ -17,9 +17,14 @@
 // session; ←/→ (and PgUp/PgDn) walk to older / newer calls;
 // ↑/↓ scroll long detail bodies; Esc closes.
 //
-// This overlay sidesteps the "there's no transcript cursor today"
-// problem by presenting its own navigable list instead of requiring
-// the user to first highlight a row. All the raw data it renders
+// This overlay was built when there was no transcript cursor, so it
+// presents its own navigable list rather than requiring the operator
+// to highlight a row first. Issue #152 later added a cursor, and
+// issue #233 connected the two: opened from focus mode with a tool
+// row selected, the overlay starts on THAT call rather than the
+// newest one. The list is still the navigation — the cursor only
+// chooses where it starts, and every case that has no usable cursor
+// still starts at the most recent call. All the raw data it renders
 // (args, response, error) is already client-side — see
 // Message.ToolArgsMap / ToolResponseMap / ToolError stashed by
 // applyToolResult — so no additional wire-protocol changes are
@@ -262,6 +267,24 @@ func collectToolCalls(snap []Message) []Message {
 		}
 	}
 	return out
+}
+
+// indexOfToolCall maps a transcript row onto the tool-call list this
+// dialog indexes into, and returns -1 when that row is not in the
+// list at all.
+//
+// Matching is by Message.ID rather than by counting RoleTool rows up
+// to the cursor. Both are correct against the same snapshot, but the
+// ID is the identity History already issues and the fold map already
+// keys by, so it stays right if the two ever read different
+// snapshots — which a counted position would not.
+func indexOfToolCall(tools []Message, id uint64) int {
+	for i, t := range tools {
+		if t.ID == id {
+			return i
+		}
+	}
+	return -1
 }
 
 // toolCallBodyHeight is how many detail rows fit at the current

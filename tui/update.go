@@ -1583,7 +1583,30 @@ func (m Model) handleKey(msg tea.KeyPressMsg) (tea.Model, tea.Cmd) {
 		if !m.overlayStack.HasID(toolCallDialogID) {
 			tools := collectToolCalls(m.history.Snapshot())
 			if len(tools) > 0 {
-				m.overlayStack.Open(newToolCallDialog(len(tools)))
+				d := newToolCallDialog(len(tools))
+				// Open on the row the operator already pointed at
+				// (issue #233). The overlay's own list predates the
+				// transcript cursor and its header says so; now that
+				// there is a cursor, landing on the newest call
+				// instead of the selected one makes the operator walk
+				// back to a choice they had already made.
+				//
+				// Only from focus mode: the marker is drawn only
+				// while the transcript holds the keyboard
+				// (chatRowMarked), so seeding off selIdx from the
+				// composer would aim the overlay with a cursor
+				// nobody can see. Every other case — composer focus,
+				// a selected row that is not a tool call, no history
+				// under the cursor — falls back to most-recent,
+				// which is what the binding has always done.
+				if m.focus == focusTranscript {
+					if sel, ok := m.chatSelectedMessage(); ok {
+						if i := indexOfToolCall(tools, sel.ID); i >= 0 {
+							d.idx = i
+						}
+					}
+				}
+				m.overlayStack.Open(d)
 				m.refreshViewport()
 			}
 		}
