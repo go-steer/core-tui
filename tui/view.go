@@ -56,11 +56,58 @@ const sidebarMinChatWidth = 40
 // be the only thing that does, and a wrapper that silently declines
 // to wrap is worse than no wrapper because it reads at every call
 // site as if the width has been dealt with.
+//
+// Tabs are expanded before either pass runs, because both pass their
+// budget to ansi.StringWidth and it prices a TAB at zero — see
+// expandTabs for why doing it here changes no bytes and issue #217
+// for what it was costing.
 func wordWrap(s string, width int) string {
 	if width <= 0 {
 		return s
 	}
+	s = expandTabs(s)
 	return ansi.Wrap(ansi.Wordwrap(s, width, " -"), width, " -")
+}
+
+// tabExpansion is what one TAB is drawn as: contentTabWidth spaces.
+// Derived from the constant rather than written out so the two cannot
+// drift, and hoisted to a package var so expandTabs does not rebuild
+// it per call on the render path.
+var tabExpansion = strings.Repeat(" ", contentTabWidth)
+
+// expandTabs replaces every TAB in s with the spaces lipgloss is
+// about to replace it with anyway.
+//
+// It is the same expansion, not a second one. lipgloss's
+// maybeConvertTabs is a strings.ReplaceAll at tabWidthDefault — fixed
+// width, NOT tab-stop aligned — and nothing in this package sets
+// Style.TabWidth, so the substitution is byte-identical wherever it
+// happens. All that moves is whether the measurements taken in
+// between can see it.
+//
+// Wrapping is the place that has to see it. ansi.Wordwrap and
+// ansi.Wrap bound a line against ansi.StringWidth, which prices a TAB
+// at zero, and neither accepts a width function — so a wrapper handed
+// a raw tab fits a line that comes out contentTabWidth-1 cells wider
+// per tab than the budget it was checked against. The overrun does
+// not reach the terminal (chatCutLine, fitRow and clipFrame all trim
+// it), which is why it read as content vanishing off the right of a
+// tab-bearing line rather than as a layout bug (issue #217).
+//
+// This is the sanctioned exception to the warning on contentTabWidth.
+// That warning is about a second expansion at a *different* width;
+// this is the same expansion at the same width, moved to before the
+// measurement, and it leaves lipgloss's own pass with nothing to find.
+//
+// The complement is renderedWidth, which prices instead of expanding.
+// Use this one when the string is about to be wrapped or otherwise
+// measured repeatedly; use renderedWidth for a one-shot measurement of
+// a string that must reach Render unaltered.
+func expandTabs(s string) string {
+	if !strings.Contains(s, "\t") {
+		return s
+	}
+	return strings.ReplaceAll(s, "\t", tabExpansion)
 }
 
 // renderedWidth reports the cells s will occupy once lipgloss has
@@ -76,10 +123,11 @@ func wordWrap(s string, width int) string {
 // already been through wants lipgloss.Width, since the expansion has
 // happened and there are no tabs left to price.
 //
-// This deliberately prices rather than expands, per the note on
-// contentTabWidth: the expansion belongs to lipgloss, and doing it
-// here as well is how a row ends up measured at one width and drawn
-// at another.
+// This prices rather than expands because its callers hand the very
+// same string to Render on the next line, and a measure helper that
+// rewrote its argument could not do that. Where the string is going
+// to be wrapped first, expandTabs is the right half of the pair — see
+// its comment for which to reach for.
 func renderedWidth(s string) int {
 	return lipgloss.Width(s) + strings.Count(s, "\t")*contentTabWidth
 }
@@ -93,10 +141,19 @@ func renderedWidth(s string) int {
 //
 // Width <= 0 returns s unchanged. Mirrors internal/tui's
 // wrapForChat (model.go:477-490).
+//
+// Tabs are expanded here rather than being left to the wordWrap call
+// below, because this function does width arithmetic of its own
+// first: it pulls the leading whitespace off each source line and
+// subtracts its BYTE length from the budget. A leading tab is one
+// byte drawn as contentTabWidth cells, so the hanging indent was
+// charged a quarter of what it costs. After the expansion every
+// prefix is ASCII spaces and len(prefix) is its cell count.
 func wordWrapIndent(s string, width int, indent string) string {
 	if width <= 0 {
 		return s
 	}
+	s = expandTabs(s)
 	sourceLines := strings.Split(s, "\n")
 	var out strings.Builder
 	for i, sl := range sourceLines {
@@ -879,6 +936,13 @@ func (m Model) renderMessage(msg Message) string {
 			// computed here and the tabs are expanded by the
 			// Render on the next line, so measuring the raw line
 			// measures a string that is about to get wider.
+			//
+			// Since #217 the wrap above has already expanded them,
+			// so the two agree on every line that reaches here. This
+			// stays the right measure rather than becoming dead
+			// weight: it is the one that holds whether or not the
+			// caller wrapped first, and the padding is what breaks
+			// if that ever stops being true.
 			pad := padTo - renderedWidth(line)
 			if pad < 0 {
 				pad = 0

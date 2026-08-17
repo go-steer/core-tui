@@ -81,9 +81,14 @@ import (
 // byte-budget arithmetic in truncateCells agrees with the renderer
 // instead of counting a tab as one cell.
 //
-// Do NOT use this to expand tabs yourself. lipgloss already does it,
-// and a second expansion at a different width is how the two get out
-// of sync.
+// Do NOT use this to expand tabs yourself, other than through
+// expandTabs (view.go). lipgloss already does the expansion, and a
+// second one at a *different* width is how the two get out of sync —
+// that is what this warns against. Expanding at exactly this width,
+// immediately before a measurement that has to agree with the render,
+// is the same expansion moved earlier and leaves lipgloss's own pass
+// with nothing to find; expandTabs derives its replacement from this
+// constant so the two cannot drift (issue #217).
 const contentTabWidth = 4
 
 // hexDigits backs the `\xNN` escape writer.
