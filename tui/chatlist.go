@@ -169,9 +169,18 @@ func (m Model) chatRowLines(i int) []string {
 // "\n" + rule + "\n\n" between a message and a following user turn,
 // "\n\n" otherwise — so the transcript is byte-identical to what the
 // flat path drew.
+//
+// The blank separator is a shared slice rather than a fresh literal,
+// because a literal is an allocation per non-user row per frame and
+// the value is a constant. Nothing here owns the slices it hands
+// back — chatRowLines copies whatever it gets into the merged row,
+// and the body it merges is the render cache's own slice — so a
+// shared one is no weaker a contract than the file already keeps.
+var chatBlankSeparator = []string{""}
+
 func (m Model) chatSeparator(msg Message) []string {
 	if msg.Role != RoleUser {
-		return []string{""}
+		return chatBlankSeparator
 	}
 	return []string{m.chatRuleLine(), ""}
 }
@@ -294,10 +303,10 @@ func (m *Model) chatVisitWindow(visit func(i int)) {
 // at, the gutter is reserved on top of it, and the sum is the column
 // the frame gave the transcript.
 //
-// The lipgloss pad at the end reproduces what the viewport did — the
-// transcript block is always exactly height rows of exactly that many
-// columns, so the frame it is joined into does not shift when the
-// transcript is short.
+// The pad at the end reproduces what the viewport did — the transcript
+// block is always exactly height rows of exactly that many columns, so
+// the frame it is joined into does not shift when the transcript is
+// short. See chatBlock for why that pad is hand-rolled.
 func (m Model) chatView() string {
 	w, h := m.viewport.Width(), m.viewport.Height()
 	if w <= 0 || h <= 0 {
@@ -327,10 +336,160 @@ func (m Model) chatView() string {
 			out = append(out, gutter+chatCutLine(ln, m.chatX, w))
 		}
 	}
+	return chatBlock(out, w+chatGutterWidth, h)
+}
+
+// chatBlock assembles the drawn rows into the transcript block:
+// exactly height rows of exactly width cells, short rows padded out
+// with spaces and absent rows supplied as blank ones.
+//
+// That shape is a contract with the compositor rather than cosmetics.
+// JoinVertical sizes the frame from what it is handed, so a short
+// transcript that returned short rows would let the panel beside it
+// move as the session fills up.
+//
+// This used to be
+//
+//	lipgloss.NewStyle().Width(width).Height(height).
+//		Render(strings.Join(rows, "\n"))
+//
+// and replacing it is issue #160. It is the same defect issue #157
+// fixed in scrollView, one level up and batched over the whole
+// visible chat instead of one modal body: a lipgloss Style with a
+// width set is a WORD-WRAPPER, not a padder, and every row handed to
+// it here has already been cut to exactly this width by chatCutLine.
+// The wrap is therefore guaranteed to be a no-op, and it is not a
+// cheap one — lipgloss.Wrap pipes the whole block through a
+// WrapWriter, which copies it into the output ONE BYTE AT A TIME
+// through an io.Writer, i.e. a `[]byte{b}` allocation per byte of the
+// visible frame. On a 100x40 window that single call was 51% of every
+// repaint's allocations.
+//
+// Two things it does besides wrapping have to survive, which is why
+// the Style is still here as a fallback rather than deleted:
+//
+//   - tabs. sanitizeLine deliberately exempts TAB, and lipgloss
+//     expands it to four spaces on the way through
+//     (maybeConvertTabs). Appending spaces to a row containing a tab
+//     would leave the row narrow.
+//   - open styling. WrapWriter closes a style that is still switched
+//     on at a newline and re-opens it on the next line, so a row
+//     carrying escapes straight from a host (a tool result, a
+//     subagent transcript) does not bleed into the row below it.
+//
+// Both are rare and neither is cheap to reproduce, so chatRowPlain
+// detects them and the block falls back whole. Falling back whole
+// rather than per row keeps the answer exactly the string the Style
+// would have returned — mixing the two per row would have to
+// reproduce WrapWriter's cross-row style state, which is the part
+// that is actually hard.
+func chatBlock(rows []string, width, height int) string {
+	if s, ok := chatPadBlock(rows, width, height); ok {
+		return s
+	}
 	return lipgloss.NewStyle().
-		Width(w + chatGutterWidth).
-		Height(h).
-		Render(strings.Join(out, "\n"))
+		Width(width).
+		Height(height).
+		Render(strings.Join(rows, "\n"))
+}
+
+// chatPadBlock is chatBlock's fast path: join and space-pad, no
+// wrapping. Reports false the moment it meets a row it cannot prove
+// wraps to itself, in which case it has written nothing the caller
+// can use and chatBlock re-does the work through lipgloss.
+//
+// Bailing out mid-build rather than pre-scanning every row is
+// deliberate: the pre-scan would walk the bytes twice on the path
+// that matters (every frame, every row plain) to save a partial
+// build on the path that essentially never happens.
+func chatPadBlock(rows []string, width, height int) (string, bool) {
+	// Degenerate geometry goes to the Style, which has its own
+	// answers for it: a zero width leaves the rows unpadded but a
+	// zero height still pads them, and more rows than the height
+	// budget renders all of them rather than dropping the excess.
+	// None of the three is reachable from chatView — it returns early
+	// on a zero width or height and its loop stops at h — so
+	// reproducing them here would be untested code guarding against
+	// nothing.
+	if width <= 0 || height <= 0 || len(rows) > height {
+		return "", false
+	}
+	var b strings.Builder
+	// height rows of width cells plus the newline between each pair.
+	// An undercount when rows carry escape sequences, which is fine:
+	// Builder grows. The point is to not grow from zero.
+	b.Grow(height * (width + 1))
+	for i := range height {
+		if i > 0 {
+			b.WriteByte('\n')
+		}
+		if i >= len(rows) {
+			chatWriteSpaces(&b, width)
+			continue
+		}
+		ln := rows[i]
+		// Wider than the block means the Style would have wrapped it
+		// onto a second row, and the whole premise here is that it
+		// does not have to. chatCutLine makes that true; this is the
+		// assertion, not a case to handle.
+		w := ansi.StringWidth(ln)
+		if w > width || !chatRowPlain(ln) {
+			return "", false
+		}
+		b.WriteString(ln)
+		chatWriteSpaces(&b, width-w)
+	}
+	return b.String(), true
+}
+
+// chatRowPlain reports whether appending spaces to a row is the same
+// thing lipgloss would do to it — see chatBlock for why the two can
+// differ.
+//
+// Rejected: any C0 control or DEL, because tab is expanded on the way
+// through lipgloss and the rest perturb ansi.Wrap's column
+// accounting; any OSC introducer, because a hyperlink left open is
+// re-opened across a newline the way an open style is. ESC itself is
+// exempt from the control-character rule — CSI styling is the common
+// case here, not the exception — and is instead checked by sgrOpen,
+// which answers the one question that matters about it: is anything
+// still switched on at the end of the row.
+//
+// Deliberately a byte scan and deliberately conservative. A false
+// negative costs one frame's worth of the old path; a false positive
+// corrupts the frame.
+func chatRowPlain(ln string) bool {
+	for i := range len(ln) {
+		c := ln[i]
+		if c >= 0x20 && c != 0x7f {
+			continue
+		}
+		if c != 0x1b {
+			return false
+		}
+		if i+1 < len(ln) && ln[i+1] == ']' {
+			return false
+		}
+	}
+	return !sgrOpen(ln)
+}
+
+// chatSpaceSlab is the run of spaces chatWriteSpaces slices its
+// padding out of, so padding a row is a copy rather than a
+// strings.Repeat allocation. 128 covers a comfortable terminal in one
+// write and the loop covers the rest — sizing it to the widest
+// plausible terminal would be a bigger constant for no fewer
+// allocations, since there are none either way.
+const chatSpaceSlab = "                                                                " +
+	"                                                                "
+
+// chatWriteSpaces writes n spaces.
+func chatWriteSpaces(b *strings.Builder, n int) {
+	for n > 0 {
+		c := min(n, len(chatSpaceSlab))
+		b.WriteString(chatSpaceSlab[:c])
+		n -= c
+	}
 }
 
 // warmChatWindow renders the rows the window is about to draw, so
