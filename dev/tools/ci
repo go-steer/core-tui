@@ -48,6 +48,9 @@ STEPS=(
   "lint            dev/tools/lint-go"
   "mod-tidy        dev/tools/verify-mod-tidy"
   "test            dev/tools/test-unit"
+  # Must follow test: it reads the coverage.out that step writes rather
+  # than re-running a 90-second suite to recompute a number it already has.
+  "coverage        dev/tools/verify-coverage"
   "vuln            dev/tools/verify-vuln"
 )
 
