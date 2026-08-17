@@ -170,6 +170,20 @@ jobs:
           path: coverage.out
           retention-days: 14
           if-no-files-found: error
+      # N-TEST's floor, enforced rather than aspired to. Inside the
+      # existing required `test` job on purpose: a new top-level job would
+      # need a branch-protection edit before it could block anything, and
+      # until that happened a coverage regression would merge green.
+      #
+      # Placed after the summary and the artifact upload so a failure here
+      # still leaves both behind — the number that failed is more useful
+      # than the fact that it failed. It reads the profile the Test step
+      # wrote; it does not re-run the suite.
+      #
+      # Not repeated in `test (macos)`: same statement set, same number.
+      - name: Coverage floor
+        if: needs.changes.outputs.docs_only != 'true'
+        run: dev/ci/presubmits/verify-coverage
 
   # darwin coverage for N-PORTABLE, which promises macOS terminals and
   # until now was tested nowhere. Capability detection, the OSC-11

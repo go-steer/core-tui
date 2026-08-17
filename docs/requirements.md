@@ -707,7 +707,16 @@ listed in `/help`:
 - **N-LICENSE** Apache-2.0.
 - **N-TEST** Mirror existing test density — direct `Update()` table
   tests plus headless `tea.Program` smoke tests for modal
-  interactions. Target ≥ 70% statement coverage in `package tui`.
+  interactions. Target ≥ 70% statement coverage in `package tui`,
+  enforced by `dev/tools/verify-coverage` in the required `test` job
+  rather than left as an aspiration here. The floor is the stated 70%
+  and not the current number: a floor pinned to today's coverage is a
+  ratchet, and a ratchet makes every later PR that moves a statement
+  into an untested branch inherit someone else's backlog. `examples/`
+  and `tui/testagent` are excluded from the measurement — the first is
+  wiring sketches, the second is a fixture, and averaging either in
+  measures the shape of the repo rather than the coverage of the
+  library.
 - **N-DOC** Every exported type and function has a doc comment.
 - **N-A11Y** Screen-reader friendliness is not a goal of v1; document
   this limit in the README.
