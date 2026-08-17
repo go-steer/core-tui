@@ -171,6 +171,57 @@ jobs:
           retention-days: 14
           if-no-files-found: error
 
+  # darwin coverage for N-PORTABLE, which promises macOS terminals and
+  # until now was tested nowhere. Capability detection, the OSC-11
+  # background query, clipboard helpers and mouse-mode handling are all
+  # places darwin diverges from linux, and none of them had ever been
+  # compiled on it, let alone run.
+  #
+  # Deliberately a SEPARATE job rather than a `matrix.os` on `test`.
+  # Matrix-expanding a job renames its check to `test (ubuntu-latest)`,
+  # and `test` is a required status check on main — the rename would
+  # park every open PR on "Expected — Waiting for status" until branch
+  # protection was edited to match. A second job adds the platform
+  # without touching the four names protection knows about.
+  #
+  # Not required to merge, on purpose: a macOS runner queues slower than
+  # ubuntu and a required check that is merely slow blocks everything.
+  # Promoting `test (macos)` to required is a branch-protection edit
+  # whenever we decide the signal has earned it.
+  #
+  # lint / tidy / govulncheck stay ubuntu-only — all three are
+  # platform-independent and doubling them only burns minutes.
+  test-macos:
+    name: test (macos)
+    needs: changes
+    runs-on: macos-latest
+    steps:
+      - uses: actions/checkout@v4
+        if: needs.changes.outputs.docs_only != 'true'
+      - uses: actions/setup-go@v5
+        if: needs.changes.outputs.docs_only != 'true'
+        with:
+          go-version: ${{ env.GO_VERSION }}
+          check-latest: true
+          cache-dependency-path: '**/go.sum'
+      - if: needs.changes.outputs.docs_only != 'true'
+        run: go mod download
+      - name: Vet
+        if: needs.changes.outputs.docs_only != 'true'
+        run: dev/ci/presubmits/vet
+      - name: Build
+        if: needs.changes.outputs.docs_only != 'true'
+        run: dev/ci/presubmits/build
+      - name: Test
+        if: needs.changes.outputs.docs_only != 'true'
+        run: dev/ci/presubmits/test-unit
+      # No coverage summary or artifact here. The ubuntu `test` job
+      # already publishes both, and a second upload under the same
+      # artifact name is a collision rather than a second data point.
+      # The statement sets do match: the one OS-tagged pair in the
+      # package (escape_hatch_unix.go / escape_hatch_other.go) puts
+      # darwin and linux on the same side of the tag.
+
   lint:
     name: lint
     needs: changes

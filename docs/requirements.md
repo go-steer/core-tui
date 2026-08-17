@@ -713,8 +713,12 @@ listed in `/help`:
   this limit in the README.
 - **N-PORTABLE** Must work on Linux + macOS terminals (iTerm,
   Terminal.app, kitty, alacritty, GNOME terminal, tmux, screen).
-  Windows is best-effort (Bubble Tea supports it; we don't test it
-  in CI).
+  Both are built and unit-tested in CI — `test` on ubuntu and
+  `test (macos)` on darwin. Neither drives a real terminal
+  emulator, so the named emulators above remain a manual-verification
+  claim; what CI proves is that the code compiles and its tests pass
+  on both kernels. Windows is best-effort (Bubble Tea supports it; we
+  don't test it in CI).
 
 ## 5. Integration requirements
 
