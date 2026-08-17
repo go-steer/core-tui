@@ -280,6 +280,49 @@ func (o *Overlay) resolveAll(reason dismissReason, m *Model) tea.Cmd {
 	return tea.Batch(cmds...)
 }
 
+// asked returns the askedQuestion carrying id, or nil when the dialog
+// under that id is a viewer or is not open at all.
+//
+// It is how an Update-side handler reaches a specific open question to
+// LOOK at it — a host reply checking that the picker that issued it is
+// still the one on screen. Reaching one to END it goes through resolve
+// instead, so the exactly-once latch cannot be sidestepped. Callers
+// wanting the widget itself take .q and type-assert; the wrapper is
+// what knows whether it has already been answered, and a caller that
+// only ever saw the widget could not.
+func (o *Overlay) asked(id string) *askedQuestion {
+	aq, _ := o.Get(id).(*askedQuestion)
+	return aq
+}
+
+// resolve answers the question under id, pops it, and returns whatever
+// its resolver scheduled. A no-op when nothing matches or when the
+// question has already been answered.
+//
+// This is the seam for an answer that does not come from a keystroke.
+// The model picker's is the first: Enter starts a host call rather than
+// ending the question, and what closes the picker is the reply landing
+// in Update several hundred milliseconds later. Without this the
+// Update-side handler would have to Overlay.Close the question, which
+// pops it with its resolver never run — the exact "torn down and
+// nobody was told" shape §1.4 of the design is about, reintroduced by
+// the code meant to remove it.
+//
+// It is also why a resolver must not Open a dialog: resolve pops
+// AFTER the resolver returns, and Overlay.HandleKeyMsg pops after it
+// too, so anything a resolver pushed would be what got popped. A
+// resolver that needs another modal returns a Cmd and lets Update open
+// it, the way the theme picker's live preview is applied.
+func (o *Overlay) resolve(id string, ans answer, m *Model) tea.Cmd {
+	aq := o.asked(id)
+	if aq == nil {
+		return nil
+	}
+	cmd := aq.resolve(ans, m)
+	o.Close(id)
+	return cmd
+}
+
 // resolve runs the resolver at most once and returns whatever it
 // scheduled.
 func (a *askedQuestion) resolve(ans answer, m *Model) tea.Cmd {

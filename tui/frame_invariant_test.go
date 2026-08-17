@@ -347,9 +347,8 @@ func withModelPicker(m Model, filter string) Model {
 	current := models[1].ID
 	m.opts.Agent = &swapAgent{id: current, models: models}
 	m.currentModel = current
-	d := newModelPickerDialog()
-	d.applyModels(models, current)
-	m.overlayStack.Open(d)
+	q := askModelPicker(&m, true)
+	q.applyModels(models, current)
 	if filter != "" {
 		typeIntoPicker(&m, filter)
 	}
@@ -571,15 +570,15 @@ func TestFrameStates_DialogSeedsOverrun(t *testing.T) {
 	// fits. Both are green and neither tests the highlighter.
 	t.Run("the filter keeps the overrunning row", func(t *testing.T) {
 		fm := withModelPicker(newFrameModel(StatusHeader, 200, 50), "gateway")
-		d, ok := fm.overlayStack.Front().(*modelPickerDialog)
-		if !ok {
-			t.Fatalf("front dialog is %T, want *modelPickerDialog", fm.overlayStack.Front())
+		q := modelPickerOn(&fm.overlayStack)
+		if q == nil {
+			t.Fatalf("front dialog is %T, want the model picker", fm.overlayStack.Front())
 		}
-		if d.filter.value() != "gateway" {
-			t.Fatalf("filter row holds %q — the keystrokes did not reach it", d.filter.value())
+		if q.filter.value() != "gateway" {
+			t.Fatalf("filter row holds %q — the keystrokes did not reach it", q.filter.value())
 		}
 		var rows []string
-		for _, mi := range d.rows() {
+		for _, mi := range q.rows() {
 			rows = append(rows, mi.Display+"  ("+mi.ID+")  "+mi.Description)
 		}
 		if len(rows) == 0 {

@@ -51,6 +51,9 @@ type (
 	DismissReason = dismissReason
 
 	ThemePreviewMsg = themePreviewMsg
+
+	ModelPickerQuestion     = modelPickerQuestion
+	ModelSwitchRequestedMsg = modelSwitchRequestedMsg
 )
 
 const (
@@ -60,4 +63,19 @@ const (
 	DismissUnrenderable = dismissUnrenderable
 )
 
-var NewThemePickerQuestion = newThemePickerQuestion
+var (
+	NewThemePickerQuestion = newThemePickerQuestion
+	NewModelPickerQuestion = newModelPickerQuestion
+
+	// LoadModels is applyModels as a plain function — a method
+	// expression rather than a hand-written wrapper, for the same
+	// reason the types above are aliases: the external test calls the
+	// very method the Update loop does, so a signature change fails to
+	// compile here too.
+	//
+	// The theme picker takes its list in its constructor and needs no
+	// equivalent. This one's list is a host snapshot that arrives
+	// asynchronously (#114), which is exactly the property that makes
+	// the picker worth having an external test for.
+	LoadModels = (*modelPickerQuestion).applyModels
+)
