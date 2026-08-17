@@ -69,9 +69,12 @@ type modalFitCase struct {
 	// render returns the modal's composed block — the string
 	// lipgloss.Place centers, before clipFrame sees it.
 	render func(m *Model) string
-	// footer is a substring of the modal's footer key hint. It is
-	// deliberately the CLOSE key in every case: that is the row whose
-	// loss strands the operator.
+	// footer is a substring of the modal's footer key hint, written
+	// with ordinary spaces — the assertion normalizes the U+00A0 that
+	// keyLegend binds a key to its action with, so a case states the
+	// phrase an operator reads and stays silent on where it may
+	// break. It is deliberately the CLOSE key in every case: that is
+	// the row whose loss strands the operator.
 	footer string
 	// title is a substring of the modal's title line — the row shed
 	// LAST before the footer, and the marker for "this cell is below
@@ -144,7 +147,7 @@ func modalFitCases() []modalFitCase {
 			render: func(m *Model) string { return m.renderPermissionModal() },
 			// permissionKeyHint glues each key to its action with a
 			// non-breaking space so the pair never wraps apart.
-			footer:        "esc\u00a0deny",
+			footer:        "esc deny",
 			title:         "Permission required",
 			minBodyHeight: modalEdgeRows + 3,
 		},
@@ -311,7 +314,14 @@ func TestModalFit_ShortTerminal(t *testing.T) {
 					if block == "" {
 						t.Fatalf("%s rendered nothing at %dx%d", tc.name, w, h)
 					}
-					plain := ansi.Strip(block)
+					// Non-breaking spaces are how keyLegend keeps a key
+					// and its action on one line; they read as ordinary
+					// spaces, so they are ordinary spaces to the
+					// assertions below. A hint that genuinely wrapped
+					// mid-phrase still fails: the break puts a newline
+					// and a box edge between the two words, and no
+					// amount of space-normalizing removes those.
+					plain := strings.ReplaceAll(ansi.Strip(block), "\u00a0", " ")
 					hasTitle := strings.Contains(plain, tc.title)
 
 					// (1) The modal composes inside the terminal

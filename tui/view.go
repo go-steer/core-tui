@@ -1254,13 +1254,13 @@ func (m Model) footerHint() string {
 			keys = append(keys, "v allow verb")
 		}
 		keys = append(keys, "t allow tool", "a allow always", "esc deny")
-		return "Permission required" + sep + strings.Join(keys, sep)
+		return "Permission required" + sep + keyLegend(keys...)
 	case m.pendingElicit != nil:
 		if m.pendingElicit.Mode == ElicitURLMode {
-			return "MCP elicitation" + sep + "a/enter accept" + sep + "n decline" + sep + "esc cancel"
+			return "MCP elicitation" + sep + keyLegend("a/enter accept", "n decline", "esc cancel")
 		}
-		return "MCP elicitation" + sep + "tab next field" + sep + "enter submit" +
-			sep + "ctrl+d decline" + sep + "esc cancel"
+		return "MCP elicitation" + sep + keyLegend(
+			"tab next field", "enter submit", "ctrl+d decline", "esc cancel")
 	case m.confirmingClear:
 		return "Confirm clear?" + sep + "type y / yes to wipe" + sep + "anything else cancels"
 	case m.sideAnswer != nil:
@@ -1472,31 +1472,36 @@ func (m Model) renderToast(width int) string {
 	return m.styles.PermissionWarn.Render(body)
 }
 
-// permissionKeyHint builds the "y allow once · n deny · …" key
-// legend for both permission renderers. Spaces WITHIN a key+action
-// pair are non-breaking (U+00A0) so wordWrap's space-break never
-// splits "a allow always" mid-pair onto two lines. The " · "
-// separator stays breakable so the legend wraps cleanly between
-// keys instead.
-func permissionKeyHint(verb string) string {
+// keyLegend joins key+action pairs into a "y allow once · n deny
+// · …" footer legend. Every space WITHIN a pair becomes
+// non-breaking (U+00A0), so wordWrap's space-break can never land
+// inside one: the failure it prevents is a narrow terminal putting
+// "esc" on one line and "cancel" on the next, which reads as two
+// keys, one of them unnamed. The " · " separators stay ordinary
+// spaces, so the legend still wraps — just between pairs, where a
+// break carries no meaning.
+//
+// A pair is written the way it reads on screen ("s allow session")
+// rather than as key and action apart; the caller composes the
+// legend, this only decides where it may break.
+func keyLegend(pairs ...string) string {
 	const nbsp = " "
-	pair := func(key, action string) string {
-		return key + nbsp + strings.ReplaceAll(action, " ", nbsp)
+	bound := make([]string, len(pairs))
+	for i, p := range pairs {
+		bound[i] = strings.ReplaceAll(p, " ", nbsp)
 	}
-	keys := []string{
-		pair("y", "allow once"),
-		pair("n", "deny"),
-		pair("s", "allow session"),
-	}
+	return strings.Join(bound, " "+GlyphSeparator+" ")
+}
+
+// permissionKeyHint builds the key legend for both permission
+// renderers.
+func permissionKeyHint(verb string) string {
+	keys := []string{"y allow once", "n deny", "s allow session"}
 	if verb != "" {
-		keys = append(keys, pair("v", "allow verb"))
+		keys = append(keys, "v allow verb")
 	}
-	keys = append(keys,
-		pair("t", "allow tool"),
-		pair("a", "allow always"),
-		pair("esc", "deny"),
-	)
-	return strings.Join(keys, " "+GlyphSeparator+" ")
+	keys = append(keys, "t allow tool", "a allow always", "esc deny")
+	return keyLegend(keys...)
 }
 
 // renderPermissionInline renders the permission prompt as a
@@ -1721,13 +1726,12 @@ func (m *Model) renderElicitModal() string {
 			body = m.styles.Muted.Render(req.Description) + "\n\n" + body
 		}
 		bodyLines = strings.Split(body, "\n")
-		footer = "a / enter accept " + GlyphSeparator + " n decline " + GlyphSeparator + " esc cancel"
+		footer = keyLegend("a / enter accept", "n decline", "esc cancel")
 	} else {
 		bodyLines, focusLine = m.elicitFormLines(modalBodyWidth(width))
-		footer = "tab next " + GlyphSeparator + " shift+tab prev " + GlyphSeparator +
-			" space toggle " + GlyphSeparator + " ←/→ enum " + GlyphSeparator +
-			" enter submit " + GlyphSeparator + " ctrl+d decline " + GlyphSeparator +
-			" esc cancel"
+		footer = keyLegend(
+			"tab next", "shift+tab prev", "space toggle", "←/→ enum",
+			"enter submit", "ctrl+d decline", "esc cancel")
 	}
 
 	// Window the field list. A form with more fields than the
