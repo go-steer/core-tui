@@ -83,7 +83,13 @@ func TestElicitRequestMsg_ReturnsRenderKickCmd(t *testing.T) {
 
 	out, cmd := m.Update(elicitRequestMsg{
 		serverName: "test-mcp",
-		req:        ElicitRequest{Title: "test", Description: "test"},
+		// A field is what makes this drawable: R-ELIC-3 screens an
+		// empty form out before the modal opens, and this test is
+		// about the kick a modal that DOES open needs.
+		req: ElicitRequest{
+			Title: "test", Description: "test",
+			Fields: []ElicitField{{Name: "who", Type: ElicitFieldString}},
+		},
 	})
 	got := out.(Model)
 	if got.pendingElicit == nil {

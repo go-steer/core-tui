@@ -1024,6 +1024,22 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		return m, forceRenderTick()
 	case elicitRequestMsg:
 		r := msg.req
+		// R-ELIC-3: a schema the modal cannot draw is declined
+		// automatically, and the operator is told it happened.
+		// Screening here rather than inside Elicit is what makes the
+		// second half possible — only the loop can append to the
+		// transcript (issue #209). A request refused with no trace is
+		// indistinguishable, from where the operator sits, from a
+		// server that never asked.
+		if !supportedElicit(r) {
+			m.history.Append(Message{
+				Role: RoleSystem,
+				Text: elicitUnsupportedNotice(msg.serverName, r),
+			})
+			m.dispatchElicit(ElicitResult{Action: ElicitActionDecline})
+			m.refreshAndScroll()
+			return m, tea.Batch(m.elicitListener(), forceRenderTick())
+		}
 		m.pendingElicit = &r
 		m.elicitShownAt = time.Now()
 		m.scroll().reset()

@@ -154,9 +154,6 @@ func NewElicitor() Elicitor { return &elicitor{requests: make(chan elicitFlow, 1
 // Elicit blocks until the operator submits / declines / cancels
 // the modal, or until ctx cancels.
 func (e *elicitor) Elicit(ctx context.Context, serverName string, req ElicitRequest) (ElicitResult, error) {
-	if !supportedElicit(req) {
-		return ElicitResult{Action: ElicitActionDecline}, nil
-	}
 	response := make(chan elicitResponse, 1)
 	flow := elicitFlow{serverName: serverName, req: req, response: response}
 
@@ -176,10 +173,20 @@ func (e *elicitor) Elicit(ctx context.Context, serverName string, req ElicitRequ
 }
 
 // supportedElicit screens out schemas the modal can't render
-// (R-ELIC-3): nested objects, unsupported field types. Auto-
-// declines those server-side instead of opening a broken modal.
-// For form mode the host has already flattened to ElicitField; we
-// trust the conversion. For URL mode the URL must be non-empty.
+// (R-ELIC-3): nested objects, unsupported field types. Those are
+// declined automatically rather than opening a broken modal. For
+// form mode the host has already flattened to ElicitField; we trust
+// the conversion. For URL mode the URL must be non-empty.
+//
+// The screen runs on the Bubble Tea loop, in the elicitRequestMsg
+// handler, and not here in Elicit. R-ELIC-3 asks for the automatic
+// decline AND for a "schema unsupported" system message, and only
+// the loop can append to the transcript — declining on this
+// goroutine got the first half and dropped the second, so a server
+// asking for something undrawable was refused in complete silence
+// and the operator had no way to know it had happened. Screening
+// where the message can be written keeps the decision and the
+// record of it in one place.
 func supportedElicit(req ElicitRequest) bool {
 	switch req.Mode {
 	case ElicitFormMode:
@@ -189,6 +196,35 @@ func supportedElicit(req ElicitRequest) bool {
 	default:
 		return false
 	}
+}
+
+// elicitUnsupportedNotice is the R-ELIC-3 system message: what was
+// refused, which server asked, and which part of the request the
+// modal could not draw. The reason is derived from supportedElicit's
+// own arms rather than from anything the server sent, so the two
+// cannot describe different failures — a notice naming a cause the
+// screen does not test for would be worse than no notice.
+//
+// The server name is the host's own label for the connection and is
+// spliced in as-is, the same way the modal title bar already renders
+// it. It is omitted rather than left as an empty gap when the host
+// passes nothing.
+func elicitUnsupportedNotice(serverName string, req ElicitRequest) string {
+	var reason string
+	switch req.Mode {
+	case ElicitFormMode:
+		reason = "the form has no fields"
+	case ElicitURLMode:
+		reason = "the URL is empty"
+	default:
+		reason = "the request mode is not one this TUI renders"
+	}
+	from := ""
+	if serverName != "" {
+		from = " from " + serverName
+	}
+	return "MCP elicitation" + from + ": schema unsupported (" + reason +
+		") — declined automatically"
 }
 
 // nextRequest is the Bubble Tea side's blocking read; mirrors the

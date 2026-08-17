@@ -378,3 +378,160 @@ func TestElicitURLMode_ActionRow(t *testing.T) {
 		})
 	}
 }
+
+// unsupportedElicitFlow wires a real elicitor to a real model and
+// hands it a request the modal cannot draw, the way an MCP server
+// would. It deliberately does NOT use elicitFlowFor, which asserts a
+// modal opened: not opening one is the behaviour under test.
+func unsupportedElicitFlow(t *testing.T, req ElicitRequest, server string) (Model, chan ElicitResult, tea.Cmd) {
+	t.Helper()
+	e := NewElicitor().(*elicitor)
+	results := make(chan ElicitResult, 1)
+	go func() {
+		r, _ := e.Elicit(context.Background(), server, req)
+		results <- r
+	}()
+	if _, ok := e.nextRequest(context.Background()); !ok {
+		t.Fatal("setup: nextRequest returned !ok with a pending request")
+	}
+	m := NewModel(Options{Elicitor: e})
+	out, _ := m.Update(tea.WindowSizeMsg{Width: 100, Height: 40})
+	m = out.(Model)
+	out, cmd := m.Update(elicitRequestMsg{serverName: server, req: req})
+	return out.(Model), results, cmd
+}
+
+// R-ELIC-3 has two halves — decline the undrawable schema, and tell
+// the operator it happened — and only the first was built. The
+// decline was issued inside Elicit, on the server's goroutine, where
+// there is no transcript to write to, so a request the TUI refused
+// left no trace anywhere the operator could see it (issue #209).
+func TestElicit_UnsupportedSchemaIsDeclinedAndRecorded(t *testing.T) {
+	cases := []struct {
+		name   string
+		req    ElicitRequest
+		server string
+		reason string
+	}{
+		{
+			name:   "form with no fields",
+			req:    ElicitRequest{Mode: ElicitFormMode, Title: "creds"},
+			server: "github",
+			reason: "the form has no fields",
+		},
+		{
+			name:   "url mode with no url",
+			req:    ElicitRequest{Mode: ElicitURLMode, Title: "open"},
+			server: "browser",
+			reason: "the URL is empty",
+		},
+		{
+			name:   "mode this TUI does not render",
+			req:    ElicitRequest{Mode: ElicitMode(42)},
+			server: "future",
+			reason: "the request mode is not one this TUI renders",
+		},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			m, results, cmd := unsupportedElicitFlow(t, tc.req, tc.server)
+
+			if m.pendingElicit != nil {
+				t.Error("a modal opened for a schema the modal cannot draw")
+			}
+			if got := awaitElicit(t, results).Action; got != ElicitActionDecline {
+				t.Errorf("action = %v, want Decline", got)
+			}
+
+			last := lastSystemRow(t, m)
+			for _, want := range []string{"schema unsupported", tc.reason, tc.server} {
+				if !strings.Contains(last, want) {
+					t.Errorf("the system row does not mention %q: %s", want, last)
+				}
+			}
+
+			// Two Cmds have to come back from this branch, and the
+			// batch is easy to get half right: the re-armed listener,
+			// or a second undrawable request is never drained and the
+			// server blocks forever; and the render kick, or the row
+			// explaining the refusal waits for the operator's next
+			// keystroke to appear (issue #24).
+			if cmd == nil {
+				t.Fatal("the unsupported branch returned no Cmd")
+			}
+			// Once. A Cmd is a call, not a value to be re-read: the
+			// listener among these blocks until the next request
+			// arrives, so a second invocation to format an error
+			// message is a hang rather than a failure.
+			first := cmd()
+			batch, ok := first.(tea.BatchMsg)
+			if !ok {
+				t.Fatalf("want a batch of listener + render kick, got %T", first)
+			}
+			if len(batch) != 2 {
+				t.Fatalf("batch has %d Cmds, want listener + render kick", len(batch))
+			}
+			// The listener Cmd blocks until the next request arrives,
+			// which is the whole point of it, so the batch cannot be
+			// walked synchronously. Run both and take whichever
+			// answers; the one that never does is the listener.
+			msgs := make(chan tea.Msg, len(batch))
+			for _, c := range batch {
+				go func(c tea.Cmd) { msgs <- c() }(c)
+			}
+			var kicked bool
+			deadline := time.After(time.Second)
+			for !kicked {
+				select {
+				case got := <-msgs:
+					_, kicked = got.(forceRenderMsg)
+				case <-deadline:
+					t.Fatal("no render kick — the refusal row waits for a keypress")
+				}
+			}
+		})
+	}
+}
+
+// A host that labels its servers with the empty string gets a notice
+// without a dangling "from" and without a double space where the name
+// would have been.
+func TestElicit_UnsupportedNoticeOmitsAnAbsentServerName(t *testing.T) {
+	m, results, _ := unsupportedElicitFlow(t, ElicitRequest{Mode: ElicitFormMode}, "")
+	if got := awaitElicit(t, results).Action; got != ElicitActionDecline {
+		t.Fatalf("action = %v, want Decline", got)
+	}
+	last := lastSystemRow(t, m)
+	if strings.Contains(last, "from") {
+		t.Errorf("the notice names a server the host did not name: %s", last)
+	}
+	if strings.Contains(last, "  ") {
+		t.Errorf("the notice has a gap where the server name would be: %q", last)
+	}
+}
+
+// The refusal is a transcript row, so it has to survive the trip to
+// the screen — a Message the renderer drops is the same silence the
+// bug was.
+func TestElicit_UnsupportedNoticeReachesTheFrame(t *testing.T) {
+	m, results, _ := unsupportedElicitFlow(t,
+		ElicitRequest{Mode: ElicitFormMode}, "github")
+	awaitElicit(t, results)
+	if got := ansi.Strip(m.View().Content); !strings.Contains(got, "schema unsupported") {
+		t.Errorf("the refusal is not on screen:\n%s", got)
+	}
+}
+
+// lastSystemRow returns the text of the transcript's final RoleSystem
+// message.
+func lastSystemRow(t *testing.T, m Model) string {
+	t.Helper()
+	msgs := m.history.Snapshot()
+	for i := len(msgs) - 1; i >= 0; i-- {
+		if msgs[i].Role == RoleSystem {
+			return msgs[i].Text
+		}
+	}
+	t.Fatalf("no system row in a transcript of %d messages", len(msgs))
+	return ""
+}
