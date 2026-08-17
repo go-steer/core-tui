@@ -47,7 +47,13 @@ STEPS=(
   "build           dev/tools/build"
   "lint            dev/tools/lint-go"
   "mod-tidy        dev/tools/verify-mod-tidy"
+  # Measures the working tree against the last release tag, so it reflects
+  # uncommitted edits — which is the point of running it before you push.
+  "apidiff         dev/tools/verify-apidiff"
   "test            dev/tools/test-unit"
+  # Must follow test: it reads the coverage.out that step writes rather
+  # than re-running a 90-second suite to recompute a number it already has.
+  "coverage        dev/tools/verify-coverage"
   "vuln            dev/tools/verify-vuln"
 )
 

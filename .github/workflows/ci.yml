@@ -170,6 +170,20 @@ jobs:
           path: coverage.out
           retention-days: 14
           if-no-files-found: error
+      # N-TEST's floor, enforced rather than aspired to. Inside the
+      # existing required `test` job on purpose: a new top-level job would
+      # need a branch-protection edit before it could block anything, and
+      # until that happened a coverage regression would merge green.
+      #
+      # Placed after the summary and the artifact upload so a failure here
+      # still leaves both behind — the number that failed is more useful
+      # than the fact that it failed. It reads the profile the Test step
+      # wrote; it does not re-run the suite.
+      #
+      # Not repeated in `test (macos)`: same statement set, same number.
+      - name: Coverage floor
+        if: needs.changes.outputs.docs_only != 'true'
+        run: dev/ci/presubmits/verify-coverage
 
   # darwin coverage for N-PORTABLE, which promises macOS terminals and
   # until now was tested nowhere. Capability detection, the OSC-11
@@ -268,6 +282,44 @@ jobs:
       - name: Verify tidy
         if: needs.changes.outputs.docs_only != 'true'
         run: dev/ci/presubmits/verify-mod-tidy
+
+  # The exported surface is the product — this library is consumed as a Go
+  # module, so a removed field breaks a host's build at `go get`. apidiff
+  # compares the module's exported API against the last release tag and
+  # fails on incompatible changes that dev/api-breaks.txt does not
+  # acknowledge; see the header of dev/tools/verify-apidiff for the
+  # escape hatch.
+  #
+  # Its own job rather than a step on `test`: it needs the full history
+  # (fetch-depth: 0) for the base tag, and paying that clone cost on the
+  # slowest job in the matrix would push the critical path out for a check
+  # that finishes in seconds.
+  #
+  # Not in the required set on `main`, deliberately. Every check added to
+  # branch protection is a check that can wedge the queue, and this one has
+  # a failure mode the others don't: it depends on a tag being fetchable,
+  # so a mirror hiccup or a forced tag move turns into a red required check
+  # on unrelated PRs. It runs on every PR and its verdict is visible; make
+  # it required once it has a release cycle of clean history behind it.
+  apidiff:
+    name: apidiff
+    needs: changes
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        if: needs.changes.outputs.docs_only != 'true'
+        with:
+          # Tags and history: the baseline is `git describe`'s nearest
+          # reachable v* tag, which a shallow clone cannot see.
+          fetch-depth: 0
+      - uses: actions/setup-go@v5
+        if: needs.changes.outputs.docs_only != 'true'
+        with:
+          go-version: ${{ env.GO_VERSION }}
+          check-latest: true
+      - name: API diff since last release
+        if: needs.changes.outputs.docs_only != 'true'
+        run: dev/ci/presubmits/verify-apidiff
 
   vuln:
     name: govulncheck

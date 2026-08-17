@@ -34,6 +34,8 @@ dev/
 │   ├── fix-go-format      # gofmt -s -w + goimports -w (auto-fix)
 │   ├── verify-mod-tidy    # `go mod tidy` clean check
 │   ├── verify-vuln        # govulncheck ./...
+│   ├── verify-coverage    # N-TEST floor (reads test-unit's coverage.out)
+│   ├── verify-apidiff     # exported-API diff vs the last release tag
 │   ├── add-license-headers # bulk-applier for SPDX + copyright headers
 │   ├── common.sh          # shared bash helpers (ensure_tool, run_step)
 │   └── .golangci.yml      # linter config
@@ -45,7 +47,9 @@ dev/
         ├── lint-go        # → dev/tools/lint-go
         ├── verify-go-format
         ├── verify-mod-tidy
-        └── verify-vuln
+        ├── verify-vuln
+        ├── verify-coverage
+        └── verify-apidiff
 ```
 
 ## Adding a check
@@ -125,6 +129,13 @@ the older SPDX-shorthand variant) to the current canonical form.
 | golangci-lint | v2.12.1    | `dev/tools/lint-go` (`GOLANGCI_LINT_VERSION` env var)      |
 | goimports     | latest     | `dev/tools/fix-go-format`, `dev/tools/verify-go-format`    |
 | govulncheck   | latest     | `dev/tools/verify-vuln`                                    |
+| apidiff       | pinned     | `dev/tools/verify-apidiff` (`APIDIFF_VERSION`)             |
+
+`apidiff` is pinned to a pseudo-version because `golang.org/x/exp`
+carries no tags. It is pinned at all — unlike govulncheck — because its
+classification of a change as compatible or incompatible *is* the gate;
+letting it float would let an upstream reclassification turn a green PR
+red with no local diff to explain it.
 
 Bump deliberately — new linter releases can introduce findings that
 block CI. When you bump golangci-lint, run `dev/tools/lint-go` locally

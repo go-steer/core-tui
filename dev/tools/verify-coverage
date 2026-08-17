@@ -1,0 +1,93 @@
+#!/usr/bin/env bash
+# Copyright 2026 The go-steer team
+#
+# Licensed under the Apache License, Version 2.0 (the "License");
+# you may not use this file except in compliance with the License.
+# You may obtain a copy of the License at
+#
+#     http://www.apache.org/licenses/LICENSE-2.0
+#
+# Unless required by applicable law or agreed to in writing, software
+# distributed under the License is distributed on an "AS IS" BASIS,
+# WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+# See the License for the specific language governing permissions and
+# limitations under the License.
+
+# Fail when statement coverage of `package tui` drops below N-TEST's floor.
+#
+# N-TEST (docs/requirements.md §4) targets "≥ 70% statement coverage in
+# package tui". The number was an aspiration in a document for the whole
+# pre-1.0 period and drifted freely; this makes it a check.
+#
+# Why 70 and not today's number: a floor pinned to the current value is a
+# ratchet, and a ratchet makes every subsequent PR that moves a statement
+# into an untested branch someone else's problem to fix before their own
+# change can land. 70 is the number the requirement actually states, and
+# the headroom above it is what lets an honest refactor land without a
+# coverage argument attached.
+#
+# Why `package tui` and not the module total: the module total includes
+# examples/ (0% by construction — they are wiring sketches, not logic)
+# and tui/testagent (a fixture). Averaging those in measures the shape of
+# the repo rather than the coverage of the library, and it moves whenever
+# an example is added. N-TEST names one package; this measures that one.
+#
+# Reads the coverage.out that dev/tools/test-unit writes, so run that
+# first. This does not re-run the suite — re-running it to check a number
+# the previous step already computed would double a 90-second job.
+set -euo pipefail
+. "$(dirname "$0")/common.sh"
+cd "$(repo_root)"
+
+FLOOR="${COVERAGE_FLOOR:-70.0}"
+PROFILE="${COVERAGE_PROFILE:-coverage.out}"
+
+if [[ ! -f "$PROFILE" ]]; then
+  echo "verify-coverage: $PROFILE not found — run dev/tools/test-unit first." >&2
+  exit 1
+fi
+
+# coverage.out lines are:
+#   <import-path>/<file>.go:<startLine>.<col>,<endLine>.<col> <numStmts> <count>
+#
+# Summing numStmts directly is the only faithful way to get a per-package
+# percentage: `go tool cover -func` reports a percentage per function,
+# and averaging percentages weights a three-line helper the same as a
+# three-hundred-line renderer.
+read -r pct covered total < <(
+  awk '
+    NR == 1 { next }                                  # "mode:" header
+    $0 !~ /\/tui\// { next }                          # other packages
+    $0 ~ /\/tui\/testagent\// { next }                # the fixture, not the library
+    {
+      stmts = $(NF-1)
+      count = $NF
+      total += stmts
+      if (count > 0) covered += stmts
+    }
+    END {
+      if (total == 0) { print "0.0 0 0"; exit }
+      printf "%.1f %d %d\n", (covered / total) * 100, covered, total
+    }
+  ' "$PROFILE"
+)
+
+if [[ "$total" -eq 0 ]]; then
+  echo "verify-coverage: no package tui statements found in $PROFILE — is the profile stale?" >&2
+  exit 1
+fi
+
+printf 'package tui: %s%% of statements (%s/%s), floor %s%%\n' \
+  "$pct" "$covered" "$total" "$FLOOR"
+
+if awk -v got="$pct" -v want="$FLOOR" 'BEGIN { exit !(got < want) }'; then
+  cat >&2 <<EOF
+
+package tui statement coverage is ${pct}%, below N-TEST's ${FLOOR}% floor.
+
+The uncovered functions, worst first:
+
+$(go tool cover -func="$PROFILE" | awk '$3 == "0.0%" && $1 ~ /\/tui\// && $1 !~ /\/tui\/testagent\//' | head -20)
+EOF
+  exit 1
+fi
