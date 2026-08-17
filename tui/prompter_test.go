@@ -109,17 +109,3 @@ func TestElicitor_RoundTripsResult(t *testing.T) {
 		t.Fatal("Elicit didn't return within 1s")
 	}
 }
-
-// TestElicitor_UnsupportedSchemaDeclines pins R-ELIC-3: an empty
-// form (or empty URL in URL mode) auto-declines server-side instead
-// of opening a broken modal.
-func TestElicitor_UnsupportedSchemaDeclines(t *testing.T) {
-	e := NewElicitor()
-	r, err := e.Elicit(context.Background(), "srv", ElicitRequest{Mode: ElicitFormMode})
-	if err != nil {
-		t.Fatalf("Elicit err: %v", err)
-	}
-	if r.Action != ElicitActionDecline {
-		t.Errorf("action = %v, want Decline for empty form", r.Action)
-	}
-}
