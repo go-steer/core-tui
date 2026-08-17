@@ -94,6 +94,14 @@ and §6 for the host-adapter recipe. Worked examples live under
   producer goroutine pushes realistic notices on a rotation (plus a
   periodic burst to demonstrate the drop-with-coalescence backpressure
   marker).
+- [`examples/core-agent`](./examples/core-agent) — the reference-host
+  adapter sketch, in the two flavors a real host ships: an in-process
+  agent, and an `attachclient` talking to a remote agent over HTTP +
+  SSE. Written against a local stand-in for core-agent's types (no
+  dependency on that module), so it doubles as the compile-time
+  canary on the plug-in surface. Start here if you are wiring your
+  own host: `go run ./examples/core-agent` and
+  `go run ./examples/core-agent -flavor attach`.
 
 ## Contributing
 

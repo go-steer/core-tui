@@ -23,6 +23,13 @@ in the host repos.
 The stable surface itself is documented in [`docs/design.md`](./docs/design.md) §3.
 This guide consumes that contract — it doesn't redefine it.
 
+The sketches in §3 and §4 are illustrative prose. Their compiling,
+tested counterpart is [`examples/core-agent/`](./examples/core-agent)
+— the same two flavors written against a local stand-in for
+core-agent's types, condensed to what fits in one readable pair of
+files. When a sketch here and the example disagree, the example is
+right: it is the one CI builds.
+
 ---
 
 ## 1. The adapter contract (recap)
@@ -482,6 +489,13 @@ func (a *attachAgent) Tools() []tui.ToolInfo {
 
 // SubagentLister + StatusReporter follow the same shape.
 ```
+
+Two things this sketch predates, both fixed in
+[`examples/core-agent/attach.go`](./examples/core-agent/attach.go):
+`Interrupt` is `Interrupt(ctx) error` on `tui.RemoteInterrupter`, not
+`() bool`; and `StatusReporter` / `UsageTracker` are called off the
+render path with no context and no error return, so an attach adapter
+has to serve them from a cache rather than a synchronous round trip.
 
 ---
 
