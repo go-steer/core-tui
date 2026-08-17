@@ -17,6 +17,8 @@ package tui
 import (
 	"strings"
 	"testing"
+
+	tea "charm.land/bubbletea/v2"
 )
 
 // modelWithTools builds a minimally-plausible Model that has the
@@ -192,5 +194,109 @@ func TestCollectToolCalls_FiltersNonToolRoles(t *testing.T) {
 	}
 	if got[0].ToolName != "read_file" || got[1].ToolName != "bash" {
 		t.Errorf("order not preserved, got %v", []string{got[0].ToolName, got[1].ToolName})
+	}
+}
+
+// ---------------------------------------------------------------
+// Opening on the selected row (issue #233)
+// ---------------------------------------------------------------
+
+// interleavedToolModel puts non-tool rows BETWEEN the tool rows on
+// purpose. With a transcript of nothing but tool calls the history
+// index and the tool-list index are the same number, so a seeding
+// bug that used selIdx directly would pass every assertion; here the
+// three tool calls sit at history 1, 3 and 5 and map to tool indices
+// 0, 1 and 2.
+func interleavedToolModel(t *testing.T) Model {
+	t.Helper()
+	m := NewModel(Options{Agent: &bareAgent{id: "a"}})
+	out, _ := m.Update(tea.WindowSizeMsg{Width: 100, Height: 40})
+	m = out.(Model)
+	m.history.Append(Message{Role: RoleUser, Text: "read it"})
+	m.history.Append(Message{Role: RoleTool, ToolName: "read_file", ToolCallID: "call-1"})
+	m.history.Append(Message{Role: RoleAssistant, Text: "done", Rendered: "done"})
+	m.history.Append(Message{Role: RoleTool, ToolName: "bash", ToolCallID: "call-2"})
+	m.history.Append(Message{Role: RoleAssistant, Text: "and now", Rendered: "and now"})
+	m.history.Append(Message{Role: RoleTool, ToolName: "grep", ToolCallID: "call-3"})
+	m.refreshViewport()
+	return m
+}
+
+// openToolCallOverlay presses ctrl+x through the real Update path and
+// hands back the dialog it opened.
+func openToolCallOverlay(t *testing.T, m Model) *toolCallDialog {
+	t.Helper()
+	m = press(m, "ctrl+x")
+	d, ok := m.overlayStack.Get(toolCallDialogID).(*toolCallDialog)
+	if !ok {
+		t.Fatal("ctrl+x did not open the tool-call overlay")
+	}
+	return d
+}
+
+// The overlay predates the transcript cursor and opened on the newest
+// call regardless of what the operator had selected — so picking a
+// row and pressing ctrl+x meant walking back to it with ←, counting
+// tool calls on the way. Issue #233.
+func TestToolCallOverlay_OpensOnTheSelectedRow(t *testing.T) {
+	m := interleavedToolModel(t)
+	m.setFocus(focusTranscript)
+	m.selIdx = 1 // the read_file row: history 1, tool 0
+
+	d := openToolCallOverlay(t, m)
+	if d.idx != 0 {
+		t.Fatalf("overlay opened on tool %d, want 0 (the selected read_file row)", d.idx)
+	}
+	if out := d.Render(m.width, &m); !strings.Contains(out, "1/3") || !strings.Contains(out, "read_file") {
+		t.Errorf("expected the header to show read_file as 1/3, got:\n%s", out)
+	}
+
+	// The middle row too, so the assertion above isn't satisfied by
+	// "always opens on the first call".
+	m.selIdx = 3 // bash: history 3, tool 1
+	if d := openToolCallOverlay(t, m); d.idx != 1 {
+		t.Errorf("overlay opened on tool %d, want 1 (the selected bash row)", d.idx)
+	}
+}
+
+// The marker is only drawn while the transcript holds the keyboard
+// (chatRowMarked), so from the composer selIdx is a position the
+// operator cannot see. Aiming the overlay with it would move the
+// binding's target for reasons invisible from where they are sitting.
+func TestToolCallOverlay_ComposerFocusStillOpensOnTheNewest(t *testing.T) {
+	m := interleavedToolModel(t)
+	m.selIdx = 1 // a stale cursor from an earlier visit to focus mode
+	if m.focus != focusInput {
+		t.Fatalf("setup: expected composer focus, got %d", m.focus)
+	}
+	if d := openToolCallOverlay(t, m); d.idx != 2 {
+		t.Errorf("overlay opened on tool %d, want 2 (most recent) — an unseen cursor aimed it", d.idx)
+	}
+}
+
+// Focus mode with the cursor on prose. There is no tool call to seed
+// from, and the fallback is the behaviour the binding has always had.
+func TestToolCallOverlay_NonToolSelectionFallsBackToTheNewest(t *testing.T) {
+	m := interleavedToolModel(t)
+	m.setFocus(focusTranscript)
+	m.selIdx = 2 // the assistant row between two tool calls
+
+	if d := openToolCallOverlay(t, m); d.idx != 2 {
+		t.Errorf("overlay opened on tool %d, want 2 (most recent)", d.idx)
+	}
+}
+
+func TestIndexOfToolCall_ReportsAbsenceRatherThanZero(t *testing.T) {
+	tools := []Message{{ID: 7}, {ID: 9}}
+	if got := indexOfToolCall(tools, 9); got != 1 {
+		t.Errorf("indexOfToolCall(9) = %d, want 1", got)
+	}
+	// -1 rather than 0: a caller that got 0 for "not here" would
+	// silently open on the first tool call instead of falling back.
+	if got := indexOfToolCall(tools, 8); got != -1 {
+		t.Errorf("indexOfToolCall(8) = %d, want -1 for a row that is not a tool call", got)
+	}
+	if got := indexOfToolCall(nil, 7); got != -1 {
+		t.Errorf("indexOfToolCall on an empty list = %d, want -1", got)
 	}
 }
