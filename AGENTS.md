@@ -47,6 +47,10 @@ examples/             runnable host examples.
                       visual harness (ctrl+y permission, ctrl+e elicit,
                       ctrl+x tool detail, /switch, -verbose-tools).
   notifier-smoke/     standalone Notifier-contract exerciser.
+  core-agent/         reference-host adapter sketch, both flavors
+                      (in-process + attachclient over HTTP/SSE),
+                      written against fakehost/ rather than the real
+                      core-agent module.
 dev/                  build / test / lint tooling — see dev/README.md.
 docs/                 source-of-truth design docs (requirements,
                       design, decisions).
@@ -56,9 +60,13 @@ CHANGELOG.md          every release back to v0.1.0 + the stability
                       promise. Promoted at tag time (see below).
 ```
 
-Not here yet: `examples/core-agent/` (the reference-host adapter
-sketch, issue #82) — with one gating host it would be the only
-compile-time canary on the plug-in surface.
+`examples/core-agent/` is load-bearing beyond being an example: with
+one gating host it is the only compile-time canary on the plug-in
+surface (`docs/design.md` §7). It asserts `var _ tui.X = ...` for 18
+interfaces, so a rename or signature change under `tui/` breaks the
+build here instead of surfacing when core-agent next upgrades. If
+you change the plug-in surface, expect to change it too — and treat
+"this adapter got harder to write" as the signal it exists to give.
 
 ## Build & test
 
@@ -203,7 +211,7 @@ Pre-1.0. What's left before the API freezes is the
 [v1.0 milestone](https://github.com/go-steer/core-tui/milestone/1):
 capability-surface consolidation, the exported-surface audit, removing
 the vestigial render paths, an `apidiff` gate in CI, headless smoke
-tests, the `examples/core-agent` adapter, coverage to the ≥70% floor,
-and macOS in the CI matrix. Read the milestone before proposing
+tests, coverage to the ≥70% floor, and macOS in the CI matrix. Read
+the milestone before proposing
 anything that widens the exported surface — it is being narrowed, not
 grown.

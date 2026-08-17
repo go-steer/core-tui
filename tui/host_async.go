@@ -308,6 +308,73 @@ func pricingSetCmd(ctrl PricingController, gen uint64, id string, in, out float6
 	}
 }
 
+// slashInvokeTimeout bounds SlashProvider.InvokeSlash. Same contract
+// inversion reloadCmd fixed: the method takes a context.Context and
+// was being handed context.Background(). Generous, because a /cmd can
+// legitimately be slow — a compaction pass, an upstream lookup — and
+// the async provider variants are the seam for anything that wants to
+// report progress while it works.
+const slashInvokeTimeout = 60 * time.Second
+
+// switchLookupCmd runs stage one of `/switch <id>`: the Sessions()
+// enumerate that decides whether id names an action row (issue #56) or
+// a session. The row match happens inside the closure because it is a
+// pure filter over the id we handed it — the goroutine reads nothing
+// from the model, and the handler gets an answer rather than a list to
+// re-scan.
+//
+// Stage two (SwitchToSession) is deliberately NOT chained here. Two
+// dependent host calls in one Cmd would commit the switch before
+// Update had a chance to notice the enumerate was superseded, which is
+// exactly the failure the seq stamp exists to prevent.
+func switchLookupCmd(switcher SessionSwitcher, gen, seq uint64, id string) tea.Cmd {
+	return func() tea.Msg {
+		out := switchLookupMsg{gen: gen, seq: seq, id: id}
+		for _, s := range switcher.Sessions() {
+			if s.ID == id && s.Input != nil {
+				row := s
+				out.row = &row
+				break
+			}
+		}
+		return out
+	}
+}
+
+// slashDispatchCmd runs the host-provider half of a `/cmd` off the
+// Update goroutine: the SlashCommands() name match and, when invoke is
+// set, the InvokeSlash call itself under slashInvokeTimeout.
+//
+// The two travel together because splitting them buys nothing — the
+// match is only ever asked in order to decide whether to invoke — and
+// costs the operator a frame of silence between their Enter and any
+// feedback at all.
+//
+// invoke is resolved by the caller, on the loop, from the provider's
+// concrete shape: only a plain SlashProvider can be driven to
+// completion out here. The async variants come back through Update
+// first, because starting one means arming the model's cancel func,
+// in-flight record and toast.
+func slashDispatchCmd(provider SlashProvider, gen, seq uint64, name, args string, invoke bool) tea.Cmd {
+	return func() tea.Msg {
+		out := slashDispatchedMsg{gen: gen, seq: seq, name: name, args: args}
+		for _, spec := range provider.SlashCommands() {
+			if spec.Name == name || sliceContains(spec.Aliases, name) {
+				out.matched = true
+				break
+			}
+		}
+		if !out.matched || !invoke {
+			return out
+		}
+		ctx, cancel := context.WithTimeout(context.Background(), slashInvokeTimeout)
+		defer cancel()
+		out.invoked = true
+		out.res, out.err = provider.InvokeSlash(ctx, name, args)
+		return out
+	}
+}
+
 // helpCommandsCmd pulls SlashProvider.SlashCommands() for /help off
 // the Update goroutine. The built-in half of the help text needs no
 // host at all, so it renders on the keystroke and the host's section

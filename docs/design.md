@@ -26,7 +26,19 @@ In order of priority:
    tool listing, subagents) is an opt-in capability the TUI
    feature-detects.
 4. **Embeddable.** A host should be able to drop core-tui in with a
-   ≤ 50-line adapter plus a `tui.Run(ctx, opts)` call.
+   small adapter plus a `tui.Run(ctx, opts)` call.
+
+   This goal used to say "a ≤ 50-line adapter". `examples/core-agent`
+   (issue #82) was written partly to measure that number, and the
+   measurement says it was never true: the *minimum* adapter —
+   `Agent.Run` translating a host's nested event tree into
+   `tui.Event`, and nothing else — is **64 non-comment lines**, and a
+   reference-host-shaped adapter is **257 lines local / 380 attach**
+   in the deliberately condensed sketch (core-agent's real ones are
+   ~1,050 and ~1,630). The figure is recorded here as measured rather
+   than aspired to. Bringing it down is what issue #77's capability
+   consolidation is for; §6.1 / §6.2's per-host LOC budgets (~150 and
+   ~400) were always the more honest targets.
 
 ## 2. Module layout
 
@@ -70,7 +82,11 @@ core-tui/
 └── examples/
     ├── local/          scripted in-process agent → visual harness
     ├── notifier-smoke/ standalone Notifier-contract exerciser
-    └── core-agent/     reference-host adapter sketch (issue #82)
+    └── core-agent/     reference-host adapter sketch — local +
+        │               attach flavors; the compile-time canary (§7)
+        └── fakehost/   local stand-in for core-agent's agent type +
+                        attach client, so the example depends on no
+                        other repo
 ```
 
 ### 2.1 Why one flat package
@@ -796,6 +812,18 @@ present-continuous string replaces the rotation entirely. No new
   contract. The rule covers the `/cmd` path as well as bare keystrokes
   (issue #137): a slash command the operator asked for still can't be
   allowed to freeze the loop.
+- **A reply that has been overtaken is dropped, not rendered.** Every
+  off-loop reply carries the generation it left under, and `Update`
+  drops it when that generation has turned over — `sessionGen` for
+  anything session-scoped, `paletteSeq` for a palette fill, `slashSeq`
+  for a slash dispatch. `slashSeq` exists because slash commands are
+  typed back to back within one session: with the `SlashCommands()`
+  name match off-loop, an "unknown command /foo" verdict can arrive
+  after the operator has moved on, and a row blaming `/foo` printed
+  under `/help`'s output is worse than no row at all. The same stamp
+  keeps the multi-stage flows honest — `/switch <id>` enumerates
+  before it switches, and a superseded enumerate must never be allowed
+  to drive the switch.
 - **Nor do the `Options.*` host callbacks** (issue #137).
   `PersistModelChoice`, `PersistThemeChoice`, `PersistStatusLayout`
   and `PermissionMode.Set` / `.Persist` are plain func fields rather
@@ -935,7 +963,10 @@ the host side of the adapter and never crosses into `tui`.
 
 A scaffold adapter, with stubs for each capability, ships as
 `examples/local/` (see §11). Third-party hosts can copy it as a
-starting point.
+starting point. `examples/core-agent/` is the fuller worked case:
+the same four steps against a host-shaped agent type, in both the
+in-process and attach flavors, with the capabilities each flavor
+declines called out and why.
 
 ### 6.1 cogo (Gemini-only, local-only) — illustrative
 
@@ -962,7 +993,8 @@ Adapter LOC budget: ~150 lines total.
 ### 6.2 core-agent (multi-provider, local + attach) — the reference host
 
 This is the migration that actually happened; see `MIGRATION.md` §3
-for its shipped shape. core-agent's setup mirrors §6.1 but adds:
+for its shipped shape and `examples/core-agent/` for a runnable
+condensation of it. core-agent's setup mirrors §6.1 but adds:
 
 - `PricingController` adapter (wraps the existing `internal/pricing`
   package).
@@ -1000,12 +1032,27 @@ Adapter LOC budget: ~400 lines (more capabilities to wire).
   every capability; tests assert that each slash command's
   "available" and "not available" paths render correctly when the
   capability is present / absent.
-- **Adapter example** — `examples/core-agent` builds a one-file
-  adapter against a fake of the reference host's agent.go; failing to
-  compile after a refactor is a CI signal that the plug-in surface
-  broke. With one gating host this is the only compile-time canary
-  we have, so it matters more than it did when there were two.
-  Not built yet — tracked as issue #82.
+- **Adapter example** — `examples/core-agent` builds an adapter
+  against `examples/core-agent/fakehost`, a local stand-in for the
+  reference host's agent type and attach client; failing to compile
+  after a refactor is a CI signal that the plug-in surface broke.
+  With one gating host this is the only compile-time canary we have,
+  so it matters more than it did when there were two.
+
+  Shipped for issue #82. Two flavors — `localAdapter` (in-process,
+  the shape of core-agent's `cmd/core-agent/coretui_enabled.go`) and
+  `attachAdapter` (HTTP + SSE, the shape of its
+  `internal/coretuiremote`) — covering 18 plug-in interfaces between
+  them via `var _ tui.X = ...` assertions, which is what makes the
+  build fail rather than merely the behavior drift. It deliberately
+  does NOT depend on the real core-agent module: core-agent depends
+  on core-tui, so that import would close an ecosystem-level cycle
+  and chain this repo's CI to another repo's release cadence.
+
+  The example also carries behavioral tests, because a canary that
+  only typechecks misses the half of the contract that lives in the
+  doc comments — cursor paging, the `*SubagentNotFoundError`
+  distinction, in-band tool errors becoming `ToolResult.Error`.
 
 ## 8. Compatibility & versioning
 
@@ -1076,8 +1123,8 @@ on the [v1.0 milestone](https://github.com/go-steer/core-tui/milestone/1).
 5. Implement the capability feature-detection in Update + the "not
    available" message paths.
 6. Write `examples/local` (visual harness) and the `examples/core-agent`
-   adapter sketch. ◐ `examples/local` shipped; the adapter sketch is
-   issue #82. The originally-planned `examples/permissions` binary was
+   adapter sketch. ✓ Both shipped (the adapter sketch was issue
+   #82). The originally-planned `examples/permissions` binary was
    dropped: `examples/local` already round-trips a real prompt through
    `tui.NewPrompter()` on `ctrl+y`, and the coverage a separate binary
    would have added belongs in the headless smoke harness (issue #81),

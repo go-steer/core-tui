@@ -463,6 +463,57 @@ type helpCommandsMsg struct {
 	specs []SlashCommandSpec
 }
 
+// The two call sites #137 deferred: `/switch <id>` and dispatchSlash's
+// match-then-invoke. Both carry seq — Model.slashSeq as of the
+// dispatch — on top of gen, because both can be overtaken by the next
+// /cmd without the session ever changing.
+
+// switchLookupMsg carries stage one of `/switch <id>`: the
+// SessionSwitcher.Sessions() enumerate, with the row matching id
+// already picked out inside the goroutine (a pure filter over the id
+// the closure was handed — it reads no model state).
+//
+// row non-nil means id named an ACTION row (issue #56) rather than a
+// session, and the handler opens that row's text-input dialog. row nil
+// sends the handler on to stage two, SwitchToSession, whose reply
+// lands as the ordinary sessionSwitchedMsg.
+//
+// The seq guard is what keeps the two stages honest: an enumerate that
+// has been superseded must never be allowed to drive a switch.
+type switchLookupMsg struct {
+	gen uint64
+	seq uint64
+	id  string
+	row *SessionInfo
+}
+
+// slashDispatchedMsg carries the host-provider half of a `/cmd`: the
+// SlashCommands() name match, plus — for a plain SlashProvider — the
+// InvokeSlash that follows it, both inside one off-loop Cmd.
+//
+// matched=false is the "unknown command" verdict, and it is the reason
+// this message is stamped at all. That row used to be written in the
+// dispatching frame, so it could not be out of order; with the match
+// off-loop, an operator who types /foo and then /help would otherwise
+// read "unknown command /foo" underneath /help's output and reasonably
+// conclude /help is the command that doesn't exist.
+//
+// invoked separates the two matched shapes. A plain SlashProvider is
+// invoked inside the same Cmd, so res/err are the whole answer. An
+// Async(WithPreamble)SlashProvider is not: launching one arms
+// m.cancelSlash, m.inFlightSlash and the toast, which is model state
+// only Update may touch.
+type slashDispatchedMsg struct {
+	gen     uint64
+	seq     uint64
+	name    string
+	args    string
+	matched bool
+	invoked bool
+	res     SlashResult
+	err     error
+}
+
 // ThemeChangedMsg is emitted by the /theme picker (and `/theme
 // <name>` with a known name) when the operator commits a new
 // theme. Hosts have two equivalent ways to persist:

@@ -547,6 +547,22 @@ type Model struct {
 	// every open; the reply is dropped unless it matches
 	// m.palette.seq.
 	paletteSeq uint64
+
+	// slashSeq identifies the CURRENT slash dispatch (issue #137).
+	// Bumped by dispatchSlash on every submitted /cmd, built-in or
+	// host. The two-stage paths that landed with #137 — `/switch <id>`
+	// enumerate-then-switch, and the host match-then-invoke — stamp
+	// their replies with it and Update drops any whose stamp has been
+	// overtaken.
+	//
+	// sessionGen is too coarse for this: it turns over only on a
+	// session switch, while slash commands are typed back to back
+	// inside one session. The reply that most needs the guard is the
+	// NEGATIVE one — "unknown command /foo" used to be written in the
+	// same frame as the dispatch, and now that the name match is a
+	// host call it can land after the output of whatever the operator
+	// typed next.
+	slashSeq uint64
 }
 
 // NewModel constructs a Model from Options. SeedHistory entries are

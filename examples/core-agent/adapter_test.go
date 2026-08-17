@@ -1,0 +1,466 @@
+// Copyright 2026 The go-steer team
+//
+// Licensed under the Apache License, Version 2.0 (the "License");
+// you may not use this file except in compliance with the License.
+// You may obtain a copy of the License at
+//
+//     http://www.apache.org/licenses/LICENSE-2.0
+//
+// Unless required by applicable law or agreed to in writing, software
+// distributed under the License is distributed on an "AS IS" BASIS,
+// WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+// See the License for the specific language governing permissions and
+// limitations under the License.
+
+package main
+
+import (
+	"context"
+	"errors"
+	"iter"
+	"strings"
+	"testing"
+	"time"
+
+	"github.com/go-steer/core-tui/examples/core-agent/fakehost"
+	"github.com/go-steer/core-tui/tui"
+)
+
+// turn drains an event iterator into a slice, failing on the first
+// error and on an unreasonable wait.
+func turn(t *testing.T, seq iter.Seq2[tui.Event, error]) []tui.Event {
+	t.Helper()
+	var out []tui.Event
+	for ev, err := range seq {
+		if err != nil {
+			t.Fatalf("event stream: %v", err)
+		}
+		out = append(out, ev)
+	}
+	return out
+}
+
+// assertTurnShape checks the properties the renderer depends on,
+// independent of which flavor produced the events. Both adapters run
+// through it — that both satisfy the same contract identically is
+// the claim I-CORE-AGENT makes.
+func assertTurnShape(t *testing.T, evs []tui.Event) {
+	t.Helper()
+	if len(evs) == 0 {
+		t.Fatal("no events")
+	}
+
+	var partials, commits int
+	var calls []tui.ToolCall
+	var results []tui.ToolResult
+	var usage *tui.Usage
+	for _, ev := range evs {
+		if ev.Partial {
+			partials++
+		} else if ev.Text != "" {
+			commits++
+		}
+		if ev.Model == "" {
+			t.Error("every event should carry the resolved model name")
+		}
+		calls = append(calls, ev.ToolCalls...)
+		results = append(results, ev.ToolResults...)
+		if ev.Usage != nil {
+			usage = ev.Usage
+		}
+	}
+
+	if partials == 0 {
+		t.Error("expected streamed partials")
+	}
+	if commits != 1 {
+		t.Errorf("expected exactly one committed (non-partial) text event, got %d", commits)
+	}
+	if len(calls) != 2 {
+		t.Fatalf("expected 2 tool calls, got %d", len(calls))
+	}
+	if calls[0].Name != "read_file" || calls[0].Args["path"] != "deploy/api.yaml" {
+		t.Errorf("tool call args did not survive translation: %+v", calls[0])
+	}
+	if len(results) != 2 {
+		t.Fatalf("expected 2 tool results, got %d", len(results))
+	}
+
+	// IDs must correlate, or the renderer cannot attach a result to
+	// its call row.
+	for i := range calls {
+		if calls[i].ID != results[i].ID {
+			t.Errorf("result %d: ID %q does not match call ID %q", i, results[i].ID, calls[i].ID)
+		}
+	}
+	// The host packs latency into the response map; core-tui plucks
+	// it, so the adapter must not strip it.
+	if _, ok := results[0].Response["latency_ms"]; !ok {
+		t.Error("latency_ms was dropped from the tool response")
+	}
+	if results[0].Error != "" {
+		t.Errorf("successful call reported an error: %q", results[0].Error)
+	}
+	// The host's in-band "error" key has to become the Error field.
+	if !strings.Contains(results[1].Error, "could not find") {
+		t.Errorf("in-band error was not split out of the response map: %+v", results[1])
+	}
+	if _, ok := results[1].Response["error"]; ok {
+		t.Error("the error key should not survive in the response map")
+	}
+	if usage == nil || usage.InputTokens == 0 || usage.OutputTokens == 0 {
+		t.Errorf("usage did not reach the TUI: %+v", usage)
+	}
+}
+
+func TestLocalAdapterRunTranslatesTurn(t *testing.T) {
+	agent := fakehost.NewAgent("")
+	a := &localAdapter{inner: agent}
+
+	evs := turn(t, a.Run(t.Context(), "check the api deployment"))
+	assertTurnShape(t, evs)
+
+	var cost float64
+	for _, ev := range evs {
+		if ev.CostUSD > 0 {
+			cost = ev.CostUSD
+		}
+	}
+	if cost <= 0 {
+		t.Error("expected the host-computed per-turn cost on the usage event")
+	}
+}
+
+func TestLocalAdapterCapabilities(t *testing.T) {
+	agent := fakehost.NewAgent("gemini-3.1-pro")
+	a := &localAdapter{inner: agent}
+
+	if got := a.Status(); got.ModelName != "gemini-3.1-pro" || got.Provider != "gemini" {
+		t.Errorf("Status() = %+v", got)
+	}
+	if len(a.Tools()) != 5 {
+		t.Errorf("Tools() returned %d entries", len(a.Tools()))
+	}
+	if got := a.Tools()[0]; got.GateState == "" {
+		t.Error("ToolLister must report the gate disposition")
+	}
+	if len(a.Subagents()) != 2 {
+		t.Errorf("Subagents() returned %d entries", len(a.Subagents()))
+	}
+	if len(a.SessionApprovals()) != 3 {
+		t.Errorf("SessionApprovals() returned %d rows", len(a.SessionApprovals()))
+	}
+	if err := a.AddAllowPatterns([]string{"bash:git *"}); err != nil {
+		t.Errorf("AddAllowPatterns: %v", err)
+	}
+	if err := a.AddBuiltinAllowExtra("nope"); err == nil {
+		t.Error("an unknown allow bundle should be an error")
+	}
+
+	// SwitchModel hands back a whole new tui.Agent, not a name.
+	next, err := a.SwitchModel("claude-sonnet-4-6")
+	if err != nil {
+		t.Fatalf("SwitchModel: %v", err)
+	}
+	swapped, ok := next.(*localAdapter)
+	if !ok {
+		t.Fatalf("SwitchModel returned %T, want *localAdapter", next)
+	}
+	if got := swapped.Status(); got.ModelName != "claude-sonnet-4-6" || got.Provider != "anthropic" {
+		t.Errorf("after swap Status() = %+v", got)
+	}
+	if _, err := a.SwitchModel("gpt-hallucination-9"); err == nil {
+		t.Error("an unknown model should be an error")
+	}
+
+	res, err := a.Reload(t.Context())
+	if err != nil {
+		t.Fatalf("Reload: %v", err)
+	}
+	if res.Agent == nil || res.Note == "" || len(res.MCPServers) == 0 {
+		t.Errorf("ReloadResult under-populated: %+v", res)
+	}
+
+	if _, err := a.Refresh(t.Context()); err != nil {
+		t.Errorf("Refresh: %v", err)
+	}
+	summary, err := a.Set("gemini-3.1-pro", 1.25, 10)
+	if err != nil || !strings.Contains(summary, "gemini-3.1-pro") {
+		t.Errorf("Set() = %q, %v", summary, err)
+	}
+}
+
+func TestLocalAdapterInboxRoundTrip(t *testing.T) {
+	a := &localAdapter{inner: fakehost.NewAgent("")}
+
+	if got := a.PendingInboxCount(); got != 0 {
+		t.Fatalf("fresh inbox has %d entries", got)
+	}
+	if err := a.Inject("also check the canary namespace"); err != nil {
+		t.Fatalf("Inject: %v", err)
+	}
+	if err := a.Inject("   "); err == nil {
+		t.Error("an empty injection should be rejected")
+	}
+	if got := a.PendingInboxCount(); got != 1 {
+		t.Fatalf("PendingInboxCount() = %d, want 1", got)
+	}
+	drained := a.DrainInbox()
+	if len(drained) != 1 || drained[0] != "also check the canary namespace" {
+		t.Fatalf("DrainInbox() = %v", drained)
+	}
+	if got := a.PendingInboxCount(); got != 0 {
+		t.Errorf("DrainInbox must empty the inbox, %d left", got)
+	}
+}
+
+func TestLocalAdapterSlashSideAnswer(t *testing.T) {
+	a := &localAdapter{inner: fakehost.NewAgent("")}
+
+	if len(a.SlashCommands()) == 0 {
+		t.Fatal("SlashProvider advertised no commands")
+	}
+	res, err := a.InvokeSlash(t.Context(), "btw", "what changed in prod?")
+	if err != nil {
+		t.Fatalf("InvokeSlash: %v", err)
+	}
+	if res.ModalAnswer == nil || res.ModalAnswer.Question != "what changed in prod?" {
+		t.Fatalf("SlashResult = %+v", res)
+	}
+	if _, err := a.InvokeSlash(t.Context(), "nope", ""); err == nil {
+		t.Error("an unknown command should be an error")
+	}
+
+	// The wake signal has to reach the channel core-tui subscribes to.
+	select {
+	case <-a.WakeRequested():
+		t.Fatal("wake fired before it was requested")
+	default:
+	}
+	if _, err := a.InvokeSlash(t.Context(), "wake", ""); err != nil {
+		t.Fatalf("/wake: %v", err)
+	}
+	select {
+	case <-a.WakeRequested():
+	case <-time.After(time.Second):
+		t.Error("wake signal never arrived")
+	}
+}
+
+func TestLocalUsageTracker(t *testing.T) {
+	agent := fakehost.NewAgent("")
+	a := &localAdapter{inner: agent}
+	u := &localUsage{inner: agent}
+
+	if u.SessionTurns() != 0 {
+		t.Fatalf("fresh session reports %d turns", u.SessionTurns())
+	}
+	turn(t, a.Run(t.Context(), "hello"))
+
+	if u.SessionTurns() != 1 {
+		t.Errorf("SessionTurns() = %d, want 1", u.SessionTurns())
+	}
+	totals := u.SessionTotals()
+	if totals.InputTokens == 0 || totals.OutputTokens == 0 {
+		t.Errorf("SessionTotals() = %+v", totals)
+	}
+	if u.SessionCostUSD() <= 0 {
+		t.Error("SessionCostUSD() did not accumulate")
+	}
+	last, cost := u.LastTurn()
+	if last != totals || cost <= 0 {
+		t.Errorf("LastTurn() = %+v, %v after a single turn", last, cost)
+	}
+	if u.ContextWindowUsed() == 0 || u.ContextWindowUsed() >= u.ContextWindowSize() {
+		t.Errorf("context window: used %d of %d", u.ContextWindowUsed(), u.ContextWindowSize())
+	}
+	if u.SessionDuration() <= 0 {
+		t.Error("SessionDuration() did not advance")
+	}
+}
+
+// startDaemon boots the toy daemon and returns an adapter attached
+// to it, torn down when the test ends.
+func startDaemon(t *testing.T) *attachAdapter {
+	t.Helper()
+	d, err := fakehost.StartDaemon(fakehost.NewAgent(""))
+	if err != nil {
+		t.Fatalf("StartDaemon: %v", err)
+	}
+	t.Cleanup(func() { _ = d.Close() })
+	return newAttachAdapter(fakehost.NewClient(d.URL()), fakehost.SessionPath)
+}
+
+func TestAttachAdapterRunOverHTTP(t *testing.T) {
+	a := startDaemon(t)
+
+	// Same assertions as the local flavor, on events that crossed a
+	// socket: the two adapters are interchangeable from core-tui's
+	// point of view.
+	assertTurnShape(t, turn(t, a.Run(t.Context(), "check the api deployment")))
+
+	if got := a.Status(); got.ModelName == "" || got.State == "" {
+		t.Errorf("Status() = %+v", got)
+	}
+	if a.SessionTurns() != 1 {
+		t.Errorf("SessionTurns() = %d, want 1", a.SessionTurns())
+	}
+	if len(a.Tools()) != 5 {
+		t.Errorf("Tools() returned %d entries", len(a.Tools()))
+	}
+	if len(a.Subagents()) != 2 {
+		t.Errorf("Subagents() returned %d entries", len(a.Subagents()))
+	}
+}
+
+func TestAttachObserverEventsSeeInjectedTurn(t *testing.T) {
+	a := startDaemon(t)
+	ctx, cancel := context.WithTimeout(t.Context(), 30*time.Second)
+	defer cancel()
+
+	type result struct {
+		text  string
+		calls int
+	}
+	done := make(chan result, 1)
+	go func() {
+		var r result
+		for ev, err := range (attachObserver{attachAdapter: a}).Events(ctx) {
+			if err != nil {
+				continue // transport hiccup; the iterator keeps going
+			}
+			r.calls += len(ev.ToolCalls)
+			if !ev.Partial && ev.Text != "" {
+				r.text = ev.Text
+				done <- r
+				return
+			}
+		}
+		done <- r
+	}()
+
+	// Give the observer a moment to subscribe, then drive the daemon
+	// from "somewhere else" — the case observer mode exists for.
+	time.Sleep(200 * time.Millisecond)
+	if err := a.Inject("what is prod doing?"); err != nil {
+		t.Fatalf("Inject: %v", err)
+	}
+
+	select {
+	case r := <-done:
+		if r.calls != 2 {
+			t.Errorf("observer saw %d tool calls, want 2", r.calls)
+		}
+		if !strings.Contains(r.text, "replicas") {
+			t.Errorf("observer missed the committed text: %q", r.text)
+		}
+	case <-ctx.Done():
+		t.Fatal("observer never saw the turn")
+	}
+}
+
+func TestAttachSubagentEvents(t *testing.T) {
+	a := startDaemon(t)
+
+	page, err := a.SubagentEvents(t.Context(), "security-review", 0)
+	if err != nil {
+		t.Fatalf("SubagentEvents: %v", err)
+	}
+	if len(page.Events) != 4 {
+		t.Fatalf("got %d turns, want 4", len(page.Events))
+	}
+	if page.NextSince != 4 {
+		t.Errorf("NextSince = %d, want 4", page.NextSince)
+	}
+	if len(page.Events[1].ToolCalls) != 1 || page.Events[1].ToolCalls[0].Name != "grep" {
+		t.Errorf("subagent tool call did not survive translation: %+v", page.Events[1])
+	}
+
+	// The cursor has to actually page.
+	rest, err := a.SubagentEvents(t.Context(), "security-review", page.NextSince)
+	if err != nil {
+		t.Fatalf("SubagentEvents(since=%d): %v", page.NextSince, err)
+	}
+	if len(rest.Events) != 0 {
+		t.Errorf("resuming from the end returned %d turns", len(rest.Events))
+	}
+
+	// "No such subagent" must be distinguishable from "did nothing",
+	// and must survive the wire as the typed error.
+	_, err = a.SubagentEvents(t.Context(), "typo-hunter", 0)
+	var notFound *tui.SubagentNotFoundError
+	if !errors.As(err, &notFound) {
+		t.Fatalf("got %T (%v), want *tui.SubagentNotFoundError", err, err)
+	}
+	if len(notFound.Available) != 2 {
+		t.Errorf("Available = %v, want the two real subagents", notFound.Available)
+	}
+}
+
+func TestAttachSessionSwitcher(t *testing.T) {
+	a := startDaemon(t)
+
+	sessions := a.Sessions()
+	if len(sessions) != 3 {
+		t.Fatalf("Sessions() returned %d rows, want 2 sessions + 1 action row", len(sessions))
+	}
+	if !sessions[0].Current {
+		t.Error("the attached session should be marked current")
+	}
+
+	action := sessions[len(sessions)-1]
+	if action.Input == nil {
+		t.Fatal("the last row should be the type-in-an-endpoint action row")
+	}
+	if action.Input.Validate("") == "" {
+		t.Error("an empty endpoint should not validate")
+	}
+	target, err := action.Input.Submit("http://127.0.0.1:9999")
+	if err != nil {
+		t.Fatalf("action row Submit: %v", err)
+	}
+	if target.Agent == nil || target.UsageTracker == nil {
+		t.Errorf("SwitchTarget under-populated: %+v", target)
+	}
+
+	if _, err := a.SwitchToSession(fakehost.SessionPath); err == nil {
+		t.Error("switching to the current session should be an error")
+	}
+	other, err := a.SwitchToSession("/sessions/core-agent/incident-4471")
+	if err != nil {
+		t.Fatalf("SwitchToSession: %v", err)
+	}
+	if other.Agent == nil {
+		t.Error("SwitchTarget.Agent is required")
+	}
+}
+
+func TestAttachAsyncSlashAndInterrupt(t *testing.T) {
+	a := startDaemon(t)
+
+	preamble, results := a.InvokeSlashAsync(t.Context(), "btw", "what changed?")
+	if preamble == "" {
+		t.Error("the preamble variant exists to put a row in the chat at dispatch time")
+	}
+	select {
+	case got := <-results:
+		if got.Err != nil {
+			t.Fatalf("/btw: %v", got.Err)
+		}
+		if got.Res.ModalAnswer == nil || !strings.Contains(got.Res.ModalAnswer.Answer, "what changed?") {
+			t.Errorf("SlashResult = %+v", got.Res)
+		}
+	case <-time.After(10 * time.Second):
+		t.Fatal("/btw never answered")
+	}
+
+	if _, unknown := a.InvokeSlashAsync(t.Context(), "reload", ""); unknown == nil {
+		t.Error("an unknown command should still deliver on the channel")
+	}
+
+	// Nothing running: the daemon says so, and the adapter turns
+	// that into an error rather than a silent no-op.
+	if err := a.Interrupt(t.Context()); err == nil {
+		t.Error("Interrupt with no turn in flight should report as much")
+	}
+}
