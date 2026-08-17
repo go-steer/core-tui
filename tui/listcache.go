@@ -69,9 +69,9 @@ type Item interface {
 	Render(m *Model, width int) string
 }
 
-// Optional capability interfaces — type-assert at use site for
-// graceful degradation. Items don't need to implement these to
-// participate in the cache; they're hooks for richer behaviors
+// Optional capability interface — type-assert at use site for
+// graceful degradation. Items don't need to implement it to
+// participate in the cache; it is a hook for richer behavior
 // the list can layer on (per skill §4.D).
 
 // RawRenderable lets clipboard / transcript paths grab unstyled
@@ -79,14 +79,6 @@ type Item interface {
 // when not implemented.
 type RawRenderable interface {
 	RawRender(width int) string
-}
-
-// Focusable receives focus state from the list (the selected
-// row sets it before render). Items use the bit to apply hover
-// / selection styling without inline `if focused` branches in
-// every Render method.
-type Focusable interface {
-	SetFocused(bool)
 }
 
 // listCacheEntry holds one memoized render. width pins the entry
