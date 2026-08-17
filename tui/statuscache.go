@@ -21,11 +21,13 @@ package tui
 // The fields are the raw inputs, not the styled output: the header's
 // cost is not in finding out what to say, it is in saying it.
 // Assembling this struct calls the same accessors the renderer does
-// and costs 5 allocations; the render it replaces costs 61, almost
-// all of them lipgloss styling one short segment at a time and then
-// wrapping the join. That ratio is the whole justification for the
-// cache — a key that were as expensive as the render would leave
-// nothing on the table.
+// and allocates nothing; the render it replaces costs 61 allocations,
+// almost all of them lipgloss styling one short segment at a time and
+// then wrapping the join. That ratio is the whole justification for
+// the cache — a key that were as expensive as the render would leave
+// nothing on the table. It used to cost 5 allocations, and all five
+// were the working directory being read back from the process on
+// every assembly; issue #223 moved that to construction.
 //
 // It is a comparable struct rather than a hash or a version counter
 // on purpose. A version counter would have to be bumped by every
@@ -43,11 +45,29 @@ type statusKey struct {
 	theme string
 	dark  bool
 
-	wordmark  string
-	identity  string
-	model     string
-	provider  string
-	cwd       string
+	wordmark string
+	identity string
+	model    string
+	provider string
+
+	// cwd is kept even though Model.cwd is now fixed for the life of a
+	// Model (issue #223), because the property this struct rests on is
+	// that the key IS every value the renderer reads — not that it is
+	// every value the renderer reads minus the ones someone has argued
+	// cannot move. Dropping it would trade a self-evident invariant for
+	// a global claim about who may write a field, which is the same
+	// reasoning the version-counter alternative is rejected for above.
+	// What it costs is a string header in a comparable struct, copied
+	// from a plain field read: no syscall, no allocation, and a compare
+	// that short-circuits on the pointer. What it buys is that the
+	// fallback sketched in #223 — refresh the directory on a turn
+	// boundary, the way hostSnapshot is refreshed — stays a one-field
+	// write instead of a change to the cache as well. And now that the
+	// value is a field rather than a syscall, a test can move it, so
+	// TestStatusCache_StaysFresh covers this leg like every other one
+	// instead of carving it out.
+	cwd string
+
 	permWired bool
 	permMode  PermissionMode
 	usage     string
