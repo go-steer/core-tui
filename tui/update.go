@@ -2584,6 +2584,25 @@ func (m *Model) applySwitchTarget(tgt *SwitchTarget) tea.Cmd {
 	clear(m.subagentTails)
 	clear(m.subagentNotTail)
 	m.queue = nil
+	// A prompt that is on screen when the session changes has to be
+	// answered, not merely forgotten. Clearing the field leaves the
+	// outgoing host's AskApproval / Elicit call parked on a response
+	// channel that no longer has a writer; it comes back only if that
+	// host happened to derive the call's ctx from the turn ctx step 1
+	// cancels, which is the host's business and not something the
+	// contract requires of it. Deny and cancel are the honest answers:
+	// the operator switched away instead of approving, so nothing may
+	// proceed on their behalf. Both dispatchers must run before step 4
+	// swaps opts, so the reply reaches the Prompter / Elicitor that
+	// asked, and the decision rows they append are wiped with the rest
+	// of the outgoing transcript by step 3 rather than following the
+	// operator into the new session.
+	if m.pendingPermission != nil {
+		m.dispatchPermission(DecisionDeny)
+	}
+	if m.pendingElicit != nil {
+		m.dispatchElicit(ElicitResult{Action: ElicitActionCancel})
+	}
 	m.pendingPermission = nil
 	m.pendingElicit = nil
 	m.pendingElicitSrv = ""

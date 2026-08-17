@@ -24,6 +24,7 @@ import (
 	"iter"
 	"strings"
 	"testing"
+	"time"
 
 	tea "charm.land/bubbletea/v2"
 )
@@ -584,4 +585,93 @@ func TestApplySwitchTarget_RedetectsLiveMode(t *testing.T) {
 	if m.liveMode {
 		t.Errorf("expected liveMode false after swap back to bareAgent")
 	}
+}
+
+// TestApplySwitchTarget_AnswersAPendingPrompt pins issue #208: a
+// prompt that is on screen when the session changes must be answered
+// on the way out, not merely cleared.
+//
+// The assertion is on the blocked host call returning, not on the
+// model field going nil — the field was always cleared, and clearing
+// it is exactly the bug. Each arm runs the host call on its own
+// goroutine, hands the request to Update through the same message the
+// listener produces, and then requires the call to come back with the
+// decision the switch is supposed to send. The ctx is never cancelled
+// here, so nothing but a real dispatch can unblock it; that is what
+// makes the test independent of whether a host happens to derive its
+// tool ctx from the turn ctx.
+func TestApplySwitchTarget_AnswersAPendingPrompt(t *testing.T) {
+	t.Run("permission", func(t *testing.T) {
+		p := NewPrompter()
+		m := NewModel(Options{Agent: &bareAgent{id: "old"}, Prompter: p})
+		m.viewport.SetWidth(80)
+
+		decided := make(chan PermissionDecision, 1)
+		go func() {
+			d, _ := p.AskApproval(context.Background(), PermissionRequest{ToolName: "bash"})
+			decided <- d
+		}()
+		req, ok := p.nextRequest(context.Background())
+		if !ok {
+			t.Fatal("nextRequest returned !ok with a pending request")
+		}
+		out, _ := m.Update(permissionRequestMsg{req: req})
+		m = out.(Model)
+		if m.pendingPermission == nil {
+			t.Fatal("pendingPermission not seeded; the arm proves nothing")
+		}
+
+		m.applySwitchTarget(&SwitchTarget{Agent: &bareAgent{id: "new"}})
+
+		select {
+		case got := <-decided:
+			if got != DecisionDeny {
+				t.Errorf("decision = %v, want Deny", got)
+			}
+		case <-time.After(time.Second):
+			t.Fatal("AskApproval still blocked 1s after the switch")
+		}
+		if m.pendingPermission != nil {
+			t.Errorf("pendingPermission should be nil after the switch")
+		}
+	})
+
+	t.Run("elicit", func(t *testing.T) {
+		e := NewElicitor()
+		m := NewModel(Options{Agent: &bareAgent{id: "old"}, Elicitor: e})
+		m.viewport.SetWidth(80)
+
+		answered := make(chan ElicitResult, 1)
+		go func() {
+			r, _ := e.Elicit(context.Background(), "srv", ElicitRequest{
+				Mode:   ElicitFormMode,
+				Title:  "credentials",
+				Fields: []ElicitField{{Name: "token", Description: "API token"}},
+			})
+			answered <- r
+		}()
+		flow, ok := e.(*elicitor).nextRequest(context.Background())
+		if !ok {
+			t.Fatal("nextRequest returned !ok with a pending request")
+		}
+		out, _ := m.Update(elicitRequestMsg{serverName: flow.serverName, req: flow.req})
+		m = out.(Model)
+		if m.pendingElicit == nil {
+			t.Fatal("pendingElicit not seeded; the arm proves nothing")
+		}
+
+		m.applySwitchTarget(&SwitchTarget{Agent: &bareAgent{id: "new"}})
+
+		select {
+		case got := <-answered:
+			if got.Action != ElicitActionCancel {
+				t.Errorf("action = %v, want Cancel", got.Action)
+			}
+		case <-time.After(time.Second):
+			t.Fatal("Elicit still blocked 1s after the switch")
+		}
+		if m.pendingElicit != nil {
+			t.Errorf("pendingElicit should be nil after the switch")
+		}
+	})
 }
