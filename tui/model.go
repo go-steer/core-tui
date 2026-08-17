@@ -63,7 +63,7 @@ type Model struct {
 	// bounds a repaint by what is on screen instead of by how long
 	// the session has been running (issue #161).
 	viewport chatViewport
-	input    textarea.Model
+	input    composer
 
 	// chatTail is the rendered live tail of the transcript — the
 	// in-progress assistant block, the spinner line, or the
@@ -320,6 +320,14 @@ type Model struct {
 	// assistant message — visible as stutter on long sessions. See
 	// listcache.go for the cache contract.
 	listCache *listCache
+
+	// statusCache memoizes the assembled status header keyed on the
+	// values that feed it (issue #201). Behind a pointer for the same
+	// reason listCache is: it is filled during a draw, and Model.View
+	// has a value receiver. See statuscache.go for why the key is the
+	// values rather than a version stamp, which is the one thing that
+	// makes a shared pointer safe here.
+	statusCache *statusCache
 
 	// Incremental Glamour cache for the in-progress assistant
 	// stream. inProgressStablePrefix holds the portion of
@@ -645,7 +653,7 @@ func NewModel(opts Options) Model {
 	m := Model{
 		opts:            opts,
 		styles:          NewStyles(initialDark, opts.Branding), // overwritten on BackgroundColorMsg unless ForceTheme is set
-		input:           ta,
+		input:           newComposer(ta),
 		follow:          true, // start pinned to the tail
 		statusLayout:    opts.StatusLayout,
 		permMode:        opts.PermissionMode.Initial,
@@ -658,6 +666,7 @@ func NewModel(opts Options) Model {
 		startedAt:       time.Now(),
 		now:             time.Now,
 		listCache:       newListCache(),
+		statusCache:     &statusCache{},
 		modalScroll:     &scrollState{},
 		caps:            caps,
 		newlineHint:     defaultNewlineHint(caps.TermProgram),
@@ -854,9 +863,9 @@ func (m *Model) refreshTheme() {
 	// default). Themes that don't customize the glyph leave
 	// Theme.PromptGlyph empty.
 	if glyph := m.styles.Theme.PromptGlyph; glyph != "" {
-		m.input.Prompt = glyph
+		m.input.SetPrompt(glyph)
 	} else {
-		m.input.Prompt = DefaultPromptGlyph
+		m.input.SetPrompt(DefaultPromptGlyph)
 	}
 }
 

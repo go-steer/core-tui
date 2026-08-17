@@ -197,13 +197,21 @@ func TestChatRowPlain(t *testing.T) {
 // 50,297 before #170 — so the useful question is "is a frame still in
 // the low thousands", not "is it still exactly 1,026".
 //
-// The number is the measurement at the time of writing (about 1,030
-// on the 100-turn fixture) rounded up with roughly 45% of room on
-// top. That absorbs the ordinary drift of adding chrome without
-// absorbing a wrapper reintroduced onto the frame path, which costs
-// thousands. Raise it if a change genuinely needs the room, but say
-// in the commit message what bought the allocations.
-const staticRepaintAllocCeiling = 1500
+// The number is the measurement at the time of writing rounded up
+// with roughly 45% of room on top. That absorbs the ordinary drift of
+// adding chrome without absorbing a wrapper reintroduced onto the
+// frame path, which costs thousands. Raise it if a change genuinely
+// needs the room, but say in the commit message what bought the
+// allocations.
+//
+// It was 1,500 against a measurement of about 1,030 until #200 and
+// #201 memoized the composer and the status header, which took the
+// same fixture to about 147. A ceiling left at 1,500 after that would
+// no longer be a ceiling: it would sit an order of magnitude above
+// the thing it measures, and the whole of the composer's 826-
+// allocation rebuild could come back without it noticing. Lowering it
+// with the win is what keeps the win.
+const staticRepaintAllocCeiling = 250
 
 // TestStaticRepaintAllocations fails when a repaint of a frame that
 // is not changing starts allocating like the one in issue #160.

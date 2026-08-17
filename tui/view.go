@@ -960,12 +960,30 @@ func (m Model) renderMessage(msg Message) string {
 // rows so segments don't run off-screen (the terminal's own
 // soft-wrap would split across ANSI escape boundaries and corrupt
 // the trailing chrome).
+//
+// It is memoized on the values it reads (issue #201). The header is
+// rebuilt out of state that moves on the order of once a turn — the
+// model name, the session's spend, the connection indicator — while
+// the frame repaints ten times a second for the whole of one, and it
+// is drawn twice per layout pass besides, since allocateChrome
+// measures its height before View draws it. See statusKey for why the
+// key is the values themselves rather than a version stamp.
 func (m Model) renderHeader() string {
+	key := m.statusLineKey()
+	if m.statusCache != nil && m.statusCache.valid && m.statusCache.key == key {
+		return m.statusCache.rendered
+	}
 	status := m.renderStatusLine()
 	if m.width > 0 {
 		status = wordWrap(status, m.width)
 	}
-	return status + "\n"
+	out := status + "\n"
+	if m.statusCache != nil {
+		m.statusCache.key = key
+		m.statusCache.rendered = out
+		m.statusCache.valid = true
+	}
+	return out
 }
 
 // renderStatusLine renders the one-line status used in StatusHeader
