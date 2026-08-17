@@ -1278,7 +1278,8 @@ func (m Model) footerHint() string {
 		if m.pendingElicit.Mode == ElicitURLMode {
 			return "MCP elicitation" + sep + "a/enter accept" + sep + "n decline" + sep + "esc cancel"
 		}
-		return "MCP elicitation" + sep + "tab next field" + sep + "enter submit" + sep + "esc cancel"
+		return "MCP elicitation" + sep + "tab next field" + sep + "enter submit" +
+			sep + "ctrl+d decline" + sep + "esc cancel"
 	case m.confirmingClear:
 		return "Confirm clear?" + sep + "type y / yes to wipe" + sep + "anything else cancels"
 	case m.sideAnswer != nil:
@@ -1699,7 +1700,8 @@ func (m *Model) renderElicitModal() string {
 		bodyLines, focusLine = m.elicitFormLines(width - 4)
 		footer = "tab next " + GlyphSeparator + " shift+tab prev " + GlyphSeparator +
 			" space toggle " + GlyphSeparator + " ←/→ enum " + GlyphSeparator +
-			" enter submit " + GlyphSeparator + " esc cancel"
+			" enter submit " + GlyphSeparator + " ctrl+d decline " + GlyphSeparator +
+			" esc cancel"
 	}
 
 	// Window the field list. A form with more fields than the

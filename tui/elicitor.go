@@ -100,11 +100,19 @@ type ElicitResult struct {
 }
 
 // ElicitAction is the operator's top-level decision.
+//
+// Decline and Cancel are different answers and the server that asked
+// may act on the difference: Decline is "I read this and I am saying
+// no", Cancel is "I dismissed it without deciding". Both are reachable
+// in both modes. Form mode declines on ctrl+d rather than on a letter
+// because every printable key belongs to the focused field, which is
+// why the form advertised a decline it could not produce until issue
+// #209.
 type ElicitAction int
 
 const (
 	ElicitActionSubmit  ElicitAction = iota // form: Enter; url: a/Enter
-	ElicitActionDecline                     // form: n; url: n
+	ElicitActionDecline                     // form: ctrl+d; url: n
 	ElicitActionCancel                      // both: Esc
 )
 
