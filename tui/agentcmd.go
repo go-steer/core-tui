@@ -32,6 +32,31 @@ var _ Elicitor = (*elicitor)(nil)
 // (R-CHAT-3).
 const spinnerCadence = 3 * time.Second
 
+// spinnerFrameCadence is how often the tick chain fires, and so how
+// often the Braille glyph advances.
+//
+// These used to be one constant, which is issue #162: the glyph and
+// the verb were both indexed by the same counter, and that counter
+// advanced once every spinnerCadence, so the animation ran at 0.33 Hz
+// and read as frozen. The cadence was never a performance decision —
+// 3 s is the right period for a phrase to sit still long enough to be
+// read, and the wrong period by two orders of magnitude for a spinner.
+//
+// 10 fps rather than the 20 the reference measurement used. At 20 fps
+// the animation cost 0.05% CPU *less* than a static control, which is
+// to say nothing at all — but that was on a frame costing 1.13 ms, and
+// a spinner tick rebuilds the chat tail and repaints, so the real cost
+// tracks the frame rather than the tick. 10 fps is already past the
+// point where a Braille cycle reads as continuous motion, and it
+// halves a cost that is paid for as long as the model is thinking.
+const spinnerFrameCadence = 100 * time.Millisecond
+
+// spinnerFramesPerVerb is how many glyph frames pass before the verb
+// rotates, which is what preserves the 3 s phrase period across the
+// split. Derived rather than written down so the two cannot drift:
+// change either constant and the phrase period stays correct.
+const spinnerFramesPerVerb = int(spinnerCadence / spinnerFrameCadence)
+
 // toastTTL is how long a wake-triggered toast banner stays visible
 // before auto-dismissing (R-WAKE-1). 4s is long enough to read
 // without being intrusive.
@@ -232,10 +257,10 @@ func (m Model) eventListener() tea.Cmd {
 }
 
 // spinnerTick returns a Cmd that fires spinnerTickMsg after one
-// spinnerCadence, stamped with gen. Update re-issues it on every
+// spinnerFrameCadence, stamped with gen. Update re-issues it on every
 // tick while a turn is in flight (R-CHAT-3).
 func spinnerTick(gen uint64) tea.Cmd {
-	return tea.Tick(spinnerCadence, func(time.Time) tea.Msg {
+	return tea.Tick(spinnerFrameCadence, func(time.Time) tea.Msg {
 		return spinnerTickMsg{gen: gen}
 	})
 }
@@ -268,7 +293,7 @@ func (m *Model) beginLiveStretch() bool {
 		return false
 	}
 	m.spinnerActive = true
-	m.thinkingIdx = 0
+	m.spinnerFrame = 0
 	// This flip IS where the stretch's animation begins, so it is
 	// where the generation is bumped — otherwise the caller's
 	// armSpinner would re-use the previous stretch's chain (#112).

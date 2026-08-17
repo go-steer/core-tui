@@ -346,8 +346,13 @@ type Model struct {
 	// `read_file` has been proven not to be a subagent, no later
 	// `read_file` call pays for the polls again.
 	subagentNotTail map[string]bool
-	thinkingIdx     int  // rotation index into ThinkingPhrases / WorkingPhrases
-	spinnerActive   bool // gates spinner tick scheduling
+	// spinnerFrame counts spinner ticks since the animation started.
+	// It drives the Braille glyph directly and the verb pool through
+	// spinnerFramesPerVerb — one counter at two rates, which is issue
+	// #162. It used to be one counter at the slower of the two, so the
+	// glyph advanced once every three seconds.
+	spinnerFrame  int
+	spinnerActive bool // gates spinner tick scheduling
 
 	// spinnerGen identifies the spinner tick chain that is allowed to
 	// be live (issue #112). Bumped wherever a new animation starts —

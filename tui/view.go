@@ -719,8 +719,13 @@ func (m *Model) renderSpinnerLine() string {
 	if len(pool) == 0 {
 		return ""
 	}
-	verb := trimTrailingEllipsis(pool[m.thinkingIdx%len(pool)])
-	glyph := m.renderBrailleFrame(m.thinkingIdx)
+	// Two rates off one counter (issue #162). The glyph takes the
+	// frame straight, so it turns at the tick rate; the verb divides
+	// first, so it holds for spinnerFramesPerVerb frames and keeps its
+	// 3 s period. Both used to read the counter straight, which is
+	// what made the animation as slow as the phrases.
+	verb := trimTrailingEllipsis(pool[m.spinnerFrame/spinnerFramesPerVerb%len(pool)])
+	glyph := m.renderBrailleFrame(m.spinnerFrame)
 	body := m.styles.Muted.Italic(true).Render(verb+GlyphTruncate) + m.renderTurnElapsed()
 	if glyph == "" {
 		return body

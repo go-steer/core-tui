@@ -218,21 +218,21 @@ func TestLiveRender_SpinnerGenPerStretch(t *testing.T) {
 	firstGen := m.spinnerGen
 
 	// The live chain ticks and the rotation is visible.
-	before := m.thinkingIdx
+	before := m.spinnerFrame
 	out, _ := m.Update(spinnerTickMsg{gen: firstGen})
 	m = out.(Model)
-	if m.thinkingIdx != before+1 {
-		t.Errorf("live tick did not rotate the verb: thinkingIdx %d → %d", before, m.thinkingIdx)
+	if m.spinnerFrame != before+1 {
+		t.Errorf("live tick did not rotate the verb: spinnerFrame %d → %d", before, m.spinnerFrame)
 	}
 
 	// Commit ends the stretch; a leftover tick from the dead chain
 	// must not restart the animation.
 	out, _ = m.Update(streamChunkMsg{gen: m.sessionGen, text: "first", partial: false})
 	m = out.(Model)
-	idle := m.thinkingIdx
+	idle := m.spinnerFrame
 	out, _ = m.Update(spinnerTickMsg{gen: firstGen})
 	m = out.(Model)
-	if m.thinkingIdx != idle {
+	if m.spinnerFrame != idle {
 		t.Error("a tick from the committed stretch kept rotating after the block closed")
 	}
 
@@ -242,15 +242,15 @@ func TestLiveRender_SpinnerGenPerStretch(t *testing.T) {
 	if m.spinnerGen == firstGen {
 		t.Fatalf("second stretch reused spinnerGen %d — issue #112", firstGen)
 	}
-	stale := m.thinkingIdx
+	stale := m.spinnerFrame
 	out, _ = m.Update(spinnerTickMsg{gen: firstGen})
 	m = out.(Model)
-	if m.thinkingIdx != stale {
+	if m.spinnerFrame != stale {
 		t.Error("superseded tick chain rotated the second stretch's verb")
 	}
 	out, _ = m.Update(spinnerTickMsg{gen: m.spinnerGen})
 	m = out.(Model)
-	if m.thinkingIdx != stale+1 {
+	if m.spinnerFrame != stale+1 {
 		t.Error("second stretch's own tick chain did not rotate the verb")
 	}
 	m.refreshViewport()
