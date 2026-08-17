@@ -44,7 +44,10 @@
 //	space           fold the selected item to its first three lines,
 //	                and unfold it again
 //	y / c           copy the item, or just the code in it, to the
-//	                clipboard via OSC 52 (core-tui #153)
+//	                clipboard via OSC 52 (core-tui #153) — the
+//	                footer says which mechanism it went out by, and
+//	                a terminal that declines the escape is why it
+//	                bothers (core-tui #175)
 //	shift+up/down   scroll a line inside an item taller than the
 //	                window
 //	shift+left/     pan sideways over content too wide to fit — the
@@ -56,6 +59,14 @@
 //
 //	-verbose-tools  append full args + response detail under every
 //	                tool row (core-tui #52 tier 2)
+//	-clipboard-file also write y / c copies to this path (core-tui
+//	                #175). Unset, the harness uses
+//	                tui.SystemClipboardWriter(), which finds nothing
+//	                on a box with no clipboard of its own and leaves
+//	                OSC 52 as the only write. Point this at a file
+//	                open in a locally-rendered editor and a copy
+//	                made over SSH becomes reachable from the desktop
+//	                the operator is actually sitting at.
 package main
 
 import (
@@ -230,6 +241,10 @@ func main() {
 	// without editing + rebuilding.
 	verboseTools := flag.Bool("verbose-tools", false,
 		"append full args + response detail under every tool row (core-tui #52 tier 2)")
+	clipboardFile := flag.String("clipboard-file", "",
+		"also write y / c copies to this file (core-tui #175) — the way to reach a "+
+			"local clipboard from a remote box: keep the file open in a locally-rendered "+
+			"editor and copy from there")
 	flag.Parse()
 
 	prompter := tui.NewPrompter()
@@ -267,6 +282,18 @@ func main() {
 		// nil — and is therefore a no-op — on a machine with no
 		// clipboard to write to, which is why it needs no guard.
 		ClipboardWriter: tui.SystemClipboardWriter(),
+	}
+	if *clipboardFile != "" {
+		// The other kind of host writer, and the only one that works
+		// on a box with no clipboard of its own: a sink the operator
+		// can reach from the machine they are sitting at. An editor
+		// showing this file renders LOCALLY even when the process is
+		// remote, so copying out of it uses the real desktop
+		// clipboard — the thing OSC 52 was trying and failing to
+		// reach.
+		opts.ClipboardWriter = func(text string) error {
+			return os.WriteFile(*clipboardFile, []byte(text), 0o600)
+		}
 	}
 	if err := tui.Run(context.Background(), opts); err != nil {
 		fmt.Fprintln(os.Stderr, "core-tui:", err)
