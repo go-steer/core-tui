@@ -395,9 +395,22 @@ func sgrOpen(s string) bool {
 // sgrIsReset reports whether an SGR parameter string means "reset":
 // empty (`ESC[m`) or every semicolon-separated field zero or absent
 // (`ESC[0m`, `ESC[00m`, `ESC[0;0m`).
+//
+// Written as a byte scan rather than as the `strings.Split` + `Trim`
+// per field it reads like, because splitting allocates and issue #160
+// put this on the per-frame path: chatBlock asks sgrOpen the same
+// question of every visible transcript row, so one slice per row per
+// frame is what the obvious spelling costs.
+//
+// The two formulations agree exactly. A field is "zero or absent" iff
+// it holds nothing but '0', so the parameter string is a reset iff it
+// holds nothing but '0' and the ';' that separates the fields.
+// Anything else — a colour, an attribute, a `38:2:…` sub-parameter —
+// contributes a byte that is neither, and both spellings reject on
+// it.
 func sgrIsReset(params string) bool {
-	for _, f := range strings.Split(params, ";") {
-		if strings.Trim(f, "0") != "" {
+	for i := range len(params) {
+		if c := params[i]; c != '0' && c != ';' {
 			return false
 		}
 	}
