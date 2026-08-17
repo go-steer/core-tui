@@ -439,55 +439,8 @@ func (d *sessionPickerDialog) DialogCursor(_ int, m *Model) *tea.Cursor {
 	return filterRowCursor(d.filter.cursor())
 }
 
-// sessionInputDialogID is the text-input dialog the picker stacks
-// on top of itself for SessionInfo action rows (issue #56).
-const sessionInputDialogID = "session-input"
-
-// newSessionInputDialog builds the text-input dialog for a
-// SessionInfo action row. The submit closure runs the row's own
-// Submit, then closes BOTH this dialog and the picker underneath so
-// a successful attach lands the operator straight in the new
-// session. Failures also close both and leave a RoleError row —
-// same shape as a failed SwitchToSession from the list.
-func newSessionInputDialog(row SessionInfo) Dialog {
-	in := row.Input
-	title := in.Title
-	if title == "" {
-		title = row.Display
-	}
-	if title == "" {
-		title = "Enter a Value"
-	}
-	return NewTextInputDialog(TextInputConfig{
-		ID:          sessionInputDialogID,
-		Title:       title,
-		Prompt:      in.Prompt,
-		Placeholder: in.Placeholder,
-		Initial:     in.Initial,
-		Validate:    in.Validate,
-		Footer:      "enter attach " + GlyphSeparator + " esc back",
-		Submit: func(value string, m *Model) DialogAction {
-			// Close the picker underneath first; the Overlay pops
-			// THIS dialog itself when we return Close: true.
-			closeBoth := func() { m.overlayStack.Close(sessionPickerDialogID) }
-			fail := func(text string) DialogAction {
-				closeBoth()
-				m.history.Append(Message{Role: RoleError, Text: "/switch: " + text})
-				m.refreshViewport()
-				return DialogAction{Consumed: true, Close: true}
-			}
-			if in.Submit == nil {
-				return fail("session row " + row.ID + " has no Submit closure")
-			}
-			tgt, err := in.Submit(value)
-			if err != nil {
-				return fail(err.Error())
-			}
-			if tgt.Agent == nil {
-				return fail("SessionInput.Submit returned nil Agent")
-			}
-			closeBoth()
-			return DialogAction{Consumed: true, Close: true, Cmd: m.applySwitchTarget(&tgt)}
-		},
-	})
-}
+// The action-row text input the picker stacks on top of itself
+// (sessionInputDialogID / newSessionInputDialog) lives in
+// dialog_sessioninput.go — it grew an in-flight state and a reply
+// handler of its own when SessionInput.Submit moved off the Update
+// goroutine (issue #194).

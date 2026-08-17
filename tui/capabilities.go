@@ -117,6 +117,18 @@ type SessionInput struct {
 	// non-nil error surfaces as a RoleError row and closes both
 	// dialogs; the current session stays attached. Same contract
 	// as SessionSwitcher.SwitchToSession — see SwitchTarget.
+	//
+	// It is called off the event loop, so it may block: dialling
+	// the endpoint the operator just typed is the motivating case,
+	// and the dialog stays up showing progress meanwhile. Two
+	// consequences for implementations. It runs on its own
+	// goroutine, so it must be safe to call while the TUI keeps
+	// painting. And it can be cancelled from the operator's side —
+	// esc closes the dialog while the call is still out — in which
+	// case the returned SwitchTarget is DISCARDED rather than
+	// attached. Anything Submit opened on the way to building that
+	// target is the host's to release, exactly as it would be for a
+	// target the TUI declined for any other reason.
 	Submit func(value string) (SwitchTarget, error)
 }
 
