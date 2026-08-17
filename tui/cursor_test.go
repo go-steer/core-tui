@@ -102,7 +102,7 @@ func TestCursor_TextareaHeaderLayout(t *testing.T) {
 	m := typeIntoModel(cursorModel(t, StatusHeader, 100, 30), "hello")
 	v := m.View()
 
-	assertCursorFollows(t, v, DefaultPromptGlyph+"hello")
+	assertCursorFollows(t, v, defaultPromptGlyph+"hello")
 
 	// Independently: the row above the textarea is renderInputBox's
 	// top rule, which is nothing but the rule glyph. If the cursor
@@ -126,7 +126,7 @@ func TestCursor_TextareaSidebarLayout(t *testing.T) {
 	if got := m.effectiveLayout(); got != StatusSidebar {
 		t.Fatalf("layout fell back to %v; the sidebar arm is not under test", got)
 	}
-	assertCursorFollows(t, v, DefaultPromptGlyph+"hello")
+	assertCursorFollows(t, v, defaultPromptGlyph+"hello")
 
 	// The input lives in the left column, not across the frame: the
 	// cursor must stay left of the sidebar divider.
@@ -186,7 +186,7 @@ func TestCursor_MultibyteAdvancesByCells(t *testing.T) {
 					"(bytes=%d runes=%d)",
 					tc.text, got, tc.cells, len(tc.text), len([]rune(tc.text)))
 			}
-			assertCursorFollows(t, v, DefaultPromptGlyph+tc.text)
+			assertCursorFollows(t, v, defaultPromptGlyph+tc.text)
 		})
 	}
 }
@@ -797,7 +797,7 @@ func TestCursor_OverlongPaletteRowDoesNotMoveTheCaret(t *testing.T) {
 				if rows > 0 {
 					m.palette.applyItems(overlongPaletteItems(rows))
 				}
-				assertCursorFollows(t, m.View(), DefaultPromptGlyph+"/zz")
+				assertCursorFollows(t, m.View(), defaultPromptGlyph+"/zz")
 			})
 		}
 	}

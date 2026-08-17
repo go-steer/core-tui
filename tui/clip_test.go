@@ -29,7 +29,7 @@ import (
 
 // clipStyles is a fixed style bundle for these tests so an ANSI
 // assertion can't be perturbed by a palette change.
-func clipStyles() Styles { return NewStylesWithTheme(true, DefaultTheme(true)) }
+func clipStyles() Styles { return NewStylesWithTheme(true, defaultTheme(true)) }
 
 // TestClipFrame_TruncatesWidth is the width half of the invariant.
 // The styled input matters: byte-level slicing would cut an escape

@@ -553,7 +553,7 @@ type Model struct {
 	// (agentic-tui skill §18). Renderers consult this to gate
 	// hyperlinks, clipboard sequences, etc. Detected once at
 	// NewModel; hosts can override post-construction.
-	caps TerminalCapabilities
+	caps terminalCapabilities
 
 	// cwd is the working directory as the status header displays it,
 	// already shortened against the home directory. Resolved once in
@@ -655,7 +655,7 @@ func NewModel(opts Options) Model {
 	// signature glyph (e.g. GKE's ⎈ helm) override via
 	// Theme.PromptGlyph; refreshTheme applies the override on
 	// theme swap.
-	ta.Prompt = DefaultPromptGlyph
+	ta.Prompt = defaultPromptGlyph
 	ta.ShowLineNumbers = false
 	ta.SetHeight(textareaMinHeight)
 	// Drive the TERMINAL's cursor rather than a painted one
@@ -681,9 +681,9 @@ func NewModel(opts Options) Model {
 	// We don't yet know dark/light (BackgroundColorMsg comes
 	// post-Init), so pick the "safer" no-tint default and let
 	// the BackgroundColorMsg handler swap in the right variant.
-	// Use DefaultTheme(true) here; refreshTheme rebuilds with the
+	// Use defaultTheme(true) here; refreshTheme rebuilds with the
 	// resolved theme once BackgroundColorMsg lands.
-	ta.SetStyles(textareaStyles(true, DefaultTheme(true)))
+	ta.SetStyles(textareaStyles(true, defaultTheme(true)))
 
 	// Seed styles.Dark from ForceTheme up front when the host has
 	// chosen explicitly; otherwise start in dark mode (the most
@@ -701,7 +701,7 @@ func NewModel(opts Options) Model {
 	// newline hint, and the banner's starting frame. It reads the
 	// environment, so calling it per use is both wasted work and a way
 	// for the three readings to disagree.
-	caps := DetectCapabilities()
+	caps := detectCapabilities()
 	// The listener lifetime starts here rather than in Init so that
 	// it is non-nil for every Model a host can get its hands on —
 	// Init runs on the Bubble Tea loop's goroutine, after
@@ -968,7 +968,7 @@ func (m *Model) refreshTheme() {
 	if glyph := m.styles.Theme.PromptGlyph; glyph != "" {
 		m.input.SetPrompt(glyph)
 	} else {
-		m.input.SetPrompt(DefaultPromptGlyph)
+		m.input.SetPrompt(defaultPromptGlyph)
 	}
 }
 
@@ -976,7 +976,7 @@ func (m *Model) refreshTheme() {
 // and re-renders. Called by the /theme picker dialog on cursor
 // (live preview), restore-on-cancel (esc), and commit (enter),
 // and by the `/theme <name>` slash form. Unknown names fall
-// through to DefaultTheme via ThemeByName so a typo is safe.
+// through to defaultTheme via ThemeByName so a typo is safe.
 func (m *Model) applyNamedTheme(name string) {
 	m.themeName = name
 	m.refreshTheme()
@@ -991,7 +991,7 @@ func (m *Model) applyNamedTheme(name string) {
 //  2. Options.AutoProviderTheme — StatusReporter's Provider tag
 //     picks the per-provider theme (Anthropic clay / Gemini blue /
 //     OpenAI green).
-//  3. DefaultTheme — brand stays consistent regardless of model.
+//  3. defaultTheme — brand stays consistent regardless of model.
 //
 // Branding overrides still apply on top of whichever theme was
 // picked. Called from BackgroundColorMsg (first-paint dark/light
@@ -1003,9 +1003,9 @@ func (m Model) resolveStyles(dark bool) Styles {
 	case m.themeName != "":
 		theme = ThemeByName(m.themeName, dark)
 	case m.opts.AutoProviderTheme:
-		theme = ThemeForProvider(m.displayProvider(), dark)
+		theme = themeForProvider(m.displayProvider(), dark)
 	default:
-		theme = DefaultTheme(dark)
+		theme = defaultTheme(dark)
 	}
 	if m.opts.Branding.AccentColor != "" {
 		c := lipgloss.Color(m.opts.Branding.AccentColor)

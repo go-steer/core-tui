@@ -367,7 +367,7 @@ func (m Model) renderBanner(width, height int) string {
 // for a tick would mean a host with no animation — reduced motion, a
 // harness that renders one frame, a golden test — shipped the unlit
 // silhouette as its final answer.
-func initialBannerFrame(caps TerminalCapabilities, brand Branding) int {
+func initialBannerFrame(caps terminalCapabilities, brand Branding) int {
 	if brand.DisableBanner || caps.ReducedMotion {
 		return bannerFrames
 	}

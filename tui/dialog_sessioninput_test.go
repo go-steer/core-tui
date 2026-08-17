@@ -323,8 +323,8 @@ func TestSessionPicker_ActionRowRender(t *testing.T) {
 	if strings.Contains(row, "(current)") {
 		t.Errorf("action row marked (current): %q", row)
 	}
-	if !strings.Contains(row, GlyphCollapsed) {
-		t.Errorf("action row missing the %q affordance: %q", GlyphCollapsed, row)
+	if !strings.Contains(row, glyphCollapsed) {
+		t.Errorf("action row missing the %q affordance: %q", glyphCollapsed, row)
 	}
 }
 

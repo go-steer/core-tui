@@ -259,7 +259,7 @@ func (m Model) dispatchBuiltinSlash(name, args string) (bool, tea.Model, tea.Cmd
 		}
 		// `/theme <name>` switches without opening a picker —
 		// useful for scripted / replay flows. Unknown names fall
-		// through to DefaultTheme via ThemeByName; we surface that
+		// through to defaultTheme via ThemeByName; we surface that
 		// via a system message instead of erroring so a typo is
 		// recoverable in one keystroke.
 		name := strings.TrimSpace(args)
@@ -483,7 +483,7 @@ func (m *Model) handleResume(args string) string {
 				break
 			}
 			fmt.Fprintf(&b, "  %s %s  %s  %s\n",
-				GlyphCollapsed,
+				glyphCollapsed,
 				m.itemNameStyle().Render(info.Name),
 				m.styles.Muted.Render(formatFileSize(info.Size)),
 				m.styles.Muted.Render(info.ModTime.Format("2006-01-02 15:04")),
@@ -695,11 +695,11 @@ func padRight(s string, width int) string {
 // internal/tui look so operators don't see a downgrade switching
 // adapters.
 func (m Model) headingStyle() lipgloss.Style {
-	return lipgloss.NewStyle().Foreground(BrandViolet).Bold(true)
+	return lipgloss.NewStyle().Foreground(brandViolet).Bold(true)
 }
 
 func (m Model) itemNameStyle() lipgloss.Style {
-	return lipgloss.NewStyle().Foreground(BrandPink).Bold(true)
+	return lipgloss.NewStyle().Foreground(brandPink).Bold(true)
 }
 
 func (m Model) renderMemoryList(files []MemoryFile) string {
@@ -709,7 +709,7 @@ func (m Model) renderMemoryList(files []MemoryFile) string {
 	var b strings.Builder
 	fmt.Fprintf(&b, "Memory files (%d):\n\n", len(files))
 	for i, f := range files {
-		fmt.Fprintf(&b, "  %s %s", GlyphCollapsed, m.itemNameStyle().Render(f.Path))
+		fmt.Fprintf(&b, "  %s %s", glyphCollapsed, m.itemNameStyle().Render(f.Path))
 		if f.Bytes > 0 || f.Truncated {
 			annotation := formatFileSize(f.Bytes)
 			if f.Truncated {
@@ -763,7 +763,7 @@ func (m Model) renderMCPList(servers []MCPServerInfo) string {
 			sort.Slice(tools, func(i, j int) bool { return tools[i].Name < tools[j].Name })
 			b.WriteByte('\n')
 			for i, t := range tools {
-				fmt.Fprintf(&b, "    %s %s\n", GlyphCollapsed, m.itemNameStyle().Render(t.Name))
+				fmt.Fprintf(&b, "    %s %s\n", glyphCollapsed, m.itemNameStyle().Render(t.Name))
 				if t.Description != "" {
 					fmt.Fprintf(&b, "        %s\n", strings.ReplaceAll(t.Description, "\n", " "))
 				}
@@ -792,7 +792,7 @@ func (m Model) renderSkillList(skills []SkillInfo) string {
 	var b strings.Builder
 	fmt.Fprintf(&b, "Skills (%d):\n\n", len(sorted))
 	for i, s := range sorted {
-		fmt.Fprintf(&b, "  %s %s", GlyphCollapsed, m.itemNameStyle().Render(s.Name))
+		fmt.Fprintf(&b, "  %s %s", glyphCollapsed, m.itemNameStyle().Render(s.Name))
 		if s.Source != "" && s.Source != "local" {
 			fmt.Fprintf(&b, " [%s]", s.Source)
 		}
@@ -941,7 +941,7 @@ func (m Model) renderToolList(tools []ToolInfo) string {
 	var b strings.Builder
 	fmt.Fprintf(&b, "Tools (%d):\n\n", len(sorted))
 	for i, t := range sorted {
-		fmt.Fprintf(&b, "  %s %s", GlyphCollapsed, m.itemNameStyle().Render(t.Name))
+		fmt.Fprintf(&b, "  %s %s", glyphCollapsed, m.itemNameStyle().Render(t.Name))
 		annotation := ""
 		if t.Source != "" {
 			annotation = t.Source

@@ -23,14 +23,10 @@ import (
 
 // Brand colors, fixed across light/dark backgrounds (style.md §1.1).
 // Hosts override AccentColor / SecondaryColor / CursorColor through
-// Options.Branding; the slate and cyan derive deterministically from
-// the brand line.
+// Options.Branding.
 var (
-	BrandViolet     = lipgloss.Color("#BD93F9")
-	BrandPink       = lipgloss.Color("#FF79C6")
-	BrandPinkBright = lipgloss.Color("#FFB6E1")
-	BrandSlate      = lipgloss.Color("#6272A4")
-	BrandCyan       = lipgloss.Color("#5FD7FF")
+	brandViolet = lipgloss.Color("#BD93F9")
+	brandPink   = lipgloss.Color("#FF79C6")
 )
 
 // Glyph vocabulary (style.md §2). One anchor glyph per row, ever.
@@ -49,8 +45,8 @@ const (
 	GlyphToolPending = "○"
 	GlyphToolDone    = "✓"
 	GlyphToolFail    = "✗"
-	GlyphCollapsed   = "▸"
-	GlyphExpanded    = "▾"
+	glyphCollapsed   = "▸"
+	glyphExpanded    = "▾"
 	GlyphWarn        = "⚠"
 	GlyphUserPrompt  = "❯"
 	// GlyphAutoContinue marks RoleUser messages synthesized by the
@@ -60,16 +56,16 @@ const (
 	GlyphAutoContinue = "↻"
 	GlyphTruncate     = "…"
 	GlyphSeparator    = "·"
-	GlyphCursor       = "█"
+	glyphCursor       = "█"
 	GlyphRule         = "─"
 	GlyphColumn       = "│"
-	// GlyphSelectBar is the transcript's selection marker (issue
+	// glyphSelectBar is the transcript's selection marker (issue
 	// #152): a dotted vertical bar drawn down the gutter of the
 	// selected item. Dotted rather than solid so it reads as a
 	// cursor rather than as structure — GlyphColumn is already the
 	// sidebar divider, and a solid bar next to a diff or a fenced
 	// code block would look like part of the content.
-	GlyphSelectBar = "┊"
+	glyphSelectBar = "┊"
 )
 
 // Styles bundles every resolved lipgloss style for the current
@@ -112,10 +108,10 @@ type Styles struct {
 
 // NewStyles assembles the style bundle for the given background
 // brightness, applying any Branding overrides on top of the
-// DefaultTheme. Hosts that want per-provider tinting should pass
+// defaultTheme. Hosts that want per-provider tinting should pass
 // a theme via NewStylesWithTheme directly.
 func NewStyles(dark bool, brand Branding) Styles {
-	theme := DefaultTheme(dark)
+	theme := defaultTheme(dark)
 	if brand.AccentColor != "" {
 		c := lipgloss.Color(brand.AccentColor)
 		theme.Primary = c
@@ -136,10 +132,10 @@ func NewStyles(dark bool, brand Branding) Styles {
 //
 // This is also where a Theme is normalized (normalizeTheme): the
 // derived tokens a caller may leave zero — OnPrimary,
-// ChromaStyleName — are filled in here rather than in DefaultTheme,
+// ChromaStyleName — are filled in here rather than in defaultTheme,
 // because this is the ONE funnel every Theme crosses. A bare
 // `Theme{...}` literal handed in by a host never touches
-// DefaultTheme, and the two Branding override sites mutate Primary
+// defaultTheme, and the two Branding override sites mutate Primary
 // and then call this function, so re-derivation after an override
 // costs no extra call site. Styles.Theme carries the normalized
 // value, so the markdown renderer and the syntax cache read the

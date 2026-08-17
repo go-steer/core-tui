@@ -208,9 +208,9 @@ func TestContextFillStyle_TracksActiveTheme(t *testing.T) {
 		dark  bool
 		theme Theme
 	}{
-		{"default dark", true, DefaultTheme(true)},
-		{"christmas light", false, ChristmasTheme(false)},
-		{"google light", false, GoogleTheme(false)},
+		{"default dark", true, defaultTheme(true)},
+		{"christmas light", false, christmasTheme(false)},
+		{"google light", false, googleTheme(false)},
 	}
 	tiers := []struct {
 		name string
@@ -248,8 +248,8 @@ func TestContextFillStyle_TracksActiveTheme(t *testing.T) {
 // gold / cardinal against the default's #5FD787 / #FFD75F / #FF5F5F,
 // so all three tiers have to move.
 func TestContextFillStyle_DiffersAcrossThemes(t *testing.T) {
-	dark := Model{styles: NewStylesWithTheme(true, DefaultTheme(true))}
-	light := Model{styles: NewStylesWithTheme(false, ChristmasTheme(false))}
+	dark := Model{styles: NewStylesWithTheme(true, defaultTheme(true))}
+	light := Model{styles: NewStylesWithTheme(false, christmasTheme(false))}
 	tiers := []struct {
 		name string
 		used int
@@ -271,7 +271,7 @@ func TestContextFillStyle_DiffersAcrossThemes(t *testing.T) {
 // size unknown" path on the muted chrome style instead of implying a
 // usage tier.
 func TestContextFillStyle_UnknownSizeIsMuted(t *testing.T) {
-	m := Model{styles: NewStylesWithTheme(true, DefaultTheme(true))}
+	m := Model{styles: NewStylesWithTheme(true, defaultTheme(true))}
 	got := m.contextFillStyle(1000, 0)
 	if got.GetForeground() != m.styles.Muted.GetForeground() {
 		t.Errorf("contextFillStyle with size=0 foreground = %v, want Muted %v",

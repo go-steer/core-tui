@@ -24,7 +24,7 @@
 // # The gutter is reserved, not borrowed
 //
 // The marker is a dotted bar down the left edge of the selected item
-// (GlyphSelectBar), and the two columns it lives in are subtracted
+// (glyphSelectBar), and the two columns it lives in are subtracted
 // from the transcript's width for EVERY row, selected or not. Drawing
 // the bar into a gutter that only exists while an item is selected
 // would be cheaper by two columns and much worse: an item's wrap
@@ -280,7 +280,7 @@ func (m Model) chatCollapsedRow(lines []string) []string {
 	}
 	out := make([]string, 0, chatCollapsedLines+1)
 	out = append(out, lines[:chatCollapsedLines]...)
-	summary := fmt.Sprintf("%s %d more lines", GlyphCollapsed, len(lines)-chatCollapsedLines)
+	summary := fmt.Sprintf("%s %d more lines", glyphCollapsed, len(lines)-chatCollapsedLines)
 	return append(out, m.styles.Muted.Render(summary))
 }
 
@@ -307,5 +307,5 @@ func (m Model) chatRowMarked(i int) bool {
 // chatGutterPrefixes returns the marked and unmarked gutters, built
 // once per frame because every drawn line takes one of them.
 func (m Model) chatGutterPrefixes() (marked, plain string) {
-	return m.styles.Accent.Render(GlyphSelectBar) + " ", strings.Repeat(" ", chatGutterWidth)
+	return m.styles.Accent.Render(glyphSelectBar) + " ", strings.Repeat(" ", chatGutterWidth)
 }

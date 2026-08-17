@@ -27,3 +27,59 @@
 # could implement it and never install it. Unexported, not deleted;
 # re-exporting it beside an Options seam is a compatible change later.
 ./tui.ToolRenderer: removed
+#
+# #78: the incidental bucket of docs/api-surface.md §3.3 — symbols that were
+# exported for no host-facing purpose. None is named by design.md §3, none is
+# reachable from a §3 root, none is referenced by examples/ or by the
+# reference host, and none appears in any doc example. Unexporting each is a
+# rename confined to package tui. The classification and the per-symbol cost
+# are in docs/api-surface.md §3.3.
+#
+# Named theme constructors — every one is already reachable by name through
+# BuiltinThemes() / ThemeByName(), so this removes thirteen redundant
+# spellings of something a host can still do.
+./tui.AnthropicTheme: removed
+./tui.ChristmasTheme: removed
+./tui.CyberpunkTheme: removed
+./tui.DefaultTheme: removed
+./tui.GKETheme: removed
+./tui.GeminiTheme: removed
+./tui.GoogleTheme: removed
+./tui.GopherTheme: removed
+./tui.MatrixTheme: removed
+./tui.OpenAITheme: removed
+./tui.PrideTheme: removed
+./tui.VaporwaveTheme: removed
+./tui.ThemeForProvider: removed
+#
+# Brand seed colors — superseded by the Theme struct's Primary / Secondary /
+# Accent fields. Hosts override through Options.Branding. Three of the five
+# turned out to have no caller at all once the export stopped hiding them
+# from the `unused` linter, and are deleted rather than unexported.
+./tui.BrandCyan: removed
+./tui.BrandPink: removed
+./tui.BrandPinkBright: removed
+./tui.BrandSlate: removed
+./tui.BrandViolet: removed
+#
+# Glyph vocabulary — the four entries with no call site in a file that other
+# in-flight work currently holds. The remaining thirteen Glyph* constants
+# stay exported for now; see docs/api-surface.md §3.3.
+./tui.GlyphCollapsed: removed
+./tui.GlyphCursor: removed
+./tui.GlyphExpanded: removed
+./tui.GlyphSelectBar: removed
+#
+# Theme seed constants — read only by the theme constructors above.
+./tui.DefaultChromaStyleName: removed
+./tui.DefaultPromptGlyph: removed
+#
+# Terminal capability probe — no Options field accepts one, so a host cannot
+# override detection, which is the only thing exporting it would be for.
+./tui.DetectCapabilities: removed
+./tui.TerminalCapabilities: removed
+#
+# Syntax highlighting — the exported signature returned a chroma.Formatter,
+# which leaked github.com/alecthomas/chroma/v2 into the library's API and
+# pinned its major version for every host. No host called it.
+./tui.LipglossFormatter: removed

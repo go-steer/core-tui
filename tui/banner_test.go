@@ -45,7 +45,7 @@ func bannerModel(t *testing.T, w, h int) Model {
 	t.Helper()
 	m := NewModel(Options{Agent: stubAgent{}})
 	m.styles = goldenStyles()
-	m.caps = TerminalCapabilities{}
+	m.caps = terminalCapabilities{}
 	m.bannerFrame = 0
 	out, _ := m.Update(tea.WindowSizeMsg{Width: w, Height: h})
 	return out.(Model)
@@ -227,7 +227,7 @@ func TestBanner_ReducedMotionRendersTheSettledFrame(t *testing.T) {
 		t.Error("reduced motion armed the wipe anyway")
 	}
 	// NewModel is the normal path into that state; it must agree.
-	if got := initialBannerFrame(TerminalCapabilities{ReducedMotion: true}, Branding{}); got != bannerFrames {
+	if got := initialBannerFrame(terminalCapabilities{ReducedMotion: true}, Branding{}); got != bannerFrames {
 		t.Errorf("initialBannerFrame seeded %d for reduced motion, want the settled %d", got, bannerFrames)
 	}
 }
@@ -353,7 +353,7 @@ func goldenEmptyModel(t *testing.T, w, h int) Model {
 	t.Helper()
 	m := NewModel(Options{Agent: &bareAgent{id: "golden"}})
 	m.styles = goldenStyles()
-	m.caps = TerminalCapabilities{}
+	m.caps = terminalCapabilities{}
 	m.newlineHint = defaultNewlineHint("")
 	m.bannerFrame = bannerFrames
 	out, _ := m.Update(tea.WindowSizeMsg{Width: w, Height: h})

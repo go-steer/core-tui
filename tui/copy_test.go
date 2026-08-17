@@ -111,7 +111,7 @@ func TestCopy_ItemCopiesTheSourceNotTheFrame(t *testing.T) {
 	if got != ansi.Strip(got) {
 		t.Error("an ANSI escape reached the clipboard")
 	}
-	if strings.Contains(got, GlyphSelectBar) {
+	if strings.Contains(got, glyphSelectBar) {
 		t.Error("the selection gutter reached the clipboard")
 	}
 	// The frame wraps that first paragraph over several rows; the

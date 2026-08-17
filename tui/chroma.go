@@ -16,7 +16,7 @@
 // (agentic-tui skill §11.B). Chroma's built-in terminal formatters
 // emit raw ANSI true-color sequences regardless of the active
 // Lipgloss palette + color profile — code fences end up clashing
-// with the brand theme. The LipglossFormatter renders each token
+// with the brand theme. The lipglossFormatter renders each token
 // through `lipgloss.NewStyle().Foreground(...)` so syntax
 // highlighting respects color-profile downgrade + future
 // per-provider themes.
@@ -38,13 +38,13 @@ import (
 // package init so the renderer can find it.
 const chromaFormatterName = "tui-lipgloss"
 
-// LipglossFormatter returns a chroma.Formatter that emits tokens
+// lipglossFormatter returns a chroma.Formatter that emits tokens
 // through Lipgloss. bg is applied as the background of each
 // styled token so the code-fence background reads as a single
 // uniform surface even when individual tokens override fg/style.
 // Pass `nil` (or `color.Color(nil)`) when no background tint is
 // wanted — Lipgloss simply skips the Background call.
-func LipglossFormatter(bg color.Color) chroma.Formatter {
+func lipglossFormatter(bg color.Color) chroma.Formatter {
 	return chroma.FormatterFunc(func(w io.Writer, style *chroma.Style, it chroma.Iterator) error {
 		for token := it(); token != chroma.EOF; token = it() {
 			entry := style.Get(token.Type)
@@ -84,5 +84,5 @@ func LipglossFormatter(bg color.Color) chroma.Formatter {
 // "default" formatter used everywhere; per-render background tints
 // would require a separate construction path (currently unused).
 func init() {
-	formatters.Register(chromaFormatterName, LipglossFormatter(nil))
+	formatters.Register(chromaFormatterName, lipglossFormatter(nil))
 }

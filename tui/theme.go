@@ -18,10 +18,10 @@
 // instead of concrete colors, so swapping themes is a one-line
 // change and color audits become grep-friendly.
 //
-// Per-provider themes (AnthropicTheme, GeminiTheme, OpenAITheme)
+// Per-provider themes (anthropicTheme, geminiTheme, openAITheme)
 // expose subtle palette shifts so each LLM provider has visual
 // identity in the status surface — same brand language, different
-// accent / secondary hues. ThemeForProvider picks based on the
+// accent / secondary hues. themeForProvider picks based on the
 // adapter's StatusReporter.Status().Provider.
 
 package tui
@@ -82,7 +82,7 @@ type Theme struct {
 	// sub-config — so a code fence and the diff under it painted
 	// from two different palettes. Naming one style per theme is
 	// what unifies them and what makes /theme reach the code.
-	// Empty is filled in with DefaultChromaStyleName; an unknown
+	// Empty is filled in with defaultChromaStyleName; an unknown
 	// name degrades through Chroma's own fallback, never a panic.
 	ChromaStyleName string
 
@@ -123,26 +123,26 @@ type Theme struct {
 	PromptGlyph string
 }
 
-// DefaultPromptGlyph is the house textarea prompt rail used by
+// defaultPromptGlyph is the house textarea prompt rail used by
 // every theme that doesn't set Theme.PromptGlyph. A thin vertical
 // half-block + space gives a 2-cell-wide focus marker that
 // doesn't shift the textarea's column position on theme swap.
-const DefaultPromptGlyph = "▎ "
+const defaultPromptGlyph = "▎ "
 
-// DefaultChromaStyleName is the Chroma style a theme gets when it
+// defaultChromaStyleName is the Chroma style a theme gets when it
 // leaves ChromaStyleName empty. github's foreground-only palette
 // reads on both light and dark terminals, which is why it was the
 // hardcoded package default before themes could pick — keeping it
 // as the fallback means a host theme written against the older
 // Theme struct renders exactly as it did.
-const DefaultChromaStyleName = "github"
+const defaultChromaStyleName = "github"
 
 // chromaFor picks a theme's Chroma style by terminal polarity. The
-// bundled styles are foreground-only through LipglossFormatter, so
+// bundled styles are foreground-only through lipglossFormatter, so
 // a dark-terminal style dropped on a white background is a real
 // legibility loss, not just a taste one — every builtin that names
 // a dark style names its light counterpart too (or falls back to
-// DefaultChromaStyleName, which reads on both).
+// defaultChromaStyleName, which reads on both).
 func chromaFor(dark bool, darkName, lightName string) string {
 	if dark {
 		return darkName
@@ -154,9 +154,9 @@ func chromaFor(dark bool, darkName, lightName string) string {
 // leave zero, and is the single funnel every Theme crosses on its
 // way to a Styles bundle (see NewStylesWithTheme, which calls it).
 //
-// It deliberately does NOT live in DefaultTheme. There are four
+// It deliberately does NOT live in defaultTheme. There are four
 // independent ways a Theme value comes into existence and only two
-// of them route through DefaultTheme — ThemeByName (via the
+// of them route through defaultTheme — ThemeByName (via the
 // registry's Build closures) and the provider/brand constructors.
 // The other two do not: a bare `Theme{...}` composite literal from
 // a host calling the exported NewStylesWithTheme, and the same
@@ -167,7 +167,7 @@ func chromaFor(dark bool, darkName, lightName string) string {
 // NewStylesWithTheme re-derive OnPrimary for free.
 func normalizeTheme(t Theme) Theme {
 	if t.ChromaStyleName == "" {
-		t.ChromaStyleName = DefaultChromaStyleName
+		t.ChromaStyleName = defaultChromaStyleName
 	}
 	if t.OnPrimary == nil {
 		t.OnPrimary = contrastOn(t.Primary)
@@ -261,27 +261,27 @@ func hexColor(c color.Color) string {
 	return fmt.Sprintf("#%02X%02X%02X", (r>>8)&0xFF, (g>>8)&0xFF, (b>>8)&0xFF)
 }
 
-// DefaultTheme returns the canonical "core-tui" palette — the
+// defaultTheme returns the canonical "core-tui" palette — the
 // purple-pink Dracula-adjacent identity used by the visual-
 // preview slice and inherited by core-agent's launchTUIv2 today.
 // `dark` flips the foreground hierarchy so light terminals stay
 // readable.
-func DefaultTheme(dark bool) Theme {
+func defaultTheme(dark bool) Theme {
 	t := Theme{
 		Name:         "default",
-		Primary:      BrandViolet,
-		Secondary:    BrandPink,
-		Accent:       BrandViolet,
+		Primary:      brandViolet,
+		Secondary:    brandPink,
+		Accent:       brandViolet,
 		Success:      lipgloss.Color("#5FD787"),
 		Warning:      lipgloss.Color("#FFD75F"),
 		Error:        lipgloss.Color("#FF5F5F"),
 		Info:         lipgloss.Color("#A8A8A8"),
-		BorderActive: BrandViolet,
+		BorderActive: brandViolet,
 		BorderQuiet:  lipgloss.Color("#3A3A3A"),
 		// Dracula is the palette this theme is already named after;
 		// it has no light counterpart in Chroma's bundle, so light
 		// terminals keep the house github default.
-		ChromaStyleName: chromaFor(dark, "dracula", DefaultChromaStyleName),
+		ChromaStyleName: chromaFor(dark, "dracula", defaultChromaStyleName),
 	}
 	if dark {
 		t.FgBase = lipgloss.Color("#D0D0D0")
@@ -308,10 +308,10 @@ func DefaultTheme(dark bool) Theme {
 	return t
 }
 
-// AnthropicTheme tints toward Claude's warm orange identity. Used
+// anthropicTheme tints toward Claude's warm orange identity. Used
 // when the host's StatusReporter reports Provider == "anthropic".
-func AnthropicTheme(dark bool) Theme {
-	t := DefaultTheme(dark)
+func anthropicTheme(dark bool) Theme {
+	t := defaultTheme(dark)
 	t.Name = "anthropic"
 	// Gruvbox is the warm orange/brown end of Chroma's bundle —
 	// the closest match to the clay identity, in both polarities.
@@ -323,10 +323,10 @@ func AnthropicTheme(dark bool) Theme {
 	return t
 }
 
-// GeminiTheme tints toward Google's blue/teal palette. Used for
+// geminiTheme tints toward Google's blue/teal palette. Used for
 // Provider == "gemini" / "vertex".
-func GeminiTheme(dark bool) Theme {
-	t := DefaultTheme(dark)
+func geminiTheme(dark bool) Theme {
+	t := defaultTheme(dark)
 	t.Name = "gemini"
 	t.ChromaStyleName = chromaFor(dark, "tokyonight-night", "tokyonight-day")
 	t.Primary = lipgloss.Color("#4285F4")
@@ -336,10 +336,10 @@ func GeminiTheme(dark bool) Theme {
 	return t
 }
 
-// OpenAITheme tints toward OpenAI's green identity. Used for
+// openAITheme tints toward OpenAI's green identity. Used for
 // Provider == "openai".
-func OpenAITheme(dark bool) Theme {
-	t := DefaultTheme(dark)
+func openAITheme(dark bool) Theme {
+	t := defaultTheme(dark)
 	t.Name = "openai"
 	// Monokai's green function names + teal keywords are the
 	// nearest bundled read on the OpenAI green.
@@ -351,7 +351,7 @@ func OpenAITheme(dark bool) Theme {
 	return t
 }
 
-// GoogleTheme paints the surface in Google's full brand palette
+// googleTheme paints the surface in Google's full brand palette
 // from the 15-color Google News set, distributing all five logo
 // hues across the decorative + signal slots so the surface reads
 // as a Google product (Search / Maps / Drive chrome) rather than
@@ -373,8 +373,8 @@ func OpenAITheme(dark bool) Theme {
 // Success green and Error red stay on the medium-tone brand
 // variants for readable foreground text on dark backdrops.
 // Diff bgs flip with dark/light so light terminals stay readable.
-func GoogleTheme(dark bool) Theme {
-	t := DefaultTheme(dark)
+func googleTheme(dark bool) Theme {
+	t := defaultTheme(dark)
 	t.Name = "google"
 	// GitHub's own palettes: the neutral, unmistakably
 	// engineering-surface read that suits the Google chrome.
@@ -419,7 +419,7 @@ func GoogleTheme(dark bool) Theme {
 	return t
 }
 
-// GKETheme is the Google Kubernetes Engine variant of the Google
+// gkeTheme is the Google Kubernetes Engine variant of the Google
 // theme. Two GKE-specific signatures vs plain Google:
 //
 //  1. Wordmark cycles R-B-G-Y (the GKE icon's clockwise quadrant
@@ -432,10 +432,10 @@ func GoogleTheme(dark bool) Theme {
 //     input row carries the Kubernetes signature.
 //
 // Everything else (chrome, signal colors, focus ring, diff bgs)
-// inherits from GoogleTheme — GKE IS a Google product, the brand
+// inherits from googleTheme — GKE IS a Google product, the brand
 // chrome should match.
-func GKETheme(dark bool) Theme {
-	t := GoogleTheme(dark)
+func gkeTheme(dark bool) Theme {
+	t := googleTheme(dark)
 	t.Name = "gke"
 	// R-B-G-Y, clockwise from top of the GKE hexagonal icon.
 	t.WordmarkSequence = []color.Color{
@@ -448,11 +448,11 @@ func GKETheme(dark bool) Theme {
 	return t
 }
 
-// GopherTheme paints the surface in the Go brand palette from the
+// gopherTheme paints the surface in the Go brand palette from the
 // Go Brand Book (Gopher Blue → Aqua gradient, Fuchsia / Yellow
 // secondaries). Source: cogo-wasm2/docs/color-palette.md.
-func GopherTheme(dark bool) Theme {
-	t := DefaultTheme(dark)
+func gopherTheme(dark bool) Theme {
+	t := defaultTheme(dark)
 	t.Name = "gopher"
 	// Nord / solarized-light are the cool blue-teal families that
 	// sit on the Gopher Blue → Aqua gradient.
@@ -495,20 +495,20 @@ func GopherTheme(dark bool) Theme {
 	return t
 }
 
-// MatrixTheme paints the surface in green-on-black phosphor —
+// matrixTheme paints the surface in green-on-black phosphor —
 // terminal-hacker aesthetic. The wordmark cycles 6 shades of
 // green light-to-dim, mimicking the "rain head" → trailing
 // tail look from the films. Error stays CRT-red so failures
 // pop hard against the monochromatic green base.
-func MatrixTheme(dark bool) Theme {
-	t := DefaultTheme(dark)
+func matrixTheme(dark bool) Theme {
+	t := defaultTheme(dark)
 	t.Name = "matrix"
 	// swapoff is Chroma's monochrome-terminal style: near-white
 	// keywords, cyan strings, teal comments on black. The narrow
 	// hue set is what keeps a code fence reading as phosphor
 	// rather than as a syntax rainbow parked in the middle of the
 	// green chrome.
-	t.ChromaStyleName = chromaFor(dark, "swapoff", DefaultChromaStyleName)
+	t.ChromaStyleName = chromaFor(dark, "swapoff", defaultChromaStyleName)
 	t.Primary = lipgloss.Color("#00FF41")   // bright matrix green
 	t.Secondary = lipgloss.Color("#39FF14") // lime
 	t.Accent = lipgloss.Color("#7FFF7F")    // pale green
@@ -534,12 +534,12 @@ func MatrixTheme(dark bool) Theme {
 	return t
 }
 
-// PrideTheme paints a neutral violet chrome with a full
+// prideTheme paints a neutral violet chrome with a full
 // rainbow-flag wordmark. The 6 flag colors R-O-Y-G-B-V land
 // on the wordmark; body text stays calm so the rainbow is a
 // signature, not a constant assault.
-func PrideTheme(dark bool) Theme {
-	t := DefaultTheme(dark)
+func prideTheme(dark bool) Theme {
+	t := defaultTheme(dark)
 	t.Name = "pride"
 	// Catppuccin spreads the widest pastel hue set of any bundled
 	// style — the closest a code fence gets to the flag without
@@ -568,16 +568,16 @@ func PrideTheme(dark bool) Theme {
 	return t
 }
 
-// CyberpunkTheme paints a deep-magenta chrome with neon
+// cyberpunkTheme paints a deep-magenta chrome with neon
 // yellow/cyan/magenta accents. The wordmark cycles Y-C-M-Y-C-M
 // for an arcade-marquee feel. Loud on purpose — this is the
 // "I'm hacking the planet" theme.
-func CyberpunkTheme(dark bool) Theme {
-	t := DefaultTheme(dark)
+func cyberpunkTheme(dark bool) Theme {
+	t := defaultTheme(dark)
 	t.Name = "cyberpunk"
 	// witchhazel is neon mint / cyan / lilac on deep purple —
 	// the arcade-marquee palette this theme is built around.
-	t.ChromaStyleName = chromaFor(dark, "witchhazel", DefaultChromaStyleName)
+	t.ChromaStyleName = chromaFor(dark, "witchhazel", defaultChromaStyleName)
 	t.Primary = lipgloss.Color("#7B007B")   // deep magenta — wordmark base
 	t.Secondary = lipgloss.Color("#00FFD0") // hot cyan
 	t.Accent = lipgloss.Color("#FCEE0A")    // neon yellow
@@ -600,12 +600,12 @@ func CyberpunkTheme(dark bool) Theme {
 	return t
 }
 
-// VaporwaveTheme paints a pink/purple/cyan synthwave palette.
+// vaporwaveTheme paints a pink/purple/cyan synthwave palette.
 // The wordmark gradients pink→cyan across 6 stops for that
 // 80s-Miami-poolside-screensaver feel. Less aggressive than
 // Cyberpunk; same chromatic family but softer.
-func VaporwaveTheme(dark bool) Theme {
-	t := DefaultTheme(dark)
+func vaporwaveTheme(dark bool) Theme {
+	t := defaultTheme(dark)
 	t.Name = "vaporwave"
 	// base16-snazzy: hot-pink keywords, mint strings, sky-blue
 	// functions — synthwave, straight out of the bundle.
@@ -635,16 +635,16 @@ func VaporwaveTheme(dark bool) Theme {
 	return t
 }
 
-// ChristmasTheme — red + green + gold festive. Wordmark
+// christmasTheme — red + green + gold festive. Wordmark
 // alternates R-G-R-G-R-G. Use in December (or whenever). Doubles
 // as a perfectly-themed diff palette (red = remove, green = add
 // matches the chrome).
-func ChristmasTheme(dark bool) Theme {
-	t := DefaultTheme(dark)
+func christmasTheme(dark bool) Theme {
+	t := defaultTheme(dark)
 	t.Name = "christmas"
 	// rrt is red keywords, green comments and gold functions on
 	// black — accidentally the exact festive triad.
-	t.ChromaStyleName = chromaFor(dark, "rrt", DefaultChromaStyleName)
+	t.ChromaStyleName = chromaFor(dark, "rrt", defaultChromaStyleName)
 	t.Primary = lipgloss.Color("#C8102E")   // holiday red
 	t.Secondary = lipgloss.Color("#0E5F40") // holiday green
 	t.Accent = lipgloss.Color("#D4AF37")    // gold
@@ -689,30 +689,30 @@ type BuiltinTheme struct {
 //   - "default" first as the neutral baseline.
 //   - Brand themes (google / gopher) — operator-facing identities.
 //   - Per-provider variants (anthropic / gemini / openai) — auto-
-//     applied by ThemeForProvider; available manually too.
+//     applied by themeForProvider; available manually too.
 //   - Fun / show-off themes leveraging the multicolor wordmark
 //     (matrix / pride / cyberpunk / vaporwave / christmas) — pure
 //     personality, last so the "serious" set is scannable first.
 func BuiltinThemes() []BuiltinTheme {
 	return []BuiltinTheme{
-		{Name: "default", Description: "house violet/pink (Dracula-adjacent)", Build: DefaultTheme},
-		{Name: "google", Description: "Google News palette — blue / red / green / yellow + multicolor wordmark", Build: GoogleTheme},
-		{Name: "gke", Description: "Google Kubernetes Engine — R-B-G-Y icon-quadrant wordmark + ⎈ helm prompt", Build: GKETheme},
-		{Name: "gopher", Description: "Go brand book — Gopher Blue → Aqua gradient wordmark, Fuchsia + brand yellow", Build: GopherTheme},
-		{Name: "anthropic", Description: "Claude clay — warm orange", Build: AnthropicTheme},
-		{Name: "gemini", Description: "Gemini blue / teal", Build: GeminiTheme},
-		{Name: "openai", Description: "OpenAI green", Build: OpenAITheme},
-		{Name: "matrix", Description: "green-on-black phosphor — wordmark cycles 6 shades of green", Build: MatrixTheme},
-		{Name: "pride", Description: "calm violet chrome + full rainbow-flag wordmark (R-O-Y-G-B-V)", Build: PrideTheme},
-		{Name: "cyberpunk", Description: "neon yellow / cyan / magenta — wordmark cycles Y-C-M", Build: CyberpunkTheme},
-		{Name: "vaporwave", Description: "synthwave pink → cyan gradient wordmark, lavender chrome", Build: VaporwaveTheme},
-		{Name: "christmas", Description: "red + green + gold — wordmark alternates R-G", Build: ChristmasTheme},
+		{Name: "default", Description: "house violet/pink (Dracula-adjacent)", Build: defaultTheme},
+		{Name: "google", Description: "Google News palette — blue / red / green / yellow + multicolor wordmark", Build: googleTheme},
+		{Name: "gke", Description: "Google Kubernetes Engine — R-B-G-Y icon-quadrant wordmark + ⎈ helm prompt", Build: gkeTheme},
+		{Name: "gopher", Description: "Go brand book — Gopher Blue → Aqua gradient wordmark, Fuchsia + brand yellow", Build: gopherTheme},
+		{Name: "anthropic", Description: "Claude clay — warm orange", Build: anthropicTheme},
+		{Name: "gemini", Description: "Gemini blue / teal", Build: geminiTheme},
+		{Name: "openai", Description: "OpenAI green", Build: openAITheme},
+		{Name: "matrix", Description: "green-on-black phosphor — wordmark cycles 6 shades of green", Build: matrixTheme},
+		{Name: "pride", Description: "calm violet chrome + full rainbow-flag wordmark (R-O-Y-G-B-V)", Build: prideTheme},
+		{Name: "cyberpunk", Description: "neon yellow / cyan / magenta — wordmark cycles Y-C-M", Build: cyberpunkTheme},
+		{Name: "vaporwave", Description: "synthwave pink → cyan gradient wordmark, lavender chrome", Build: vaporwaveTheme},
+		{Name: "christmas", Description: "red + green + gold — wordmark alternates R-G", Build: christmasTheme},
 	}
 }
 
 // ThemeByName resolves a case-insensitive name against the
 // builtin registry and returns the constructed Theme. Unknown
-// names fall back to DefaultTheme so a stale persisted name or
+// names fall back to defaultTheme so a stale persisted name or
 // a typo in /theme <name> never strands the operator on a
 // half-painted UI.
 func ThemeByName(name string, dark bool) Theme {
@@ -721,25 +721,25 @@ func ThemeByName(name string, dark bool) Theme {
 			return bt.Build(dark)
 		}
 	}
-	return DefaultTheme(dark)
+	return defaultTheme(dark)
 }
 
-// ThemeForProvider returns the per-provider theme variant for
-// the given provider tag, or DefaultTheme on empty / unknown.
+// themeForProvider returns the per-provider theme variant for
+// the given provider tag, or defaultTheme on empty / unknown.
 // The provider string is matched case-insensitively and tolerates
 // vendor suffixes ("anthropic-vertex" → anthropic).
-func ThemeForProvider(provider string, dark bool) Theme {
+func themeForProvider(provider string, dark bool) Theme {
 	switch {
 	case provider == "":
-		return DefaultTheme(dark)
+		return defaultTheme(dark)
 	case containsCI(provider, "anthropic"):
-		return AnthropicTheme(dark)
+		return anthropicTheme(dark)
 	case containsCI(provider, "gemini"), containsCI(provider, "vertex"):
-		return GeminiTheme(dark)
+		return geminiTheme(dark)
 	case containsCI(provider, "openai"):
-		return OpenAITheme(dark)
+		return openAITheme(dark)
 	default:
-		return DefaultTheme(dark)
+		return defaultTheme(dark)
 	}
 }
 

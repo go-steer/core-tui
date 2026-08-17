@@ -96,8 +96,8 @@ const goldenMarkdownDoc = "## Section\n\nBody with `inline` code.\n\n```go\nfunc
 // styles. Two themes at the same polarity must now produce different
 // configs at every slot the operator actually looks at.
 func TestTuiStyleConfig_DerivesFromTheme(t *testing.T) {
-	a := tuiStyleConfig(MatrixTheme(true), true)
-	b := tuiStyleConfig(ChristmasTheme(true), true)
+	a := tuiStyleConfig(matrixTheme(true), true)
+	b := tuiStyleConfig(christmasTheme(true), true)
 
 	differs := func(name string, x, y *string) {
 		t.Helper()
@@ -115,11 +115,11 @@ func TestTuiStyleConfig_DerivesFromTheme(t *testing.T) {
 	differs("HorizontalRule.Color", a.HorizontalRule.Color, b.HorizontalRule.Color)
 
 	// Document takes FgBase, which Matrix and Christmas both inherit
-	// from DefaultTheme — so this one is pinned to the token rather
+	// from defaultTheme — so this one is pinned to the token rather
 	// than compared across themes. Glamour's own "252" would be the
 	// regression.
-	if a.Document.Color == nil || *a.Document.Color != hexColor(MatrixTheme(true).FgBase) {
-		t.Errorf("Document.Color = %v, want the theme FgBase %s", a.Document.Color, hexColor(MatrixTheme(true).FgBase))
+	if a.Document.Color == nil || *a.Document.Color != hexColor(matrixTheme(true).FgBase) {
+		t.Errorf("Document.Color = %v, want the theme FgBase %s", a.Document.Color, hexColor(matrixTheme(true).FgBase))
 	}
 	// cfg.Text is the innermost cascade level; setting a color there
 	// wins over every enclosing block and repaints headings in body
@@ -150,7 +150,7 @@ func TestTuiStyleConfig_DerivesFromTheme(t *testing.T) {
 // from the Accent→FgMuted ramp rather than from five more Theme
 // tokens, so the ramp has to actually be monotonic and anchored.
 func TestHeadingColor_RampsAccentToMuted(t *testing.T) {
-	theme := MatrixTheme(true)
+	theme := matrixTheme(true)
 	if got := headingColor(theme, 2); got != theme.Accent {
 		t.Errorf("H2 = %v, want the theme Accent %v", got, theme.Accent)
 	}
@@ -170,8 +170,8 @@ func TestHeadingColor_RampsAccentToMuted(t *testing.T) {
 // user-visible claim in issue #116: switching themes has to move the
 // assistant text, not just the chrome around it.
 func TestRenderMarkdown_ThemeChangesHeadingsAndFences(t *testing.T) {
-	matrix := newMarkdownRenderer(MatrixTheme(true), true, 60).renderMarkdown(goldenMarkdownDoc)
-	christmas := newMarkdownRenderer(ChristmasTheme(true), true, 60).renderMarkdown(goldenMarkdownDoc)
+	matrix := newMarkdownRenderer(matrixTheme(true), true, 60).renderMarkdown(goldenMarkdownDoc)
+	christmas := newMarkdownRenderer(christmasTheme(true), true, 60).renderMarkdown(goldenMarkdownDoc)
 	if matrix == christmas {
 		t.Fatal("two themes rendered byte-identical markdown")
 	}
@@ -206,8 +206,8 @@ func TestRenderMarkdown_ThemeChangesHeadingsAndFences(t *testing.T) {
 // the bundled structural base, so a theme must not render the same
 // bytes on a light terminal as on a dark one.
 func TestRenderMarkdown_LightVariantDiffers(t *testing.T) {
-	dark := newMarkdownRenderer(GopherTheme(true), true, 60).renderMarkdown(goldenMarkdownDoc)
-	light := newMarkdownRenderer(GopherTheme(false), false, 60).renderMarkdown(goldenMarkdownDoc)
+	dark := newMarkdownRenderer(gopherTheme(true), true, 60).renderMarkdown(goldenMarkdownDoc)
+	light := newMarkdownRenderer(gopherTheme(false), false, 60).renderMarkdown(goldenMarkdownDoc)
 	if dark == light {
 		t.Error("light and dark rendered identical markdown")
 	}

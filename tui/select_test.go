@@ -66,7 +66,7 @@ func chatWindowRows(m *Model) map[int]bool {
 // selection bar and the lines that do not.
 func markedFrameLines(view string) (marked, plain int) {
 	for _, ln := range strings.Split(view, "\n") {
-		if strings.HasPrefix(ansi.Strip(ln), GlyphSelectBar) {
+		if strings.HasPrefix(ansi.Strip(ln), glyphSelectBar) {
 			marked++
 			continue
 		}

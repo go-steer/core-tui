@@ -200,7 +200,7 @@ func TestPan_TheSelectionMarkerDoesNotSlide(t *testing.T) {
 	m := press(panModel(t), "shift+right")
 	var marked int
 	for _, ln := range strings.Split(m.chatView(), "\n") {
-		if strings.HasPrefix(ansi.Strip(ln), GlyphSelectBar) {
+		if strings.HasPrefix(ansi.Strip(ln), glyphSelectBar) {
 			marked++
 		}
 	}

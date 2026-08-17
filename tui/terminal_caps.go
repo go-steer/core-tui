@@ -30,10 +30,10 @@ import (
 	"strings"
 )
 
-// TerminalCapabilities is the bag of optional terminal features
+// terminalCapabilities is the bag of optional terminal features
 // the TUI knows how to exploit when present and degrade past when
 // absent. Zero value = "assume nothing supported" (safe default).
-type TerminalCapabilities struct {
+type terminalCapabilities struct {
 	// TrueColor is true when the terminal advertises 24-bit color
 	// via COLORTERM. Lipgloss v2 picks the best output path
 	// regardless, but renderers that want to gate gradient/blend
@@ -85,15 +85,15 @@ type TerminalCapabilities struct {
 	TermProgram string
 }
 
-// DetectCapabilities probes the environment once and returns the
+// detectCapabilities probes the environment once and returns the
 // best-guess capability bag. Called from NewModel; hosts can
 // override on Model.caps after NewModel returns if they have a
 // better signal.
-func DetectCapabilities() TerminalCapabilities {
+func detectCapabilities() terminalCapabilities {
 	colorterm := strings.ToLower(os.Getenv("COLORTERM"))
 	term := strings.ToLower(os.Getenv("TERM"))
 	prog := termProgram()
-	caps := TerminalCapabilities{
+	caps := terminalCapabilities{
 		TermProgram: prog,
 		TrueColor:   colorterm == "truecolor" || colorterm == "24bit" || strings.Contains(term, "direct"),
 		NoColor:     os.Getenv("NO_COLOR") != "",
@@ -160,17 +160,4 @@ func termProgram() string {
 		return "tmux"
 	}
 	return ""
-}
-
-// Hyperlink renders s as an OSC 8 hyperlink to url when the
-// capability is supported, otherwise returns s unchanged. Lets
-// renderers always call Hyperlink without branching themselves.
-func (c TerminalCapabilities) Hyperlink(url, s string) string {
-	if !c.Hyperlinks || url == "" {
-		return s
-	}
-	// OSC 8 syntax: ESC ] 8 ; ; URL ST text ESC ] 8 ; ; ST
-	const esc = "\x1b]8;;"
-	const st = "\x1b\\"
-	return esc + url + st + s + esc + st
 }

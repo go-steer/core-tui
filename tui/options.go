@@ -52,7 +52,7 @@ type Options struct {
 
 	// InitialThemeName seeds the named theme at startup. Resolved
 	// case-insensitively against tui.BuiltinThemes; unknown names
-	// fall through to DefaultTheme. Set this when the host has
+	// fall through to the default theme. Set this when the host has
 	// persisted a previous /theme pick (observed via
 	// ThemeChangedMsg). Empty leaves the theme on the auto /
 	// per-provider path (see AutoProviderTheme).
