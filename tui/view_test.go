@@ -129,3 +129,50 @@ func TestWordWrapIndent_Issue49_SystemMessageWithURL(t *testing.T) {
 		}
 	}
 }
+
+// TestEffectiveLayout_NormalizesToADeclaredMember pins the clamp that
+// moved into effectiveLayout when View's layout switch stopped having a
+// `default:` arm.
+//
+// StatusLayout is an exported int and Options takes it by value, so a
+// host can hand the model a value outside the declared pair. It used to
+// reach View and fall into the default arm, which drew the header
+// layout; now effectiveLayout resolves it, and the render site names
+// both members so `exhaustive` polices the list. Either way the frame
+// is the header layout — this asserts the resolution, and the frame
+// assertion below is what proves the two agree.
+func TestEffectiveLayout_NormalizesToADeclaredMember(t *testing.T) {
+	for _, tc := range []struct {
+		name   string
+		layout StatusLayout
+		width  int
+		want   StatusLayout
+	}{
+		{"header stays header", StatusHeader, 120, StatusHeader},
+		{"sidebar with room stays sidebar", StatusSidebar, 120, StatusSidebar},
+		{"sidebar too narrow falls back", StatusSidebar, 40, StatusHeader},
+		{"undeclared value resolves to header", StatusLayout(7), 120, StatusHeader},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			m := newFrameModel(tc.layout, tc.width, 24)
+			if got := m.effectiveLayout(); got != tc.want {
+				t.Errorf("effectiveLayout() = %v, want %v", got, tc.want)
+			}
+		})
+	}
+}
+
+// TestView_UndeclaredLayoutStillRendersTheHeaderFrame is the other half:
+// an out-of-range StatusLayout must produce the same frame it produced
+// when the render site caught it in a default arm. A switch that named
+// only StatusSidebar and StatusHeader with no clamp ahead of it would
+// leave body empty here, which is a blank terminal rather than a
+// degraded one.
+func TestView_UndeclaredLayoutStillRendersTheHeaderFrame(t *testing.T) {
+	odd := newFrameModel(StatusLayout(7), 120, 24)
+	header := newFrameModel(StatusHeader, 120, 24)
+	if got, want := odd.View().Content, header.View().Content; got != want {
+		t.Errorf("an undeclared StatusLayout did not render the header frame\ngot:\n%s\nwant:\n%s",
+			ansi.Strip(got), ansi.Strip(want))
+	}
+}

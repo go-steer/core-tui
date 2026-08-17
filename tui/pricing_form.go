@@ -154,6 +154,10 @@ func (m *Model) updatePricingForm(msg tea.Msg) tea.Cmd {
 		m.history.Append(Message{Role: RoleSystem, Text: "/pricing set: cancelled"})
 		m.resize()
 		m.refreshAndScroll()
+	case huh.StateNormal:
+		// The form is still collecting input. Nothing to commit and
+		// nothing to tear down — the Cmd huh returned above is what
+		// keeps it running.
 	}
 	return cmd
 }

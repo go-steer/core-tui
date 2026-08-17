@@ -42,9 +42,9 @@ func (s QueueState) String() string {
 		return "done"
 	case QueueFailed:
 		return "failed"
-	default:
-		return "queued"
+	case QueueQueued:
 	}
+	return "queued"
 }
 
 // QueueEntry is one row in the operator-typed-during-streaming queue

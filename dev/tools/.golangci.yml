@@ -32,6 +32,8 @@ linters:
   enable:
     # Bug-finders we never want to silence.
     - errcheck       # unchecked errors
+    - exhaustive     # enum switches that miss a member
+    - gochecksumtype # sealed-interface type switches that miss a variant
     - govet          # core vet rules
     - ineffassign    # ineffectual assignments
     - staticcheck    # massive bug+style ruleset (now includes stylecheck + gosimple)
@@ -63,6 +65,20 @@ linters:
           - errcheck
           - gosec
           - unparam
+      # SA5011 in tests is a harness artifact, not a finding. With
+      # `exhaustive` and `gochecksumtype` both enabled, golangci-lint
+      # v2.12.1 loses the noreturn fact for (*testing.common).Fatal and
+      # reports every
+      #     if got == nil { t.Fatal(...) }
+      #     got.Field
+      # as a possible nil dereference. Neither linter alone provokes it,
+      # and `staticcheck -checks SA5011 ./tui/...` run standalone over
+      # the same tree reports nothing. Scoped to the check and to tests
+      # so the rest of SA5011 keeps working.
+      - path: _test\.go
+        text: SA5011
+        linters:
+          - staticcheck
 
   settings:
     errcheck:
