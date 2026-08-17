@@ -36,12 +36,14 @@
 package tui
 
 import (
+	"fmt"
 	"strconv"
 	"strings"
 	"testing"
 	"time"
 
 	tea "charm.land/bubbletea/v2"
+	"charm.land/lipgloss/v2"
 	"github.com/charmbracelet/x/ansi"
 )
 
@@ -278,6 +280,423 @@ func assertFrameFits(t *testing.T, frame string, w, h int) {
 	}
 }
 
+// --- Panel survival (issue #158) -----------------------------------
+//
+// assertFrameFits above measures two numbers, and a frame that has
+// silently lost a whole panel scores perfectly on both of them: the
+// survivors reflow into the freed rows and the dimensions still check
+// out. That is not hypothetical — #147 and #149 were both exactly this
+// shape, and the spike hit a third instance (a sidebar loop that
+// capped at *n sessions* rather than *n lines*, which pushed the input
+// row and the footer off the bottom of every frame while this grid
+// stayed green). clipFrame is what makes an oversized frame legal, so
+// a clip pass without a survival assertion beside it is a safety net
+// that also hides the fall.
+//
+// # Why this is not strings.Contains
+//
+// The obvious assertion — "the footer text appears somewhere in the
+// frame" — is the same mistake this file was written to undo (see the
+// header comment: 202 Contains assertions that proved nothing). A
+// marker present *somewhere* says nothing about where it landed. A
+// sidebar collapsed to one column contains its markers. A footer
+// composed into the middle of the chat contains its markers. Both are
+// broken frames and both pass Contains.
+//
+// So the assertion here is positional: every panel is located to a
+// rectangle — a row range and a column band — and checked to occupy
+// the rectangle the layout contract gives it.
+//
+// # How each panel is identified
+//
+// By re-rendering it and finding its own text in the frame's cell
+// grid, NOT by looking for a marker and NOT by re-deriving row numbers
+// from the chrome budget.
+//
+// The distinction matters. View composes the left column by stacking
+// the blocks its renderers return, in a fixed order, with
+// JoinVertical; the row each panel starts at is therefore the sum of
+// the heights of the blocks above it, and nothing else. This test
+// re-does exactly that sum — from lipgloss.Height of the very blocks
+// View joins — and asserts the frame is the top min(stack, h) rows of
+// it. It never reads m.chrome. That is deliberate: allocateChrome
+// (budget.go) is one of the things that can break, and a test whose
+// expected geometry comes out of allocateChrome would happily assert
+// the bug. Here, if the budget hands the help panel rows the input box
+// needed, the blocks still stack the same way, the stack still
+// overflows, and irreducibleRows below says the terminal had room —
+// which is the failure.
+//
+// Columns are the one place a constant is consulted: chromeWidth() is
+// a pure function of m.width and the sidebarWidth constant, has no row
+// arithmetic in it, and its own doc comment nominates it as the thing
+// tests should ask rather than re-deriving. The divider column is also
+// cross-checked against the frame itself.
+//
+// # What "survival" means when the terminal is genuinely too short
+//
+// At 40x4 the header, the footer and the input box are together taller
+// than the screen; no allocation can win and clipFrame trims the
+// bottom. That is documented behaviour, not panel loss, so the
+// assertion is conditional — on irreducibleRows (resize_budget_test.go),
+// which measures the panel RENDERERS and adds the two published floors
+// (textareaMinHeight, chatMinHeight) and never consults the allocator.
+// A stack that overflows a terminal with room for that floor is a bug
+// even though the frame still fits.
+//
+// Degenerate geometry is checked separately, because a renderer that
+// collapses is invisible to a match against its own output: the
+// sidebar has to be at least 3 rows and 16 columns, the input box at
+// least its border plus textareaMinHeight, the header and the footer
+// at least one non-blank row. For the same reason the sidebar band is
+// checked to be BLANK below the sidebar's own last row — a panel that
+// grows past its rectangle somewhere between its renderer and the join
+// does not change the size of what the renderer returns, so matching
+// the renderer's output cannot see it. That is the spike's F2 exactly.
+//
+// # What it still cannot see
+//
+// On a terminal too short for the irreducible chrome the bottom of the
+// stack is already off-screen, so a panel dropped there is invisible to
+// any frame-level assertion — the frame is identical either way. The
+// grid's 40x4 and 40x10 cells are in that regime for the base layout.
+// This is stated rather than worked around: the alternative is to
+// assert something about a frame that does not contain the evidence.
+// The modal arm has no such hole, because #147 gave modals a height
+// regime that fits every terminal in the grid.
+
+// frameCellRows splits a composed frame into one ANSI-stripped string
+// per terminal row. Styling is dropped because position, not colour,
+// is what is being asserted; a trailing newline costs no row.
+func frameCellRows(frame string) []string {
+	lines := strings.Split(frame, "\n")
+	if n := len(lines); n > 0 && lines[n-1] == "" {
+		lines = lines[:n-1]
+	}
+	rows := make([]string, 0, len(lines))
+	for _, l := range lines {
+		rows = append(rows, ansi.Strip(l))
+	}
+	return rows
+}
+
+// cellWindow returns the display cells of an ANSI-stripped row in the
+// half-open column band [c0, c1). Cells, not bytes and not runes: a
+// frame full of box-drawing glyphs and CJK is neither one byte nor one
+// rune per column, and a column band that splits a wide glyph would
+// otherwise slide every comparison after it.
+func cellWindow(row string, c0, c1 int) string {
+	start := len(row)
+	w := 0
+	for i, r := range row {
+		if w >= c0 {
+			start = i
+			break
+		}
+		w += ansi.StringWidth(string(r))
+	}
+	s := row[start:]
+	w = 0
+	for i, r := range s {
+		if w >= c1-c0 {
+			return s[:i]
+		}
+		w += ansi.StringWidth(string(r))
+	}
+	return s
+}
+
+// framePanel is one region of the layout: the block View renders for
+// it, and the column band the layout contract confines it to.
+type framePanel struct {
+	name string
+	// block is the panel's own render — the exact string View joins
+	// into the body.
+	block    string
+	col, end int
+}
+
+// rows is the panel's own rendered height, which is the number of
+// terminal rows it is entitled to in the composed frame.
+func (p framePanel) rows() int { return lipgloss.Height(p.block) }
+
+// matchAt reports how many of the panel's leading rows are present in
+// the frame starting at (row, p.col), plus a description of the first
+// row that is not. Trailing blanks are ignored on both sides:
+// JoinVertical pads every part out to the width of the widest one, and
+// that padding is not the panel's content.
+func (p framePanel) matchAt(frame []string, row int) (int, string) {
+	lines := strings.Split(p.block, "\n")
+	for i, pl := range lines {
+		fr := row + i
+		if fr >= len(frame) {
+			return i, ""
+		}
+		got := strings.TrimRight(cellWindow(frame[fr], p.col, p.end), " ")
+		want := strings.TrimRight(ansi.Strip(pl), " ")
+		if got != want {
+			return i, fmt.Sprintf("frame row %d, cols %d..%d:\n     want %q\n     got  %q",
+				fr, p.col, p.end, want, got)
+		}
+	}
+	return len(lines), ""
+}
+
+// composedStack re-derives the vertical stack View builds, in View's
+// order, from the same renderers View calls. The conditional members
+// (help panel, palette, toast) are included on the same conditions
+// View includes them on — a non-empty render.
+//
+// It returns the left column's stack, the sidebar panel, and whether
+// the sidebar is part of this layout at all.
+func composedStack(m Model) (stack []framePanel, sidebar framePanel, hasSidebar bool) {
+	cw := m.chromeWidth()
+	add := func(name, block string) {
+		stack = append(stack, framePanel{name: name, block: block, col: 0, end: cw})
+	}
+	if m.effectiveLayout() == StatusHeader {
+		add("status header", m.renderHeader())
+	}
+	add("chat", m.chatView())
+	if help := m.renderHelpPanel(cw); help != "" {
+		add("help panel", help)
+	}
+	if pal := m.renderPalette(cw); pal != "" {
+		add("palette", pal)
+	}
+	add("input box", m.renderInputBox())
+	if toast := m.renderToast(cw); toast != "" {
+		add("toast", toast)
+	}
+	add("footer legend", m.renderFooter(cw))
+
+	if m.effectiveLayout() == StatusSidebar {
+		// The sidebar is a horizontal sibling of the whole left column,
+		// so it starts at frame row 0 and at the column just right of
+		// the one-cell divider.
+		sidebar = framePanel{
+			name:  "sidebar",
+			block: m.renderSidebar(),
+			col:   cw + 1,
+			end:   m.width,
+		}
+		hasSidebar = true
+	}
+	return stack, sidebar, hasSidebar
+}
+
+// modalBlock returns the block View would centre over the body, and
+// whether there is one. The switch is View's switch: an active modal
+// REPLACES the body rather than overlaying it, so when one is up the
+// panel stack is not what the frame contains and the survival question
+// becomes "did the modal keep its own footer" — which is #147.
+func modalBlock(m *Model) (string, bool) {
+	switch {
+	case m.pendingPermission != nil && m.opts.PermissionLayout == PermissionOverlay:
+		return m.renderPermissionModal(), true
+	case m.pendingElicit != nil:
+		return m.renderElicitModal(), true
+	case m.pendingForm != nil:
+		return m.styles.ModalBorder.Padding(1, 2).Render(m.pendingForm.View()), true
+	case m.sideAnswer != nil:
+		return m.renderSideAnswer(), true
+	case m.overlayStack.HasDialogs():
+		return m.overlayStack.Render(m.width, m), true
+	}
+	return "", false
+}
+
+// assertPanelsSurvive is the panel-survival invariant: every panel the
+// layout contract puts on screen is on screen, in its own rectangle,
+// whole.
+func assertPanelsSurvive(t *testing.T, m Model, w, h int) {
+	t.Helper()
+	frame := frameCellRows(m.View().Content)
+
+	if block, ok := modalBlock(&m); ok {
+		assertModalSurvives(t, frame, block, w, h)
+		return
+	}
+
+	stack, sidebar, hasSidebar := composedStack(m)
+
+	// The stack may only be taller than the terminal when the terminal
+	// cannot hold the irreducible chrome. Anywhere else, an overflow
+	// means some panel took rows another panel needed and clipFrame
+	// quietly ate the difference.
+	stackH := 0
+	for _, p := range stack {
+		stackH += p.rows()
+	}
+	need := irreducibleRows(m)
+	switch {
+	case stackH > h && need <= h:
+		t.Errorf("composed stack is %d rows at height %d, but the irreducible chrome needs only %d — "+
+			"clipFrame will trim %d rows off the bottom and whatever is there vanishes silently",
+			stackH, h, need, stackH-h)
+	case stackH > h && len(frame) != h:
+		// A terminal too short for the irreducible chrome is the one
+		// case clipFrame is contracted to fire in, and it keeps the
+		// first h rows. Fewer than h means rows went missing some other
+		// way.
+		t.Errorf("stack of %d rows overflows a %d-row terminal, but the frame is %d rows — "+
+			"clipFrame keeps the first %d, so %d rows were lost before the clamp",
+			stackH, h, len(frame), h, h-len(frame))
+	case stackH <= h && len(frame) != stackH:
+		// The footer is the bottom of the stack, so a frame that fits
+		// ends on the footer's last row and has nothing below it.
+		t.Errorf("frame is %d rows in a %d-row terminal but the panels stack to %d — "+
+			"the frame is not the panels",
+			len(frame), h, stackH)
+	}
+
+	// Every panel sits at the row the blocks above it end on, in its
+	// own column band, whole.
+	row := 0
+	for _, p := range stack {
+		matched, diff := p.matchAt(frame, row)
+		switch {
+		case matched == p.rows():
+			// Whole panel present where the stack puts it.
+		case diff != "":
+			t.Errorf("%s is not in its rectangle: %d of %d rows match from frame row %d\n     %s",
+				p.name, matched, p.rows(), row, diff)
+		case len(frame) < h:
+			// The frame did not fill the terminal, so the clip pass
+			// cannot be what removed these rows: the panel was dropped
+			// from the composition.
+			t.Errorf("%s is missing: it needs frame rows %d..%d but the frame is only %d rows "+
+				"in a %d-row terminal — the panel was dropped from the composition, not clipped",
+				p.name, row, row+p.rows()-1, len(frame), h)
+		case need <= h:
+			t.Errorf("%s is clipped: %d of its %d rows survive from frame row %d in a %d-row terminal "+
+				"that had room for the %d rows the layout cannot give up",
+				p.name, matched, p.rows(), row, h, need)
+		default:
+			// The terminal is genuinely shorter than the irreducible
+			// chrome. clipFrame trims from the bottom and the loss is
+			// reported once, above, rather than once per panel.
+		}
+		row += p.rows()
+	}
+
+	assertPanelsNotDegenerate(t, stack)
+
+	if !hasSidebar {
+		return
+	}
+
+	// The divider is a full-height column of GlyphColumn, and it is
+	// what separates the two bands. Locating it in the frame is the
+	// independent check that the sidebar band is where chromeWidth says
+	// it is.
+	divider := 0
+	for _, r := range frame {
+		if strings.HasPrefix(cellWindow(r, sidebar.col-1, sidebar.col), GlyphColumn) {
+			divider++
+		}
+	}
+	if divider != len(frame) {
+		t.Errorf("sidebar divider is at column %d on %d of %d frame rows — the sidebar band has no left edge",
+			sidebar.col-1, divider, len(frame))
+	}
+
+	// The spike's F2 shape: JoinHorizontal makes the body as tall as
+	// its tallest column, so a sidebar that renders past its own
+	// rectangle overflows a frame the left column fits in perfectly
+	// well — and the clip pass makes that legal.
+	if sb := sidebar.rows(); sb > h && stackH <= h {
+		t.Errorf("sidebar renders %d rows in a %d-row terminal the %d-row left column fits — "+
+			"the sidebar alone is what pushes the joined body past the clamp",
+			sb, h, stackH)
+	}
+	// A sidebar clipped by a terminal shorter than the sidebar is not
+	// panel loss; a sidebar that does not match where it does fit is.
+	wantSB := sidebar.rows()
+	if wantSB > len(frame) {
+		wantSB = len(frame)
+	}
+	if matched, diff := sidebar.matchAt(frame, 0); matched != wantSB {
+		if diff == "" {
+			diff = fmt.Sprintf("frame is %d rows", len(frame))
+		}
+		t.Errorf("sidebar is not in its rectangle: %d of %d rows match from frame row 0, cols %d..%d\n     %s",
+			matched, wantSB, sidebar.col, sidebar.end, diff)
+	}
+	// Below its own last row the band belongs to nobody: JoinHorizontal
+	// pads the shorter column with blanks. Anything drawn there is
+	// content the sidebar renderer did not account for, which is how a
+	// panel grows past its rectangle without its own render changing
+	// size.
+	for r := sidebar.rows(); r < len(frame); r++ {
+		if got := strings.TrimRight(cellWindow(frame[r], sidebar.col, sidebar.end), " "); got != "" {
+			t.Errorf("frame row %d has %q in the sidebar band (cols %d..%d) below the sidebar's own %d rows — "+
+				"the panel is taller than the rectangle it reports",
+				r, got, sidebar.col, sidebar.end, sidebar.rows())
+			break
+		}
+	}
+	if sbw, sbh := lipgloss.Width(sidebar.block), sidebar.rows(); sbw < 16 || sbh < 3 {
+		t.Errorf("sidebar collapsed to %dx%d cells — it is contracted to a %d-column panel, "+
+			"and a marker-presence check would not notice",
+			sbw, sbh, sidebarWidth)
+	}
+}
+
+// assertPanelsNotDegenerate checks the panels are not merely present
+// but usable. A panel that has collapsed still matches its own render,
+// so these are floors stated here rather than measured off the model.
+func assertPanelsNotDegenerate(t *testing.T, stack []framePanel) {
+	t.Helper()
+	for _, p := range stack {
+		switch p.name {
+		case "input box":
+			// The border row plus a textarea the operator can type in.
+			if floor := 1 + textareaMinHeight; p.rows() < floor {
+				t.Errorf("input box is %d rows, below its floor of %d — "+
+					"an operator who cannot see the line they are typing cannot drive the TUI",
+					p.rows(), floor)
+			}
+		case "status header", "footer legend", "help panel", "palette":
+			if p.rows() < 1 || strings.TrimSpace(ansi.Strip(p.block)) == "" {
+				t.Errorf("%s rendered %d blank rows — it is on screen and says nothing", p.name, p.rows())
+			}
+		case "chat":
+			if p.rows() < 1 {
+				t.Errorf("chat region is %d rows", p.rows())
+			}
+		}
+	}
+}
+
+// assertModalSurvives is the modal arm of the invariant, and the one
+// #147 and #149 needed: a modal overflowing a short terminal kept its
+// title and lost its bottom, which is where the footer rule and the
+// key hint that closes the thing live. Asserting the whole block lands
+// inside the frame at the origin lipgloss.Place gives it says the
+// footer survived without naming the footer's text.
+func assertModalSurvives(t *testing.T, frame []string, block string, w, h int) {
+	t.Helper()
+	bw, bh := lipgloss.Width(block), lipgloss.Height(block)
+	if bh > h || bw > w {
+		t.Errorf("modal is %dx%d in a %dx%d terminal — clipFrame will take the overflow off the bottom, "+
+			"which is where the footer hint is",
+			bw, bh, w, h)
+		return
+	}
+	// lipgloss.Place centres by integer division, so the block's
+	// top-left cell is a function of its own size.
+	p := framePanel{name: "modal", block: block, col: atLeast((w-bw)/2, 0), end: w}
+	top := atLeast((h-bh)/2, 0)
+	if matched, diff := p.matchAt(frame, top); matched != bh {
+		if diff == "" {
+			diff = fmt.Sprintf("frame is %d rows", len(frame))
+		}
+		t.Errorf("modal is not in its rectangle: %d of %d rows match from frame row %d, col %d\n     %s",
+			matched, bh, top, p.col, diff)
+	}
+}
+
 // TestFrameInvariants_Grid is the core of issue #101: every cell of
 // the width x height x state x layout matrix must produce a frame
 // that fits the terminal in both dimensions.
@@ -323,7 +742,42 @@ func TestFrameInvariants_ResizeSequence(t *testing.T) {
 		m = out.(Model)
 		t.Run(strconv.Itoa(s.w)+"x"+strconv.Itoa(s.h), func(t *testing.T) {
 			assertFrameFits(t, m.View().Content, s.w, s.h)
+			assertPanelsSurvive(t, m, s.w, s.h)
 		})
+	}
+}
+
+// TestFrameInvariants_PanelSurvival is issue #158: the same matrix as
+// TestFrameInvariants_Grid, asserting that the frame which fits is
+// also the frame that still has all its panels in it.
+//
+// It walks the grid separately rather than riding on the Grid test's
+// t.Run so a failure names which invariant broke — "the frame is too
+// tall" and "the frame lost its footer" are different bugs with
+// different fixes, and a clip pass is capable of turning the second
+// into a clean bill of health on the first.
+func TestFrameInvariants_PanelSurvival(t *testing.T) {
+	layouts := []struct {
+		name   string
+		layout StatusLayout
+	}{
+		{"header", StatusHeader},
+		{"sidebar", StatusSidebar},
+	}
+	for _, lay := range layouts {
+		for _, st := range frameStates() {
+			for _, w := range frameWidths {
+				for _, h := range frameHeights {
+					name := lay.name + "/" + st.name + "/" +
+						strconv.Itoa(w) + "x" + strconv.Itoa(h)
+					t.Run(name, func(t *testing.T) {
+						m := newFrameModel(lay.layout, w, h)
+						m = st.setup(t, m, w, h)
+						assertPanelsSurvive(t, m, w, h)
+					})
+				}
+			}
+		}
 	}
 }
 
