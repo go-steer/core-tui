@@ -20,6 +20,8 @@ import (
 	"testing"
 
 	tea "charm.land/bubbletea/v2"
+	"charm.land/lipgloss/v2"
+	"github.com/charmbracelet/x/ansi"
 )
 
 func TestScrollState_ClampsToContent(t *testing.T) {
@@ -639,5 +641,300 @@ func TestThemePicker_UnsizedRendersEveryRow(t *testing.T) {
 		if !strings.Contains(rendered, bt.Name) {
 			t.Errorf("theme %q missing from an unsized render", bt.Name)
 		}
+	}
+}
+
+// --- fitRow: issue #157 ----------------------------------------
+//
+// scrollView used to square off each visible row with
+// lipgloss.NewStyle().Width(n).Render — a word-wrapper doing a
+// padder's job. These pin the three properties the swap has to keep
+// (exact width, one row out for one row in, no colour leaking into
+// the gutter) plus the benchmark that stops the wrapper from
+// creeping back in.
+
+func TestFitRow_BringsRowsToExactlyWidth(t *testing.T) {
+	styled := lipgloss.NewStyle().Foreground(lipgloss.Color("#8B5CF6")).Render("colour")
+	cases := []struct {
+		name  string
+		in    string
+		width int
+		want  string // ANSI-stripped
+	}{
+		{name: "pads-short", in: "abc", width: 8, want: "abc     "},
+		{name: "leaves-exact", in: "abcdefgh", width: 8, want: "abcdefgh"},
+		{name: "truncates-long", in: "abcdefghijkl", width: 8, want: "abcdefgh"},
+		{name: "pads-empty", in: "", width: 4, want: "    "},
+		{name: "zero-width-passes-through", in: "abc", width: 0, want: "abc"},
+		{name: "negative-width-passes-through", in: "abc", width: -3, want: "abc"},
+		{name: "pads-styled-by-cells-not-bytes", in: styled, width: 10, want: "colour    "},
+		{name: "truncates-styled-by-cells", in: styled, width: 3, want: "col"},
+		{name: "wide-runes-measured-in-cells", in: "日本語", width: 8, want: "日本語  "},
+		{name: "wide-runes-truncated-in-cells", in: "日本語", width: 4, want: "日本"},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			got := fitRow(tc.in, tc.width)
+			if plain := ansi.Strip(got); plain != tc.want {
+				t.Errorf("fitRow(%q, %d) = %q, want %q (ANSI-stripped)", tc.in, tc.width, plain, tc.want)
+			}
+			if tc.width > 0 {
+				if w := ansi.StringWidth(got); w != tc.width {
+					t.Errorf("fitRow(%q, %d) is %d cells wide, want exactly %d", tc.in, tc.width, w, tc.width)
+				}
+			}
+			if n := strings.Count(got, "\n"); n != 0 {
+				t.Errorf("fitRow(%q, %d) emitted %d extra rows; a padder must return one row for one row",
+					tc.in, tc.width, n)
+			}
+		})
+	}
+}
+
+// The row count is the property the wrapper broke. A modal body is
+// assembled against a height budget; a padder that hands back two
+// rows where it was given one pushes the scrollbar cell onto the
+// wrong line and shoves the footer off the bottom of the frame.
+func TestFitRow_NeverGrowsTheRowCount(t *testing.T) {
+	long := strings.Repeat("lorem ipsum dolor sit amet ", 6)
+	const width = 30
+	if h := lipgloss.Height(lipgloss.NewStyle().Width(width).Render(long)); h < 2 {
+		t.Fatalf("fixture is not overlong: lipgloss wrapped it to %d rows, want >= 2", h)
+	}
+	if h := lipgloss.Height(fitRow(long, width)); h != 1 {
+		t.Errorf("fitRow returned %d rows for one overlong row, want 1", h)
+	}
+}
+
+// ansi.Truncate forwards the escape sequences it finds and never
+// synthesizes a terminator, so a row that arrived with its colour
+// still switched on — raw ANSI out of a tool result, say — would
+// bleed through the gutter space and into the scrollbar cell. The
+// old Style.Render leaked the same way; this is the one place the
+// swap changes rendered output, and it changes it in the right
+// direction.
+func TestFitRow_ClosesAnOpenStyleBeforeTheGutter(t *testing.T) {
+	cases := []struct {
+		name string
+		in   string
+	}{
+		{name: "open-when-padded", in: "\x1b[31mred, never reset"},
+		{name: "open-when-truncated", in: "\x1b[31m" + strings.Repeat("red", 40)},
+		{name: "open-after-an-earlier-reset", in: "\x1b[31mred\x1b[m plain \x1b[42mgreen"},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			got := fitRow(tc.in, 20)
+			if !strings.HasSuffix(got, ansi.ResetStyle) {
+				t.Errorf("fitRow(%q) = %q; an open style must be closed before the scrollbar column",
+					tc.in, got)
+			}
+		})
+	}
+
+	// ...and a row that already closed itself is handed back byte
+	// for byte, so a correct frame costs no extra escapes.
+	closed := lipgloss.NewStyle().Foreground(lipgloss.Color("#8B5CF6")).Render("tidy")
+	if got := fitRow(closed, 4); got != closed {
+		t.Errorf("fitRow on an already-reset row = %q, want it untouched (%q)", got, closed)
+	}
+	if got, want := fitRow(closed, 8), closed+"    "; got != want {
+		t.Errorf("fitRow padding an already-reset row = %q, want %q (bare spaces, no extra reset)", got, want)
+	}
+}
+
+func TestSGROpen_ClassifiesTheLastSequence(t *testing.T) {
+	cases := []struct {
+		name string
+		in   string
+		want bool
+	}{
+		{name: "no-escapes", in: "plain text", want: false},
+		{name: "opened-and-closed", in: "\x1b[31mred\x1b[m", want: false},
+		{name: "closed-with-explicit-zero", in: "\x1b[1mbold\x1b[0m", want: false},
+		{name: "closed-with-padded-zero", in: "\x1b[1mbold\x1b[00m", want: false},
+		{name: "closed-with-zero-list", in: "\x1b[1mbold\x1b[0;0m", want: false},
+		{name: "left-open", in: "\x1b[31mred", want: true},
+		{name: "reopened-after-a-reset", in: "\x1b[31mred\x1b[m\x1b[1m", want: true},
+		{name: "truecolor-left-open", in: "\x1b[38;2;255;0;0mred", want: true},
+		{name: "non-sgr-escapes-ignored", in: "\x1b[2J\x1b[Hcleared", want: false},
+		{name: "cursor-move-after-a-reset", in: "\x1b[31mred\x1b[m\x1b[5C", want: false},
+		{name: "truncated-escape-at-end", in: "red\x1b[3", want: false},
+		{name: "bare-escape-at-end", in: "red\x1b", want: false},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			if got := sgrOpen(tc.in); got != tc.want {
+				t.Errorf("sgrOpen(%q) = %v, want %v", tc.in, got, tc.want)
+			}
+		})
+	}
+}
+
+// The whole point of the swap, at the scrollView seam: every row it
+// returns is exactly contentWidth cells of body, one gutter space
+// and one bar cell — and no row silently becomes two.
+func TestScrollView_RowsAreExactlyContentWidthPlusBar(t *testing.T) {
+	styles := NewStyles(true, Branding{})
+	lines := make([]string, 30)
+	for i := range lines {
+		// Alternate short, exactly-at and overlong rows so every
+		// branch of fitRow is on screen at once.
+		switch i % 3 {
+		case 0:
+			lines[i] = "short-" + strconv.Itoa(i)
+		case 1:
+			lines[i] = strings.Repeat("x", 20)
+		default:
+			lines[i] = strings.Repeat("overflowing-", 6)
+		}
+	}
+	const contentWidth = 20
+	for i, row := range scrollView(styles, lines, contentWidth, 8, 5) {
+		if n := strings.Count(row, "\n"); n != 0 {
+			t.Errorf("row %d spans %d lines; the modal's height budget is broken", i, n+1)
+		}
+		if w := ansi.StringWidth(row); w != contentWidth+2 {
+			t.Errorf("row %d is %d cells wide, want %d (body + gutter + bar)", i, w, contentWidth+2)
+		}
+	}
+}
+
+// A row whose colour is still switched on must not tint the gutter
+// space or the scrollbar glyph glued to its right.
+func TestScrollView_OpenColourDoesNotReachTheScrollbar(t *testing.T) {
+	styles := NewStyles(true, Branding{})
+	lines := make([]string, 30)
+	for i := range lines {
+		lines[i] = "\x1b[41mrow-" + strconv.Itoa(i) // background on, never reset
+	}
+	got := scrollView(styles, lines, 20, 8, 5)
+	bar := strings.Split(Scrollbar(styles, 8, len(lines), 8, 5), "\n")
+	for i, row := range got {
+		// The row must read: body, reset, gutter space, bar cell —
+		// with the reset in front of the gutter, so neither the
+		// space nor the glyph inherits the row's background.
+		want := ansi.ResetStyle + " " + bar[i]
+		if !strings.HasSuffix(row, want) {
+			t.Errorf("row %d = %q; want it to end with a reset before the gutter and bar (%q)",
+				i, row, want)
+		}
+		if body := strings.TrimSuffix(row, " "+bar[i]); sgrOpen(body) {
+			t.Errorf("row %d leaves a style open before the gutter: %q", i, body)
+		}
+	}
+}
+
+// TestGolden_ModalFrameScrolled closes the corpus gap issue #157
+// turned up.
+//
+// TestGolden_ModalFrame opens the theme picker at 24 rows, where the
+// twelve themes fit inside the fourteen-row body — so scrollView
+// returns early and no golden in the corpus has ever contained a
+// scrollbar column at all. The padding this issue rewrites was
+// invisible to the corpus: it survived being changed to pad with
+// interpuncts. Eighteen rows is the tallest terminal that still
+// windows the body while staying above modalFullscreenBelow, so this
+// captures a scrolled modal in the normal regime rather than the
+// degraded one.
+func TestGolden_ModalFrameScrolled(t *testing.T) {
+	pinChromaStyle(t)
+	pinCwd(t)
+	for _, w := range goldenWidths {
+		t.Run("width-"+strconv.Itoa(w), func(t *testing.T) {
+			m := goldenModel(t, w, 18)
+			m.overlayStack.Open(newThemePickerDialog(m.themeName))
+			frame := m.View().Content
+			if !strings.Contains(frame, "█") {
+				t.Fatalf("width %d did not window the picker body; the capture would be pointless", w)
+			}
+			assertGolden(t, "modal_frame_scrolled_w"+strconv.Itoa(w), frame)
+		})
+	}
+}
+
+// --- benchmarks -------------------------------------------------
+//
+// BenchmarkScrollViewFitRow and BenchmarkScrollViewStyleRender are a
+// matched pair: the same job (bring a row to exactly contentWidth
+// cells), one via measure-truncate-pad and one via the lipgloss
+// word-wrapper that used to do it. Read them together — either
+// number alone says nothing.
+//
+//	go test ./tui -run '^$' -bench ScrollView -benchmem
+//
+// Expect roughly 4-5x the time and ~30x the allocations for the
+// Style.Render arm. Issue #157 quotes 11.7x and 52x, and both are
+// right: that measurement squares off forty PLAIN, ALREADY-SHORT
+// rows, so its cheap arm is a pure pad and never truncates. These
+// rows are styled and one in three overflows, which is what a picker
+// body looks like — truncation costs more than padding, so the ratio
+// narrows. The narrower ratio is the one this package actually
+// banks; the wider one is the ceiling.
+
+// benchScrollWidth is the content column the pair squares rows off
+// to; 100 is the mid width of the golden corpus.
+const benchScrollWidth = 100
+
+// benchScrollRows is the shape scrollView actually renders: styled
+// picker rows (a real frame is SGR-laden) at a mix of under,
+// exactly-at and over the content width, so neither implementation
+// gets an all-short-rows freebie.
+func benchScrollRows(n int) []string {
+	st := lipgloss.NewStyle().Foreground(lipgloss.Color("#8B5CF6"))
+	rows := make([]string, n)
+	for i := range rows {
+		switch i % 3 {
+		case 0:
+			rows[i] = st.Render("  theme " + strconv.Itoa(i) + " — a short label")
+		case 1:
+			rows[i] = st.Render(strings.Repeat("x", benchScrollWidth))
+		default:
+			rows[i] = st.Render(strings.Repeat("a description that runs well past the column ", 3))
+		}
+	}
+	return rows
+}
+
+// BenchmarkScrollViewFitRow is the shipped path: one windowful of
+// rows squared off by measure, truncate and pad.
+func BenchmarkScrollViewFitRow(b *testing.B) {
+	rows := benchScrollRows(40)
+	b.ReportAllocs()
+	b.ResetTimer()
+	for i := 0; i < b.N; i++ {
+		for _, r := range rows {
+			_ = fitRow(r, benchScrollWidth)
+		}
+	}
+}
+
+// BenchmarkScrollViewStyleRender is the control: what
+// dialog_scroll.go did before issue #157, over the same rows. If
+// this ever stops being dramatically the slower of the two, the
+// finding has evaporated and fitRow can go back to being one line
+// of lipgloss.
+func BenchmarkScrollViewStyleRender(b *testing.B) {
+	rows := benchScrollRows(40)
+	pad := lipgloss.NewStyle().Width(benchScrollWidth)
+	b.ReportAllocs()
+	b.ResetTimer()
+	for i := 0; i < b.N; i++ {
+		for _, r := range rows {
+			_ = pad.Render(r)
+		}
+	}
+}
+
+// BenchmarkScrollViewWindow is the whole function — windowing,
+// scrollbar and all — over a long body, i.e. the per-frame cost an
+// open modal actually pays.
+func BenchmarkScrollViewWindow(b *testing.B) {
+	styles := NewStylesWithTheme(true, goldenTheme())
+	rows := benchScrollRows(400)
+	b.ReportAllocs()
+	b.ResetTimer()
+	for i := 0; i < b.N; i++ {
+		_ = scrollView(styles, rows, benchScrollWidth, 40, 100)
 	}
 }

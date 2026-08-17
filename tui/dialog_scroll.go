@@ -46,6 +46,7 @@ import (
 
 	tea "charm.land/bubbletea/v2"
 	"charm.land/lipgloss/v2"
+	"github.com/charmbracelet/x/ansi"
 )
 
 // wheelScrollLines is how many body rows one mouse-wheel tick moves.
@@ -293,13 +294,107 @@ func scrollView(styles Styles, lines []string, contentWidth, view, offset int) [
 	offset = min(nonNeg(offset), len(lines)-view)
 	visible := append([]string(nil), lines[offset:offset+view]...)
 	bar := strings.Split(Scrollbar(styles, view, len(lines), view, offset), "\n")
-	pad := lipgloss.NewStyle().Width(contentWidth)
 	for i := range visible {
 		if i < len(bar) {
-			visible[i] = pad.Render(visible[i]) + " " + bar[i]
+			visible[i] = fitRow(visible[i], contentWidth) + " " + bar[i]
 		}
 	}
 	return visible
+}
+
+// fitRow brings one already-single-line row to exactly width cells:
+// measure, truncate if over, pad with spaces if under.
+//
+// This used to be `lipgloss.NewStyle().Width(width).Render(ln)`, and
+// the swap is issue #157. A lipgloss Style with a width set is a
+// WORD-WRAPPER, not a padder. Handed a row the caller already knows
+// is one line it re-measures it, hunts for break points, allocates
+// on the way — and on an overlong row returns MORE ROWS than it was
+// given, which silently blows the height budget the modal was
+// assembled against and pushes the scrollbar cell onto the wrong
+// line. Measured over the shape scrollView actually renders it is an
+// order of magnitude of wasted work per visible row per frame; see
+// BenchmarkScrollViewFitRow and its Style.Render control.
+//
+// Truncation, not wrapping, is the right bound here: it is the only
+// one that leaves the row count alone, and the row count is what the
+// caller budgeted against.
+func fitRow(ln string, width int) string {
+	if width <= 0 {
+		return closeSGR(ln)
+	}
+	if w := ansi.StringWidth(ln); w > width {
+		ln = ansi.Truncate(ln, width, "")
+	} else if w < width {
+		ln += strings.Repeat(" ", width-w)
+	}
+	return closeSGR(ln)
+}
+
+// closeSGR appends an SGR reset when s ends with a colour or
+// attribute still switched on, and returns s untouched otherwise.
+//
+// scrollView glues `" " + bar[i]` onto the right of every row it
+// fits, so a row that never closed its own styling would bleed its
+// foreground and background through the gutter space and into the
+// scrollbar cell. Rows built by lipgloss always reset themselves,
+// but rows carrying escape sequences straight from a host — a tool
+// result, a subagent transcript — are not obliged to, and
+// ansi.Truncate does not synthesize a terminator: it forwards the
+// escapes it finds and nothing else. The old Style.Render did not
+// close them either, so this is a fix rather than a restoration.
+//
+// Conditional rather than unconditional on purpose. Emitting a reset
+// after every already-terminated row would be bytes in every frame
+// and churn in every golden for output that is already correct.
+func closeSGR(s string) string {
+	if sgrOpen(s) {
+		return s + ansi.ResetStyle
+	}
+	return s
+}
+
+// sgrOpen reports whether the last SGR sequence in s left something
+// switched on. A string with no SGR at all is closed by definition.
+//
+// Byte scan, no allocation, no parser state machine: SGR is
+// `ESC [ params m`, and a reset is the sequence whose parameters are
+// empty or all zero. Anything else — a colour, an attribute, a
+// partial unset like `39` — counts as open, which errs toward
+// emitting one redundant reset rather than toward leaking a colour
+// into the scrollbar.
+func sgrOpen(s string) bool {
+	open := false
+	for i := 0; i+1 < len(s); {
+		if s[i] != 0x1b || s[i+1] != '[' {
+			i++
+			continue
+		}
+		j := i + 2
+		for j < len(s) && s[j] >= 0x20 && s[j] <= 0x3f {
+			j++
+		}
+		if j >= len(s) {
+			break
+		}
+		if s[j] == 'm' {
+			open = !sgrIsReset(s[i+2 : j])
+		}
+		i = j + 1
+	}
+	return open
+}
+
+// sgrIsReset reports whether an SGR parameter string means "reset":
+// empty (`ESC[m`) or every semicolon-separated field zero or absent
+// (`ESC[0m`, `ESC[00m`, `ESC[0;0m`).
+func sgrIsReset(params string) bool {
+	for _, f := range strings.Split(params, ";") {
+		if strings.Trim(f, "0") != "" {
+			return false
+		}
+	}
+	return true
 }
 
 // listWindow returns the window offset for a cursor list: the stored
