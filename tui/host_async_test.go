@@ -36,6 +36,7 @@ import (
 	"time"
 
 	tea "charm.land/bubbletea/v2"
+	"github.com/charmbracelet/x/ansi"
 )
 
 // slowHostDelay is what a wedged host feels like. Long enough that an
@@ -189,16 +190,18 @@ func (a *slowAgent) Set(id string, in, out float64) (string, error) {
 	return fmt.Sprintf("/pricing set: %s = $%.2f in / $%.2f out", id, in, out), nil
 }
 
-// readyModelPicker builds a model picker with the host list already
-// snapshotted — the test-side shorthand for Open + the
-// modelsLoadedMsg round trip, for tests about what happens AFTER the
-// list lands.
-func readyModelPicker(m *Model) *modelPickerDialog {
-	d := newModelPickerDialog()
-	if sw, ok := m.opts.Agent.(ModelSwapper); ok {
-		d.applyModels(sw.AvailableModels(), m.displayModelName())
+// readyModelPicker asks the model picker with the host list already
+// snapshotted — the test-side shorthand for ask + the modelsLoadedMsg
+// round trip, for tests about what happens AFTER the list lands. It
+// opens the picker, as /model does; askModelPicker is the unloaded
+// half.
+func readyModelPicker(m *Model) *modelPickerQuestion {
+	sw, wired := m.opts.Agent.(ModelSwapper)
+	q := askModelPicker(m, wired)
+	if wired {
+		q.applyModels(sw.AvailableModels(), m.displayModelName())
 	}
-	return d
+	return q
 }
 
 // readySessionPicker is readyModelPicker's session-list twin.
@@ -275,7 +278,7 @@ func TestView_NeverCallsHost(t *testing.T) {
 	before := agent.calls.Load()
 	mustBeFast(t, "View with no dialog", func() { _ = m.View() })
 
-	m.overlayStack.Open(newModelPickerDialog())
+	askModelPicker(&m, true)
 	mustBeFast(t, "View with a loading model picker", func() { _ = m.View() })
 	m.overlayStack.Close(modelPickerDialogID)
 
@@ -288,9 +291,10 @@ func TestView_NeverCallsHost(t *testing.T) {
 	}
 
 	// Snapshot installed: still zero host calls, now with real rows.
-	picker := readyModelPicker(&m)
+	// The AvailableModels() pull readyModelPicker makes is the
+	// open-time one and happens before the counter is re-read.
+	readyModelPicker(&m)
 	before = agent.calls.Load()
-	m.overlayStack.Open(picker)
 	mustBeFast(t, "View with a populated model picker", func() { _ = m.View() })
 	if got := agent.calls.Load(); got != before {
 		t.Errorf("a populated picker made %d host call(s) from View()", got-before)
@@ -311,8 +315,8 @@ func TestUpdate_ModelPickerOpensWithoutBlocking(t *testing.T) {
 	if !m.overlayStack.HasID(modelPickerDialogID) {
 		t.Fatalf("ctrl+g did not open the model picker")
 	}
-	d := m.overlayStack.Get(modelPickerDialogID).(*modelPickerDialog)
-	if d.loaded {
+	q := modelPickerOn(&m.overlayStack)
+	if q.loaded {
 		t.Errorf("picker should open unloaded, before AvailableModels() answers")
 	}
 	if cmd == nil {
@@ -330,18 +334,24 @@ func TestUpdate_ModelPickerOpensWithoutBlocking(t *testing.T) {
 	}
 	out, _ := m.Update(msg)
 	m = out.(Model)
-	d = m.overlayStack.Get(modelPickerDialogID).(*modelPickerDialog)
-	if !d.loaded || len(d.rows()) != 2 {
-		t.Fatalf("snapshot not installed: loaded=%v rows=%d", d.loaded, len(d.rows()))
+	q = modelPickerOn(&m.overlayStack)
+	if !q.loaded || len(q.rows()) != 2 {
+		t.Fatalf("snapshot not installed: loaded=%v rows=%d", q.loaded, len(q.rows()))
 	}
-	if got := renderPlain(d, &m); !strings.Contains(got, "m1") {
+	if got := ansi.Strip(m.overlayStack.Render(80, &m)); !strings.Contains(got, "m1") {
 		t.Errorf("picker render missing the snapshot rows:\n%s", got)
 	}
 }
 
-// TestModelPicker_EnterSwitchesOffLoop — Enter dispatches a Cmd and
-// leaves the dialog open showing progress; the attach happens in
-// Update when modelSwitchedMsg lands.
+// TestModelPicker_EnterSwitchesOffLoop — neither Enter nor the
+// request it schedules may touch the host on the Update goroutine; the
+// picker stays open showing progress, and the attach happens when
+// modelSwitchedMsg lands.
+//
+// Two hops rather than one since #164 stage 3: Enter names the model
+// and the request arm makes the call, because the live ModelSwapper
+// and the live generation are the two things a question is not allowed
+// to hold. The non-blocking claim has to hold at both.
 func TestModelPicker_EnterSwitchesOffLoop(t *testing.T) {
 	next := &bareAgent{id: "next"}
 	agent := &slowAgent{
@@ -352,31 +362,39 @@ func TestModelPicker_EnterSwitchesOffLoop(t *testing.T) {
 	m := NewModel(Options{Agent: agent})
 	m.viewport.SetWidth(80)
 
-	d := readyModelPicker(&m)
-	m.overlayStack.Open(d)
-	d.idx = 1
+	q := readyModelPicker(&m)
+	q.idx = 1
 
-	var act DialogAction
+	var cmd tea.Cmd
 	mustBeFast(t, "enter on the model picker", func() {
-		act = d.HandleKey("enter", &m)
+		m, cmd = pressKey(m, tea.Key{Code: tea.KeyEnter})
 	})
-	if !act.Consumed || act.Close {
-		t.Errorf("enter = %+v, want Consumed and NOT Close (the switch is in flight)", act)
+	if !m.overlayStack.HasID(modelPickerDialogID) {
+		t.Error("enter closed the picker; the switch is still in flight")
 	}
-	if act.Cmd == nil {
-		t.Fatalf("enter returned no Cmd")
-	}
-	if d.switching != "m2" {
-		t.Errorf("switching = %q, want m2", d.switching)
+	if q.switching != "m2" {
+		t.Errorf("switching = %q, want m2", q.switching)
 	}
 	if m.opts.Agent != Agent(agent) {
 		t.Errorf("Agent swapped before the reply landed")
 	}
-	if got := renderPlain(d, &m); !strings.Contains(got, "switching to m2") {
+	if got := ansi.Strip(m.overlayStack.Render(80, &m)); !strings.Contains(got, "switching to m2") {
 		t.Errorf("in-flight render missing the progress line:\n%s", got)
 	}
 
-	msg := act.Cmd().(modelSwitchedMsg)
+	req, ok := cmd().(modelSwitchRequestedMsg)
+	if !ok {
+		t.Fatalf("enter scheduled a %T, want modelSwitchRequestedMsg", cmd())
+	}
+	mustBeFast(t, "the switch request", func() {
+		out, follow := m.Update(req)
+		m, cmd = out.(Model), follow
+	})
+	if cmd == nil {
+		t.Fatalf("the request scheduled no SwitchModel call")
+	}
+
+	msg := cmd().(modelSwitchedMsg)
 	out, _ := m.Update(msg)
 	m = out.(Model)
 	if m.opts.Agent != Agent(next) {
@@ -401,7 +419,7 @@ func TestModelSwitchedMsg_StaleGenDoesNotAttach(t *testing.T) {
 	m.sessionGen = 7
 
 	stale := &bareAgent{id: "stale-from-the-old-session"}
-	m.overlayStack.Open(newModelPickerDialog())
+	askModelPicker(&m, false)
 
 	out, _ := m.Update(modelSwitchedMsg{gen: 6, id: "m9", agent: stale})
 	m = out.(Model)
@@ -435,8 +453,7 @@ func TestModelsLoadedMsg_RoutesToCoveredDialog(t *testing.T) {
 	m := NewModel(Options{Agent: agent})
 	m.viewport.SetWidth(80)
 
-	picker := newModelPickerDialog()
-	m.overlayStack.Open(picker)
+	picker := askModelPicker(&m, true)
 	m.overlayStack.Open(newToolCallDialog(1)) // covers the picker
 
 	out, _ := m.Update(modelsLoadedMsg{gen: m.sessionGen, models: []ModelInfo{{ID: "m1"}}})

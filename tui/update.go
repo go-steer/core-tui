@@ -578,11 +578,36 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		if msg.gen != m.sessionGen {
 			return m, nil
 		}
-		if d, ok := m.overlayStack.Get(modelPickerDialogID).(*modelPickerDialog); ok {
-			d.applyModels(msg.models, m.displayModelName())
+		if q := modelPickerOn(&m.overlayStack); q != nil {
+			q.applyModels(msg.models, m.displayModelName())
 			m.refreshViewport()
 		}
 		return m, nil
+	case modelSwitchRequestedMsg:
+		// The picker's Enter arm, come back for the two things a
+		// question is not allowed to hold: the live ModelSwapper and
+		// the live generation. Both can move while the picker is open —
+		// a completed switch replaces m.opts.Agent, and a session
+		// switch bumps the generation without closing the overlay
+		// stack — so reading them here rather than capturing them at
+		// open time is what keeps the call pointed at the agent the
+		// operator is actually talking to.
+		q := modelPickerOn(&m.overlayStack)
+		if q == nil || q.switching != msg.ID {
+			// Esc, or a second picker, between the keystroke and this
+			// message. Nothing has been asked of the host yet, so
+			// dropping it is free.
+			return m, nil
+		}
+		swapper, wired := m.opts.Agent.(ModelSwapper)
+		if !wired {
+			// The agent lost ModelSwapper since the picker opened —
+			// only reachable through a switch landing underneath it.
+			// Release the in-flight state so the list is usable again.
+			q.switching = ""
+			return m, nil
+		}
+		return m, switchModelCmd(swapper, m.sessionGen, msg.ID)
 	case modelSwitchedMsg:
 		// SwitchModel REPLACES m.opts.Agent, so the generation guard
 		// is load-bearing here rather than merely tidy: a reply that
@@ -591,16 +616,27 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		if msg.gen != m.sessionGen {
 			return m, nil
 		}
-		// Close the picker only if it is the one that issued this
-		// switch: Esc mid-flight pops it, and the operator may have
-		// re-opened a fresh picker before the reply landed. The
-		// switch itself still applies either way — the host call was
-		// committed the moment it left.
-		if d, ok := m.overlayStack.Get(modelPickerDialogID).(*modelPickerDialog); ok && d.switching == msg.id {
-			d.switching = ""
-			m.overlayStack.Close(modelPickerDialogID)
+		cmd := m.applyModelSwitch(msg)
+		// Answer the picker only if it is the one that issued this
+		// switch: esc mid-flight pops it, and the operator may have
+		// re-opened a fresh picker before the reply landed. The switch
+		// itself still applies either way — the host call was committed
+		// the moment it left, and applyModelSwitch above has already
+		// announced it.
+		q := modelPickerOn(&m.overlayStack)
+		if q == nil || q.switching != msg.id {
+			return m, cmd
 		}
-		return m, m.applyModelSwitch(msg)
+		q.switching = ""
+		if msg.err != nil || msg.agent == nil {
+			// The switch failed. The question was never answered, so
+			// leave the picker open on its list rather than closing it:
+			// the operator's next move is almost always the next model
+			// down, and closing would make them re-run /model to get
+			// back to a list they were already looking at.
+			return m, cmd
+		}
+		return m, tea.Batch(cmd, m.overlayStack.resolve(modelPickerDialogID, chosen{ID: msg.id}, &m))
 	case sessionsLoadedMsg:
 		if msg.gen != m.sessionGen {
 			return m, nil

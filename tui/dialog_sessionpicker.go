@@ -111,7 +111,7 @@ func (d *sessionPickerDialog) ID() string { return sessionPickerDialogID }
 
 // rows returns the list the cursor indexes into and Render paints —
 // the snapshot narrowed by the filter row, through the same seam and
-// the same ranker as modelPickerDialog.rows.
+// the same ranker as modelPickerQuestion.rows.
 func (d *sessionPickerDialog) rows() []SessionInfo {
 	filter := d.filter.value()
 	if filter == "" {

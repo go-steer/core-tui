@@ -59,21 +59,21 @@ func TestIndexOfModel(t *testing.T) {
 // arrival rather than in the constructor — the constructor has no list
 // to seed against.
 func TestApplyModels_SeedsCursorOnCurrent(t *testing.T) {
-	d := newModelPickerDialog()
-	if d.idx != 0 {
-		t.Fatalf("setup: fresh dialog idx = %d, want 0", d.idx)
+	q := newModelPickerQuestion(true)
+	if q.idx != 0 {
+		t.Fatalf("setup: fresh question idx = %d, want 0", q.idx)
 	}
 
-	d.applyModels(seedModels, "gamma-3")
+	q.applyModels(seedModels, "gamma-3")
 
-	if !d.loaded {
+	if !q.loaded {
 		t.Error("applyModels did not mark the snapshot loaded")
 	}
-	if d.idx != 2 {
-		t.Errorf("cursor seeded at %d, want 2 (gamma-3)", d.idx)
+	if q.idx != 2 {
+		t.Errorf("cursor seeded at %d, want 2 (gamma-3)", q.idx)
 	}
-	if d.off != 0 {
-		t.Errorf("scroll offset = %d, want 0", d.off)
+	if q.off != 0 {
+		t.Errorf("scroll offset = %d, want 0", q.off)
 	}
 }
 
@@ -86,22 +86,29 @@ func TestModelsLoadedMsg_CursorLandsOnTheCurrentRow(t *testing.T) {
 	m = out.(Model)
 	m.currentModel = "beta-2"
 
-	d := newModelPickerDialog()
-	m.overlayStack.Open(d)
+	q := askModelPicker(&m, true)
 
 	out, _ = m.Update(modelsLoadedMsg{gen: m.sessionGen, models: seedModels})
 	m = out.(Model)
 
-	if d.idx != 1 {
-		t.Fatalf("cursor at %d, want 1 (beta-2)", d.idx)
+	if q.idx != 1 {
+		t.Fatalf("cursor at %d, want 1 (beta-2)", q.idx)
 	}
 
 	// The marker and the "(current)" tag must be on the same row —
 	// that is the whole point, and asserting the index alone would
 	// not catch the two drifting apart.
-	for _, line := range strings.Split(ansi.Strip(d.Render(100, &m)), "\n") {
-		if strings.Contains(line, "(current)") && !strings.HasPrefix(strings.TrimSpace(line), ">") {
+	var tagged bool
+	for _, line := range strings.Split(ansi.Strip(m.overlayStack.Render(100, &m)), "\n") {
+		if !strings.Contains(line, "(current)") {
+			continue
+		}
+		tagged = true
+		if !strings.Contains(line, "> Beta Two") {
 			t.Errorf("the current model is not the selected row: %q", strings.TrimSpace(line))
 		}
+	}
+	if !tagged {
+		t.Error("no row is tagged (current) at all")
 	}
 }

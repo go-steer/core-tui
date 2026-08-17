@@ -685,6 +685,55 @@ If a future question genuinely wants fall-through, that is a new
 optional extension interface, not a field every question must set to
 the same value.
 
+### 6.5 The answer that does not come from a keystroke
+
+*Added in stage 3.* §6.2 describes one way an answer reaches its
+resolver: `Key` returns it, and `askedQuestion.HandleKeyMsg` runs the
+resolver and pops. That covers every synchronous question — the theme
+picker's Enter is both the pick and the moment the pick exists.
+
+It does not cover the shape the model picker, the session picker, the
+permission prompt and the elicit form all share. There, Enter starts a
+**host call** and the picker stays on screen showing progress, because
+a list that freezes for as long as the host takes reads as a hang. The
+answer arrives from `Update`, several hundred milliseconds later, when
+the reply lands:
+
+```go
+// resolve answers the question under id, pops it, and returns
+// whatever its resolver scheduled. A no-op when nothing matches or
+// when the question has already been answered.
+func (o *Overlay) resolve(id string, ans answer, m *Model) tea.Cmd
+```
+
+Without it the Update-side handler would have to `Overlay.Close` the
+question, which pops it with **its resolver never run** — the exact
+"torn down and nobody was told" shape §1.4 is about, reintroduced by
+the code meant to remove it. `resolve` goes through the same
+exactly-once latch as `resolveAll`, so a question answered by a
+keystroke and a reply in the same frame resolves once.
+
+Two rules fall out of it, both recorded on the method:
+
+- **A resolver must not `Open` a dialog.** `resolve` pops *after* the
+  resolver returns, and `Overlay.HandleKeyMsg` pops after it too, so
+  anything a resolver pushed would be what got popped. A resolver that
+  needs another modal returns a `tea.Cmd` and lets `Update` open it —
+  the same route the theme picker's live preview takes (§6.3), and for
+  the same underlying reason (§6.2: no `*Model` survives an `Update`).
+- **A committed question is not an answered one.** The model picker
+  carries a `switching` field for the window between the two, during
+  which every keystroke but esc is swallowed so a second switch cannot
+  be queued against a list that is about to be replaced. Esc in that
+  window is `dismissed{dismissEscape}` and the in-flight call still
+  applies — the host call was committed the moment it left, and the
+  operator is declining to watch it, not cancelling it.
+
+Reading a question without ending it goes through `Overlay.asked`,
+which returns the wrapper rather than the widget: the wrapper is what
+knows whether it has already been answered, and a caller holding only
+the widget could not.
+
 ---
 
 ## 7. The dialog family, and what the base really shares
@@ -1346,11 +1395,25 @@ question arrives in stage 3; and the adapter does not implement
 `ScrollDialog`, so a wheel tick over a question still steps the list
 by one row instead of three.
 
-**Stage 2 — the grace window moves to `Overlay`.** `askOrigin`,
-`Commits`, `resolveAll` on `applySwitchTarget` and on quit. Fixes the
-stranded-flow hole from §1.4 as a side effect, which should be its own
-test. Delete `withinGrace` / `permissionShownAt` / `elicitShownAt` at
-the end of stage 3, not here. No exported change.
+**Stage 2 — the grace window moves to `Overlay`. Folded into stage 3,
+2026-08-17.** Not landing as a standalone PR, for two reasons found
+when it came up for work.
+
+Its headline benefit is already delivered. The stranded-flow hole from
+§1.4 — a session switch tearing down a permission prompt or an elicit
+form with the host never told — was closed by PR #214 (`ff2e6fb`),
+which dispatches `DecisionDeny` / `ElicitActionCancel` at
+`tui/update.go:2623-2627`. Wiring `resolveAll` into `applySwitchTarget`
+today would also contradict the deliberate comment there that the
+overlay stack *survives* a session switch, so a picker can close itself
+normally after returning the switch `Cmd`.
+
+And the grace machinery (`askOrigin`, `Commits`) has no agent-opened
+question to guard until the permission prompt and the elicit form
+become questions, which is stage 3. Landing it first would be an
+interface with no implementor — the same thing stage 1 declined to do
+with `scrollQuestion`, for the same reason. Each piece now lands in the
+stage-3 PR that creates its first user.
 
 **Stage 3 — the family, and the two big migrations.**
 `selectQuestion`, `confirmQuestion`, `formQuestion` (huh-backed),
@@ -1358,7 +1421,19 @@ the end of stage 3, not here. No exported change.
 session picker, **permission prompt** and **elicit form** onto them.
 This is the largest stage by far and should be at least four PRs:
 one per widget, one per migrated modal, each with its own external
-test. It deletes `handleElicitKey` (130 lines), the permission arm of
+test. It also absorbs stage 2, above.
+
+**Model picker: done, 2026-08-17.** `tui/dialog_modelpicker.go` is
+gone; `tui/question_modelpicker.go` replaces it. It is the first
+question whose answer does not come from a keystroke, and it brought
+`Overlay.resolve` with it (§6.5). Four reaches into `*Model` left the
+widget: the `ModelSwapper` type assertion, `displayModelName()` during
+render, the `history.Append`, and building a host `Cmd` out of
+`sessionGen` — the last two now sit in `modelPickerResolver` and in
+`Update`'s `modelSwitchRequestedMsg` arm respectively. One behaviour
+change: a **failed** switch now leaves the picker open on its list
+rather than closing it, since the question was never answered and the
+operator's next move is almost always the next model down. It deletes `handleElicitKey` (130 lines), the permission arm of
 `handleKey` (50 lines), and five `Model` fields. Fixes the
 unreachable-decline bug in §1.4 by construction, since `declined`
 becomes an option row.
@@ -1504,3 +1579,14 @@ that does not exist.
   than a silent fallback. Four deviations from the sketch are recorded
   in §6.1, §6.2, §6.3 and §8. Q1 and Q3 are still open; neither gates
   stage 2 or 3.
+- 2026-08-17 — stage 2 folded into stage 3 rather than landing on its
+  own. PR #214 already closed the §1.4 hole it was justified by, and
+  the grace machinery has no agent-opened question to guard until the
+  permission prompt and the elicit form migrate. Recorded in §12.
+- 2026-08-17 — stage 3 began with the model picker. It is the first
+  question whose answer arrives from a host reply rather than from a
+  keystroke, which is the shape the session picker, the permission
+  prompt and the elicit form share, so it went first to establish it.
+  The seam it added is `Overlay.resolve` (§6.5), together with the two
+  rules that fall out of pop ordering: a resolver may not open a
+  dialog, and a committed question is not an answered one.
