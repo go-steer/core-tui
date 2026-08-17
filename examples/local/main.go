@@ -27,7 +27,9 @@
 //	ctrl+b          toggle StatusHeader <-> StatusSidebar
 //	shift+tab       cycle the permission mode chip
 //	ctrl+p          open the (sample) command palette
-//	ctrl+g          open the (sample) model picker
+//	ctrl+g, /model  open the (sample) model picker; the pick moves
+//	                the header's model + provider and survives a
+//	                /switch
 //	ctrl+x          open the tool-call detail overlay (core-tui #52)
 //	ctrl+y          open the (sample) permission modal
 //	ctrl+e          open the (sample) MCP elicitation form
@@ -88,7 +90,16 @@ import (
 // during streaming routes through InjectableAgent.Inject. A real
 // host's agent exposes these on its own type; this composition is
 // for the visual harness only.
-type demoAgent struct{ tui.Agent }
+type demoAgent struct {
+	tui.Agent
+
+	// model is the /model pick this instance was built for. It is
+	// per-instance and never mutated, which is what makes Status()
+	// safe to call from the host-snapshot goroutine while a
+	// SwitchModel is in flight on another: the switch produces a NEW
+	// demoAgent rather than writing to this one.
+	model string
+}
 
 // Inject implements tui.InjectableAgent. The demo doesn't actually
 // feed the message into the scripted playback — it just returns nil
@@ -154,6 +165,62 @@ func demoElicitAfter(e tui.Elicitor, delay time.Duration) {
 	})
 }
 
+// demoModels is the /model catalog. The entries are deliberately
+// provider-qualified and the descriptions deliberately long: the
+// picker lays each row out as an ID column plus a dim subtitle, so
+// short placeholder names would leave the column arithmetic and the
+// modal's right edge untested — which is the one thing a visual
+// harness is for. The last row is longer than the picker is wide on
+// purpose, so truncation shows up too.
+var demoModels = []tui.ModelInfo{
+	{ID: "anthropic/claude-opus-5", Display: "claude-opus-5",
+		Description: "frontier tier — deepest reasoning, slowest, priciest"},
+	{ID: "anthropic/claude-sonnet-5", Display: "claude-sonnet-5",
+		Description: "balanced tier — the default for interactive coding"},
+	{ID: "anthropic/claude-haiku-4-5", Display: "claude-haiku-4-5",
+		Description: "fast tier — subtasks, classification, cheap fan-out"},
+	{ID: "google/gemini-3.1-pro", Display: "gemini-3.1-pro",
+		Description: "long context, strong multimodal"},
+	{ID: "openai/gpt-5.1", Display: "gpt-5.1",
+		Description: "alternate vendor, for A/B-ing a prompt"},
+	{ID: "local/qwen3-coder-30b-a3b-instruct",
+		Description: "runs on the box — no network, no spend, and no subtitle shorter than this row is wide"},
+}
+
+// AvailableModels implements the read half of tui.ModelSwapper
+// (/model, also bound to ctrl+g). Returning a package-level slice is
+// fine here because nothing mutates it; a real host reads its own
+// config or asks its provider registry.
+func (demoAgent) AvailableModels() []tui.ModelInfo { return demoModels }
+
+// SwitchModel implements the write half of tui.ModelSwapper. Note it
+// returns a tui.Agent rather than an error-or-nothing: the host hands
+// back the agent to talk to from now on, so even a demo that changes
+// nothing but a label has to build one. The scripted playback is
+// carried across unchanged, which is why every model answers with the
+// same turn.
+//
+// An unknown ID is a real error and demos the RoleError path, the
+// same way SwitchToSession does.
+func (a demoAgent) SwitchModel(modelID string) (tui.Agent, error) {
+	for _, mi := range demoModels {
+		if mi.ID == modelID {
+			return demoAgent{Agent: a.Agent, model: modelID}, nil
+		}
+	}
+	return nil, fmt.Errorf("unknown model %q", modelID)
+}
+
+// Status implements tui.StatusReporter. Without it the harness has no
+// way to say which model is live, so the header reads "(model not
+// set)" and the picker marks nothing as (current) — both of which
+// make the /model demo hard to read. Provider is the ID's leading
+// segment, which is also what Options.AutoProviderTheme keys off.
+func (a demoAgent) Status() tui.Status {
+	provider, _, _ := strings.Cut(a.model, "/")
+	return tui.Status{ModelName: a.model, Provider: provider, State: "idle"}
+}
+
 // Sessions implements tui.SessionSwitcher. Two fake sessions plus
 // the action row from core-tui #56: a row carrying SessionInput is
 // rendered with a ▸ chevron and, on Enter, opens a single-line
@@ -161,7 +228,7 @@ func demoElicitAfter(e tui.Elicitor, delay time.Duration) {
 // typed value goes to SessionInput.Submit, which returns the
 // SwitchTarget — no magic IDs round-tripping through
 // SwitchToSession. A real multi-daemon host dials the URL here.
-func (demoAgent) Sessions() []tui.SessionInfo {
+func (a demoAgent) Sessions() []tui.SessionInfo {
 	return []tui.SessionInfo{
 		{ID: "local", Display: "local", Description: "in-process scripted agent", Current: true},
 		{ID: "staging", Display: "staging", Description: "fake remote daemon"},
@@ -183,7 +250,7 @@ func (demoAgent) Sessions() []tui.SessionInfo {
 				},
 				Submit: func(v string) (tui.SwitchTarget, error) {
 					return tui.SwitchTarget{
-						Agent: demoAgent{Agent: testagent.NewScripted(testagent.CodingDemo())},
+						Agent: demoAgent{Agent: testagent.NewScripted(testagent.CodingDemo()), model: a.model},
 						Note:  "Attached to " + v + " (demo — nothing was actually dialed)",
 					}, nil
 				},
@@ -197,12 +264,17 @@ func (demoAgent) Sessions() []tui.SessionInfo {
 // shows the history wipe + re-paint. Action-row IDs never land here
 // — that's the point of SessionInput.Submit — so an unknown ID is a
 // real error and demos the RoleError path.
-func (demoAgent) SwitchToSession(id string) (tui.SwitchTarget, error) {
+//
+// The model pick rides across the switch. A session change replaces
+// the agent, so anything the operator chose that the new agent
+// doesn't carry forward is silently lost — here that would show up
+// as the header reverting to a model nobody selected.
+func (a demoAgent) SwitchToSession(id string) (tui.SwitchTarget, error) {
 	if id != "local" && id != "staging" {
 		return tui.SwitchTarget{}, fmt.Errorf("unknown session %q", id)
 	}
 	return tui.SwitchTarget{
-		Agent: demoAgent{Agent: testagent.NewScripted(testagent.CodingDemo())},
+		Agent: demoAgent{Agent: testagent.NewScripted(testagent.CodingDemo()), model: a.model},
 		Note:  "Attached to session " + id,
 	}, nil
 }
@@ -262,7 +334,9 @@ func main() {
 		// submit so the operator can see streaming + spinner + Glamour
 		// + per-turn footer end-to-end. Same script regardless of
 		// prompt — it's a visual harness, not a real agent.
-		Agent:        demoAgent{Agent: testagent.NewScripted(testagent.CodingDemo())},
+		// Boots on the middle tier so /model has somewhere to move
+		// from in both directions.
+		Agent:        demoAgent{Agent: testagent.NewScripted(testagent.CodingDemo()), model: "anthropic/claude-sonnet-5"},
 		Prompter:     prompter,
 		Elicitor:     elicitor,
 		StatusLayout: tui.StatusHeader,
