@@ -72,6 +72,11 @@ type slowAgent struct {
 	denied  []string
 	bundles []string
 
+	// invokeCtx is the context InvokeSlash was handed, kept so a test
+	// can ask whether it carries a deadline — the half of issue #137's
+	// slash-dispatch fix that isn't about blocking.
+	invokeCtx context.Context
+
 	// calls counts every capability method entered, so a test can
 	// prove a call happened (or didn't) without racing the sleep.
 	calls atomic.Int64
@@ -125,8 +130,10 @@ func (a *slowAgent) SlashCommands() []SlashCommandSpec {
 	return a.specs
 }
 
-func (a *slowAgent) InvokeSlash(context.Context, string, string) (SlashResult, error) {
-	return SlashResult{}, nil
+func (a *slowAgent) InvokeSlash(ctx context.Context, name, _ string) (SlashResult, error) {
+	a.invokeCtx = ctx
+	a.sleep()
+	return SlashResult{SystemMessage: "/" + name + " answered"}, nil
 }
 
 // The /cmd-path capabilities issue #137 moved off the loop. Same
@@ -1264,5 +1271,257 @@ func TestModelSwitch_PersistsOffLoop(t *testing.T) {
 	}
 	if len(persisted) != 1 || persisted[0] != "m2" {
 		t.Errorf("PersistModelChoice got %v, want [m2]", persisted)
+	}
+}
+
+// ---- the two call sites be1817d deferred (issue #137) ----
+
+// TestSwitchWithID_IsTwoStagesOffLoop — `/switch <id>` was two host
+// calls in a row on the event loop: Sessions() to find out whether the
+// id names an action row, then SwitchToSession. Neither may run from
+// Update, and the second must not leave until the first has come back
+// and been accepted.
+func TestSwitchWithID_IsTwoStagesOffLoop(t *testing.T) {
+	agent := &slowAgent{id: "slow", sessions: []SessionInfo{{ID: "b", Display: "other"}}}
+	m := NewModel(Options{Agent: agent})
+	m.viewport.SetWidth(80)
+
+	var (
+		out tea.Model
+		cmd tea.Cmd
+	)
+	mustBeFast(t, "/switch b", func() { out, cmd = m.dispatchSlash("/switch b") })
+	m = out.(Model)
+	if got := agent.calls.Load(); got != 0 {
+		t.Fatalf("%d host call(s) ran on the Update goroutine", got)
+	}
+	if last := lastText(m); !strings.Contains(last, "looking up b") {
+		t.Errorf("acknowledgement row = %q", last)
+	}
+	if cmd == nil {
+		t.Fatal("/switch b returned no Cmd — the enumerate would never happen")
+	}
+
+	// Stage one: the enumerate, and only the enumerate.
+	lookup, ok := cmd().(switchLookupMsg)
+	if !ok {
+		t.Fatalf("stage one produced %T, want switchLookupMsg", lookup)
+	}
+	if lookup.row != nil {
+		t.Errorf("a plain session id resolved to an action row: %+v", lookup.row)
+	}
+	if got := agent.calls.Load(); got != 1 {
+		t.Fatalf("stage one made %d host call(s), want 1 (Sessions)", got)
+	}
+
+	var stage2 tea.Cmd
+	mustBeFast(t, "switchLookupMsg", func() { out, stage2 = m.Update(lookup) })
+	m = out.(Model)
+	if got := agent.calls.Load(); got != 1 {
+		t.Fatalf("SwitchToSession ran on the Update goroutine (%d calls)", got)
+	}
+	if m.opts.Agent != Agent(agent) {
+		t.Errorf("Agent swapped before stage two had answered")
+	}
+	if stage2 == nil {
+		t.Fatal("stage one produced no stage two")
+	}
+
+	// Stage two lands as the ordinary sessionSwitchedMsg, so the
+	// picker's Enter path and this one share a handler.
+	switched, ok := stage2().(sessionSwitchedMsg)
+	if !ok {
+		t.Fatalf("stage two produced %T, want sessionSwitchedMsg", switched)
+	}
+	out, _ = m.Update(switched)
+	m = out.(Model)
+	if m.opts.Agent == Agent(agent) {
+		t.Fatalf("the switch never landed")
+	}
+	if last := lastText(m); !strings.Contains(last, "Attached to b") {
+		t.Errorf("post-switch row = %q, want the target's note", last)
+	}
+}
+
+// TestSwitchWithID_ActionRowStillOpensItsDialog — the issue #56 path
+// through the same two stages: an id naming an action row opens that
+// row's text input and never reaches SwitchToSession.
+func TestSwitchWithID_ActionRowStillOpensItsDialog(t *testing.T) {
+	agent := &slowAgent{id: "slow", sessions: []SessionInfo{
+		{ID: "+attach", Display: "Attach to endpoint", Input: &SessionInput{Prompt: "Daemon URL:"}},
+	}}
+	m := NewModel(Options{Agent: agent})
+	m.viewport.SetWidth(80)
+
+	out, cmd := m.dispatchSlash("/switch +attach")
+	m = out.(Model)
+	lookup := cmd().(switchLookupMsg)
+	if lookup.row == nil || lookup.row.ID != "+attach" {
+		t.Fatalf("enumerate did not resolve the action row: %+v", lookup.row)
+	}
+	out, cmd = m.Update(lookup)
+	m = out.(Model)
+	if cmd != nil {
+		t.Errorf("an action row produced a stage-two Cmd: %T", cmd)
+	}
+	if !m.overlayStack.HasID(sessionInputDialogID) {
+		t.Error("action row did not open its text input")
+	}
+	if got := agent.calls.Load(); got != 1 {
+		t.Errorf("%d host call(s), want 1 — SwitchToSession must not be reached", got)
+	}
+}
+
+// TestSwitchLookup_SupersededEnumerateNeverSwitches — the second risk
+// in a two-stage flow. An enumerate the operator has already moved
+// past must not be allowed to drive a switch, and neither must one
+// that outlived its session.
+func TestSwitchLookup_SupersededEnumerateNeverSwitches(t *testing.T) {
+	for _, tc := range []struct {
+		name  string
+		stale func(m *Model)
+	}{
+		{"another /cmd was typed", func(m *Model) {
+			out, _ := m.dispatchSlash("/keys")
+			*m = out.(Model)
+		}},
+		{"the session turned over", func(m *Model) { m.sessionGen++ }},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			agent := &slowAgent{id: "slow", sessions: []SessionInfo{{ID: "b"}}}
+			m := NewModel(Options{Agent: agent})
+			m.viewport.SetWidth(80)
+
+			out, cmd := m.dispatchSlash("/switch b")
+			m = out.(Model)
+			lookup := cmd().(switchLookupMsg)
+
+			tc.stale(&m)
+			before := agent.calls.Load()
+
+			out, cmd = m.Update(lookup)
+			m = out.(Model)
+			if cmd != nil {
+				t.Errorf("superseded enumerate returned a Cmd (%T) — stage two would run", cmd)
+			}
+			if got := agent.calls.Load(); got != before {
+				t.Errorf("superseded enumerate made %d more host call(s)", got-before)
+			}
+			if m.opts.Agent != Agent(agent) {
+				t.Error("superseded enumerate switched the session")
+			}
+		})
+	}
+}
+
+// TestDispatchSlash_MatchAndInvokeRunOffLoop — the host half of a
+// /cmd. The SlashCommands() match and the InvokeSlash it gates were
+// both inline, and InvokeSlash was handed context.Background() despite
+// taking a ctx precisely to say it might be slow.
+func TestDispatchSlash_MatchAndInvokeRunOffLoop(t *testing.T) {
+	agent := &slowAgent{id: "slow", specs: []SlashCommandSpec{{Name: "btw"}}}
+	m := NewModel(Options{Agent: agent})
+	m.viewport.SetWidth(80)
+
+	var (
+		out tea.Model
+		cmd tea.Cmd
+	)
+	mustBeFast(t, "/btw hello", func() { out, cmd = m.dispatchSlash("/btw hello") })
+	m = out.(Model)
+	if got := agent.calls.Load(); got != 0 {
+		t.Fatalf("%d host call(s) ran on the Update goroutine", got)
+	}
+	if cmd == nil {
+		t.Fatal("/btw returned no Cmd — the host would never be asked")
+	}
+
+	msg, ok := cmd().(slashDispatchedMsg)
+	if !ok {
+		t.Fatalf("Cmd produced %T, want slashDispatchedMsg", msg)
+	}
+	if !msg.matched || !msg.invoked {
+		t.Fatalf("matched=%v invoked=%v, want both — a plain provider resolves in one hop", msg.matched, msg.invoked)
+	}
+	if got := agent.calls.Load(); got != 2 {
+		t.Errorf("Cmd made %d host call(s), want 2 (SlashCommands + InvokeSlash)", got)
+	}
+	if agent.invokeCtx == nil {
+		t.Fatal("InvokeSlash was never reached")
+	}
+	if _, ok := agent.invokeCtx.Deadline(); !ok {
+		t.Error("InvokeSlash was handed a context with no deadline — the contract inverted")
+	}
+
+	mustBeFast(t, "slashDispatchedMsg", func() { out, _ = m.Update(msg) })
+	m = out.(Model)
+	if last := lastText(m); !strings.Contains(last, "/btw answered") {
+		t.Errorf("reply row = %q, want the host's SystemMessage", last)
+	}
+}
+
+// TestUnknownCommand_CannotLandUnderTheNextCommand — the ordering
+// hazard the move creates. "unknown command /foo" used to be written
+// in the dispatching frame and so could not be out of order; with the
+// name match off-loop it can arrive after whatever the operator typed
+// next, and a row blaming /foo under /help's output reads as /help
+// being the command that doesn't exist.
+func TestUnknownCommand_CannotLandUnderTheNextCommand(t *testing.T) {
+	agent := &slowAgent{id: "slow", specs: []SlashCommandSpec{{Name: "btw"}}}
+	m := NewModel(Options{Agent: agent})
+	m.viewport.SetWidth(80)
+
+	// Control: nothing else happens, and the operator is told.
+	out, cmd := m.dispatchSlash("/foo")
+	m = out.(Model)
+	verdict := cmd().(slashDispatchedMsg)
+	if verdict.matched {
+		t.Fatal("setup: /foo should not have matched")
+	}
+	out, _ = m.Update(verdict)
+	if last := lastText(out.(Model)); !strings.Contains(last, "unknown command /foo") {
+		t.Fatalf("the verdict never reached the operator: %q", last)
+	}
+
+	// The real thing: the operator doesn't wait, and types /help
+	// while the match for /foo is still out with the host.
+	m = NewModel(Options{Agent: agent})
+	m.viewport.SetWidth(80)
+	out, cmd = m.dispatchSlash("/foo")
+	m = out.(Model)
+	out, _ = m.dispatchSlash("/help")
+	m = out.(Model)
+	helpRows := m.history.Len()
+
+	out, _ = m.Update(cmd().(slashDispatchedMsg))
+	m = out.(Model)
+	if m.history.Len() != helpRows {
+		t.Errorf("the stale verdict appended a row: %q", lastText(m))
+	}
+	for _, row := range m.history.Snapshot() {
+		if strings.Contains(row.Text, "unknown command") {
+			t.Errorf("stale unknown-command row landed under /help: %q", row.Text)
+		}
+	}
+}
+
+// TestSlashDispatched_StaleGenDropped — the session-scoped half of the
+// same guard, in the shape the rest of #137's replies use.
+func TestSlashDispatched_StaleGenDropped(t *testing.T) {
+	m := NewModel(Options{Agent: &slowAgent{id: "slow", specs: []SlashCommandSpec{{Name: "btw"}}}})
+	m.viewport.SetWidth(80)
+	m.sessionGen = 2
+
+	out, _ := m.Update(slashDispatchedMsg{gen: 1, name: "ghost-cmd"})
+	m = out.(Model)
+	out, _ = m.Update(slashDispatchedMsg{
+		gen: 1, name: "btw", matched: true, invoked: true,
+		res: SlashResult{SystemMessage: "ghost-answer"},
+	})
+	m = out.(Model)
+	for _, row := range m.history.Snapshot() {
+		if strings.Contains(row.Text, "ghost-") {
+			t.Errorf("stale slashDispatchedMsg leaked a transcript row: %q", row.Text)
+		}
 	}
 }
