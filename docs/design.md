@@ -36,9 +36,17 @@ In order of priority:
    reference-host-shaped adapter is **257 lines local / 380 attach**
    in the deliberately condensed sketch (core-agent's real ones are
    ~1,050 and ~1,630). The figure is recorded here as measured rather
-   than aspired to. Bringing it down is what issue #77's capability
-   consolidation is for; §6.1 / §6.2's per-host LOC budgets (~150 and
-   ~400) were always the more honest targets.
+   than aspired to; §6.1 / §6.2's per-host LOC budgets (~150 and ~400)
+   were always the more honest targets.
+
+   Issue #77's capability consolidation moved it a little and was
+   never going to move it much: the four capabilities it removed were
+   the ones no adapter implemented, so the code it deleted from
+   `examples/core-agent` was three `var _ tui.X` lines and a comment.
+   The minimum adapter is unchanged at 64 lines, because it was always
+   `Agent.Run` alone. What a real host writes is dominated by event
+   translation and the capabilities it actually wants, and shrinking
+   THAT is a different job from counting interfaces.
 
 ## 2. Module layout
 
@@ -156,7 +164,8 @@ Two properties of the surface are easy to miss and are promises too:
   `SavingsPathAgentic`, …). Those constants are contract even though no
   type-level walk reaches them.
 - **`errors.As` targets.** `SubagentNotFoundError` is returned as a bare
-  `error` from `SubagentEventReader`; hosts match it with `errors.As`.
+  `error` from `SubagentReporter.SubagentEvents`; hosts match it with
+  `errors.As`.
   Its identity is contract even though its name never appears in a
   signature.
 
@@ -263,7 +272,7 @@ func (a *cogoAgent) Run(ctx context.Context, prompt string) iter.Seq2[tui.Event,
 ### 3.3 Optional capability interfaces
 
 Each interface matches one user-visible feature and is documented as
-such. There are twenty, and this section declares all twenty: a
+such. There are sixteen, and this section declares all sixteen: a
 capability that does not appear here is not part of the plug-in
 surface. [`api-surface.md`](./api-surface.md) §3.1 is the mechanical
 list the roster is checked against, and
@@ -271,14 +280,18 @@ list the roster is checked against, and
 compares every declaration below against `package tui` on each test
 run, so the two can no longer disagree quietly.
 
-Seventeen of the twenty are feature-detected on the `Agent` by type
-assertion. The other three each differ in a way worth knowing:
-`UsageTracker` is supplied through `Options.UsageTracker` (§3.4)
-rather than found on the `Agent`, so it may live on a type of its own;
-`SessionByModelTracker` is asserted on that tracker rather than on the
-agent; and `ContentRunner` is asserted nowhere in `package tui` at
-all, being declared so hosts can drive each other through it, which is
-why #77 proposes deleting it.
+It was twenty until v0.21.0. Issue #77 deleted the three nothing
+implemented (`AsyncSlashProvider`'s bare variant, `ContentRunner`,
+`SessionByModelTracker`) and merged the two that no host ever
+satisfied separately (`SubagentLister` + `SubagentEventReader` →
+`SubagentReporter`). The rule that came out of it: a capability earns
+its place by being a thing a host can plausibly do WITHOUT doing the
+one next to it. See [`api-audit.md`](./api-audit.md) §5.
+
+Fifteen of the sixteen are feature-detected on the `Agent` by type
+assertion. `UsageTracker` is the exception: it is supplied through
+`Options.UsageTracker` (§3.4) rather than found on the `Agent`, so it
+may live on a type of its own.
 
 Detection by type assertion is why the declarations below have to be
 exact. A near-miss — the right method name with the wrong signature —
@@ -360,22 +373,6 @@ type UsageTracker interface {
     ContextWindowUsed() int         // 0 when unknown
     SessionTurns() int              // 0 when unknown
     SessionDuration() time.Duration // 0 when unknown
-}
-
-// SessionByModelTracker is a capability ON the UsageTracker, not on
-// the Agent (issue #18): hosts that account per-model satisfy it and
-// /stats grows a breakdown under the aggregate rows. The map key is
-// the model name and should match what StatusReporter reports. An
-// empty map or a single entry suppresses the breakdown, since one
-// entry would only restate SessionTotals.
-type SessionByModelTracker interface {
-    SessionByModel() map[string]ModelTotals
-}
-type ModelTotals struct {
-    Turns        int
-    InputTokens  int
-    OutputTokens int
-    CostUSD      float64
 }
 
 // ModelSwapper backs /model.
@@ -531,59 +528,36 @@ type WakeRequester interface {
     WakeRequested() <-chan struct{}
 }
 
-// ContentRunner is an optional Agent capability for hosts that
-// support structured-prompt entry — driving turns from `[]Content`
-// instead of a single string. Used for retry / replay flows where
-// the host has pre-built the conversation context. Nothing in
-// package tui asserts it: the submit path always uses
-// Run(ctx, prompt), and RunWithContents is called only by
-// host-supplied affordances, which is why it is a deletion candidate
-// under #77.
+// SubagentReporter backs /subagents: the roster, and the drill-down
+// `/subagents <name>` opens — an overlay with the UNTRUNCATED
+// LastReport (#70) above the subagent's turn log (#71). A running
+// sync subagent's tool row also grows a live preview block underneath
+// it that collapses to a one-line summary when the result lands.
 //
-// See R-CHAT-12.
-type Content struct {
-    Role  string
-    Text  string
-    Parts []ContentPart
-}
-type ContentPart struct {
-    Kind string
-    Data any
-}
-type ContentRunner interface {
-    RunWithContents(ctx context.Context, contents []Content) iter.Seq2[Event, error]
-}
-
-// SubagentLister backs /subagents (v1 read-only).
-type SubagentLister interface {
-    Subagents() []SubagentInfo
-}
-type SubagentInfo struct {
-    Name, Status, LastReport string
-    StartedAt                time.Time
-}
-
-// SubagentEventReader backs the subagent drill-down: `/subagents
-// <name>` opens an overlay with the UNTRUNCATED LastReport (#70)
-// above the subagent's turn log (#71), and a running sync
-// subagent's tool row grows a live preview block underneath it
-// that collapses to a one-line summary when the result lands.
+// Two methods, one interface, since v0.21.0: a host that can name its
+// subagents but not say what they did leaves the roster's only
+// affordance pointing at nothing.
 //
-// Polled, not streamed, and deliberately so: a subagent's turns are
-// kept off the parent's event stream (they'd flood every attached
-// chat view), so the only live view of them is a cursored re-read
-// of the host's log. `since` is a seq cursor; 0 means "from the
-// start"; the reply carries the cursor to resume from. Both callers
-// poll once a second while their surface is open, off the render
-// path with a bounded context.
+// SubagentEvents is polled, not streamed, and deliberately so: a
+// subagent's turns are kept off the parent's event stream (they'd
+// flood every attached chat view), so the only live view of them is a
+// cursored re-read of the host's log. `since` is a seq cursor; 0
+// means "from the start"; the reply carries the cursor to resume
+// from. Both callers poll once a second while their surface is open,
+// off the render path with a bounded context.
 //
 // A name the host cannot resolve MUST return *SubagentNotFoundError
 // carrying the names that would resolve — not an empty page. The
 // two are different facts, and flattening them makes the TUI paint
 // a convincing empty turn log for a typo (the server-side half of
 // this is go-steer/core-agent#694).
-type SubagentEventReader interface {
+type SubagentReporter interface {
+    Subagents() []SubagentInfo
     SubagentEvents(ctx context.Context, name string, since int64) (SubagentEventPage, error)
+}
+type SubagentInfo struct {
+    Name, Status, LastReport string
+    StartedAt                time.Time
 }
 type SubagentEventPage struct {
     Events    []SubagentEvent
@@ -642,28 +616,26 @@ type SlashResult struct {
     SwitchTo      *SwitchTarget // optional mid-run Agent swap (issue #48)
 }
 
-// AsyncSlashProvider and AsyncSlashProviderWithPreamble are the
-// non-blocking shapes, for hosts whose commands do network or file
-// I/O (issues #10 / #16). The channel carries exactly one
-// SlashResultOrErr and the ctx is cancelled when the operator hits
-// Esc, at which point the eventual value is discarded. The preamble
-// variant additionally returns a line to append to the chat
+// AsyncSlashProvider is the non-blocking shape, for hosts whose
+// commands do network or file I/O (issues #10 / #16). The channel
+// carries exactly one SlashResultOrErr and the ctx is cancelled when
+// the operator hits Esc, at which point the eventual value is
+// discarded. The preamble is a line appended to the chat
 // synchronously at dispatch, for work slow enough that the bottom-bar
-// toast is easy to miss.
+// toast is easy to miss; "" appends nothing.
 //
-// Both are refinements of SlashProvider rather than alternatives to
-// it: dispatch asserts SlashProvider FIRST and only then looks for an
-// async shape, so an adapter that implements one of these without
-// also implementing InvokeSlash has every one of its commands
-// silently declined. The two async shapes share a method name and
-// differ in return type, so one Go type can satisfy only one of them;
-// dispatch prefers the preamble variant. Collapsing all three into
-// SlashProvider is #77's proposal.
+// It is a refinement of SlashProvider rather than an alternative to
+// it: dispatch asserts SlashProvider FIRST and only then looks for
+// the async shape, so an adapter that implements this without also
+// implementing InvokeSlash has every one of its commands silently
+// declined.
+//
+// Until v0.21.0 the preamble lived on a second interface,
+// AsyncSlashProviderWithPreamble. The two shared a method name and
+// differed in return type, so no one Go type could satisfy both, and
+// the preamble form was a documented strict superset. #77 kept the
+// superset.
 type AsyncSlashProvider interface {
-    SlashCommands() []SlashCommandSpec
-    InvokeSlashAsync(ctx context.Context, name, args string) <-chan SlashResultOrErr
-}
-type AsyncSlashProviderWithPreamble interface {
     SlashCommands() []SlashCommandSpec
     InvokeSlashAsync(ctx context.Context, name, args string) (preamble string, results <-chan SlashResultOrErr)
 }
@@ -1167,9 +1139,9 @@ neutral interfaces in §3. Every adapter does the same four things:
    This is the only required interface.
 2. **Implement zero or more capability interfaces** from §3.3
    (`ModelSwapper`, `Reloader`, `PermissionController`,
-   `PricingController`, `ToolLister`, `SubagentLister`,
-   `SubagentEventReader`, `SessionSwitcher`, `RemoteInterrupter`,
-   `StatusReporter`, `SlashProvider`). Each one lights up the
+   `PricingController`, `ToolLister`, `SubagentReporter`,
+   `SessionSwitcher`, `RemoteInterrupter`, `StatusReporter`,
+   `SlashProvider`). Each one lights up the
    corresponding slash command or UI affordance; missing ones degrade
    to a "not available" message. Capabilities may be implemented on
    the same type as `Agent` or on separate types — the TUI feature-
@@ -1212,7 +1184,7 @@ most capabilities are declined. cogo has the TUI under
      routing invocations back into cogo's command layer.
    - cogo does **not** implement `PricingController` — `/pricing`
      gracefully reports "not available."
-   - cogo does **not** implement `SubagentLister`, `ToolLister`
+   - cogo does **not** implement `SubagentReporter`, `ToolLister`
      (initially) — those slash commands degrade similarly.
    - Call `tui.Run(ctx, opts)`.
 
@@ -1228,9 +1200,9 @@ condensation of it. core-agent's setup mirrors §6.1 but adds:
   package).
 - `PermissionController` adapter (wraps `permissions.Gate`).
 - `ToolLister` adapter.
-- `SubagentLister` adapter (over the `BackgroundAgentManager`), plus
-  a `SubagentEventReader` adapter over
-  `GET /sessions/{id}/agents/{name}/events` for the turn drill-down.
+- `SubagentReporter` adapter — the roster over the
+  `BackgroundAgentManager`, and the turn drill-down over
+  `GET /sessions/{id}/agents/{name}/events`.
 - `RemoteInterrupter` adapter (wraps `Agent.Interrupt`), so
   `/interrupt` reaches a daemon-driven turn in attach mode.
 - `SlashProvider` adapter exposing core-agent's agent-side commands
@@ -1270,7 +1242,7 @@ Adapter LOC budget: ~400 lines (more capabilities to wire).
   Shipped for issue #82. Two flavors — `localAdapter` (in-process,
   the shape of core-agent's `cmd/core-agent/coretui_enabled.go`) and
   `attachAdapter` (HTTP + SSE, the shape of its
-  `internal/coretuiremote`) — covering 18 plug-in interfaces between
+  `internal/coretuiremote`) — covering 17 plug-in interfaces between
   them via `var _ tui.X = ...` assertions, which is what makes the
   build fail rather than merely the behavior drift. It deliberately
   does NOT depend on the real core-agent module: core-agent depends
@@ -1315,10 +1287,23 @@ Adapter LOC budget: ~400 lines (more capabilities to wire).
 
 ## 10. Open risks
 
-1. **Adapter boilerplate fatigue.** If the capability interfaces grow
-   past ~10, each host's adapter becomes annoying to write. Mitigation:
-   when a capability is required for "most" hosts, fold it into the
-   base `Agent` interface (and accept the breaking change before v1.0).
+1. **Adapter boilerplate fatigue.** Each capability interface a host
+   wants is another block of translation code, and at sixteen (§3.3)
+   the count is already past the ~10 where writing an adapter starts
+   to feel like a chore.
+
+   Mitigation, as revised by issue #77: hold the count down by
+   deleting capabilities nothing implements and merging ones no host
+   satisfies separately — not by folding them into the base `Agent`.
+   Promotion trades a cost every host pays voluntarily for one every
+   host pays whether or not it wants the feature, which is the wrong
+   direction for an interface whose whole claim (§1 goal 3) is that
+   `Run` is all you must write. #77 took the surface from twenty to
+   sixteen this way and left `Agent` at one method.
+
+   What promotion IS for: a capability so near-universal that
+   declining it produces a broken TUI rather than a degraded one.
+   None of the sixteen is that today.
 2. **Hidden ADK assumptions in the rendering code.** Tool-call args
    are `map[string]any` which is a JSON-ish shape ADK happens to use.
    If a non-ADK adapter ever wants to render structured tool args

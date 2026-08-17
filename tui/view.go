@@ -1095,7 +1095,7 @@ func (m Model) renderStatusLine() string {
 // (style.md §7.2). Stacks the model + mode + spend metrics in a
 // readable vertical layout — separate input/output tokens, context-
 // window %, cumulative cost — sourced live from the host's
-// UsageTracker + SubagentLister. The "modified files" preview section
+// UsageTracker + SubagentReporter. The "modified files" preview section
 // was dropped pending a real file-watch capability; until one exists
 // any rendered value is fiction.
 func (m Model) renderSidebar() string {
@@ -1120,7 +1120,7 @@ func (m Model) renderSidebar() string {
 // The bound is not defensive tidiness — the sidebar is the one panel
 // whose content is host-supplied and whose width is a CONSTANT rather
 // than a share of the terminal. `subagentSummary` renders whatever
-// names a SubagentLister reports, `displayModelName` renders whatever
+// names a SubagentReporter reports, `displayModelName` renders whatever
 // the host calls its model, and a realistic provider-qualified model
 // id ("anthropic/claude-…-extended-thinking") is 50-odd cells against
 // a 32-cell column. Unbounded, JoinVertical widened the WHOLE block

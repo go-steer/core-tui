@@ -41,9 +41,9 @@ Every host adapter does the same four things (`docs/design.md` §6.0):
    `tui.Event`.
 2. **Implement zero or more capability interfaces** from §3.3
    (`ModelSwapper`, `Reloader`, `PermissionController`,
-   `PricingController`, `ToolLister`, `SubagentLister`,
-   `SubagentEventReader`, `SessionSwitcher`, `RemoteInterrupter`,
-   `StatusReporter`, `SlashProvider`, `LiveAgent`, `InjectableAgent`).
+   `PricingController`, `ToolLister`, `SubagentReporter`,
+   `SessionSwitcher`, `RemoteInterrupter`, `StatusReporter`,
+   `SlashProvider`, `LiveAgent`, `InjectableAgent`).
    Each lights up the corresponding slash command or UI affordance;
    missing ones degrade to a "not available in this host" message.
 3. **Wire the TUI-implemented interfaces** (`PermissionPrompter`,
@@ -90,7 +90,7 @@ of core-agent's pre-extraction TUI). The TUI is driven by:
 | `StatusReporter` | `Model.cfg.Model.Name` + agent's `Run` state | Trivial: return `Status{ModelName: cfg.Model.Name, State: "idle"/"running"}`. |
 | `PricingController` | (not present) | Skip. `/pricing` degrades to "not available". |
 | `ToolLister` | (not present — tools baked into the agent at startup) | Skip for v1. `/tools` palette stays "not available" until cogo adds tool introspection. |
-| `SubagentLister` | (not present) | Skip. cogo has no subagents. |
+| `SubagentReporter` | (not present) | Skip. cogo has no subagents. |
 | `RemoteInterrupter` | (not present — cogo runs in-process, `ctx` cancellation only) | Skip. `Esc`-interrupt still works via the context the TUI passes into `Agent.Run`; this capability is for turns the TUI has no local context for. |
 | `SlashProvider` | (no agent-defined commands) | Not needed — every cogo slash command maps to a core-tui built-in once the corresponding capability is wired. |
 | `PermissionPrompter` (TUI-provided) | cogo's `gate.Prompter` | Construct via `tui.NewPrompter()`, hand to `gate.SetPrompter` before `agent.Run`. |
@@ -280,7 +280,7 @@ Other notable host pieces:
 | `PermissionController` | `permissions.Gate` (same shape as cogo's) | Wrap on `*Gate`. |
 | `PricingController` | `internal/pricing.RefreshPricing` + `SetPricing` | Wrap; surface the 5-layer precedence (config / project / user-manual / external / builtin / longest-prefix) inside `Refresh`. core-agent's per-model `ModelConfig.Pricing` map is the host's storage; core-tui doesn't see it. |
 | `ToolLister` | `agent.Agent.Tools() []tool.Tool` (or `AttachTools()` in attach mode) | Wrap; map `tool.Tool` → `tui.ToolInfo`. |
-| `SubagentLister` | `agent.Agent.BackgroundManager().Subagents()` (or `AttachAgents()` in attach mode) | Wrap; map entries → `tui.SubagentInfo` (`Name, Status, LastReport, StartedAt`). |
+| `SubagentReporter` | `agent.Agent.BackgroundManager().Subagents()` (or `AttachAgents()` in attach mode) for the roster, `GET /sessions/{id}/agents/{name}/events` for the turn log | Wrap; map entries → `tui.SubagentInfo` (`Name, Status, LastReport, StartedAt`) and turns → `tui.SubagentEventPage`. Both methods on one adapter — the roster's only affordance is drilling into it. |
 | `RemoteInterrupter` | `agent.Agent.Interrupt() bool` (or `AttachInterrupt()` in attach mode) | Thin wrapper — core-tui's signature is `Interrupt(ctx) error`, so map `false` to an error. Only consulted when there's no local turn context to cancel. |
 | `StatusReporter` | `agent.Agent.AttachStatus()` (returns `attach.StatusInfo`) | Wrap; map `StatusInfo.State` to the core-tui state string. |
 | `SlashProvider` | `/subagent` flag parser + `/btw` invocation | **Needed.** See §3.3 below — `/subagent` is pure SlashProvider; `/btw` needs the resolution from §5. |
@@ -341,7 +341,8 @@ func (c *coreAgentCaps) Tools() []tui.ToolInfo {
     return out
 }
 
-// SubagentLister
+// SubagentReporter (roster half; SubagentEvents follows the same shape
+// over the host's recorded background-agent turns)
 func (c *coreAgentCaps) Subagents() []tui.SubagentInfo {
     mgr := c.inner.BackgroundManager()
     if mgr == nil {
@@ -415,7 +416,7 @@ the adapter just changes how `Agent.Run` works.
 | `tui.Agent.Run` | `Client.Stream(ctx, sid, since)` | Translator subscribes to the SSE stream, converts each `Frame.Event` to a `tui.Event`. On EOF, re-subscribes with the last seen `Seq`. |
 | `RemoteInterrupter` | `Client.Interrupt(ctx, sid)` | One round-trip. This is the capability's home case — an attached observer watching a daemon-driven turn has no local context to cancel. |
 | `ToolLister` | `Client.Tools(ctx, sid)` | One round-trip; cache for the session unless `/reload` fires. |
-| `SubagentLister` | `Client.Agents(ctx, sid)` | One round-trip per `/subagents` open. |
+| `SubagentReporter` | `Client.Agents(ctx, sid)` + `Client.AgentEvents(ctx, sid, name, since)` | One round-trip per `/subagents` open, one more per drill-down page. |
 | `StatusReporter` | `Client.Status(ctx, sid)` | Lightweight poll. |
 | `ModelSwapper` / `Reloader` / `PermissionController` / `PricingController` | (not yet RPCs in attach API) | **Defer.** Attach-mode `/model`, `/reload`, `/permissions`, `/pricing` degrade to "not available in attach mode" until the attach API adds the matching RPCs. |
 | `SlashProvider` for `/btw` | (no attach RPC for `AskSideQuestion`) | Defer. `/btw` is local-mode only until the attach server exposes a side-question RPC. |
@@ -487,7 +488,7 @@ func (a *attachAgent) Tools() []tui.ToolInfo {
     return out
 }
 
-// SubagentLister + StatusReporter follow the same shape.
+// SubagentReporter + StatusReporter follow the same shape.
 ```
 
 Two things this sketch predates, both fixed in
@@ -566,7 +567,7 @@ requires `github.com/go-steer/core-tui`, the adapter lives in
 
 - [x] Add `cmd/core-agent-tui/main.go`.
 - [x] Same translator + capability adapters as cogo, plus:
-      `RemoteInterrupter`, `ToolLister`, `SubagentLister`,
+      `RemoteInterrupter`, `ToolLister`, `SubagentReporter`,
       `PricingController`, `SlashProvider` for `/btw`.
 - [x] Wire `Prompter`, `Elicitor`.
 - [x] Construct `Options`.
@@ -587,7 +588,7 @@ runtime rather than by build target.
       single adapter instead.
 - [ ] Implement the `attachAgent.Run` translator with reconnection
       + `since` replay.
-- [ ] Implement `RemoteInterrupter`, `ToolLister`, `SubagentLister`,
+- [ ] Implement `RemoteInterrupter`, `ToolLister`, `SubagentReporter`,
       `StatusReporter` (each one round-trip to the attach client).
 - [ ] Decide whether to bind `Client.Inject` to a custom key; if so,
       register a `SlashProvider` entry for it.

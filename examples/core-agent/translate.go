@@ -62,6 +62,29 @@ func translateEvent(ev *fakehost.Event, model string) tui.Event {
 	return te
 }
 
+// translateSubagentTurns maps the host's recorded background-agent
+// turns onto the page tui.SubagentReporter.SubagentEvents returns.
+// Both flavors share it — local reads the turns in process, attach
+// decodes them off a JSON body, and the shape core-tui sees is the
+// same either way.
+func translateSubagentTurns(turns []fakehost.SubagentTurn) []tui.SubagentEvent {
+	out := make([]tui.SubagentEvent, 0, len(turns))
+	for _, t := range turns {
+		ev := tui.SubagentEvent{Seq: t.Seq, Timestamp: t.At, Author: t.Author, Text: t.Text}
+		for _, c := range t.Calls {
+			ev.ToolCalls = append(ev.ToolCalls, tui.SubagentToolCall{ID: c.ID, Name: c.Name, Args: c.Args})
+		}
+		for _, r := range t.Results {
+			response, errText := splitFunctionResponse(&r)
+			ev.ToolResults = append(ev.ToolResults, tui.SubagentToolResult{
+				ID: r.ID, Name: r.Name, Response: response, Error: errText,
+			})
+		}
+		out = append(out, ev)
+	}
+	return out
+}
+
 // splitFunctionResponse lifts the host's in-band "error" key out of
 // the response map, because core-tui models tool failure as its own
 // field. Exactly the kind of glue design.md §6.0 says belongs on the

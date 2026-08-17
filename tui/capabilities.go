@@ -223,34 +223,29 @@ type ToolInfo struct {
 	GateState   string // "allowed" / "denied" / "ask" — current gate disposition
 }
 
-// SubagentLister backs /subagents (R-SUB-1 read-only v1).
-type SubagentLister interface {
-	Subagents() []SubagentInfo
-}
-
-// SubagentInfo is one entry in the /subagents display.
-type SubagentInfo struct {
-	Name       string
-	Status     string // "running" / "done" / "failed" / "paused"
-	LastReport string // most recent alert / completion text (truncated)
-	StartedAt  time.Time
-}
-
-// SubagentEventReader backs the subagent turn drill-down (issue #71):
-// what a subagent actually DID, not just its name, status, and final
-// report. Hosts that keep a per-subagent turn log implement it; the
-// canonical one is core-agent's
-// GET /sessions/{id}/agents/{name}/events.
+// SubagentReporter backs the /subagents surfaces: the roster
+// (R-SUB-1) and the per-subagent turn drill-down (issue #71) — what a
+// subagent actually DID, not just its name, status, and final report.
+// The canonical implementation is core-agent's
+// GET /sessions/{id}/agents and GET /sessions/{id}/agents/{name}/events.
 //
-// Two surfaces consume it, both off the render path:
+// Until v0.21.0 the two methods were two interfaces, SubagentLister
+// and SubagentEventReader, and every consumer took both. Nothing ever
+// implemented one without the other, and a host that listed its
+// subagents but could not say what they did left the roster's only
+// affordance — drill in — pointing at nothing. See
+// docs/api-audit.md §5.3.
 //
+// Three surfaces consume it, all off the render path:
+//
+//   - `/subagents` renders the roster from Subagents().
 //   - `/subagents <name>` opens a detail overlay — the untruncated
 //     report (issue #70) above a scrollable turn log.
 //   - A running SYNC subagent's tool row grows a live preview block
 //     underneath it, tailed while the call is in flight, which
 //     collapses to a one-line summary when the result lands.
 //
-// Contract:
+// SubagentEvents contract:
 //
 //   - Paged and cursored. since is a seq cursor; 0 means "from the
 //     start". Return the page plus the cursor to resume from. The
@@ -265,8 +260,17 @@ type SubagentInfo struct {
 //     are the ones there are" instead of showing a plausible-looking
 //     empty log. An empty page means "this subagent has recorded no
 //     turns yet", which is a different and legitimate answer.
-type SubagentEventReader interface {
+type SubagentReporter interface {
+	Subagents() []SubagentInfo
 	SubagentEvents(ctx context.Context, name string, since int64) (SubagentEventPage, error)
+}
+
+// SubagentInfo is one entry in the /subagents display.
+type SubagentInfo struct {
+	Name       string
+	Status     string // "running" / "done" / "failed" / "paused"
+	LastReport string // most recent alert / completion text (truncated)
+	StartedAt  time.Time
 }
 
 // SubagentEventPage is one page of a subagent's inner turns.
@@ -330,7 +334,8 @@ type SubagentToolResult struct {
 	Error    string
 }
 
-// SubagentNotFoundError is what a SubagentEventReader returns for a
+// SubagentNotFoundError is what SubagentReporter.SubagentEvents
+// returns for a
 // name it cannot resolve. Available carries the names that WOULD
 // resolve, so the UI can name them instead of leaving the operator to
 // guess at a spelling.
@@ -403,36 +408,6 @@ type UsageTracker interface {
 	ContextWindowUsed() int         // 0 when unknown
 	SessionTurns() int              // 0 when unknown
 	SessionDuration() time.Duration // 0 when unknown
-}
-
-// ModelTotals is the per-model usage row surfaced by the optional
-// SessionByModelTracker capability (issue #18). One entry per
-// distinct model the session has routed work to — useful when the
-// host routes subtasks to a cheaper tier (e.g. parent on
-// gemini-3.1-pro, subtasks on gemini-2.5-flash) and the operator
-// wants to see the cost-efficiency split in /stats.
-type ModelTotals struct {
-	Turns        int
-	InputTokens  int
-	OutputTokens int
-	CostUSD      float64
-}
-
-// SessionByModelTracker is an optional capability on UsageTracker:
-// hosts that track usage per-model can satisfy it so /stats
-// surfaces a per-model breakdown under the existing aggregate
-// rows. core-tui does a duck-typed assertion at render time, so
-// trackers that don't implement it keep working unchanged.
-//
-// Contract:
-//   - Map key is the model name (host-defined; should match what
-//     StatusReporter.Status().ModelName / displayModelName render).
-//   - Empty map OR single entry → /stats skips the breakdown row
-//     (single entry would just restate SessionTotals).
-//   - Hosts can include zero-cost entries; /stats decides what to
-//     show. Sorting / formatting lives entirely on the TUI side.
-type SessionByModelTracker interface {
-	SessionByModel() map[string]ModelTotals
 }
 
 // PathScope is the list of roots that bound `@file` palette lookups

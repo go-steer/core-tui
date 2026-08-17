@@ -250,6 +250,13 @@ pull-mode host.
 
 ## 5. Decision — #77, capability consolidation
 
+**Implemented in v0.21.0.** All four decisions below shipped: 5.1 as a
+rewrite of `design.md` §10 risk 1, 5.2 and 5.3 as deletions and a merge in
+`package tui`, 5.4 as a stop. The capability count is 16. The rest of this
+section is the reasoning as it stood at audit time, and the symbol
+inventory in §8 is a snapshot of the pre-consolidation surface — neither is
+maintained against head. `docs/api-surface.md` is.
+
 ### 5.1 Reject the mitigation as written
 
 `docs/design.md` §10 risk 1 says: *when a capability is required for "most"

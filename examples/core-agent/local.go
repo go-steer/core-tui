@@ -16,6 +16,7 @@ package main
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"iter"
 	"time"
@@ -52,7 +53,7 @@ var (
 	_ tui.PermissionController = (*localAdapter)(nil)
 	_ tui.PricingController    = (*localAdapter)(nil)
 	_ tui.ToolLister           = (*localAdapter)(nil)
-	_ tui.SubagentLister       = (*localAdapter)(nil)
+	_ tui.SubagentReporter     = (*localAdapter)(nil)
 	_ tui.StatusReporter       = (*localAdapter)(nil)
 	_ tui.SlashProvider        = (*localAdapter)(nil)
 
@@ -73,16 +74,11 @@ var (
 //   - LiveAgent — the in-process agent is per-turn by construction.
 //     See attach.go for the observer-mode side.
 //   - SessionSwitcher — one process, one session.
-//   - SubagentEventReader — core-agent implements it over an HTTP
-//     endpoint even in local mode; covered in attach.go instead so
-//     each file stays readable.
-//   - AsyncSlashProvider / AsyncSlashProviderWithPreamble — the
-//     async variants are exercised in attach.go, where the latency
-//     that motivates them is real.
-//   - ContentRunner, SessionByModelTracker — no host wiring today.
+//   - AsyncSlashProvider — the async variant is exercised in
+//     attach.go, where the latency that motivates it is real.
 //
-// This file satisfies 13 interfaces; attach.go adds 5 more it
-// doesn't share, for 18 of the plug-in surface between them. The
+// This file satisfies 13 interfaces; attach.go adds 4 more it
+// doesn't share, for 17 of the plug-in surface between them. The
 // distance between "the required agent surface is tiny" (design.md
 // §1 goal 3) and what a real host ends up writing is the input this
 // example owes issue #77.
@@ -222,7 +218,8 @@ func (a *localAdapter) Tools() []tui.ToolInfo {
 	return out
 }
 
-// Subagents implements tui.SubagentLister (/subagents).
+// Subagents implements the roster half of tui.SubagentReporter
+// (/subagents).
 func (a *localAdapter) Subagents() []tui.SubagentInfo {
 	agents := a.inner.Subagents()
 	out := make([]tui.SubagentInfo, 0, len(agents))
@@ -235,6 +232,34 @@ func (a *localAdapter) Subagents() []tui.SubagentInfo {
 		})
 	}
 	return out
+}
+
+// SubagentEvents implements the drill-down half of
+// tui.SubagentReporter (`/subagents <name>`). In local mode the turn
+// log is an in-process read, so there is no cursor to honor beyond
+// filtering on since and no page limit to report.
+//
+// The contract's sharp edge is the error type: an unresolvable name
+// must come back as *tui.SubagentNotFoundError, not an empty page,
+// or the UI renders a convincing empty log for a typo.
+func (a *localAdapter) SubagentEvents(_ context.Context, name string, since int64) (tui.SubagentEventPage, error) {
+	turns, err := a.inner.SubagentTurns(name, since)
+	var unknown *fakehost.UnknownSubagentError
+	if errors.As(err, &unknown) {
+		return tui.SubagentEventPage{}, &tui.SubagentNotFoundError{
+			Name: unknown.Name, Available: unknown.Available,
+		}
+	}
+	if err != nil {
+		return tui.SubagentEventPage{}, err
+	}
+	page := tui.SubagentEventPage{Events: translateSubagentTurns(turns)}
+	if n := len(page.Events); n > 0 {
+		page.NextSince = page.Events[n-1].Seq
+	} else {
+		page.NextSince = since
+	}
+	return page, nil
 }
 
 // Status implements tui.StatusReporter, feeding the status header.

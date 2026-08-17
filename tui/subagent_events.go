@@ -125,17 +125,15 @@ type subagentTail struct {
 // subagentEventsCmd fetches one page off the event loop. The roster
 // read rides along because both are host calls and the overlay wants
 // them consistent with each other.
-func subagentEventsCmd(reader SubagentEventReader, lister SubagentLister, gen uint64, name string, since int64) tea.Cmd {
+func subagentEventsCmd(reporter SubagentReporter, gen uint64, name string, since int64) tea.Cmd {
 	return func() tea.Msg {
 		ctx, cancel := context.WithTimeout(context.Background(), subagentFetchTimeout)
 		defer cancel()
 		out := subagentEventsMsg{gen: gen, name: name}
-		if lister != nil {
-			if info, ok := findSubagent(lister.Subagents(), name); ok {
-				out.info, out.hasInfo = info, true
-			}
+		if info, ok := findSubagent(reporter.Subagents(), name); ok {
+			out.info, out.hasInfo = info, true
 		}
-		out.page, out.err = reader.SubagentEvents(ctx, name, since)
+		out.page, out.err = reporter.SubagentEvents(ctx, name, since)
 		return out
 	}
 }
@@ -148,11 +146,11 @@ func subagentPollTick(gen uint64, name string) tea.Cmd {
 }
 
 // subagentTailCmd fetches one inline-tail page off the event loop.
-func subagentTailCmd(reader SubagentEventReader, gen uint64, callID, name string, since int64) tea.Cmd {
+func subagentTailCmd(reporter SubagentReporter, gen uint64, callID, name string, since int64) tea.Cmd {
 	return func() tea.Msg {
 		ctx, cancel := context.WithTimeout(context.Background(), subagentTailTimeout)
 		defer cancel()
-		page, err := reader.SubagentEvents(ctx, name, since)
+		page, err := reporter.SubagentEvents(ctx, name, since)
 		return subagentTailMsg{gen: gen, callID: callID, name: name, page: page, err: err}
 	}
 }
@@ -170,7 +168,7 @@ func subagentTailTick(gen uint64, callID string) tea.Cmd {
 // host can't serve turns, the row has no wire-level call ID to key
 // on, or this tool name has already been proven not to be a subagent.
 func (m *Model) startSubagentTail(msg toolCallMsg) tea.Cmd {
-	reader, ok := m.opts.Agent.(SubagentEventReader)
+	reporter, ok := m.opts.Agent.(SubagentReporter)
 	if !ok || msg.id == "" {
 		return nil
 	}
@@ -185,7 +183,7 @@ func (m *Model) startSubagentTail(msg toolCallMsg) tea.Cmd {
 		return nil
 	}
 	m.subagentTails[msg.id] = &subagentTail{name: name, inflight: true}
-	return subagentTailCmd(reader, m.sessionGen, msg.id, name, 0)
+	return subagentTailCmd(reporter, m.sessionGen, msg.id, name, 0)
 }
 
 // subagentTailName is the subagent a tool call is presumed to drive.
@@ -256,12 +254,12 @@ func (m *Model) resumeSubagentTail(callID string) tea.Cmd {
 	if t == nil || t.inflight {
 		return nil
 	}
-	reader, ok := m.opts.Agent.(SubagentEventReader)
+	reporter, ok := m.opts.Agent.(SubagentReporter)
 	if !ok {
 		return nil
 	}
 	t.inflight = true
-	return subagentTailCmd(reader, m.sessionGen, callID, t.name, t.since)
+	return subagentTailCmd(reporter, m.sessionGen, callID, t.name, t.since)
 }
 
 // stopSubagentTail retires a tail when its tool call completes,
@@ -420,11 +418,10 @@ func subagentDeclaredName(name string) string {
 // the first fetch plus the live tail. Returns a system-message string
 // instead when there's nothing to open.
 func (m *Model) openSubagentDetail(query string) (string, tea.Cmd) {
-	reader, ok := m.opts.Agent.(SubagentEventReader)
+	reporter, ok := m.opts.Agent.(SubagentReporter)
 	if !ok {
-		return "/subagents: agent doesn't implement SubagentEventReader — no turn log to show", nil
+		return "/subagents: agent doesn't implement SubagentReporter — no turn log to show", nil
 	}
-	lister, _ := m.opts.Agent.(SubagentLister)
 	// Resolve the name against the cached roster rather than calling
 	// Subagents() from Update (issue #137). hostSnapshot refreshes it
 	// off-loop every hostSnapshotInterval, and a name that isn't in a
@@ -450,7 +447,7 @@ func (m *Model) openSubagentDetail(query string) (string, tea.Cmd) {
 	m.overlayStack.Open(newSubagentDialog(name))
 	m.refreshViewport()
 	return "", tea.Batch(
-		subagentEventsCmd(reader, lister, m.sessionGen, name, 0),
+		subagentEventsCmd(reporter, m.sessionGen, name, 0),
 		subagentPollTick(m.sessionGen, name),
 	)
 }

@@ -5,6 +5,13 @@ Generated from `go doc -all ./tui` at commit
 cross-checked against a `go/doc` + `go/ast` walk of the 67 non-test files of
 `package tui`. Both enumerations agree on **265 exported top-level symbols**.
 
+The census figures below are that snapshot and are not re-derived on every
+change; §3.1's "Optional capability" table is the exception, because
+`TestDesignDocDeclarationsMatchSource` reads it as the live roster of §3.3
+capability interfaces and fails when it drifts from `package tui`. It is
+seven rows shorter than the snapshot after [#77](https://github.com/go-steer/core-tui/issues/77)
+deleted the unimplemented capabilities and merged the redundant pair.
+
 This document answers [#78](https://github.com/go-steer/core-tui/issues/78):
 which of those 265 the project intends to keep promising at 1.0, and which
 are exported only because nobody stopped them. It is the classification that
@@ -194,29 +201,23 @@ library without these. Frozen at 1.0.
 | `UsageLastTurn` | type | `remote_events.go:89` | `Event.UsageUpdate` (SSE spec §2.3). |
 | `UsageUpdate` | type | `remote_events.go:73` | `Event.UsageUpdate` (SSE spec §2.3). |
 
-#### Optional capability (43)
+#### Optional capability (36)
 
 | symbol | kind | declared | reached from |
 |---|---|---|---|
-| `ApprovalLog` | type | `capabilities.go:188` | Reached from `PermissionController`. |
-| `AsyncSlashProvider` | type | `slash.go:166` | §3.3 capability interface. |
-| `AsyncSlashProviderWithPreamble` | type | `slash.go:208` | §3.3 capability interface. |
-| `Content` | type | `agent.go:301` | Reached from `ContentRunner`. |
-| `ContentPart` | type | `agent.go:312` | Reached from `ContentRunner`. |
-| `ContentRunner` | type | `agent.go:328` | §3.3 capability interface. |
+| `ApprovalLog` | type | `capabilities.go:200` | Reached from `PermissionController`. |
+| `AsyncSlashProvider` | type | `slash.go:188` | §3.3 capability interface. |
 | `InboxDrainer` | type | `agent.go:242` | §3.3 capability interface. |
 | `InjectableAgent` | type | `agent.go:161` | §3.3 capability interface. |
 | `LiveAgent` | type | `agent.go:203` | §3.3 capability interface. |
 | `ModelInfo` | type | `capabilities.go:42` | Reached from `ModelSwapper`. |
 | `ModelSwapper` | type | `capabilities.go:36` | §3.3 capability interface. |
-| `ModelTotals` | type | `capabilities.go:402` | Reached from `SessionByModelTracker`. |
 | `PermanentStreamError` | type | `agent.go:219` | Reached from `LiveAgent`. |
-| `PermissionController` | type | `capabilities.go:178` | §3.3 capability interface. |
-| `PricingController` | type | `capabilities.go:196` | §3.3 capability interface. |
-| `ReloadResult` | type | `capabilities.go:131` | Reached from `Reloader`. |
-| `Reloader` | type | `capabilities.go:124` | §3.3 capability interface. |
+| `PermissionController` | type | `capabilities.go:190` | §3.3 capability interface. |
+| `PricingController` | type | `capabilities.go:208` | §3.3 capability interface. |
+| `ReloadResult` | type | `capabilities.go:143` | Reached from `Reloader`. |
+| `Reloader` | type | `capabilities.go:136` | §3.3 capability interface. |
 | `RemoteInterrupter` | type | `agent.go:288` | §3.3 capability interface. |
-| `SessionByModelTracker` | type | `capabilities.go:422` | §3.3 capability interface. |
 | `SessionInfo` | type | `capabilities.go:67` | Reached from `SessionSwitcher`. |
 | `SessionInput` | type | `capabilities.go:95` | Reached from `SessionSwitcher`. |
 | `SessionSwitcher` | type | `capabilities.go:61` | §3.3 capability interface. |
@@ -224,22 +225,21 @@ library without these. Frozen at 1.0.
 | `SlashCommandSpec` | type | `slash.go:39` | Reached from `SlashProvider`. |
 | `SlashProvider` | type | `slash.go:30` | §3.3 capability interface. |
 | `SlashResult` | type | `slash.go:65` | Reached from `SlashProvider`. |
-| `SlashResultOrErr` | type | `slash.go:174` | Reached from `AsyncSlashProvider`. |
-| `Status` | type | `capabilities.go:372` | Reached from `StatusReporter`. |
-| `StatusReporter` | type | `capabilities.go:367` | §3.3 capability interface. |
-| `SubagentEvent` | type | `capabilities.go:280` | Reached from `SubagentEventReader`. |
-| `SubagentEventPage` | type | `capabilities.go:261` | Reached from `SubagentEventReader`. |
-| `SubagentEventReader` | type | `capabilities.go:256` | §3.3 capability interface. |
-| `SubagentInfo` | type | `capabilities.go:220` | Reached from `SubagentLister`. |
-| `SubagentLister` | type | `capabilities.go:215` | §3.3 capability interface. |
-| `SubagentNotFoundError` | type | `capabilities.go:331` | Reached from `SubagentEventReader`. |
-| `SubagentNotFoundError.Error` | method | `capabilities.go:336` | Reached from `SubagentEventReader`. |
-| `SubagentToolCall` | type | `capabilities.go:307` | Reached from `SubagentEventReader`. |
-| `SubagentToolResult` | type | `capabilities.go:314` | Reached from `SubagentEventReader`. |
+| `SlashResultOrErr` | type | `slash.go:150` | Reached from `AsyncSlashProvider`. |
+| `Status` | type | `capabilities.go:389` | Reached from `StatusReporter`. |
+| `StatusReporter` | type | `capabilities.go:384` | §3.3 capability interface. |
+| `SubagentEvent` | type | `capabilities.go:296` | Reached from `SubagentReporter`. |
+| `SubagentEventPage` | type | `capabilities.go:277` | Reached from `SubagentReporter`. |
+| `SubagentInfo` | type | `capabilities.go:269` | Reached from `SubagentReporter`. |
+| `SubagentNotFoundError` | type | `capabilities.go:348` | Reached from `SubagentReporter`. |
+| `SubagentNotFoundError.Error` | method | `capabilities.go:353` | Reached from `SubagentReporter`. |
+| `SubagentReporter` | type | `capabilities.go:263` | §3.3 capability interface. |
+| `SubagentToolCall` | type | `capabilities.go:323` | Reached from `SubagentReporter`. |
+| `SubagentToolResult` | type | `capabilities.go:330` | Reached from `SubagentReporter`. |
 | `SwitchTarget` | type | `slash.go:98` | Reached from `SlashProvider`. |
-| `ToolInfo` | type | `capabilities.go:207` | Reached from `ToolLister`. |
-| `ToolLister` | type | `capabilities.go:202` | §3.3 capability interface. |
-| `UsageTracker` | type | `capabilities.go:386` | §3.3 capability interface. |
+| `ToolInfo` | type | `capabilities.go:219` | Reached from `ToolLister`. |
+| `ToolLister` | type | `capabilities.go:214` | §3.3 capability interface. |
+| `UsageTracker` | type | `capabilities.go:403` | §3.3 capability interface. |
 | `WakeRequester` | type | `agent.go:260` | §3.3 capability interface. |
 
 #### Prompter / elicitor (41)

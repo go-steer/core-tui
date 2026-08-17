@@ -1121,7 +1121,7 @@ func formatKTokens(n int) string {
 }
 
 // subagentSummary renders the sidebar's subagent rows from the host
-// snapshot's SubagentLister read. Returns ("none") when the capability
+// snapshot's SubagentReporter read. Returns ("none") when the capability
 // is unwired or the list is empty so the section reads consistently.
 //
 // Reads hostSnap rather than calling Subagents() directly: this runs
@@ -1129,8 +1129,8 @@ func formatKTokens(n int) string {
 // guarantees never blocks on a host method. The roster refreshes on
 // the same hostSnapshotInterval tick as the header figures.
 func (m Model) subagentSummary() []string {
-	if _, ok := m.opts.Agent.(SubagentLister); !ok {
-		return []string{"none (no SubagentLister)"}
+	if _, ok := m.opts.Agent.(SubagentReporter); !ok {
+		return []string{"none (no SubagentReporter)"}
 	}
 	if !m.hostSnap.valid {
 		// Wired, but the first off-loop pull hasn't landed yet.

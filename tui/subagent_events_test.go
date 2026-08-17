@@ -376,13 +376,13 @@ func TestOpenSubagentDetail_OpensAndFetches(t *testing.T) {
 	}
 }
 
-func TestOpenSubagentDetail_NoReaderExplainsWhy(t *testing.T) {
+func TestOpenSubagentDetail_NoReporterExplainsWhy(t *testing.T) {
 	m := subagentModel(t, stubAgent{})
 	text, cmd := m.openSubagentDetail("auditor")
 	if cmd != nil {
-		t.Error("expected no fetch without a SubagentEventReader")
+		t.Error("expected no fetch without a SubagentReporter")
 	}
-	if !strings.Contains(text, "SubagentEventReader") {
+	if !strings.Contains(text, "SubagentReporter") {
 		t.Errorf("expected the missing capability named, got %q", text)
 	}
 }
@@ -502,10 +502,10 @@ func TestSubagentTail_TransportErrorDropsTailQuietly(t *testing.T) {
 	}
 }
 
-func TestSubagentTail_NoReaderNoPolling(t *testing.T) {
+func TestSubagentTail_NoReporterNoPolling(t *testing.T) {
 	m := subagentModel(t, stubAgent{})
 	if cmd := m.startSubagentTail(toolCallMsg{id: "call-1", name: "auditor"}); cmd != nil {
-		t.Error("a host without SubagentEventReader must never be polled")
+		t.Error("a host without SubagentReporter must never be polled")
 	}
 }
 
@@ -562,7 +562,7 @@ func TestSubagentEventsCmd_CarriesRosterInfo(t *testing.T) {
 		roster: []SubagentInfo{{Name: "auditor", Status: "running", LastReport: "all good"}},
 		turns:  map[string][]SubagentEvent{"auditor": {turn(1, "model", "hi")}},
 	}
-	cmd := subagentEventsCmd(a, a, 1, "auditor", 0)
+	cmd := subagentEventsCmd(a, 1, "auditor", 0)
 	msg, ok := cmd().(subagentEventsMsg)
 	if !ok {
 		t.Fatalf("expected subagentEventsMsg, got %T", cmd())
@@ -592,16 +592,21 @@ func TestSubagentUpdate_DropsStaleGeneration(t *testing.T) {
 func TestRenderSubagentList_PointsAtTheOverlayWhenClipped(t *testing.T) {
 	subs := []SubagentInfo{{Name: "auditor", Status: "done",
 		LastReport: strings.Repeat("finding ", 30)}}
-	got := renderSubagentList(subs, true)
+	got := renderSubagentList(subs)
 	if !strings.Contains(got, "/subagents <name>") {
 		t.Errorf("expected a pointer to the drill-down, got:\n%s", got)
 	}
 	if !strings.Contains(got, "full report") {
 		t.Errorf("expected the hint to mention the clipped report, got:\n%s", got)
 	}
-	// Hosts without the reader capability get no dead-end pointer.
-	if strings.Contains(renderSubagentList(subs, false), "/subagents <name>") {
-		t.Error("expected no drill-down hint without SubagentEventReader")
+	// An unclipped report still points at the overlay, for the turn
+	// log — but doesn't promise more of a report than was shown.
+	short := renderSubagentList([]SubagentInfo{{Name: "auditor", Status: "done", LastReport: "all good"}})
+	if !strings.Contains(short, "/subagents <name>") {
+		t.Errorf("expected the turn-log pointer even unclipped, got:\n%s", short)
+	}
+	if strings.Contains(short, "full report") {
+		t.Errorf("nothing was clipped, so the hint must not offer the rest of it, got:\n%s", short)
 	}
 }
 

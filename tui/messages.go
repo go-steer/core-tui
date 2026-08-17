@@ -443,14 +443,11 @@ type permissionRuleAddedMsg struct {
 	err error
 }
 
-// subagentRosterMsg carries SubagentLister.Subagents() for a bare
-// /subagents. drillable was resolved at dispatch (SubagentEventReader
-// type assertion) and only decides whether the rendered list mentions
-// `/subagents <name>`.
+// subagentRosterMsg carries SubagentReporter.Subagents() for a bare
+// /subagents.
 type subagentRosterMsg struct {
-	gen       uint64
-	subs      []SubagentInfo
-	drillable bool
+	gen  uint64
+	subs []SubagentInfo
 }
 
 // pricingSetMsg carries the outcome of PricingController.Set, from
