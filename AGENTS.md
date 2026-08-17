@@ -132,7 +132,14 @@ Conventions worth knowing at agent prompt time:
 
 - **Run presubmits before every push.** `dev/ci/presubmits/*` are the
   same scripts CI runs. Full sweep:
-  `dev/ci/presubmits/{build,lint-go,test-unit,verify-go-format,verify-mod-tidy,vet,verify-vuln}`.
+  `dev/ci/presubmits/{build,lint-go,test-unit,verify-go-format,verify-mod-tidy,vet,verify-vuln}`,
+  plus `verify-coverage` (needs the `coverage.out` that `test-unit`
+  writes) and `verify-apidiff`. Or just `dev/tools/ci`, which runs all of
+  them in that order.
+- **Don't break the exported API by accident.** `verify-apidiff` diffs
+  `package tui` against the last release tag. A deliberate break is
+  acknowledged in `dev/api-breaks.txt` by the PR that makes it — see
+  "Changing the exported API" in CONTRIBUTING.md.
 - **Rebase, don't merge.** Feature branches stay rebased on `main`.
   `git push --force-with-lease` on your own branches is normal; never
   force-push `main`.

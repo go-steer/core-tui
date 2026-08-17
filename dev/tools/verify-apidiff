@@ -1,0 +1,168 @@
+#!/usr/bin/env bash
+# Copyright 2026 The go-steer team
+#
+# Licensed under the Apache License, Version 2.0 (the "License");
+# you may not use this file except in compliance with the License.
+# You may obtain a copy of the License at
+#
+#     http://www.apache.org/licenses/LICENSE-2.0
+#
+# Unless required by applicable law or agreed to in writing, software
+# distributed under the License is distributed on an "AS IS" BASIS,
+# WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+# See the License for the specific language governing permissions and
+# limitations under the License.
+
+# Report every change to the exported API since the last release tag, and
+# fail on the incompatible ones unless they have been acknowledged in
+# dev/api-breaks.txt.
+#
+# N-COMPAT (docs/requirements.md §4). The library is consumed as a Go
+# module, so the exported surface is the product; a removed field or a
+# changed signature breaks a host's build at `go get`. Before this check
+# the only thing standing between an accidental break and a tagged release
+# was whether a reviewer happened to notice.
+#
+# What "acknowledged" means, and why an allowlist rather than a label:
+#
+#   Pre-1.0 the project reserves the right to break the surface at any
+#   minor version, so a hard, unconditional gate would be wrong — it would
+#   block the narrowing work the API audit calls for. But "you may break
+#   it" is not the same as "you may break it silently", and a PR label or
+#   a commit trailer would not survive the squash-merge this repo uses.
+#   dev/api-breaks.txt makes the acknowledgement a reviewable diff hunk:
+#   the author writes down exactly which symbols they are removing, in the
+#   same PR that removes them, and the reviewer sees it next to the code.
+#   That list is also the raw material for the CHANGELOG's Removed section
+#   and for the release notes, so it is not busywork.
+#
+# The escape hatch, concretely:
+#
+#   1. Run this locally. Copy the lines it prints under "Incompatible
+#      changes" into dev/api-breaks.txt, minus the leading "- ".
+#   2. Add a `#` comment above them naming the PR or issue and the reason.
+#   3. Commit both in the PR that makes the change, and record it under
+#      Changed/Removed in CHANGELOG.md.
+#
+#   Cutting a release empties the file: once the tag moves, those breaks
+#   are behind the new baseline and the entries would silently permit a
+#   *second* removal of a symbol that no longer exists. See "Changing the
+#   exported API" in CONTRIBUTING.md.
+#
+# Post-1.0 this becomes the v2 conversation rather than a per-PR one: an
+# incompatible change means a new major version and a /v2 module path, and
+# the allowlist should be empty on every release branch.
+set -euo pipefail
+. "$(dirname "$0")/common.sh"
+cd "$(repo_root)"
+
+# Pinned deliberately. apidiff's classification of a change as compatible
+# or incompatible is the thing being gated on; letting @latest float would
+# let an upstream reclassification turn a green PR red with no local diff.
+APIDIFF_VERSION="v0.0.0-20260813180055-c1d0aacb2297"
+
+MODULE="$(go list -m)"
+ALLOWFILE="${APIDIFF_ALLOWFILE:-dev/api-breaks.txt}"
+
+# Default baseline is the nearest reachable release tag. Override with
+# APIDIFF_BASE=<ref> to diff against something else (a branch point, an
+# older release) while working out the shape of a change.
+BASE="${APIDIFF_BASE:-}"
+if [[ -z "$BASE" ]]; then
+  if ! BASE="$(git describe --tags --abbrev=0 --match 'v[0-9]*' 2>/dev/null)"; then
+    echo "verify-apidiff: no v* tag reachable from HEAD — nothing to compare against, skipping." >&2
+    exit 0
+  fi
+fi
+
+if ! git rev-parse --verify --quiet "${BASE}^{commit}" >/dev/null; then
+  echo "verify-apidiff: base ref '$BASE' not found. In CI this usually means" >&2
+  echo "  the checkout was shallow — actions/checkout needs fetch-depth: 0." >&2
+  exit 1
+fi
+
+ensure_tool apidiff "golang.org/x/exp/cmd/apidiff@${APIDIFF_VERSION}"
+
+WORKDIR="$(mktemp -d)"
+BASETREE="$WORKDIR/base"
+cleanup() {
+  git worktree remove --force "$BASETREE" >/dev/null 2>&1 || true
+  rm -rf "$WORKDIR"
+}
+trap cleanup EXIT
+
+# Module mode (-m) covers every package in one pass, so a new exported
+# package cannot slip in unmeasured the way a hardcoded package list would
+# let it. It also skips `package main`, which is why examples/ needs no
+# exclusion here.
+git worktree add --detach --quiet "$BASETREE" "$BASE"
+( cd "$BASETREE" && apidiff -m -w "$WORKDIR/base.api" "$MODULE" )
+apidiff -m -w "$WORKDIR/head.api" "$MODULE"
+
+echo "exported API: $BASE → HEAD ($MODULE)"
+echo
+
+# apidiff always exits 0 — it reports, it does not judge. The gate is the
+# emptiness of the -incompatible output, so run it twice: once for the
+# full human-readable report, once machine-readably for the decision.
+full="$(apidiff -m "$WORKDIR/base.api" "$WORKDIR/head.api")"
+incompatible="$(apidiff -m -incompatible "$WORKDIR/base.api" "$WORKDIR/head.api")"
+
+if [[ -z "$full" ]]; then
+  echo "No change to the exported API."
+  exit 0
+fi
+
+echo "$full"
+echo
+
+if [[ -z "$incompatible" ]]; then
+  echo "All changes are backward compatible."
+  exit 0
+fi
+
+# Strip apidiff's "- " bullet, and drop comments/blanks from the allowlist,
+# so the two sides compare as bare "symbol: verb" lines.
+mapfile -t breaks < <(printf '%s\n' "$incompatible" | sed 's/^- //')
+allowed=()
+if [[ -f "$ALLOWFILE" ]]; then
+  mapfile -t allowed < <(sed -e 's/#.*//' -e 's/^[[:space:]]*//' -e 's/[[:space:]]*$//' "$ALLOWFILE" | grep -v '^$' || true)
+fi
+
+unacknowledged=()
+for b in "${breaks[@]}"; do
+  hit=0
+  for a in "${allowed[@]:-}"; do
+    if [[ "$b" == "$a" ]]; then
+      hit=1
+      break
+    fi
+  done
+  if [[ "$hit" -eq 0 ]]; then
+    unacknowledged+=("$b")
+  fi
+done
+
+if [[ "${#unacknowledged[@]}" -eq 0 ]]; then
+  printf 'All %d incompatible change(s) are acknowledged in %s.\n' \
+    "${#breaks[@]}" "$ALLOWFILE"
+  exit 0
+fi
+
+{
+  echo
+  printf '%d incompatible change(s) to the exported API are not acknowledged in %s:\n\n' \
+    "${#unacknowledged[@]}" "$ALLOWFILE"
+  printf '  %s\n' "${unacknowledged[@]}"
+  cat <<EOF
+
+If the break is deliberate, append those lines to $ALLOWFILE with a
+comment naming the issue and the reason, and record it under Changed or
+Removed in CHANGELOG.md. See the header of dev/tools/verify-apidiff.
+
+If it is not deliberate, the usual causes are an exported identifier
+renamed without a deprecated alias, a struct field removed, or a
+signature that grew a parameter instead of an option.
+EOF
+} >&2
+exit 1

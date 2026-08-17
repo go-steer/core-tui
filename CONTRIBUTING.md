@@ -89,7 +89,23 @@ Every source file carries the full Apache 2.0 header attributed to The go-steer 
 - Unit tests live next to the code (`*_test.go`) and drive the `bubbletea.Model` via direct `Update(msg)` calls plus assertions on history / palette / modal state.
 - Smoke tests run a headless `tea.Program` over an in-tree scripted agent, covering startup/shutdown and the flows that span goroutines — chiefly the permission round-trip. The harness doesn't exist yet ([#81](https://github.com/go-steer/core-tui/issues/81)); until it does, those paths are covered only by direct `Update(msg)` tests.
 - A new feature without a test is not done. A new bug fix without a regression test makes it easy for the bug to come back.
-- Target ≥ 70% statement coverage in `package tui` (per [`docs/requirements.md`](./docs/requirements.md) §N-TEST).
+- Target ≥ 70% statement coverage in `package tui` (per [`docs/requirements.md`](./docs/requirements.md) §N-TEST). This is enforced, not aspirational — `dev/tools/verify-coverage` fails the required `test` job below the floor.
+
+### Changing the exported API
+
+The library is consumed as a Go module, so the exported surface is the product: a removed field or a changed signature breaks a host's build at `go get`. The `apidiff` job compares every exported symbol in the module against the last release tag on each PR, reports the additions, and fails on incompatible changes.
+
+Pre-1.0 you are allowed to break the surface — but not silently. To land a deliberate break:
+
+1. Run `dev/ci/presubmits/verify-apidiff` locally.
+2. Copy the lines it lists under **Incompatible changes** into [`dev/api-breaks.txt`](./dev/api-breaks.txt), dropping the leading `- `, with a `#` comment naming the issue and the reason.
+3. Record the same change under **Changed** or **Removed** in [`CHANGELOG.md`](./CHANGELOG.md).
+
+Both go in the PR that makes the change, so a reviewer sees the acknowledgement next to the code that needs it. Override the baseline with `APIDIFF_BASE=<ref>` while you're still working out the shape of a change.
+
+**Cutting a release empties `dev/api-breaks.txt`.** Once the tag moves, those breaks sit behind the new baseline and a leftover entry would silently permit a second, unrelated removal. The entries are the raw material for the release notes' Removed section, so fold them in before you clear them.
+
+Post-1.0 this stops being a per-PR conversation: an incompatible change means a new major version and a `/v2` module path, and the allowlist should be empty on every release branch.
 
 ## Project layout
 

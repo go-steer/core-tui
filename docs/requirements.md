@@ -717,6 +717,18 @@ listed in `/help`:
   wiring sketches, the second is a fixture, and averaging either in
   measures the shape of the repo rather than the coverage of the
   library.
+- **N-COMPAT** The exported surface of `package tui` is the product —
+  hosts consume it as a Go module, so a removed field or a changed
+  signature breaks their build at `go get`. `dev/tools/verify-apidiff`
+  diffs the module's exported API against the last release tag on every
+  PR, reports compatible additions, and fails on incompatible changes
+  that `dev/api-breaks.txt` does not acknowledge. Pre-1.0 a break is
+  permitted at any minor version but must be written down in that file
+  and in the CHANGELOG by the PR that makes it; post-1.0 it means a new
+  major version and a `/v2` module path. The check is not in the required
+  set on `main`: it depends on a tag being fetchable, and that failure
+  mode should not be able to redden unrelated PRs. See "Changing the
+  exported API" in CONTRIBUTING.md.
 - **N-DOC** Every exported type and function has a doc comment.
 - **N-A11Y** Screen-reader friendliness is not a goal of v1; document
   this limit in the README.

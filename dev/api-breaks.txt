@@ -1,0 +1,20 @@
+# Acknowledged incompatible changes to the exported API since the last
+# release tag. Read and enforced by dev/tools/verify-apidiff.
+#
+# One apidiff line per entry, exactly as the tool prints it under
+# "Incompatible changes" but without the leading "- ". Blank lines and
+# everything after a `#` are ignored. For example:
+#
+#   # #77: Options.Foo never had a caller outside the examples and its
+#   # zero value was already the only supported one.
+#   ./tui.Options.Foo: removed
+#
+# An entry here is not a rubber stamp — it is a claim, made in the PR that
+# breaks the symbol, that the break is intended and written down. Record
+# the same change under Changed or Removed in CHANGELOG.md.
+#
+# Cutting a release empties this file: once the tag moves, these breaks
+# sit behind the new baseline, and a leftover entry would silently permit
+# a second, unrelated removal of a symbol that no longer exists.
+#
+# (empty — no acknowledged breaks against v0.20.0)
