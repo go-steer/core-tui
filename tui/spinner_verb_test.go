@@ -115,7 +115,11 @@ func TestSpinnerLine_DefaultPoolsAreNormalized(t *testing.T) {
 			pool = m.workingPhrases()
 		}
 		for i, verb := range pool {
-			m.thinkingIdx = i
+			// spinnerFrame counts glyph frames, and the verb only
+			// advances every spinnerFramesPerVerb of them (issue
+			// #162), so selecting pool entry i means landing on the
+			// first frame of its window rather than on frame i.
+			m.spinnerFrame = i * spinnerFramesPerVerb
 			line := ansi.Strip(m.renderSpinnerLine())
 			assertOneTrailingEllipsis(t, line, trimTrailingEllipsis(verb))
 		}

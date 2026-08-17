@@ -862,12 +862,16 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		// Identity guard (issue #112). The two level gates below can
 		// only tell whether *a* spinner should be running right now,
 		// not which chain this tick belongs to — and m.state flips
-		// back to stateStreaming well inside one spinnerCadence when
-		// a turn end is immediately followed by another submitTurn
-		// (queue drain, auto-continue). The superseded chain's next
-		// tick therefore passes the level gates and re-arms, and the
-		// verb pool rotates at 2x for the rest of the session. The
-		// stamp is what distinguishes the chains.
+		// back to stateStreaming well inside one spinnerFrameCadence
+		// when a turn end is immediately followed by another
+		// submitTurn (queue drain, auto-continue). The superseded
+		// chain's next tick therefore passes the level gates and
+		// re-arms, and the animation runs at 2x for the rest of the
+		// session. The stamp is what distinguishes the chains.
+		//
+		// The window this can happen in got ten times smaller when
+		// issue #162 sped the tick up, which makes the bug rarer and
+		// no less real — the guard is what fixes it, not the odds.
 		if msg.gen != m.spinnerGen {
 			return m, nil
 		}
@@ -883,7 +887,7 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		if !m.turnInFlight() {
 			return m, nil
 		}
-		m.thinkingIdx++
+		m.spinnerFrame++
 		m.markViewportDirty()
 		if refresh := m.scheduleCoalescedRefresh(); refresh != nil {
 			return m, tea.Batch(m.armSpinner(), refresh)
@@ -1905,7 +1909,7 @@ func (m Model) submitTurn(text string) Model {
 	m.inProgressStablePrefix = ""
 	m.inProgressStableRender = ""
 	m.toolActive = false
-	m.thinkingIdx = 0
+	m.spinnerFrame = 0
 	m.spinnerActive = true
 	// A new turn starts a new spinner animation, so it retires the
 	// previous chain (issue #112). Turn-level granularity is the
