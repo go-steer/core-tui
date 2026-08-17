@@ -317,6 +317,20 @@ type Branding struct {
 	EmptyStateHint   string
 	FooterHint       string
 	InputPlaceholder string
+
+	// DisableBanner suppresses the startup wordmark banner — the
+	// block-face rendering of Wordmark that sits above the empty-state
+	// hint until the first message arrives (issue #165).
+	//
+	// The banner already stands itself down for a reduced-motion or
+	// NO_COLOR environment, for a chat window too narrow or too short
+	// to hold it, and for a wordmark carrying a rune the block face
+	// does not have; in every one of those the hint renders on its
+	// own, exactly as it did before the banner existed. This field is
+	// for the host that simply does not want it — an embedded pane, a
+	// screenshot harness, a deployment where the brand line is
+	// somebody else's chrome.
+	DisableBanner bool
 }
 
 // StatusLayout picks the persistent status surface (R-USE-2).
