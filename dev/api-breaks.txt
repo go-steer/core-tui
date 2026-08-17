@@ -17,4 +17,13 @@
 # sit behind the new baseline, and a leftover entry would silently permit
 # a second, unrelated removal of a symbol that no longer exists.
 #
-# (empty — no acknowledged breaks against v0.20.0)
+# #213: Focusable had no implementor and no consumer anywhere in the tree.
+# Per-row selection styling is drawn by the list in the gutter (select.go),
+# not by the item, so the interface promised a mechanism nobody built.
+./tui.Focusable: removed
+
+# #213: ToolRenderer had no registration seam — toolRendererFor dispatches
+# over package-private values and Options has no renderer field, so a host
+# could implement it and never install it. Unexported, not deleted;
+# re-exporting it beside an Options seam is a compatible change later.
+./tui.ToolRenderer: removed

@@ -13,7 +13,7 @@
 // limitations under the License.
 
 // Per-tool rendering strategy (agentic-tui skill §14). One
-// ToolRenderer interface, one concrete renderer per well-known
+// toolRenderer interface, one concrete renderer per well-known
 // tool, plus a generic fallback; a factory dispatches by tool
 // name. renderMessage's RoleTool case routes through the factory
 // so per-tool layout / framing can diverge without growing the
@@ -33,7 +33,7 @@ import (
 	"charm.land/lipgloss/v2"
 )
 
-// ToolRenderer is the contract for one tool's call/result
+// toolRenderer is the contract for one tool's call/result
 // rendering. renderMessage feeds it the message, the styled head
 // (already glyph + bold name), and the available width; the
 // renderer returns the full styled string for the row, including
@@ -44,7 +44,18 @@ import (
 // factory can hand out a single shared instance per tool. The
 // preview block is shared across all renderers via withPreview;
 // per-tool renderers focus on the call-line layout only.
-type ToolRenderer interface {
+//
+// Unexported deliberately (issue #213). Its Model-free signature
+// makes it the one render interface a host could plausibly
+// implement, and toolRendererFor dispatches over package-private
+// values with no way to register another — so exporting it
+// promised an extension point that does not exist, and freezing
+// that promise at 1.0 would freeze the missing seam with it.
+// Adding the seam later is a compatible change: an
+// Options.ToolRenderers map and a re-export can land the day a
+// host asks for one. Removing the interface after the freeze
+// could not.
+type toolRenderer interface {
 	RenderCall(msg Message, head string, width int, styles Styles) string
 }
 
@@ -105,16 +116,16 @@ func (fileToolRenderer) RenderCall(msg Message, head string, width int, styles S
 }
 
 var (
-	rendererGeneric ToolRenderer = genericToolRenderer{}
-	rendererBash    ToolRenderer = bashToolRenderer{}
-	rendererFile    ToolRenderer = fileToolRenderer{}
+	rendererGeneric toolRenderer = genericToolRenderer{}
+	rendererBash    toolRenderer = bashToolRenderer{}
+	rendererFile    toolRenderer = fileToolRenderer{}
 )
 
 // toolRendererFor returns the per-tool renderer for name, or the
 // generic fallback. Name matching is case-insensitive on the
 // well-known builtins; MCP tools (any name without a builtin
 // match) get the generic renderer.
-func toolRendererFor(name string) ToolRenderer {
+func toolRendererFor(name string) toolRenderer {
 	switch strings.ToLower(name) {
 	case "bash":
 		return rendererBash
