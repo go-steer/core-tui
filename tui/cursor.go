@@ -249,9 +249,13 @@ func (m Model) modalCursor(modal string) (c *tea.Cursor, covered bool) {
 	if c == nil {
 		return nil, true
 	}
-	// Every arm above composites with lipgloss.Place(m.width,
-	// m.height, Center, Center, ...), so the modal's top-left cell is
-	// derived from its own measured size.
+	// Every arm above is drawn by compositeModal, which centres the
+	// block with these two calls, so the modal's top-left cell is
+	// derived from its own measured size. Both sides call
+	// placeCenterOffset rather than each spelling out gap/2: the draw
+	// origin and the caret origin have to agree exactly, and nothing
+	// would catch them drifting apart — the golden corpus captures
+	// tea.View.Content, not tea.View.Cursor.
 	c.X += placeCenterOffset(m.width, lipgloss.Width(modal))
 	c.Y += placeCenterOffset(m.height, lipgloss.Height(modal))
 	return c, true
