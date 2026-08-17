@@ -103,8 +103,8 @@ func TestModalEdge_BodyFitsTheReducedColumn(t *testing.T) {
 	for _, w := range modalEdgeWidths {
 		t.Run(strconv.Itoa(w), func(t *testing.T) {
 			m := newFrameModel(StatusHeader, w, h)
-			d := newThemePickerDialog(m.themeName)
-			block := d.Render(m.width, &m)
+			askThemePicker(&m)
+			block := m.overlayStack.Render(m.width, &m)
 
 			bw := lipgloss.Width(block)
 			inner := modalInnerWidth(bw)

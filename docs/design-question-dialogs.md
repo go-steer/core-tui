@@ -517,6 +517,25 @@ type question interface {
 }
 ```
 
+**As shipped in stage 1 the seam has two more numbers on it**, and
+both are corrections to the sketch above rather than additions to it.
+
+`Body(width, termHeight int, st Styles)`. A question whose body is
+longer than the terminal has to window it, and the row budget depends
+on how many chrome rows the question itself spends inside `Body` — the
+pickers pay `modalChromeRows+1` for their filter row. Leaving the
+height overlay-owned would mean the overlay computing a budget it
+cannot know the inputs to. `termHeight` carries `RenderContext.Height`'s
+contract exactly, zero included: unknown geometry, no windowing.
+`scrollQuestion.Measure` already presupposed the question knew this
+number; this only says where it comes from.
+
+`Width(avail int) int`. How wide a modal should be is a property of
+its content — 72 columns for a theme list, 96 for a tool-call body —
+and every dialog already carried its own preferred width and floor.
+The overlay owns the chrome inside that width; it has no basis for
+choosing it.
+
 Optional extensions, unchanged in spirit from today's:
 
 ```go
@@ -562,6 +581,19 @@ type resolver func(a answer, m *Model) tea.Cmd
 // questions; Open remains for viewers.
 func (o *Overlay) Ask(q question, r resolver)
 ```
+
+Shipped as `ask`, lower-case. Its parameters are unexported, so an
+exported `Ask` would be a method a host can see and can never call —
+API surface with no caller, and posture A's whole claim is that stage
+1 adds none. Exporting the family is posture B (§10.2) and is a
+separate decision.
+
+The `resolver` signature is also load-bearing in a way worth spelling
+out: `m` is a **parameter**, not something the resolver closes over.
+`Model.Update` has a value receiver, so a `*Model` captured when the
+question was asked points at the per-`Update` copy that opened it and
+is dead by the time the answer arrives. Every effect a widget wants to
+cause has to route through something the Update loop hands it.
 
 Exactly-once is the overlay's job, and it is what closes the
 `applySwitchTarget` hole from §1.4:
@@ -614,6 +646,19 @@ m.overlayStack.Ask(newThemePicker(m.themeName), askOperator, func(a answer, m *M
 	return nil
 })
 ```
+
+**What this example leaves out is the live preview**, and it is the
+one effect that could not simply move. Cursor movement has to apply a
+theme *before* there is an answer, and by the paragraph above the
+widget has no `*Model` to apply it with. So it returns a
+`themePreviewMsg` on the `Cmd` that `Key` already provides for a
+question's own machinery, and the Update loop applies it — guarded on
+the picker still being open, because the message is asynchronous and
+an operator who arrows and immediately escapes would otherwise have
+the stale preview overwrite the restore. That guard is a bug that did
+not exist before the change and now cannot happen; the point of
+recording it here is that it is the shape of every "the widget needs
+to touch the model mid-question" case that follows.
 
 The effects did not get smaller — they moved. That is the whole
 change, and it is worth being blunt that the line count is roughly
@@ -873,6 +918,17 @@ Two caveats stated rather than papered over.
    the owner's intent behind the criterion was "the widgets live in a
    package that cannot see `Model`", that is #115 and it is blocked.
    §14 Q6.
+
+   A third caveat surfaced on contact, and it has a standard answer.
+   Under posture A the whole family is unexported, so an external test
+   cannot *name* `newThemePickerQuestion` or `chosen` either. Stage 1
+   reaches them through `tui/export_test.go` — a `package tui` file the
+   go tool compiles only under `go test`, so apidiff does not see it
+   and a host cannot import it. The bridge is type **aliases**, not
+   wrappers: the external test therefore asserts against the very
+   types the package switches over, and a variant renamed or a field
+   retyped fails to compile in the test rather than being absorbed by
+   a shim that still builds.
 2. **`Styles` is exported and stays exported**, so "no theme" is met
    in the sense of "the zero value works", not "no theme type is
    reachable". `RenderContext.Render` already tolerates a zero
@@ -1267,15 +1323,28 @@ itself rather than leaving `View`'s `default:` arm to absorb it.
 This answers §14 Q2: **sealed**, since the condition it was
 contingent on now holds.
 
-**Stage 1 — the answer type and the resolver, with one caller.**
-Introduce `answer` + variants, `question`, `resolver`, `Overlay.Ask`,
-`Overlay.resolveAll`. Convert exactly one dialog — the **theme
-picker**, because it is the smallest, has the most effects per line
-(§1.1), and is the one whose host-visible message has no consumer
-(§1.4), so a mistake is cheap. Ship the external-test-package
-criterion (§8) with it as `tui/question_external_test.go` in
-`package tui_test`. No exported change: `Dialog` and the old path both
-still exist.
+**Stage 1 — the answer type and the resolver, with one caller. Done,
+2026-08-17.** All seven variants, `question`, `cursorQuestion`,
+`resolver`, `Overlay.ask` and `Overlay.resolveAll` are in
+`tui/question.go`; the theme picker is the one caller, in
+`tui/question_themepicker.go`; the §8 criterion ships as
+`tui/question_external_test.go`. No exported change — apidiff is
+unmoved, and the questions ride the existing stack through an
+`askedQuestion` adapter that implements `Dialog`, `KeyMsgDialog` and
+`cursorDialog`, so routing, z-order, the esc cascade, the wheel and
+the caret all keep working against the old contract while the two
+shapes coexist.
+
+Four things came out differently from the sketch, each recorded where
+it belongs: `Body` takes the terminal height and `Width` joined the
+seam (§6.1), `Ask` shipped as `ask` (§6.2), the live preview became a
+scheduled message (§6.3), and the external test reaches the unexported
+family through `export_test.go` (§8). Two deliberate omissions:
+`scrollQuestion` is not declared, because an interface with no
+implementor is a guess rather than a seam and the first scrolling
+question arrives in stage 3; and the adapter does not implement
+`ScrollDialog`, so a wheel tick over a question still steps the list
+by one row instead of three.
 
 **Stage 2 — the grace window moves to `Overlay`.** `askOrigin`,
 `Commits`, `resolveAll` on `applySwitchTarget` and on quit. Fixes the
@@ -1428,3 +1497,10 @@ that does not exist.
   enabled and the eleven enum switches they found are total. Q2 is
   answered — sealed. Q1 (`Asker`) is still open and still gated on
   stage 3.
+- 2026-08-17 — stage 1 landed: the sealed `answer`, the `question`
+  seam, the `resolver`, and the theme picker as the first caller. The
+  sealing is real — `answer` carries `//sumtype:decl`, so the resolver
+  names all seven variants and a missing arm is a lint failure rather
+  than a silent fallback. Four deviations from the sketch are recorded
+  in §6.1, §6.2, §6.3 and §8. Q1 and Q3 are still open; neither gates
+  stage 2 or 3.
