@@ -191,7 +191,264 @@ func frameStates() []frameState {
 				return withTallTextarea(withHostileTranscript(m))
 			},
 		},
+		// --- The host-content dialogs (issue #211) -----------------
+		//
+		// The theme picker above was the only dialog in this list,
+		// and it was chosen precisely because it needs no host
+		// capability to populate itself — its rows are a compiled-in
+		// table of theme names, none of which is longer than a word.
+		// That makes it the WEAKEST possible witness for the three
+		// assertions that iterate this slice: a picker whose every
+		// row fits cannot break the width contract (#159), cannot
+		// push a panel out of its rectangle (#158), and cannot blank
+		// a background row it does not cover (#156).
+		//
+		// The five below are the dialogs whose content comes from the
+		// host, so their rows are as long as some other program's
+		// strings happen to be. Each one seeds at least one row that
+		// overruns the dialog's own width on its own — a
+		// provider-qualified model id, a session Display with a
+		// Description under it, a subagent report, a tool response —
+		// because the case worth testing is the one where the
+		// renderer has to bound something it did not author, and #159
+		// found the sidebar failing on exactly that shape of input.
+		//
+		// The short heights in frameHeights (4 and 10) are below
+		// modalFullscreenBelow, so these states also drive every
+		// windowing dialog here through the fullscreen regime, where
+		// the body is a scrollView with a scrollbar column glued to
+		// the right of every row and the minModalBodyRows floor is
+		// off. That is the geometry #157 found no golden had ever
+		// covered, and it is now under the width and rectangle
+		// invariants at five different modal surfaces.
+		{
+			name: "model-picker",
+			setup: func(_ *testing.T, m Model, _, _ int) Model {
+				return withModelPicker(withHostileTranscript(m), "")
+			},
+		},
+		{
+			// The filter row (dialog_filter.go, issue #117) is a
+			// different render path from the unfiltered picker above,
+			// not merely a shorter list: the count readout replaces
+			// the placeholder, and every visible row is rebuilt by
+			// highlightSpan, which splices SGR pairs INTO the middle
+			// of a host-supplied string. Those escapes cost zero
+			// cells and there is no arithmetic anywhere that says so
+			// — fitRow measures with ansi.StringWidth and truncates
+			// with ansi.Truncate, and the two agreeing about a
+			// highlighted overlong row is the thing being asserted.
+			//
+			// The query is chosen to keep the longest row in the
+			// result set. A filter that narrowed to the short rows
+			// would test the highlighter against content that fits,
+			// which is the vacuous case this whole block exists to
+			// avoid.
+			name: "model-picker-filtered",
+			setup: func(_ *testing.T, m Model, _, _ int) Model {
+				return withModelPicker(withHostileTranscript(m), "gateway")
+			},
+		},
+		{
+			name: "session-picker",
+			setup: func(_ *testing.T, m Model, _, _ int) Model {
+				m = withHostileTranscript(m)
+				m.opts.Agent = &switchAgent{id: "cur", sessions: frameSessions()}
+				d := newSessionPickerDialog()
+				d.applySessions(frameSessions())
+				// Off row 0: the cursor cell is two lines tall and
+				// listWindow is called twice to keep both of them on
+				// screen (see sessionPickerDialog.Render). At row 0
+				// that pair of calls is a no-op and the arithmetic it
+				// exists for never runs.
+				d.idx = 2
+				m.overlayStack.Open(d)
+				return m
+			},
+		},
+		{
+			name: "subagent-detail",
+			setup: func(_ *testing.T, m Model, _, _ int) Model {
+				m = withHostileTranscript(m)
+				d := newSubagentDialog("cluster-auditor")
+				d.apply(subagentEventsMsg{
+					name:    "cluster-auditor",
+					info:    frameSubagentInfo(),
+					hasInfo: true,
+					page:    frameSubagentPage(),
+				})
+				// Unpinned, i.e. an operator who scrolled back to the
+				// head of the log. Pinned, the window sits on the
+				// tail and the section rules and the report — the
+				// widest rows this dialog composes — are never in it.
+				d.pinned = false
+				m.overlayStack.Open(d)
+				return m
+			},
+		},
+		{
+			name: "tool-call-detail",
+			setup: func(_ *testing.T, m Model, _, _ int) Model {
+				m = withHostileTranscript(m)
+				m = withToolCalls(m)
+				m.overlayStack.Open(newToolCallDialog(len(collectToolCalls(m.history.Snapshot()))))
+				return m
+			},
+		},
 	}
+}
+
+// --- Host-content fixtures for the dialog states (issue #211) ------
+//
+// Every string in here is deliberately longer than the dialog that
+// has to render it: the model picker composes against 64 columns, the
+// session picker against 72, and both clamp down to width-4 on a
+// narrow terminal, so a 40-column cell of the grid gives them 36. A
+// fixture whose longest row is thirty cells would leave the grid
+// green no matter what the renderers did with it.
+
+// frameModels is the model picker's list. One row is a
+// provider-qualified id of the shape a self-hosted gateway actually
+// produces — three path segments and a pile of suffixes — with a
+// Display and a Description beside it, so the composed row is the id
+// TWICE plus prose. That row alone is wider than the dialog at every
+// width in the matrix.
+func frameModels() []ModelInfo {
+	return []ModelInfo{
+		{ID: "acme/text-small", Display: "Text Small", Description: "fast"},
+		{
+			ID: "self-hosted-eu-west-1/inference-gateway/text-xl-405b-instruct-fp8-128k-preview",
+			Display: "Text XL 405B Instruct " +
+				"(FP8 quantised, 128k context, EU West inference gateway)",
+			Description: "the row that overruns the dialog on its own",
+		},
+		{ID: "acme/text-medium", Display: "Text Medium"},
+		// No Display: the id is the label, and the parenthesised
+		// second copy of it is suppressed. A different branch of the
+		// row builder from every other entry here.
+		{ID: "self-hosted-eu-west-1/inference-gateway/text-large-experimental-rc7"},
+		{ID: "acme/text-large", Display: "Text Large", Description: "the default"},
+	}
+}
+
+// withModelPicker opens a loaded model picker over m, optionally with
+// a filter already typed into it.
+//
+// The current model is set to the longest id in the list so the
+// "(current)" tag lands on the row that was already too wide — the
+// tag is appended AFTER the id, which is the position where an
+// unbounded row grows rather than the position where it gets cut.
+//
+// The filter is typed through Overlay.HandleKeyMsg rather than poked
+// into the widget, so the state the grid measures is the one a
+// keystroke actually produces.
+func withModelPicker(m Model, filter string) Model {
+	models := frameModels()
+	current := models[1].ID
+	m.opts.Agent = &swapAgent{id: current, models: models}
+	m.currentModel = current
+	d := newModelPickerDialog()
+	d.applyModels(models, current)
+	m.overlayStack.Open(d)
+	if filter != "" {
+		typeIntoPicker(&m, filter)
+	}
+	return m
+}
+
+// frameSessions is the session picker's list. Its cells are two lines
+// — Display over ID + Description — and every field on them is
+// host-supplied and spliced in verbatim, which is what makes this the
+// dialog with the most untrusted text in it.
+//
+// One row overruns on the title line, one on the detail line, and one
+// is an action row (issue #56), whose title carries a chevron instead
+// of an id and whose detail line is built from a different branch of
+// sessionCell.
+func frameSessions() []SessionInfo {
+	return []SessionInfo{
+		{ID: "sess-001", Display: "nightly refactor", Current: true},
+		{
+			ID: "sess-002",
+			Display: "refactor the admission path so every controller " +
+				"shares one decision cache instead of three",
+			Description: "last touched two days ago",
+		},
+		{
+			ID:      "endpoint-eu-west-1-shard-07-replica-3-session-0000000000000042",
+			Display: "prod incident",
+			Description: "attached over the daemon socket at " +
+				"/var/run/a-really-quite-long-host-supplied-socket-path/endpoint.sock",
+		},
+		{ID: "sess-004"}, // no Display: the id is the title, no detail line
+		{ID: "attach", Display: "+ Attach to endpoint…", Input: &SessionInput{
+			Prompt: "Daemon URL:",
+			Submit: func(string) (SwitchTarget, error) {
+				return SwitchTarget{Agent: &bareAgent{id: "remote"}}, nil
+			},
+		}},
+	}
+}
+
+// frameSubagentInfo / frameSubagentPage seed the subagent drill-down.
+// The report is untruncated by contract (issue #70) — it is wordWrap'd
+// to the content column rather than cut — so it is the one body a
+// host can make arbitrarily tall, and Truncated is set so the
+// "(older turns truncated)" notice is in the composed body too.
+func frameSubagentInfo() SubagentInfo {
+	return SubagentInfo{
+		Name:   "cluster-auditor",
+		Status: "running",
+		LastReport: strings.Repeat(
+			"the audit found a node whose kubelet has been unready for longer "+
+				"than the eviction toleration and no controller has claimed it. ", 4),
+		StartedAt: time.Date(2026, 8, 15, 9, 0, 0, 0, time.UTC),
+	}
+}
+
+func frameSubagentPage() SubagentEventPage {
+	events := make([]SubagentEvent, 0, 12)
+	for i := 1; i <= 12; i++ {
+		events = append(events, SubagentEvent{
+			Seq:       int64(i),
+			Timestamp: time.Date(2026, 8, 15, 9, i, 0, 0, time.UTC),
+			Author:    "model",
+			Text: "turn " + strconv.Itoa(i) + " " +
+				strings.Repeat("of a log line the host wrote and this dialog has to bound. ", 3),
+		})
+	}
+	return SubagentEventPage{Events: events, NextSince: 12, Truncated: true}
+}
+
+// withToolCalls appends the tool rows the tool-call overlay drills
+// into. The response map is the host's, JSON-rendered by
+// renderToolDetail, and it is both wider and taller than the modal —
+// wider so the width contract has something to bound, taller so the
+// body windows and the scrollbar column appears.
+func withToolCalls(m Model) Model {
+	m.history.Append(Message{
+		Role:       RoleTool,
+		ToolName:   "read_file",
+		ToolCallID: "call-0000000000000000000000000001",
+		ToolArgsMap: map[string]any{
+			"path": "/var/run/a-really-quite-long-host-supplied-socket-path/" +
+				"and/then/some/more/of/it/config.yaml",
+		},
+		ToolResponseMap: map[string]any{
+			"content": strings.Repeat(
+				"a line of the file that is itself wider than the overlay renders it. \n", 30),
+		},
+	})
+	m.history.Append(Message{
+		Role:        RoleTool,
+		ToolName:    "search_the_whole_repository_for_a_pattern",
+		ToolCallID:  "call-0000000000000000000000000002",
+		ToolArgsMap: map[string]any{"pattern": strings.Repeat("TODO|FIXME|", 12)},
+		ToolError: "regex compile failed: " +
+			strings.Repeat("nested quantifier at offset 400; ", 4),
+	})
+	m.refreshViewport()
+	return m
 }
 
 // withLiveStretch puts the model mid-LiveAgent-stretch: liveMode on,
@@ -242,6 +499,107 @@ func withHostileTranscript(m Model) Model {
 	}
 	m.refreshViewport()
 	return m
+}
+
+// TestFrameStates_DialogSeedsOverrun is the guard on the fixtures the
+// five dialog states are built from, and it is the reason those
+// states are worth having at all.
+//
+// A picker whose every row fits inside the dialog is a state that
+// cannot fail any of the three assertions iterating frameStates: the
+// width contract is met by content that was never wide enough to
+// break it, the panel rectangle is met by a block that never grew,
+// and the background survives a modal that never spilled. #159's
+// defect — the sidebar's section rule one cell over its own column —
+// only became visible on host content longer than the panel, so a
+// fixture that fits is a fixture that turns a new grid cell into
+// decoration.
+//
+// The widths below are the content column each dialog fits its rows
+// to at its PREFERRED width: the widest it ever gets, and therefore
+// the hardest bar for a seed row to clear. Cleared there, it is
+// cleared at every width in the matrix. The two picker widths are
+// literals inside their Render methods rather than named constants;
+// if one of them grows, this is the test that says so.
+func TestFrameStates_DialogSeedsOverrun(t *testing.T) {
+	m := newFrameModel(StatusHeader, 200, 50)
+
+	var modelRows []string
+	for _, mi := range frameModels() {
+		modelRows = append(modelRows, mi.Display+"  ("+mi.ID+")  "+mi.Description)
+	}
+	var sessionRows []string
+	for _, s := range frameSessions() {
+		sessionRows = append(sessionRows, s.Display, s.ID+"  "+s.Description)
+	}
+	subagentRows := []string{frameSubagentInfo().LastReport}
+	for _, e := range frameSubagentPage().Events {
+		subagentRows = append(subagentRows, e.Text)
+	}
+	tm := withToolCalls(m)
+	var toolRows []string
+	for _, tool := range collectToolCalls(tm.history.Snapshot()) {
+		detail := renderToolDetail(tool.ToolArgsMap, tool.ToolResponseMap, tool.ToolError, m.styles)
+		toolRows = append(toolRows, strings.Split(detail, "\n")...)
+	}
+
+	cases := []struct {
+		name  string
+		width int
+		rows  []string
+	}{
+		{"model picker", 64 - 4, modelRows},
+		{"session picker", 72 - 4, sessionRows},
+		{"subagent detail", subagentDialogPreferredWidth - 6, subagentRows},
+		{"tool call detail", toolCallDialogPreferredWidth - 6, toolRows},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			if widest := widestRow(tc.rows); widest <= tc.width {
+				t.Errorf("the widest seeded row is %d cells and %s fits its rows to %d — "+
+					"nothing in this fixture has to be bounded, so the grid cell that renders it "+
+					"passes on the fixture's merit rather than the renderer's",
+					widest, tc.name, tc.width)
+			}
+		})
+	}
+
+	// The filtered state is the one that can go vacuous without any
+	// fixture changing: a query that matched nothing renders the
+	// "no models match" line, which is one short muted row, and a
+	// query that matched only the short rows renders content that
+	// fits. Both are green and neither tests the highlighter.
+	t.Run("the filter keeps the overrunning row", func(t *testing.T) {
+		fm := withModelPicker(newFrameModel(StatusHeader, 200, 50), "gateway")
+		d, ok := fm.overlayStack.Front().(*modelPickerDialog)
+		if !ok {
+			t.Fatalf("front dialog is %T, want *modelPickerDialog", fm.overlayStack.Front())
+		}
+		if d.filter.value() != "gateway" {
+			t.Fatalf("filter row holds %q — the keystrokes did not reach it", d.filter.value())
+		}
+		var rows []string
+		for _, mi := range d.rows() {
+			rows = append(rows, mi.Display+"  ("+mi.ID+")  "+mi.Description)
+		}
+		if len(rows) == 0 {
+			t.Fatal("the filter matched nothing: the state renders one muted line and " +
+				"exercises neither the row builder nor highlightSpan")
+		}
+		if widest := widestRow(rows); widest <= 64-4 {
+			t.Errorf("the widest matching row is %d cells and the picker fits its rows to %d — "+
+				"the filter narrowed the list down to content that fits",
+				widest, 64-4)
+		}
+	})
+}
+
+func widestRow(rows []string) int {
+	widest := 0
+	for _, r := range rows {
+		widest = max(widest, ansi.StringWidth(r))
+	}
+	return widest
 }
 
 // newFrameModel builds a model sized to (w, h) in the requested
