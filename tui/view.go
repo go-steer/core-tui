@@ -289,6 +289,17 @@ func (m Model) View() tea.View {
 // concatenation, so overflow is possible at every join and nothing
 // caught it at the end.
 //
+// It is a BACKSTOP, not the mechanism (issue #159). The width half of
+// the contract is owned at the render site — chatCutLine bounds every
+// line the transcript puts on screen, and every other renderer is
+// expected to fit the width it was handed, which
+// TestFrameInvariants_RenderersHonorWidth asserts one renderer at a
+// time. That distinction is not decoration: clipping here is the one
+// remedy that destroys the information about WHO overran, so a frame
+// this pass has to rescue is a frame nobody can debug. In steady
+// state the width loop below should find nothing to do; if it fires,
+// the invariant test is the thing that names the culprit.
+//
 // Width: every line is truncated with ansi.Truncate, which is
 // escape-aware — it counts display cells, keeps the SGR state
 // intact, and re-emits a reset. Byte-level slicing would cut an
@@ -336,6 +347,40 @@ func clipFrame(body string, width, height int) string {
 		return body
 	}
 	return strings.Join(lines, "\n")
+}
+
+// fitCells bounds ONE rendered line to width display cells (issue
+// #159). It is the width contract expressed as a function, so the
+// render sites that owe it — chatCutLine for the transcript,
+// renderSidebar for the fixed column — enforce the same thing rather
+// than three hand-rolled truncations that drift.
+//
+// Truncation, never a re-wrap. A wrap turns one line into two, and
+// every height budget in the package (allocateChrome's row
+// allocation, the transcript's lazy line walk) has already been
+// computed against the row count the renderer produced. Cutting is
+// the only bound that leaves that number alone.
+//
+// Two deliberate imprecisions, both in the safe direction:
+//
+//   - ansi.Truncate DROPS a double-width rune that straddles the cut
+//     rather than splitting it, so the result can come back one cell
+//     SHORT of width. A bound that occasionally under-shoots is fine;
+//     half a glyph on the terminal is not.
+//   - No ellipsis tail. This is a clamp, not a summary — the same
+//     call clipFrame makes, for the same reason: an added "…" costs a
+//     column and reads as intentional content. A renderer that wants
+//     to SAY it elided something wants trimToolArg / GlyphTruncate,
+//     which is a different decision made with the content in hand.
+//
+// A non-positive width means the caller does not know its geometry
+// yet, so the line passes through untouched rather than being clamped
+// to nothing. A line that already fits comes back byte-identical.
+func fitCells(s string, width int) string {
+	if width <= 0 || ansi.StringWidth(s) <= width {
+		return s
+	}
+	return ansi.Truncate(s, width, "")
 }
 
 // chatMinHeight is the floor resize will shrink the viewport to.
@@ -948,13 +993,13 @@ func (m Model) renderStatusLine() string {
 // any rendered value is fiction.
 func (m Model) renderSidebar() string {
 	headerLines := []string{
-		"  " + m.styles.AgentIdentity.Render(GlyphModel+" "+m.displayModelName()),
-		"    " + m.styles.Muted.Render(m.permMode.String()),
+		sidebarRow(2, m.styles.AgentIdentity.Render(GlyphModel+" "+m.displayModelName())),
+		sidebarRow(4, m.styles.Muted.Render(m.permMode.String())),
 	}
 	if line1, line2 := m.usageSummaryStacked(); line1 != "" {
 		headerLines = append(headerLines,
-			"    "+m.styles.Muted.Render(line1),
-			"    "+m.styles.Muted.Render(line2),
+			sidebarRow(4, m.styles.Muted.Render(line1)),
+			sidebarRow(4, m.styles.Muted.Render(line2)),
 		)
 	}
 	header := lipgloss.JoinVertical(lipgloss.Left, headerLines...)
@@ -962,17 +1007,75 @@ func (m Model) renderSidebar() string {
 	return lipgloss.JoinVertical(lipgloss.Left, header, "", sub)
 }
 
-// sidebarSection renders a `─ heading ─` section with body rows.
+// sidebarRow indents one already-styled sidebar line and bounds it to
+// the panel's fixed column (issue #159).
+//
+// The bound is not defensive tidiness — the sidebar is the one panel
+// whose content is host-supplied and whose width is a CONSTANT rather
+// than a share of the terminal. `subagentSummary` renders whatever
+// names a SubagentLister reports, `displayModelName` renders whatever
+// the host calls its model, and a realistic provider-qualified model
+// id ("anthropic/claude-…-extended-thinking") is 50-odd cells against
+// a 32-cell column. Unbounded, JoinVertical widened the WHOLE block
+// to the longest line, JoinHorizontal made the composed body that
+// much wider than the terminal, and clipFrame took the difference off
+// the right edge of every row in the frame — so the visible symptom
+// of a long model name was the sidebar's own content disappearing.
+//
+// Bounding here rather than leaning on that clamp is the whole point
+// of #159: the clamp cannot say which renderer overran, and by the
+// time it runs the sidebar's overrun has already been charged to
+// every other row on the screen.
+func sidebarRow(indent int, styled string) string {
+	return fitCells(strings.Repeat(" ", indent)+styled, sidebarWidth)
+}
+
+// sidebarIndent is the left gutter every sidebar row sits behind. It
+// is part of the fixed column, not extra to it, so the section rule
+// below has to pay for it out of sidebarWidth.
+const sidebarIndent = 2
+
+// sidebarSection renders a `─ heading ─` section with body rows,
+// filling the sidebar's fixed column exactly.
+//
+// The rule length is derived from the label rather than from a
+// hand-counted constant, which is what it used to be. The old
+// `sidebarWidth - len(heading) - 4` had to cover five cells that are
+// not the heading — the label's three (the leading glyph and the
+// space either side of the heading) plus the two-cell indent — and
+// only charged for four, so every section head came out one cell over
+// sidebarWidth. Because JoinVertical pads every part to the width of
+// the widest, that one cell widened the WHOLE sidebar block, header
+// rows included.
+//
+// It stayed invisible because chromeWidth() reserves two columns of
+// slack beside the sidebar, which absorbed the overrun before the
+// frame clamp ever saw it. That is the failure mode issue #159 is
+// about: the panel was not the fixed-width panel it is documented to
+// be, nothing downstream could tell, and the only assertion that
+// could catch it is one that measures the renderer's output against
+// the width the renderer was handed (see
+// TestFrameInvariants_RenderersHonorWidth).
+//
+// The measurement is lipgloss.Width, not len: the glyph in the label
+// is multi-byte, a heading is a display string, and the arithmetic
+// they feed is in cells.
 func (m Model) sidebarSection(heading string, rows ...string) string {
-	hr := strings.Repeat(GlyphRule, sidebarWidth-len(heading)-4)
-	if hr == "" {
-		hr = "─"
+	label := GlyphRule + " " + heading + " "
+	fill := sidebarWidth - sidebarIndent - lipgloss.Width(label)
+	if fill < 1 {
+		// A heading longer than the column has no rule to draw. One
+		// glyph keeps the section reading as a section; the overrun
+		// belongs to the caller that named it, not to the rule.
+		fill = 1
 	}
-	head := "  " + m.styles.SidebarHeading.Render(GlyphRule+" "+heading+" ") + m.styles.Rule.Render(hr)
+	hr := strings.Repeat(GlyphRule, fill)
+	head := sidebarRow(sidebarIndent,
+		m.styles.SidebarHeading.Render(label)+m.styles.Rule.Render(hr))
 	body := make([]string, 0, len(rows)+1)
 	body = append(body, head)
 	for _, r := range rows {
-		body = append(body, "    "+m.styles.Muted.Render(r))
+		body = append(body, sidebarRow(4, m.styles.Muted.Render(r)))
 	}
 	return lipgloss.JoinVertical(lipgloss.Left, body...)
 }
