@@ -406,8 +406,7 @@ func (d *sessionPickerDialog) Render(totalWidth int, m *Model) string {
 		lines = append(lines, scrollView(m.styles, rows, modalBodyWidth(width), view, d.off)...)
 		body = strings.Join(lines, "\n")
 	}
-	footer := "type to filter " + GlyphSeparator + " ↑↓ choose " +
-		GlyphSeparator + " enter attach " + GlyphSeparator + " esc cancel"
+	footer := keyLegend("type to filter", "↑↓ choose", "enter attach", "esc cancel")
 	return RenderContext{
 		Title:  "Choose a Session",
 		Body:   body,

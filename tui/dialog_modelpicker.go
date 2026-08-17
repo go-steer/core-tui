@@ -368,8 +368,7 @@ func (d *modelPickerDialog) Render(totalWidth int, m *Model) string {
 		lines = append(lines, scrollView(m.styles, rows, modalBodyWidth(width), view, d.off)...)
 		body = strings.Join(lines, "\n")
 	}
-	footer := "type to filter " + GlyphSeparator + " ↑↓ choose " +
-		GlyphSeparator + " enter accept " + GlyphSeparator + " esc cancel"
+	footer := keyLegend("type to filter", "↑↓ choose", "enter accept", "esc cancel")
 	return RenderContext{
 		Title:  "Choose a Model",
 		Body:   body,

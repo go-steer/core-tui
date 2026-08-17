@@ -335,7 +335,7 @@ func TestElicitModal_AdvertisesTheKeysItHonors(t *testing.T) {
 			// U+00A0 keyLegend binds it with is a rendering detail
 			// of where the line may break, not part of the promise.
 			plain := func(s string) string {
-				return strings.ReplaceAll(ansi.Strip(s), "\u00a0", " ")
+				return unbindLegend(ansi.Strip(s))
 			}
 			if got := plain(m.renderElicitModal()); !strings.Contains(got, tc.key) {
 				t.Errorf("the modal footer does not offer %q:\n%s", tc.key, got)

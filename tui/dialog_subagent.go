@@ -306,5 +306,5 @@ func subagentDialogFooter(bodyLines, viewport int, pinned bool) string {
 		}
 	}
 	parts = append(parts, "esc close")
-	return strings.Join(parts, "  "+GlyphSeparator+"  ")
+	return keyLegend(parts...)
 }

@@ -447,8 +447,13 @@ func TestSessionPicker_ShortTerminal(t *testing.T) {
 			}
 			lines := sessionPickerLines(d, &m)
 			// The filter row is never windowed away — it is what the
-			// operator edits to get back.
-			if !strings.Contains(ansi.Strip(rendered), filterPlaceholder) {
+			// operator edits to get back. Probed on the prompt rail
+			// as well as the placeholder because the footer says
+			// "type to filter" too, and matching the phrase alone let
+			// the footer stand in for the row at heights that have no
+			// body at all (issue #230).
+			if h >= modalEdgeRows+3 &&
+				!strings.Contains(ansi.Strip(rendered), filterPromptRail+filterPlaceholder) {
 				t.Errorf("filter row scrolled out of the body:\n%s", ansi.Strip(rendered))
 			}
 			// A one-row window can only hold half the cell, and the

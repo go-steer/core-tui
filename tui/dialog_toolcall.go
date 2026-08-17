@@ -254,7 +254,7 @@ func renderToolCallFooter(total, bodyLines, viewport int) string {
 		parts = append(parts, "↑↓ scroll")
 	}
 	parts = append(parts, "esc close")
-	return strings.Join(parts, "  "+GlyphSeparator+"  ")
+	return keyLegend(parts...)
 }
 
 // collectToolCalls returns every RoleTool message from the snapshot
