@@ -220,9 +220,7 @@ func (m Model) View() tea.View {
 			leftParts = append(leftParts, t)
 		}
 		leftParts = append(leftParts, footer)
-		left := lipgloss.NewStyle().Width(chatWidth).Render(
-			lipgloss.JoinVertical(lipgloss.Left, leftParts...),
-		)
+		left := stackColumn(leftParts, chatWidth)
 		sidebar := m.renderSidebar()
 		divider := strings.Repeat(GlyphColumn+"\n", lipgloss.Height(left))
 		body = lipgloss.JoinHorizontal(lipgloss.Top,
