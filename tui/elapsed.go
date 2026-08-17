@@ -31,12 +31,17 @@ import (
 // turnElapsedFloor is how long the turn must have been running
 // before the readout appears at all.
 //
-// One spinnerCadence, because that is the repaint that advances the
-// number: anything shown earlier is a value the operator cannot
-// watch move, and "0s" / "1s" tells them nothing the spinner hasn't
-// already. Starting at the first tick also means the suffix appears
-// exactly once per turn rather than flickering in and out on short
-// turns that finish inside the first cadence.
+// One spinnerCadence: "0s" / "1s" tells the operator nothing the
+// spinner has not already said, and a suffix that appeared on the
+// first repaint would flicker in and out on short turns.
+//
+// Pinned to the verb period rather than to spinnerFrameCadence, which
+// issue #162 split off from it, because the verb period is the beat
+// the operator perceives — the readout arrives with the first phrase
+// change rather than thirty frames before it. That split also means
+// the repaint rate is now ten times the readout's own one-second
+// resolution, so the number is current instead of up to three seconds
+// stale between ticks.
 const turnElapsedFloor = spinnerCadence
 
 // nowFn is the Model's clock. Tests set Model.now directly to make

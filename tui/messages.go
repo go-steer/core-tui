@@ -102,7 +102,8 @@ type turnErrMsg struct {
 // "(interrupted)" notice instead of an error banner.
 type turnCancelledMsg struct{ gen uint64 }
 
-// spinnerTickMsg fires every spinnerCadence to rotate the
+// spinnerTickMsg fires every spinnerFrameCadence to advance the
+// Braille glyph, and every spinnerFramesPerVerb of those to rotate the
 // thinking/working verb (R-CHAT-3). gen is the spinnerGen stamp
 // taken when the tick was armed — the Update handler drops the msg
 // when it no longer matches, so a chain left over from an earlier
