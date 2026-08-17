@@ -326,6 +326,8 @@ func keyPress(stroke string) tea.KeyPressMsg {
 		"tab":    tea.KeyTab,
 		"pgdown": tea.KeyPgDown,
 		"space":  tea.KeySpace,
+
+		"backspace": tea.KeyBackspace,
 	}
 	if code, ok := codes[stroke]; ok {
 		return tea.KeyPressMsg(tea.Key{Code: code})
