@@ -1351,9 +1351,11 @@ func (m Model) handleKey(msg tea.KeyPressMsg) (tea.Model, tea.Cmd) {
 		return m, nil
 	}
 
-	// Elicit modal — Tab/Shift+Tab nav, Enter submit, n decline,
+	// Elicit modal — Tab/Shift+Tab nav, Enter submit, ctrl+d decline,
 	// Space toggle bool/enum, and printable chars feed the focused
-	// string/number field.
+	// string/number field. Decline is a control stroke in form mode
+	// and a letter in URL mode for the same reason: in a form every
+	// printable key belongs to whichever field has the keyboard.
 	if m.pendingElicit != nil {
 		if cmd := m.handleElicitKey(stroke); cmd != nil {
 			return m, cmd
@@ -2930,6 +2932,16 @@ func (m *Model) handleElicitKey(stroke string) tea.Cmd {
 		}
 		m.dispatchElicit(ElicitResult{Action: ElicitActionSubmit, Values: m.elicitValues})
 		return m.elicitListener()
+	case "ctrl+d":
+		// Decline, not cancel: the operator read the request and
+		// answered no. Esc a few lines up in Update is the other
+		// answer — dismissed without deciding — and a server may
+		// treat them differently, so the form needs both (issue
+		// #209). No validation runs: a decline is a complete answer
+		// whatever the fields hold, and the values are dropped
+		// rather than sent, because nothing in them was agreed to.
+		m.dispatchElicit(ElicitResult{Action: ElicitActionDecline})
+		return m.elicitListener()
 	case "tab":
 		m.elicitFieldIdx = (m.elicitFieldIdx + 1) % len(req.Fields)
 		m.refreshViewport()
@@ -2997,12 +3009,13 @@ func (m *Model) handleElicitKey(stroke string) tea.Cmd {
 // isElicitCommitKey reports whether a keystroke sends a result back
 // to the host — the elicit modal's equivalent of a permission
 // decision. URL mode commits on accept / submit / decline; form mode
-// commits on Enter.
+// commits on Enter and on the ctrl+d decline (issue #209) — both send
+// an answer to the host, which is the whole test.
 func isElicitCommitKey(req ElicitRequest, stroke string) bool {
 	if req.Mode == ElicitURLMode {
 		return stroke == "a" || stroke == "enter" || stroke == "n"
 	}
-	return stroke == "enter"
+	return stroke == "enter" || stroke == "ctrl+d"
 }
 
 // isElicitEmpty reports whether v is the zero value for its type

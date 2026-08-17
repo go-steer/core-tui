@@ -15,8 +15,14 @@
 package tui
 
 import (
+	"context"
+	"strings"
 	"testing"
+	"time"
 	"unicode/utf8"
+
+	tea "charm.land/bubbletea/v2"
+	"github.com/charmbracelet/x/ansi"
 )
 
 // elicitStringForm returns a model parked on a one-field string form,
@@ -107,5 +113,268 @@ func TestElicitKey_SeededDefaultRoundTrips(t *testing.T) {
 	}
 	if !utf8.ValidString(got) {
 		t.Errorf("round-trip produced invalid UTF-8: % x", got)
+	}
+}
+
+// --- decline (issue #209) -------------------------------------------
+
+// elicitFlowFor opens req on a real elicitor and returns the model
+// parked on the modal plus the channel the host's Elicit call answers
+// on. The commit keys are still inside modalInputGrace — call
+// pastGrace before pressing one, except in the test that is about the
+// window itself.
+func elicitFlowFor(t *testing.T, req ElicitRequest) (Model, chan ElicitResult) {
+	t.Helper()
+	e := NewElicitor().(*elicitor)
+	results := make(chan ElicitResult, 1)
+	go func() {
+		r, _ := e.Elicit(context.Background(), "srv", req)
+		results <- r
+	}()
+	if _, ok := e.nextRequest(context.Background()); !ok {
+		t.Fatal("setup: nextRequest returned !ok with a pending request")
+	}
+
+	m := NewModel(Options{Elicitor: e})
+	out, _ := m.Update(tea.WindowSizeMsg{Width: 100, Height: 40})
+	m = out.(Model)
+	out, _ = m.Update(elicitRequestMsg{serverName: "srv", req: req})
+	m = out.(Model)
+	if m.pendingElicit == nil {
+		t.Fatal("setup: elicitRequestMsg did not open the modal")
+	}
+	return m, results
+}
+
+// pastGrace backdates the modal's arrival so the keys that commit a
+// result are live. modal_grace_test.go owns the window itself.
+func pastGrace(m Model) Model {
+	m.elicitShownAt = time.Now().Add(-modalInputGrace - time.Millisecond)
+	return m
+}
+
+// awaitElicit reads the host's answer, or fails.
+func awaitElicit(t *testing.T, results chan ElicitResult) ElicitResult {
+	t.Helper()
+	select {
+	case r := <-results:
+		return r
+	case <-time.After(time.Second):
+		t.Fatal("no result reached the host")
+		return ElicitResult{}
+	}
+}
+
+// Issue #209: form mode documented `n` as its decline key and had no
+// such case — `n` is printable and types into the focused field, which
+// is the only sane thing for it to do. So the form could submit and it
+// could cancel, and the one answer it advertised it could not give.
+func TestElicitForm_DeclinesOnCtrlD(t *testing.T) {
+	m, results := elicitFlowFor(t, ElicitRequest{
+		Title:  "creds",
+		Fields: []ElicitField{{Name: "user", Type: ElicitFieldString}},
+	})
+	m = pastGrace(m)
+	m = typeWord(m, "ada")
+
+	out, cmd := m.Update(keyPress("ctrl+d"))
+	m = out.(Model)
+	if m.pendingElicit != nil {
+		t.Fatal("ctrl+d left the modal open — the form still has no reachable decline")
+	}
+	if cmd == nil {
+		t.Error("ctrl+d returned no Cmd, so the elicit listener was not re-armed " +
+			"and the next request from this server would never arrive")
+	}
+
+	r := awaitElicit(t, results)
+	if r.Action != ElicitActionDecline {
+		t.Errorf("ctrl+d dispatched %v, want Decline", r.Action)
+	}
+	if len(r.Values) != 0 {
+		t.Errorf("the decline carried field values %v — a decline agrees to nothing, "+
+			"and half-typed input is not an answer the host may use", r.Values)
+	}
+}
+
+// Decline and cancel are different answers — "I read this and I am
+// saying no" against "I dismissed it without deciding" — and the
+// server that asked may act on the difference. Both have to be
+// reachable, and they must not collapse into one another.
+func TestElicitForm_DeclineAndCancelAreDifferentAnswers(t *testing.T) {
+	cases := []struct {
+		stroke string
+		want   ElicitAction
+	}{
+		{"ctrl+d", ElicitActionDecline},
+		{"esc", ElicitActionCancel},
+	}
+	for _, tc := range cases {
+		t.Run(tc.stroke, func(t *testing.T) {
+			m, results := elicitFlowFor(t, ElicitRequest{
+				Title:  "creds",
+				Fields: []ElicitField{{Name: "user", Type: ElicitFieldString}},
+			})
+			m = pastGrace(m)
+
+			out, _ := m.Update(keyPress(tc.stroke))
+			m = out.(Model)
+			if m.pendingElicit != nil {
+				t.Fatalf("%s left the modal open", tc.stroke)
+			}
+			if got := awaitElicit(t, results).Action; got != tc.want {
+				t.Errorf("%s dispatched %v, want %v", tc.stroke, got, tc.want)
+			}
+		})
+	}
+}
+
+// A decline is a complete answer whatever the fields hold, so it does
+// not run Enter's required-field validation. Enter on the same form is
+// the control: it refuses and moves the cursor to what is missing.
+func TestElicitForm_DeclineSkipsRequiredFieldValidation(t *testing.T) {
+	req := ElicitRequest{
+		Title: "creds",
+		Fields: []ElicitField{
+			{Name: "user", Type: ElicitFieldString},
+			{Name: "token", Type: ElicitFieldString, Required: true},
+		},
+	}
+
+	m, results := elicitFlowFor(t, req)
+	m = pastGrace(m)
+	out, _ := m.Update(keyPress("enter"))
+	m = out.(Model)
+	if m.pendingElicit == nil {
+		t.Fatal("precondition: Enter submitted with the required field empty")
+	}
+	if m.elicitFieldIdx != 1 {
+		t.Fatalf("precondition: Enter left the cursor on field %d, want the missing one (1)",
+			m.elicitFieldIdx)
+	}
+
+	out, _ = m.Update(keyPress("ctrl+d"))
+	m = out.(Model)
+	if m.pendingElicit != nil {
+		t.Fatal("ctrl+d was refused on a form with an empty required field — " +
+			"validation gates submission, not declining")
+	}
+	if got := awaitElicit(t, results).Action; got != ElicitActionDecline {
+		t.Errorf("action = %v, want Decline", got)
+	}
+}
+
+// The decline commits a result, so it is held for modalInputGrace like
+// every other key that answers the host (issue #95). A keystroke
+// already in the terminal buffer when the modal appears must not be
+// spent saying no on the operator's behalf.
+func TestElicitForm_DeclineIsHeldDuringTheGraceWindow(t *testing.T) {
+	m, results := elicitFlowFor(t, ElicitRequest{
+		Title:  "creds",
+		Fields: []ElicitField{{Name: "user", Type: ElicitFieldString}},
+	})
+	if m.elicitShownAt.IsZero() {
+		t.Fatal("setup: elicitRequestMsg did not stamp elicitShownAt")
+	}
+
+	out, _ := m.Update(keyPress("ctrl+d"))
+	m = out.(Model)
+	if m.pendingElicit == nil {
+		t.Fatal("ctrl+d declined inside the grace window")
+	}
+	select {
+	case r := <-results:
+		t.Fatalf("a result (%v) was dispatched inside the grace window", r.Action)
+	default:
+	}
+
+	m = pastGrace(m)
+	out, _ = m.Update(keyPress("ctrl+d"))
+	m = out.(Model)
+	if m.pendingElicit != nil {
+		t.Fatal("ctrl+d after the grace window did not decline")
+	}
+	if got := awaitElicit(t, results).Action; got != ElicitActionDecline {
+		t.Errorf("action = %v, want Decline", got)
+	}
+}
+
+// The bug was a promise the code did not keep, so the fix is not
+// finished until the keys the modal advertises are the keys that work.
+// Both surfaces that name them are checked: the modal's own footer and
+// the status footer hint.
+func TestElicitModal_AdvertisesTheKeysItHonors(t *testing.T) {
+	cases := []struct {
+		name   string
+		req    ElicitRequest
+		stroke string
+		key    string
+	}{
+		{
+			name: "form",
+			req: ElicitRequest{
+				Title:  "creds",
+				Fields: []ElicitField{{Name: "user", Type: ElicitFieldString}},
+			},
+			stroke: "ctrl+d",
+			key:    "ctrl+d",
+		},
+		{
+			name:   "url",
+			req:    ElicitRequest{Mode: ElicitURLMode, Title: "open", URL: "https://example.com"},
+			stroke: "n",
+			key:    "n decline",
+		},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			m, results := elicitFlowFor(t, tc.req)
+			m = pastGrace(m)
+
+			if got := ansi.Strip(m.renderElicitModal()); !strings.Contains(got, tc.key) {
+				t.Errorf("the modal footer does not offer %q:\n%s", tc.key, got)
+			}
+			if got := ansi.Strip(m.footerHint()); !strings.Contains(got, tc.key) {
+				t.Errorf("the footer hint does not offer %q: %s", tc.key, got)
+			}
+
+			out, _ := m.Update(keyPress(tc.stroke))
+			m = out.(Model)
+			if got := awaitElicit(t, results).Action; got != ElicitActionDecline {
+				t.Errorf("the advertised decline key %q dispatched %v, want Decline",
+					tc.stroke, got)
+			}
+		})
+	}
+}
+
+// URL mode's action row had no key test at all — the mode was only
+// ever exercised as a channel-shape fixture. Its three answers are
+// pinned here alongside the form's.
+func TestElicitURLMode_ActionRow(t *testing.T) {
+	cases := []struct {
+		stroke string
+		want   ElicitAction
+	}{
+		{"a", ElicitActionSubmit},
+		{"enter", ElicitActionSubmit},
+		{"n", ElicitActionDecline},
+		{"esc", ElicitActionCancel},
+	}
+	for _, tc := range cases {
+		t.Run(tc.stroke, func(t *testing.T) {
+			m, results := elicitFlowFor(t,
+				ElicitRequest{Mode: ElicitURLMode, Title: "open", URL: "https://example.com"})
+			m = pastGrace(m)
+
+			out, _ := m.Update(keyPress(tc.stroke))
+			m = out.(Model)
+			if m.pendingElicit != nil {
+				t.Fatalf("%s left the modal open", tc.stroke)
+			}
+			if got := awaitElicit(t, results).Action; got != tc.want {
+				t.Errorf("%s dispatched %v, want %v", tc.stroke, got, tc.want)
+			}
+		})
 	}
 }
