@@ -126,6 +126,12 @@ func TestRenderedWidth_PricesATabTheWayLipglossDrawsIt(t *testing.T) {
 // measurement priced at zero, so a single tab put the card four cells
 // past the chat column. The overrun was invisible because chatCutLine
 // trims it on the way to the frame; the card just lost its right edge.
+//
+// The pad is all this pins. Wrapping still prices a tab at zero, so a
+// line with enough tabs in it wraps late and overruns anyway — a turn
+// of strings.Repeat("a\t", 20) still draws at 93 cells here. That is
+// issue #217 and a wider change than this; the cases below are ones
+// the wrap does not reach, so they isolate the arithmetic under test.
 func TestRenderMessage_UserCardWithATabStaysInTheColumn(t *testing.T) {
 	const width = 40
 	m := NewModel(Options{})
