@@ -25,6 +25,12 @@ The wire protocol in [`docs/sse-event-stream-protocol.md`](./docs/sse-event-stre
 
 ## [Unreleased]
 
+## [0.20.0] — 2026-08-17
+
+The transcript stops being a thing you scroll and becomes a thing you drive. `tab` hands it the keyboard, a cursor selects one item at a time, `space` folds the one you are on, `y` / `c` copy it, and `shift+←` / `shift+→` pan across the content that does not wrap — a table, a diff, a stack trace. Under all of it the render path is addressed by item instead of by one concatenated blob, which is what makes item-at-a-time navigation affordable at session length rather than an O(session) walk per keystroke.
+
+The other half of the release is the quality backlog that had been queued behind a rendering-architecture spike and did not need to wait for it: the frame is measured and clipped to the terminal in both dimensions, modals fit a short window, the pickers filter and open on the right row, markdown and syntax highlighting follow the active theme, every remaining host call is off the event loop, and untrusted tool output can no longer write escape sequences to the operator's terminal.
+
 ### Added
 
 - **`Options.ClipboardWriter`, and a copy notice that stops claiming what it cannot observe** ([#175](https://github.com/go-steer/core-tui/issues/175)). [#153](https://github.com/go-steer/core-tui/issues/153) shipped `y` / `c` over OSC 52, which is the right default — it is the only mechanism that reaches the clipboard of the machine the operator is *sitting at* rather than the one the process runs on, and that is the whole LiveAgent-over-SSH case. What it did not reckon with is how many terminals decline the escape: Terminal.app has never implemented it, iTerm2 keeps it behind a preference that is off by default, and several remote and web terminals strip it in the relay. On those the key did nothing at all, and since the protocol has no acknowledgement, the footer said `copied 24 lines` regardless. Claiming a result we cannot observe was the worse half of the defect, because it sends the operator looking for the bug in the wrong place.
@@ -431,7 +437,8 @@ Initial release: `package tui` extracted from the duplicated `internal/tui` tree
 - **Performance and terminal-fidelity work** — incremental Glamour streaming, an auto-growing textarea, hanging-indent word wrap that preserves source leading whitespace, and the viewport's `h`/`j`/`k`/`l`/arrow bindings disabled with `xOffset` pinned to 0 so a wide line can't shift the whole chat sideways.
 - **The docs that govern all of it** — `docs/requirements.md`, `docs/design.md`, `docs/decisions.md`, `docs/style.md`, `docs/ui-references.md`, and `MIGRATION.md`.
 
-[Unreleased]: https://github.com/go-steer/core-tui/compare/v0.19.0...HEAD
+[Unreleased]: https://github.com/go-steer/core-tui/compare/v0.20.0...HEAD
+[0.20.0]: https://github.com/go-steer/core-tui/compare/v0.19.0...v0.20.0
 [0.19.0]: https://github.com/go-steer/core-tui/compare/v0.18.0...v0.19.0
 [0.18.0]: https://github.com/go-steer/core-tui/compare/v0.17.0...v0.18.0
 [0.17.0]: https://github.com/go-steer/core-tui/compare/v0.16.1...v0.17.0
