@@ -2864,9 +2864,11 @@ func permissionDecisionLabel(d PermissionDecision) string {
 		return "allow-session-tool"
 	case DecisionAllowAlways:
 		return "allow-always"
-	default:
-		return "deny"
+	case DecisionDeny:
 	}
+	// Deny is also the label for a decision outside the declared set:
+	// the echo should never claim an approval the gate did not get.
+	return "deny"
 }
 
 // dispatchElicit writes the operator's elicit result back to the

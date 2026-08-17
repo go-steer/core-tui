@@ -319,9 +319,11 @@ func (m Model) elicitCursor() *tea.Cursor {
 	f := req.Fields[idx]
 	switch f.Type {
 	case ElicitFieldString, ElicitFieldNumber, ElicitFieldInteger:
-	default:
+	case ElicitFieldBoolean, ElicitFieldEnum:
 		// Booleans toggle with space and enums cycle with ←/→ —
 		// neither accepts typed text, so neither owns a caret.
+		return nil
+	default:
 		return nil
 	}
 

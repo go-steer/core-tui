@@ -273,7 +273,7 @@ func permissionRuleCmd(ctrl PermissionController, gen uint64, op permissionRuleO
 			err = ctrl.AddBuiltinAllowExtra(arg)
 		case permissionRuleDeny:
 			err = ctrl.AddDenyPatterns([]string{arg})
-		default:
+		case permissionRuleAllow:
 			err = ctrl.AddAllowPatterns([]string{arg})
 		}
 		return permissionRuleAddedMsg{gen: gen, op: op, arg: arg, err: err}

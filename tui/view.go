@@ -204,11 +204,18 @@ func wordWrapIndent(s string, width int, indent string) string {
 // back from StatusSidebar to StatusHeader when the terminal is too
 // narrow to fit both the sidebar and a useful chat column.
 func (m Model) effectiveLayout() StatusLayout {
-	if m.statusLayout == StatusSidebar &&
-		m.width-sidebarWidth-3 < sidebarMinChatWidth {
+	// Anything that is not the sidebar — including a StatusLayout
+	// value outside the declared pair, which Options accepts because
+	// the type is an exported int — is the header layout. Normalizing
+	// here rather than in a `default:` arm at the render site is what
+	// lets View's layout switch name both members and be total.
+	if m.statusLayout != StatusSidebar {
 		return StatusHeader
 	}
-	return m.statusLayout
+	if m.width-sidebarWidth-3 < sidebarMinChatWidth {
+		return StatusHeader
+	}
+	return StatusSidebar
 }
 
 // chromeWidth is the column the chrome around the chat viewport is
@@ -285,7 +292,7 @@ func (m Model) View() tea.View {
 			m.styles.SidebarDivider.Render(strings.TrimRight(divider, "\n")),
 			sidebar,
 		)
-	default:
+	case StatusHeader:
 		header := m.renderHeader()
 		footer := m.renderFooter(m.width)
 		help := m.renderHelpPanel(m.width)
@@ -812,9 +819,9 @@ func (m Model) queueRowStyle(s QueueState) (string, lipgloss.Style) {
 		return GlyphToolDone, m.styles.Muted
 	case QueueFailed:
 		return GlyphToolFail, m.styles.ErrorText
-	default:
-		return GlyphToolPending, m.styles.Muted
+	case QueueQueued:
 	}
+	return GlyphToolPending, m.styles.Muted
 }
 
 // renderSpinnerLine renders the rotating cognition verb (R-CHAT-3)
@@ -1645,9 +1652,11 @@ func (m *Model) renderPermissionDetail(req *PermissionRequest, width int) string
 		return renderShellDetail(req.Detail, width, m.styles)
 	case DetailArgs:
 		return renderArgsDetail(req.Detail, width, m.styles)
-	default:
-		return wordWrap(req.Detail, width)
+	case DetailPlain:
 	}
+	// DetailPlain, and any kind outside the declared set, is wrapped
+	// verbatim.
+	return wordWrap(req.Detail, width)
 }
 
 // renderShellDetail formats a bash / HTTP command as `$ <cmd>`
@@ -1831,13 +1840,15 @@ func (m *Model) formatElicitValue(f ElicitField) string {
 			v = f.EnumChoices[0]
 		}
 		return "‹ " + v + " ›"
-	default:
-		v, _ := m.elicitValues[f.Name].(string)
-		if v == "" {
-			return m.styles.Muted.Render("(empty)")
-		}
-		return v
+	case ElicitFieldString, ElicitFieldNumber, ElicitFieldInteger:
 	}
+	// The typed-text field kinds, and anything outside the declared
+	// set, render the literal value.
+	v, _ := m.elicitValues[f.Name].(string)
+	if v == "" {
+		return m.styles.Muted.Render("(empty)")
+	}
+	return v
 }
 
 // nonNeg returns x when x > 0, else 0. Used for the modal-width

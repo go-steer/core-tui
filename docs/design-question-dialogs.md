@@ -1253,13 +1253,19 @@ Each stage is a PR. Stages 0-3 are internal and can land before the
 freeze without an `api-breaks.txt` entry; stage 4 is the point of no
 return.
 
-**Stage 0 — the linter.** Enable `gochecksumtype` and `exhaustive` in
-`dev/tools/.golangci.yml`, fix whatever the existing
-`PermissionDecision` / `ElicitAction` / `PermissionKind` /
-`ElicitFieldType` switches turn up. No API impact. **Do this first**:
-§5.3 argues the sealed interface is decoration without it, and if the
-existing enum switches turn out to be a mess, that is information
-about whether the rest is worth doing.
+**Stage 0 — the linter. Done, 2026-08-17.** Both linters are on in
+`dev/tools/.golangci.yml`. `gochecksumtype` reported nothing, there
+being no sealed interface yet — it is scaffolding for stage 1.
+`exhaustive` reported eleven switches, and they were not a mess: every
+one of them put the enum's *zero value* on a `default:` arm, which is
+one deliberate idiom applied consistently rather than eleven
+oversights. Each is now written as a total switch with the fallback
+below it, so a member added later is a lint failure instead of a
+silent route to the default. The one behaviour change is
+`effectiveLayout`, which now normalizes an out-of-range `StatusLayout`
+itself rather than leaving `View`'s `default:` arm to absorb it.
+This answers §14 Q2: **sealed**, since the condition it was
+contingent on now holds.
 
 **Stage 1 — the answer type and the resolver, with one caller.**
 Introduce `answer` + variants, `question`, `resolver`, `Overlay.Ask`,
@@ -1357,7 +1363,8 @@ package?**
 `gochecksumtype` is not enabled, take the struct: an unchecked sealed
 interface costs seven types and a marker method to buy what a struct
 with a `Kind` field buys for free. The conditionality is the answer,
-not a hedge.
+not a hedge. **Resolved 2026-08-17: sealed.** Stage 0 landed and
+`gochecksumtype` is enabled, so the condition holds.
 
 **Q3. Include `selected` (multi-select) in the initial variant set,
 with no shipped caller?**
@@ -1417,3 +1424,7 @@ that does not exist.
 
 - 2026-08-17 — design captured for #164. Not implemented. Blocking
   decision is Q1 + Q2; stage 0 can start regardless of either.
+- 2026-08-17 — stage 0 landed: `exhaustive` and `gochecksumtype` are
+  enabled and the eleven enum switches they found are total. Q2 is
+  answered — sealed. Q1 (`Asker`) is still open and still gated on
+  stage 3.

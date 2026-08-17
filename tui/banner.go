@@ -259,9 +259,12 @@ func bannerStyle(styles Styles, settled color.Color, zone bannerZone) lipgloss.S
 		return lipgloss.NewStyle().Foreground(styles.Theme.Accent).Bold(true)
 	case bannerUnlit:
 		return lipgloss.NewStyle().Foreground(styles.Theme.FgMuted)
-	default:
-		return lipgloss.NewStyle().Foreground(settled).Bold(true)
+	case bannerLit:
 	}
+	// bannerLit — and any zone value outside the declared set — is the
+	// glyph's own settled colour. Kept below the switch rather than in
+	// a default arm so `exhaustive` polices the zone list.
+	return lipgloss.NewStyle().Foreground(settled).Bold(true)
 }
 
 // renderBannerBlock paints the layout at a phase. Cells are emitted in

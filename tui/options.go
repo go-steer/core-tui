@@ -385,9 +385,11 @@ func (m PermissionMode) String() string {
 		return "plan"
 	case PermissionModeBypass:
 		return "bypassPermissions"
-	default:
-		return "default"
+	case PermissionModeDefault:
 	}
+	// The zero value, and any mode outside the declared set, is
+	// ask-every-time.
+	return "default"
 }
 
 // Next returns the next mode in the Shift+Tab cycle.
