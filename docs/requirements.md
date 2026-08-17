@@ -566,10 +566,10 @@ listed in `/help`:
 
 ### 3.19 Agent-driven prompts (should)
 
-- **R-PROMPT-1** (⚠️ specified, not shipped as of v0.19.0 — neither
+- **R-PROMPT-1** (⚠️ specified, not shipped as of v0.21.0 — neither
   `UserPrompter` nor `NewUserPrompter()` exists in `package tui`.
-  Whether to build it or drop this requirement is part of the
-  exported-surface audit, issue #78.)
+  Whether to build it or drop this requirement is stage 5 of issue
+  #164, gated on §14 Q1 of `docs/design-question-dialogs.md`.)
   When the host wires the TUI-supplied `UserPrompter`
   into its agent, the agent may call `AskUser` mid-turn to elicit a
   structured multiple-choice answer from the operator. The TUI

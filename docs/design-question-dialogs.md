@@ -1187,10 +1187,10 @@ TUI is running** — the one arrangement in which an operator is
 demonstrably sitting there.
 
 That is exactly `requirements.md` §3.19 R-PROMPT-1, which is marked
-"⚠️ specified, not shipped as of v0.19.0 — neither `UserPrompter` nor
+"⚠️ specified, not shipped as of v0.21.0 — neither `UserPrompter` nor
 `NewUserPrompter()` exists in `package tui`. Whether to build it or
-drop this requirement is part of the exported-surface audit, issue
-#78." #164 is the issue that would build it.
+drop this requirement is stage 5 of issue #164, gated on §14 Q1
+below." Stage 5 of this design is what would build it.
 
 The minimal shape, mirroring D5/D6 exactly:
 
