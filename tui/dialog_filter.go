@@ -122,15 +122,15 @@ func pickerNavStroke(stroke string) bool {
 // active a right-aligned "matched/total" count — the palette's
 // match-count affordance, which the pickers never had.
 //
-// width is the DIALOG width; the row is laid out inside
-// RenderContext's one column of padding on each side. The widget
+// width is the DIALOG width; the row is laid out inside the modal's
+// box edge and the one column of padding within it. The widget
 // paints prompt + Width() + 1 cells (the trailing cell is the caret's
 // own), so the count's column is reserved out of the width handed to
 // SetWidth rather than trimmed off afterwards.
 func (f *pickerFilter) render(width, matched, total int, s Styles) string {
 	f.syncStyles(s)
 
-	inner := nonNeg(width - 2)
+	inner := modalInnerWidth(width)
 	count := ""
 	if f.active() {
 		count = fmt.Sprintf("%d/%d", matched, total)
@@ -166,16 +166,17 @@ func (f *pickerFilter) cursor() *tea.Cursor {
 }
 
 // filterRowCursor lifts a filter caret into dialog-relative
-// coordinates. RenderContext's chrome is fixed — one column of
-// horizontal padding, a title line and a blank row above the body —
-// and the filter row is always the FIRST row of the body, so the
-// offsets are the same for all three pickers.
+// coordinates. RenderContext's chrome is fixed — the box edge, one
+// column of horizontal padding, a title line and a blank row above
+// the body — and the filter row is always the FIRST row of the body,
+// so modalContentX / modalBodyTop are the whole offset, for all three
+// pickers.
 func filterRowCursor(c *tea.Cursor) *tea.Cursor {
 	if c == nil {
 		return nil
 	}
-	c.X++ // RenderContext's Padding(0, 1)
-	c.Y += 2
+	c.X += modalContentX
+	c.Y += modalBodyTop
 	return c
 }
 

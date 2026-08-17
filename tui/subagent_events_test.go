@@ -250,7 +250,10 @@ func TestSubagentDialog_RendersUntruncatedReport(t *testing.T) {
 		hasInfo: true,
 		page:    SubagentEventPage{Events: []SubagentEvent{turn(1, "model", "starting")}},
 	})
-	out := ansi.Strip(d.Render(m.width, m))
+	// Read inside the box edge: the report wraps, and a row's closing
+	// edge glyph followed by the next row's opening one would land in
+	// the middle of the text this is looking for.
+	out := strings.Join(modalContentLines(d.Render(m.width, m)), "\n")
 	// The tail of the report — the part the list would have cut —
 	// has to be present somewhere in the (wrapped) body.
 	if !strings.Contains(collapseWhitespace(out), collapseWhitespace(report)) {

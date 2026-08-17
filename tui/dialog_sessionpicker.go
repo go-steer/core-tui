@@ -403,7 +403,7 @@ func (d *sessionPickerDialog) Render(totalWidth int, m *Model) string {
 		// the invariant the two calls above exist to establish;
 		// rounding up breaks the top edge symmetrically. A half cell
 		// peeking in at an edge is the cheaper cosmetic defect.
-		lines = append(lines, scrollView(m.styles, rows, nonNeg(width-4), view, d.off)...)
+		lines = append(lines, scrollView(m.styles, rows, modalBodyWidth(width), view, d.off)...)
 		body = strings.Join(lines, "\n")
 	}
 	footer := "type to filter " + GlyphSeparator + " ↑↓ choose " +

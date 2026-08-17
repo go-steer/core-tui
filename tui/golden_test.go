@@ -261,14 +261,23 @@ func TestGolden_Frame(t *testing.T) {
 //
 // All three captures are 24 rows, well above modalFullscreenBelow, so
 // the fullscreen degradation must not appear in any of them. The
-// widths do different jobs. At 100 and 160 the modal has room and the
-// bytes are identical to what main produced — that is the
-// no-regression control. At 60 they are not, and deliberately: the
-// theme descriptions wrap hard enough that the modal composed 26 rows
-// in a 24-row terminal, so clipFrame took the footer rule and the key
-// hint off the bottom. That is issue #142's defect at a perfectly
-// normal HEIGHT, reached through width instead, and this capture is
-// where it is now visibly fixed.
+// widths do different jobs. At 60 the theme descriptions wrap hard
+// enough that the modal composed 26 rows in a 24-row terminal, so
+// clipFrame took the footer rule and the key hint off the bottom —
+// issue #142's defect at a perfectly normal HEIGHT, reached through
+// width instead, and this capture is where it is visibly fixed. At 100
+// and 160 the modal has room, and these were the no-regression control
+// that matched main byte for byte.
+//
+// They no longer do, and #199 is why. The twelve built-in themes are
+// exactly the window the height regime lends the picker at 24 rows, so
+// the list is never windowed, so its rows are never cut to the body
+// column and six of the descriptions wrap. That body was two rows
+// inside the terminal; the box edge takes two rows; the spacing above
+// the footer rule and under the title is what fitModalContent gives up
+// to pay for it. The control these captures provide is now the shape
+// of the loss rather than the absence of one — the shedding order is
+// visible in them, and it is the documented order.
 //
 // The theme picker is the subject because it needs no host capability
 // to populate itself and it is the tallest chrome of the four

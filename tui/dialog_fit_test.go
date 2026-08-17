@@ -47,12 +47,17 @@ import (
 )
 
 // modalFitHeights brackets the two regimes and the boundary between
-// them. 24 and 14 are normal (margin intact); 12 is the first
-// fullscreen height; 8 is the brief's worked example (chrome 5 + body
-// 3 fits exactly once the margin goes); 6 is where chrome alone fills
+// them. 24 and 16 are normal (margin intact); 14 is the first
+// fullscreen height; 10 is the brief's worked example (chrome 7 + body
+// 3 fits exactly once the margin goes); 8 is where chrome alone fills
 // the terminal; 3 and 2 are below that, where the honest answer is a
 // title and a footer hint and nothing else.
-var modalFitHeights = []int{24, 14, 13, 12, 11, 10, 8, 6, 4, 3, 2}
+//
+// Every one of those boundaries moved up by modalEdgeRows when the
+// modal grew a box edge (issue #199), so the list keeps the old
+// landmarks as well: they are interior points of the fullscreen
+// regime now, and they still have to behave.
+var modalFitHeights = []int{24, 16, 15, 14, 13, 12, 11, 10, 8, 6, 4, 3, 2}
 
 // modalFitCase is one modal surface: how to open it, how to render
 // just its own block, and a token from its footer hint that must
@@ -74,7 +79,10 @@ type modalFitCase struct {
 	title string
 	// minBodyHeight is the shortest terminal at which this modal
 	// still renders a body row (as opposed to title + footer only).
-	// Below it the body assertion is skipped, not relaxed.
+	// Below it the body assertion is skipped, not relaxed. The box
+	// edge's own two rows are part of it: they are drawn outside
+	// everything fitModalContent is able to shed, so they raise the
+	// floor rather than competing with the content for it.
 	minBodyHeight int
 	// body, when non-empty, is a substring of the first body row —
 	// the row the shedding order promises to keep longest.
@@ -94,7 +102,7 @@ func modalFitCases() []modalFitCase {
 			footer:        "esc cancel",
 			title:         "Choose a Theme",
 			body:          filterPlaceholder,
-			minBodyHeight: 3,
+			minBodyHeight: modalEdgeRows + 3,
 		},
 		{
 			name: "model-picker",
@@ -106,7 +114,7 @@ func modalFitCases() []modalFitCase {
 			footer:        "esc cancel",
 			title:         "Choose a Model",
 			body:          filterPlaceholder,
-			minBodyHeight: 3,
+			minBodyHeight: modalEdgeRows + 3,
 		},
 		{
 			name: "session-picker",
@@ -118,7 +126,7 @@ func modalFitCases() []modalFitCase {
 			footer:        "esc cancel",
 			title:         "Choose a Session",
 			body:          filterPlaceholder,
-			minBodyHeight: 3,
+			minBodyHeight: modalEdgeRows + 3,
 		},
 		{
 			name: "permission-modal",
@@ -138,7 +146,7 @@ func modalFitCases() []modalFitCase {
 			// non-breaking space so the pair never wraps apart.
 			footer:        "esc\u00a0deny",
 			title:         "Permission required",
-			minBodyHeight: 3,
+			minBodyHeight: modalEdgeRows + 3,
 		},
 		{
 			name: "elicit-modal",
@@ -162,7 +170,7 @@ func modalFitCases() []modalFitCase {
 			render:        func(m *Model) string { return m.renderElicitModal() },
 			footer:        "esc cancel",
 			title:         "an-mcp-server-with-a-long-name",
-			minBodyHeight: 3,
+			minBodyHeight: modalEdgeRows + 3,
 		},
 		{
 			// Issue #149. This overlay and the subagent one below
@@ -200,7 +208,7 @@ func modalFitCases() []modalFitCase {
 			// The banner wraps to two rows at 40 columns, so the
 			// shortest terminal that holds title + banner + hint is
 			// four rows, not three.
-			minBodyHeight: 4,
+			minBodyHeight: modalEdgeRows + 4,
 		},
 		{
 			name: "subagent",
@@ -232,7 +240,7 @@ func modalFitCases() []modalFitCase {
 			// The status banner is the first body row; "running" is
 			// its leading chip.
 			body:          "running",
-			minBodyHeight: 3,
+			minBodyHeight: modalEdgeRows + 3,
 		},
 		{
 			name: "text-input",
@@ -248,7 +256,7 @@ func modalFitCases() []modalFitCase {
 			footer:        "esc cancel",
 			title:         "Attach to Endpoint",
 			body:          "URL:",
-			minBodyHeight: 3,
+			minBodyHeight: modalEdgeRows + 3,
 		},
 		{
 			name: "side-answer",
@@ -264,7 +272,7 @@ func modalFitCases() []modalFitCase {
 			render:        func(m *Model) string { return m.renderSideAnswer() },
 			footer:        "dismiss",
 			title:         "by the way",
-			minBodyHeight: 3,
+			minBodyHeight: modalEdgeRows + 3,
 		},
 	}
 }
@@ -416,12 +424,13 @@ func TestModalFit_ComposesExactly(t *testing.T) {
 // TestModalFit_NoRegressionAtNormalSizes is the other half of the
 // trade: above modalFullscreenBelow the fix must be invisible. The
 // margin is still reserved, the body allowance is still the old
-// arithmetic to the row, and fitModalContent sheds nothing — the two
-// blank spacer rows and the footer rule are all still on the block.
+// arithmetic to the row, and fitModalContent sheds nothing it did not
+// have to — the two blank spacer rows and the footer rule are still
+// on the block wherever the terminal has a row to spare.
 //
 // (TestGolden_ModalFrame pins the same claim at the byte level.)
 func TestModalFit_NoRegressionAtNormalSizes(t *testing.T) {
-	for _, h := range []int{modalFullscreenBelow, 14, 24, 50} {
+	for _, h := range modalRoomyHeights() {
 		// The pre-#142 arithmetic, restated rather than called, so
 		// this fails if modalBodyHeight's normal branch is touched.
 		for _, chrome := range []int{modalChromeRows, modalPickerChromeRows} {
@@ -436,15 +445,30 @@ func TestModalFit_NoRegressionAtNormalSizes(t *testing.T) {
 		}
 	}
 	for _, tc := range modalFitCases() {
-		for _, h := range []int{modalFullscreenBelow, 14, 24, 50} {
+		for _, h := range modalRoomyHeights() {
 			t.Run(tc.name+"/"+strconv.Itoa(h), func(t *testing.T) {
 				block := ansi.Strip(tc.render(ptr(tc.open(t, 100, h))))
 				// The blank row under the title and the blank row
 				// above the footer rule: two empty content rows,
 				// present iff fitModalContent shed nothing.
-				if got := blankContentRows(block); got < 2 {
-					t.Errorf("height %d: modal has %d blank spacer rows, want 2 — "+
-						"spacing was shed on a terminal that had room\n%s", h, got, block)
+				//
+				// "Had room" is measured rather than assumed. A
+				// dialog whose rows wrap past the logical allowance
+				// modalBodyHeight lent it can fill the terminal
+				// outright at a height the regime still calls
+				// roomy: the theme picker does exactly that at 24
+				// rows, where twelve themes whose descriptions wrap
+				// in a 72-column modal want more terminal rows than
+				// twelve. Once the block has grown to the full
+				// height of the screen there is no room left to
+				// keep the spacing in, and shedding it is
+				// fitModalContent honouring its documented order
+				// rather than the height regime being wrong. Short
+				// of that, the spacing must survive.
+				if got := blankContentRows(block); got < 2 && lipgloss.Height(block) < h {
+					t.Errorf("height %d: modal has %d blank spacer rows, want 2 — spacing "+
+						"was shed on a terminal with %d rows still to spare\n%s",
+						h, got, h-lipgloss.Height(block), block)
 				}
 				if !strings.Contains(block, tc.title) {
 					t.Errorf("height %d: the title line was shed on a roomy terminal\n%s", h, block)
@@ -526,7 +550,7 @@ func TestModalFit_OverflowingModalTakesItsWholeAllowance(t *testing.T) {
 		},
 	}
 	for _, tc := range cases {
-		for _, h := range []int{modalFullscreenBelow, 14, 24, 50} {
+		for _, h := range modalRoomyHeights() {
 			// Below chrome+margin+floor the floor is what sets the
 			// body height, not the budget, and the modal is entitled
 			// to spill into the margin.
@@ -562,13 +586,54 @@ func manyKeys(n int) map[string]any {
 // take *Model because View's own modal renderers do.
 func ptr(m Model) *Model { return &m }
 
+// modalRoomyHeights is the set of terminal heights at which every
+// modal composes with its margin intact and sheds nothing: the first
+// such height, the one above it, and two comfortable ones. Derived
+// from modalFullscreenBelow rather than written out, because the
+// threshold moves whenever the chrome does — it went from 13 to 15
+// when the modal grew a box edge (issue #199), and a literal 14 in
+// this list silently became a fullscreen height asserting the
+// normal-regime arithmetic against itself.
+func modalRoomyHeights() []int {
+	return []int{modalFullscreenBelow, modalFullscreenBelow + 1, 24, 50}
+}
+
+// modalContentLines strips the box edge off a rendered modal and
+// returns what is inside it: ANSI removed, right-trimmed, one string
+// per row, without the edge's own top and bottom rows.
+//
+// Issue #199 put a glyph at both ends of every row, which is the whole
+// point on screen and a nuisance to a test reading the body. A
+// paragraph that wraps now has "│ … │" between its halves, so a
+// substring check for the unwrapped text fails on the edge rather than
+// on the content; a row that renders nothing is no longer the empty
+// string. Tests that assert about CONTENT come through here. Tests
+// that assert about the edge itself (assertModalEdge) must not — they
+// would be checking their own helper.
+//
+// The single column of padding is left in place, so a caller sees the
+// same leading space the modal frame has always produced.
+func modalContentLines(block string) []string {
+	lines := strings.Split(ansi.Strip(block), "\n")
+	b := lipgloss.RoundedBorder()
+	if len(lines) > 0 && strings.HasPrefix(lines[0], b.TopLeft) {
+		lines = lines[1 : len(lines)-1]
+	}
+	out := make([]string, len(lines))
+	for i, ln := range lines {
+		ln = strings.TrimPrefix(ln, b.Left)
+		ln = strings.TrimSuffix(ln, b.Right)
+		out[i] = strings.TrimRight(ln, " ")
+	}
+	return out
+}
+
 // blankContentRows counts the modal rows that carry no printable
-// content. The modal frame pads every row to its width, so "blank"
-// means "nothing but spaces once the escapes are stripped".
+// content inside the box edge.
 func blankContentRows(block string) int {
 	n := 0
-	for _, line := range strings.Split(block, "\n") {
-		if strings.TrimSpace(ansi.Strip(line)) == "" {
+	for _, line := range modalContentLines(block) {
+		if strings.TrimSpace(line) == "" {
 			n++
 		}
 	}

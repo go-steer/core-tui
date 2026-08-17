@@ -252,9 +252,10 @@ func (d *textInputDialog) Render(totalWidth int, m *Model) string {
 	width := d.dialogWidth(totalWidth)
 
 	d.syncStyles(m.styles)
-	// Inner width: dialog width minus RenderContext's 1-col padding
-	// on each side, minus the widget's own prompt rail.
-	d.input.SetWidth(nonNeg(width - 2 - lipgloss.Width(d.input.Prompt)))
+	// Inner width: the modal's content column (box edge plus one
+	// column of padding on each side) minus the widget's own prompt
+	// rail.
+	d.input.SetWidth(nonNeg(modalInnerWidth(width) - lipgloss.Width(d.input.Prompt)))
 
 	parts := make([]string, 0, 3)
 	if d.cfg.Prompt != "" {
@@ -284,9 +285,10 @@ func (d *textInputDialog) Render(totalWidth int, m *Model) string {
 // top-left cell. Overlay.Cursor adds the origin lipgloss.Place
 // composited the dialog at (cursor.go).
 //
-// The offsets are RenderContext's chrome, which is fixed: one column
-// of horizontal padding, and a title line plus a blank row above the
-// body. Inside the body the input is the first part unless a prompt
+// The offsets are RenderContext's chrome, which is fixed: the box
+// edge plus one column of horizontal padding, and a title line plus a
+// blank row above the body. Inside the body the input is the first
+// part unless a prompt
 // line was configured, in which case it is the second. The inline
 // validation error renders BELOW the input and never moves it.
 //
@@ -298,8 +300,8 @@ func (d *textInputDialog) DialogCursor(_ int, _ *Model) *tea.Cursor {
 	if c == nil {
 		return nil // blurred
 	}
-	c.X += 1 // RenderContext's Padding(0, 1)
-	c.Y += 2 // title line + blank row
+	c.X += modalContentX
+	c.Y += modalBodyTop
 	if d.cfg.Prompt != "" {
 		c.Y++
 	}

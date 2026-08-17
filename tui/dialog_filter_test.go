@@ -145,15 +145,22 @@ func TestPickerFilter_RenderShowsTheMatchCount(t *testing.T) {
 }
 
 // TestFilterRowCursor pins the chrome offsets, which are the same for
-// all three pickers: one column of RenderContext padding, and a title
-// line plus a blank row above the body the filter heads.
+// all three pickers: the box edge plus one column of RenderContext
+// padding across, and the box edge plus a title line plus a blank row
+// above the body the filter heads.
+//
+// Spelled as literals rather than as modalContentX / modalBodyTop. The
+// golden corpus captures tea.View.Content and not tea.View.Cursor, so
+// nothing else in the package would notice the caret drifting off the
+// character the operator is typing — and an assertion written in terms
+// of the constants it guards would drift with them in silence.
 func TestFilterRowCursor(t *testing.T) {
 	if got := filterRowCursor(nil); got != nil {
 		t.Errorf("a nil widget cursor must stay nil, got (%d,%d)", got.X, got.Y)
 	}
 	got := filterRowCursor(tea.NewCursor(4, 0))
-	if got == nil || got.X != 5 || got.Y != 2 {
-		t.Fatalf("filterRowCursor(4,0) = %v, want (5,2)", got)
+	if got == nil || got.X != 6 || got.Y != 3 {
+		t.Fatalf("filterRowCursor(4,0) = %v, want (6,3)", got)
 	}
 }
 
