@@ -45,6 +45,31 @@ func (s *slashAgent) InvokeSlash(_ context.Context, name, args string) (SlashRes
 	return s.res, s.err
 }
 
+// submitSlash dispatches text and pumps the one off-loop hop the host
+// path takes since issue #137: the SlashCommands() name match, plus
+// the InvokeSlash that rides in the same Cmd when the provider is the
+// plain synchronous shape.
+//
+// It returns the model as of that reply landing and whatever Cmd the
+// reply produced — nil for a resolved synchronous call, the
+// result-channel drain for the async shapes. Only for commands that
+// reach the host: a built-in never issues a slashDispatchedMsg and
+// this fails rather than run its Cmd blind.
+func submitSlash(t *testing.T, m Model, text string) (Model, tea.Cmd) {
+	t.Helper()
+	out, cmd := m.dispatchSlash(text)
+	m = out.(Model)
+	if cmd == nil {
+		t.Fatalf("dispatchSlash(%q) returned no Cmd — the host would never be asked", text)
+	}
+	msg, ok := cmd().(slashDispatchedMsg)
+	if !ok {
+		t.Fatalf("dispatchSlash(%q) produced a %T, want slashDispatchedMsg", text, msg)
+	}
+	out, cmd = m.Update(msg)
+	return out.(Model), cmd
+}
+
 // TestDispatchSlash_OpensSideAnswerModal pins R-CMD-5: a SlashResult
 // with a non-nil ModalAnswer sets m.sideAnswer and doesn't add the
 // answer to chat history.
@@ -57,8 +82,7 @@ func TestDispatchSlash_OpensSideAnswerModal(t *testing.T) {
 	m.input.SetValue("/btw what now")
 	m.viewport.SetWidth(80)
 
-	out, _ := m.dispatchSlash("/btw what now")
-	got := out.(Model)
+	got, _ := submitSlash(t, m, "/btw what now")
 	if got.sideAnswer == nil {
 		t.Fatalf("expected sideAnswer to be set")
 	}
@@ -86,8 +110,7 @@ func TestDispatchSlash_AppendsSystemMessage(t *testing.T) {
 	m := NewModel(Options{Agent: agent})
 	m.viewport.SetWidth(80)
 
-	out, _ := m.dispatchSlash("/ping")
-	got := out.(Model)
+	got, _ := submitSlash(t, m, "/ping")
 	entries := got.history.Snapshot()
 	if len(entries) != 1 {
 		t.Fatalf("history len = %d, want 1", len(entries))
@@ -107,8 +130,7 @@ func TestDispatchSlash_SurfacesError(t *testing.T) {
 	m := NewModel(Options{Agent: agent})
 	m.viewport.SetWidth(80)
 
-	out, _ := m.dispatchSlash("/boom")
-	got := out.(Model)
+	got, _ := submitSlash(t, m, "/boom")
 	entries := got.history.Snapshot()
 	if len(entries) != 1 || entries[0].Role != RoleError {
 		t.Fatalf("expected one RoleError row, got %+v", entries)
@@ -127,8 +149,7 @@ func TestDispatchSlash_AliasMatches(t *testing.T) {
 	m := NewModel(Options{Agent: agent})
 	m.viewport.SetWidth(80)
 
-	out, _ := m.dispatchSlash("/by-the-way hello")
-	got := out.(Model)
+	got, _ := submitSlash(t, m, "/by-the-way hello")
 	if got.history.Len() != 1 {
 		t.Errorf("alias dispatch failed: history len = %d, want 1", got.history.Len())
 	}
@@ -260,10 +281,7 @@ func TestDispatchSlash_AsyncPathReturnsCmd(t *testing.T) {
 	m.input.SetValue("/btw hello")
 	m.viewport.SetWidth(80)
 
-	out, cmd := m.dispatchSlash("/btw hello")
-	if _, ok := out.(Model); !ok {
-		t.Fatalf("expected Model, got %T", out)
-	}
+	_, cmd := submitSlash(t, m, "/btw hello")
 	if cmd == nil {
 		t.Fatal("expected a Cmd for the async path, got nil")
 	}
@@ -309,11 +327,10 @@ func TestDispatchSlash_SyncFallbackWhenNoAsync(t *testing.T) {
 	m := NewModel(Options{Agent: agent})
 	m.viewport.SetWidth(80)
 
-	out, cmd := m.dispatchSlash("/btw ping")
+	got, cmd := submitSlash(t, m, "/btw ping")
 	if cmd != nil {
-		t.Errorf("sync path should return nil Cmd, got %T", cmd)
+		t.Errorf("sync path should resolve in one hop, got a follow-up %T", cmd)
 	}
-	got := out.(Model)
 	if got.history.Len() == 0 {
 		t.Errorf("expected system message appended on sync path")
 	}
@@ -348,8 +365,7 @@ func TestDispatchSlash_Async_ArmsInFlightAndStickyToast(t *testing.T) {
 	m := NewModel(Options{Agent: agent})
 	m.viewport.SetWidth(80)
 
-	out, cmd := m.dispatchSlash("/compact")
-	got := out.(Model)
+	got, cmd := submitSlash(t, m, "/compact")
 	if got.inFlightSlash == nil || got.inFlightSlash.name != "compact" {
 		t.Errorf("expected inFlightSlash{name=compact}, got %+v", got.inFlightSlash)
 	}
@@ -411,15 +427,13 @@ func TestDispatchSlash_Async_RefusesConcurrent(t *testing.T) {
 	m := NewModel(Options{Agent: agent})
 	m.viewport.SetWidth(80)
 
-	out, _ := m.dispatchSlash("/compact")
-	m = out.(Model)
+	m, _ = submitSlash(t, m, "/compact")
 	if m.inFlightSlash == nil {
 		t.Fatal("setup: expected first dispatch to arm inFlightSlash")
 	}
 
 	// Second slash while compact still in flight.
-	out2, cmd2 := m.dispatchSlash("/btw hi")
-	got := out2.(Model)
+	got, cmd2 := submitSlash(t, m, "/btw hi")
 	if cmd2 != nil {
 		t.Errorf("expected nil Cmd on refused concurrent slash, got %T", cmd2)
 	}
@@ -583,8 +597,7 @@ func TestDispatchSlash_PreambleVariant_AppendsAtDispatch(t *testing.T) {
 	m := NewModel(Options{Agent: agent})
 	m.viewport.SetWidth(80)
 
-	out, cmd := m.dispatchSlash("/done")
-	got := out.(Model)
+	got, cmd := submitSlash(t, m, "/done")
 	if cmd == nil {
 		t.Fatal("expected a Cmd for the async preamble path")
 	}
@@ -620,8 +633,7 @@ func TestDispatchSlash_PreambleVariant_EmptyPreambleSkipsRow(t *testing.T) {
 	m := NewModel(Options{Agent: agent})
 	m.viewport.SetWidth(80)
 
-	out, cmd := m.dispatchSlash("/compact")
-	got := out.(Model)
+	got, cmd := submitSlash(t, m, "/compact")
 	if cmd == nil {
 		t.Fatal("expected a Cmd")
 	}
@@ -644,7 +656,7 @@ func TestDispatchSlash_PreambleVariant_DrainsResultChannel(t *testing.T) {
 	m := NewModel(Options{Agent: agent})
 	m.viewport.SetWidth(80)
 
-	_, cmd := m.dispatchSlash("/done")
+	_, cmd := submitSlash(t, m, "/done")
 	msg := cmd()
 	r, ok := msg.(slashResultMsg)
 	if !ok {
@@ -669,8 +681,7 @@ func TestDispatchSlash_PreambleVariant_PassesCancellableCtx(t *testing.T) {
 	m := NewModel(Options{Agent: agent})
 	m.viewport.SetWidth(80)
 
-	out, _ := m.dispatchSlash("/done")
-	got := out.(Model)
+	got, _ := submitSlash(t, m, "/done")
 	if agent.ctx == nil {
 		t.Fatal("expected ctx captured at dispatch")
 	}
@@ -704,15 +715,13 @@ func TestDispatchSlash_PreambleVariant_RefusesConcurrent(t *testing.T) {
 	m := NewModel(Options{Agent: agent})
 	m.viewport.SetWidth(80)
 
-	out, _ := m.dispatchSlash("/done")
-	m = out.(Model)
+	m, _ = submitSlash(t, m, "/done")
 	if m.inFlightSlash == nil {
 		t.Fatal("setup: first dispatch should arm inFlightSlash")
 	}
 	preambleRows := m.history.Len()
 
-	out2, cmd2 := m.dispatchSlash("/compact")
-	got := out2.(Model)
+	got, cmd2 := submitSlash(t, m, "/compact")
 	if cmd2 != nil {
 		t.Errorf("expected nil Cmd on refused concurrent slash, got %T", cmd2)
 	}
@@ -732,8 +741,7 @@ func TestDispatchSlash_UnknownCommand(t *testing.T) {
 	m := NewModel(Options{Agent: agent})
 	m.viewport.SetWidth(80)
 
-	out, _ := m.dispatchSlash("/nope")
-	got := out.(Model)
+	got, _ := submitSlash(t, m, "/nope")
 	if got.history.Len() != 1 {
 		t.Fatalf("expected one system row, got %d", got.history.Len())
 	}

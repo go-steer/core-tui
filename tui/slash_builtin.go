@@ -228,36 +228,23 @@ func (m Model) dispatchBuiltinSlash(name, args string) (bool, tea.Model, tea.Cmd
 			m.input.Reset()
 			return true, m, cmd
 		}
-		// `/switch <id>` naming an action row (issue #56) opens the
-		// row's text-input dialog rather than treating the row ID
-		// as a session — the host's SwitchToSession has never heard
-		// of that ID.
-		for _, s := range switcher.Sessions() {
-			if s.ID != args || s.Input == nil {
-				continue
-			}
-			if !m.overlayStack.HasID(sessionInputDialogID) {
-				m.overlayStack.Open(newSessionInputDialog(s))
-			}
-			m.input.Reset()
-			return true, m, nil
-		}
-		// `/switch <id>` — scripted / muscle-memory direct-jump.
-		tgt, err := switcher.SwitchToSession(args)
-		if err != nil {
-			m.history.Append(Message{Role: RoleError, Text: "/switch: " + err.Error()})
-			m.input.Reset()
-			m.refreshAndScroll()
-			return true, m, nil
-		}
-		if tgt.Agent == nil {
-			m.history.Append(Message{Role: RoleError, Text: "/switch: SessionSwitcher returned nil Agent"})
-			m.input.Reset()
-			m.refreshAndScroll()
-			return true, m, nil
-		}
+		// `/switch <id>` is two dependent host calls, which is why it
+		// didn't ride along with the picker in #114: Sessions() first,
+		// because an id naming an action row (issue #56) opens that
+		// row's text-input dialog rather than switching — the host's
+		// SwitchToSession has never heard of that ID — and only then
+		// SwitchToSession itself. Both used to run inline.
+		//
+		// They run as two stages now (issue #137). The enumerate lands
+		// as switchLookupMsg and Update picks the second half, so a
+		// superseded enumerate is dropped before it can switch
+		// anything. The acknowledgement row is what the operator has
+		// to look at meanwhile; on the switching path it goes away
+		// with the rest of the transcript.
+		m.history.Append(Message{Role: RoleSystem, Text: "/switch: looking up " + args + "…"})
 		m.input.Reset()
-		return true, m, m.applySwitchTarget(&tgt)
+		m.refreshAndScroll()
+		return true, m, switchLookupCmd(switcher, m.sessionGen, m.slashSeq, args)
 
 	case "theme":
 		if args == "" {
@@ -1033,6 +1020,33 @@ func truncate(s string, n int) string {
 		return s[:n]
 	}
 	return s[:n-3] + "..."
+}
+
+// applySwitchLookup is the Update-side half of stage one of
+// `/switch <id>` (issue #137). Called only after the gen AND seq
+// guards have passed, so by the time it runs the enumerate is known
+// still to describe the session the operator is looking at.
+//
+// Two outcomes: the id named an action row, and we open its dialog; or
+// it didn't, and we go on to stage two. The switcher is re-resolved
+// here rather than carried through the message because the agent can
+// be replaced inside one session generation (a /model switch does
+// exactly that), and stage two must reach whichever agent is attached
+// now — or nobody, if the replacement dropped the capability.
+func (m *Model) applySwitchLookup(msg switchLookupMsg) tea.Cmd {
+	if msg.row != nil {
+		if !m.overlayStack.HasID(sessionInputDialogID) {
+			m.overlayStack.Open(newSessionInputDialog(*msg.row))
+		}
+		return nil
+	}
+	switcher, ok := m.opts.Agent.(SessionSwitcher)
+	if !ok {
+		m.history.Append(Message{Role: RoleError, Text: "/switch: agent no longer implements SessionSwitcher"})
+		m.refreshAndScroll()
+		return nil
+	}
+	return switchToSessionCmd(switcher, m.sessionGen, msg.id)
 }
 
 // applyReload installs a completed Reloader.Reload (issue #114's

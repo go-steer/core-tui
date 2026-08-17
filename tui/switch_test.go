@@ -24,7 +24,31 @@ import (
 	"iter"
 	"strings"
 	"testing"
+
+	tea "charm.land/bubbletea/v2"
 )
+
+// submitSwitch dispatches a `/switch <id>` and pumps the two host hops
+// it takes since issue #137: the Sessions() enumerate, then — when the
+// id turned out to name a session rather than an action row —
+// SwitchToSession. Returns the model as of the last reply plus the Cmd
+// that reply produced (the listener batch, on a switch that landed).
+func submitSwitch(t *testing.T, m Model, text string) (Model, tea.Cmd) {
+	t.Helper()
+	out, cmd := m.dispatchSlash(text)
+	m = out.(Model)
+	for hop := 0; hop < 2 && cmd != nil; hop++ {
+		msg := cmd()
+		switch msg.(type) {
+		case switchLookupMsg, sessionSwitchedMsg:
+		default:
+			return m, cmd
+		}
+		out, cmd = m.Update(msg)
+		m = out.(Model)
+	}
+	return m, cmd
+}
 
 // bareAgent is a minimal Agent stub — no capabilities, no events.
 type bareAgent struct{ id string }
@@ -343,11 +367,7 @@ func TestSwitchBuiltin_Direct(t *testing.T) {
 	m.viewport.SetWidth(80)
 	beforeGen := m.sessionGen
 
-	handled, out, cmd := m.dispatchBuiltinSlash("switch", "b")
-	if !handled {
-		t.Fatalf("expected /switch b to be handled by builtin")
-	}
-	got := out.(Model)
+	got, cmd := submitSwitch(t, m, "/switch b")
 	if len(agent.switchCalls) != 1 || agent.switchCalls[0] != "b" {
 		t.Errorf("switchCalls = %v, want [b]", agent.switchCalls)
 	}
@@ -376,17 +396,14 @@ func TestSwitchBuiltin_DirectError(t *testing.T) {
 	m := NewModel(Options{Agent: agent})
 	m.viewport.SetWidth(80)
 
-	handled, out, _ := m.dispatchBuiltinSlash("switch", "bogus")
-	if !handled {
-		t.Fatalf("expected /switch to be handled")
-	}
-	got := out.(Model)
+	got, _ := submitSwitch(t, m, "/switch bogus")
 	if got.opts.Agent != Agent(agent) {
 		t.Errorf("Agent should not have swapped on error")
 	}
+	// The acknowledgement row, then the failure.
 	snap := got.history.Snapshot()
-	if len(snap) != 1 || snap[0].Role != RoleError || !strings.Contains(snap[0].Text, "not found") {
-		t.Errorf("expected single RoleError row with 'not found', got %+v", snap)
+	if len(snap) != 2 || snap[1].Role != RoleError || !strings.Contains(snap[1].Text, "not found") {
+		t.Errorf("expected an ack row then a RoleError with 'not found', got %+v", snap)
 	}
 }
 
