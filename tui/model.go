@@ -423,6 +423,47 @@ type Model struct {
 	// time. Buffered so a fast agent can't stall on a slow Update.
 	eventCh chan tea.Msg
 
+	// lifeCtx / lifeCancel bound the lifetime of every listener Cmd
+	// — the drain loops in agentcmd.go that park on a channel waiting
+	// for the next permission request, elicit request, notice, wake
+	// signal or agent event (issue #202).
+	//
+	// Those Cmds used to block on context.Background() or on a bare
+	// channel receive with no second case, which meant the only thing
+	// that could ever wake them was traffic that, at shutdown, never
+	// comes. Bubble Tea does not wait for outstanding Cmd goroutines
+	// — handleCommands spawns one per Cmd and deliberately leaks it
+	// ("Don't wait on these goroutines, otherwise the shutdown
+	// latency would get too large", tea.go) — so today the parked
+	// goroutines simply die with the process. That is an accident of
+	// the process model, not a lifecycle: a host that embeds the TUI
+	// in a longer-lived process, or runs it twice, accumulates one
+	// permanently parked goroutine per listener per run, each one
+	// pinning the Model it captured.
+	//
+	// The context is created in NewModel and cancelled at the two
+	// places that can observe shutdown: every Update path that
+	// returns tea.Quit (via Model.quitCmd), and Run's defer, which
+	// covers the paths Update cannot see at all — a cancelled
+	// Options context, tea.Program.Kill, SIGINT. Bubble Tea v2 hands
+	// the model nothing on those paths; its event loop intercepts
+	// QuitMsg and returns before model.Update is called, and context
+	// cancellation exits the loop without synthesising a message. So
+	// "cancel where we return tea.Quit, and again once Run returns"
+	// is the whole of the observable surface.
+	//
+	// Both fields are copied by value along with the rest of the
+	// Model, and that is fine here in a way it is not for listCache
+	// or modalScroll: nothing ever writes these fields after
+	// construction. Every copy carries the same context.Context
+	// interface value and the same cancel closure over the same
+	// cancelCtx, so cancelling through any copy cancels the one
+	// context all the listeners are parked on. Read them through
+	// Model.listenerCtx / Model.endListeners, which tolerate the nil
+	// a zero-value Model{} (tests) has.
+	lifeCtx    context.Context
+	lifeCancel context.CancelFunc
+
 	// Viewport-refresh coalescing (perf: attach to long remote
 	// sessions used to be O(N²) because each incoming event walked
 	// the full history, concatenated every rendered message, and
@@ -650,8 +691,17 @@ func NewModel(opts Options) Model {
 	// environment, so calling it per use is both wasted work and a way
 	// for the three readings to disagree.
 	caps := DetectCapabilities()
+	// The listener lifetime starts here rather than in Init so that
+	// it is non-nil for every Model a host can get its hands on —
+	// Init runs on the Bubble Tea loop's goroutine, after
+	// tea.NewProgram has already copied the Model, and a context
+	// installed there would never reach the copy the program holds.
+	// See the lifeCtx field comment for what cancels it.
+	lifeCtx, lifeCancel := context.WithCancel(context.Background())
 	m := Model{
 		opts:            opts,
+		lifeCtx:         lifeCtx,
+		lifeCancel:      lifeCancel,
 		styles:          NewStyles(initialDark, opts.Branding), // overwritten on BackgroundColorMsg unless ForceTheme is set
 		input:           newComposer(ta),
 		follow:          true, // start pinned to the tail

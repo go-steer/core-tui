@@ -91,7 +91,7 @@ func (m Model) dispatchBuiltinSlash(name, args string) (bool, tea.Model, tea.Cmd
 
 	case "quit", "exit", "q":
 		m.input.Reset()
-		return true, m, tea.Quit
+		return true, m, m.quitCmd()
 
 	case "memory":
 		m.history.Append(Message{Role: RoleSystem, Text: m.renderMemoryList(m.opts.Memory)})

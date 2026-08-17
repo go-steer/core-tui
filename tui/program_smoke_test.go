@@ -51,6 +51,8 @@ import (
 	"fmt"
 	"io"
 	"iter"
+	"runtime"
+	"sort"
 	"strings"
 	"sync"
 	"testing"
@@ -298,6 +300,235 @@ func TestProgramSmokePermissionRoundTrip(t *testing.T) {
 		}
 	}
 }
+
+// ---------------------------------------------------------------
+// Scenario 4 — the listener goroutines do not outlive the program.
+// Issue #202.
+// ---------------------------------------------------------------
+
+// smokeListenerFrames names the drain-loop Cmds in agentcmd.go that
+// park on a channel waiting for the next request / notice / signal /
+// event. Each one is a goroutine bubbletea spawned and, by its own
+// documented design, will never wait for or cancel: handleCommands
+// runs every Cmd in a bare `go func()` and leaks it if it has not
+// returned by the time Run does. So whether these goroutines ever end
+// is entirely a question of whether the TUI gives them a way out.
+//
+// Matching on the function name rather than counting goroutines is
+// what makes the failure message worth reading: a runtime.NumGoroutine
+// delta says a number went up; this says which listener is still
+// parked and prints the stack it is parked on.
+//
+// The entries are substrings rather than whole symbols because the
+// compiler decorates the closure's name with wherever it inlined the
+// constructor. The same listener shows up as
+// `tui.Model.wakeListener.func1` when it wasn't inlined and as
+// `tui.Model.Init.Model.eventListener.func2` when it was, so the
+// receiver-qualified method name is the longest part that is stable
+// across an inlining decision.
+var smokeListenerFrames = []string{
+	".Model.eventListener",
+	".Model.wakeListener",
+	".Model.promptListener",
+	".Model.elicitListener",
+	".Model.notifyListener",
+}
+
+// TestProgramSmokeListenersReleasedOnQuit is the assertion the issue
+// asks for, and the reason it says only this layer can see the bug:
+// nothing reachable from Update can observe a goroutine that Update
+// is not itself running on. It wires every listener the TUI has —
+// four opt-in capabilities plus the always-on event drain — runs a
+// real program, quits it the way an operator does, and requires that
+// all five goroutines have returned.
+//
+// Before the fix all five park forever: three blocked on
+// context.Background(), one on a Notifier channel that only tui.Run
+// closes (and only after tea.Program.Run has already returned, which
+// this test, like any embedding host, never calls), and one on an
+// eventCh that nothing closes at all.
+func TestProgramSmokeListenersReleasedOnQuit(t *testing.T) {
+	// Attribute goroutines to THIS program. Package tests run
+	// sequentially, but runtime.Stack is process-wide and the
+	// scenarios above leave their own programs winding down, so the
+	// assertion is "every listener this test started has gone" rather
+	// than "no listener exists anywhere in the process".
+	baseline := parkedListeners()
+
+	agent := &wakingSmokeAgent{wake: make(chan struct{})}
+	r := startProgram(t, tui.Options{
+		Agent:    agent,
+		Prompter: tui.NewPrompter(),
+		Elicitor: tui.NewElicitor(),
+		Notifier: tui.NewNotifier(),
+	})
+	r.waitFor("the startup frame", "Ask me anything to get started.")
+
+	// Init arms the listeners concurrently with the first paint, so
+	// poll rather than sampling once. This also keeps the scenario
+	// from passing vacuously: a listener that was never armed — a
+	// capability that stopped being wired, a renamed method — would
+	// trivially satisfy the post-quit assertion, so require it to be
+	// running before quitting.
+	armed := waitForArmedListeners(t, baseline)
+	t.Logf("armed listener goroutines: %v", sortedFrames(armed))
+
+	r.quitViaSlash()
+	if err := r.waitExit(); err != nil {
+		t.Fatalf("tea.Program.Run returned %v; want a clean exit.\n%s", err, r.dump())
+	}
+
+	// The goroutines are released by a cancellation that happened on
+	// the event loop, so they are already runnable by the time Run
+	// returns — but "runnable" is the scheduler's business, not ours,
+	// so this is a bounded poll rather than a bare sample. A healthy
+	// run clears on the first or second iteration.
+	deadline := time.Now().Add(smokeExitBudget)
+	for {
+		leaked := newListeners(baseline)
+		if len(leaked) == 0 {
+			return
+		}
+		if time.Now().After(deadline) {
+			var b strings.Builder
+			fmt.Fprintf(&b, "%d listener goroutine(s) still parked %s after tea.Program.Run returned; "+
+				"bubbletea does not reap them, so they are leaked for the life of the process.\n",
+				len(leaked), smokeExitBudget)
+			for _, id := range sortedKeys(leaked) {
+				fmt.Fprintf(&b, "\n%s\n", leaked[id])
+			}
+			t.Fatal(b.String())
+		}
+		time.Sleep(smokePollInterval)
+	}
+}
+
+// waitForArmedListeners blocks until every listener in
+// smokeListenerFrames has a goroutine of its own that was not in the
+// baseline, and returns the set of frames it saw. Fails the test
+// rather than returning a partial set — a listener that never arms
+// makes the scenario's real assertion meaningless.
+func waitForArmedListeners(t *testing.T, baseline map[string]string) map[string]bool {
+	t.Helper()
+
+	seen := map[string]bool{}
+	deadline := time.Now().Add(smokeWaitBudget)
+	for {
+		for _, block := range newListeners(baseline) {
+			for _, frame := range smokeListenerFrames {
+				if strings.Contains(block, frame) {
+					seen[frame] = true
+				}
+			}
+		}
+		if len(seen) == len(smokeListenerFrames) {
+			return seen
+		}
+		if time.Now().After(deadline) {
+			var missing []string
+			for _, frame := range smokeListenerFrames {
+				if !seen[frame] {
+					missing = append(missing, frame)
+				}
+			}
+			t.Fatalf("timed out after %s waiting for the listener Cmds to arm; never saw %v running. "+
+				"Either a capability stopped being wired from Init or a listener stopped blocking, and "+
+				"either way the leak assertion this scenario exists for would be vacuous.",
+				smokeWaitBudget, missing)
+		}
+		time.Sleep(smokePollInterval)
+	}
+}
+
+// newListeners returns the parked listener goroutines that are not in
+// the given baseline, keyed by goroutine id.
+func newListeners(baseline map[string]string) map[string]string {
+	out := map[string]string{}
+	for id, block := range parkedListeners() {
+		if _, ok := baseline[id]; !ok {
+			out[id] = block
+		}
+	}
+	return out
+}
+
+// parkedListeners dumps every goroutine in the process and returns
+// the ones sitting inside one of the listener Cmds, keyed by
+// goroutine id with the whole stack as the value.
+//
+// Keying by id rather than by frame is what lets the caller subtract
+// a baseline and be sure it is talking about the same goroutine
+// rather than a same-named one belonging to a program some earlier
+// scenario started.
+func parkedListeners() map[string]string {
+	buf := make([]byte, 1<<16)
+	for {
+		n := runtime.Stack(buf, true)
+		if n < len(buf) {
+			buf = buf[:n]
+			break
+		}
+		buf = make([]byte, 2*len(buf))
+	}
+
+	out := map[string]string{}
+	for _, block := range strings.Split(string(buf), "\n\n") {
+		if !strings.HasPrefix(block, "goroutine ") {
+			continue
+		}
+		if !containsAny(block, smokeListenerFrames) {
+			continue
+		}
+		id, _, ok := strings.Cut(strings.TrimPrefix(block, "goroutine "), " ")
+		if !ok {
+			continue
+		}
+		out[id] = block
+	}
+	return out
+}
+
+func containsAny(s string, subs []string) bool {
+	for _, sub := range subs {
+		if strings.Contains(s, sub) {
+			return true
+		}
+	}
+	return false
+}
+
+func sortedKeys(m map[string]string) []string {
+	out := make([]string, 0, len(m))
+	for k := range m {
+		out = append(out, k)
+	}
+	sort.Strings(out)
+	return out
+}
+
+func sortedFrames(m map[string]bool) []string {
+	out := make([]string, 0, len(m))
+	for k := range m {
+		out = append(out, k)
+	}
+	sort.Strings(out)
+	return out
+}
+
+// wakingSmokeAgent is an idle Agent that also claims the
+// WakeRequester capability, so that Init arms wakeListener. Its
+// channel is deliberately one nobody ever writes to or closes —
+// which is the realistic state of a host-owned wake channel at
+// shutdown, and the reason that listener needs a second way out.
+type wakingSmokeAgent struct {
+	wake chan struct{}
+}
+
+func (a *wakingSmokeAgent) Run(_ context.Context, _ string) iter.Seq2[tui.Event, error] {
+	return func(_ func(tui.Event, error) bool) {}
+}
+
+func (a *wakingSmokeAgent) WakeRequested() <-chan struct{} { return a.wake }
 
 // ---------------------------------------------------------------
 // The gated agent fixture.
