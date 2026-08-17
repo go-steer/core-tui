@@ -259,7 +259,7 @@ func sessionCell(s SessionInfo, selected bool, filter string, styles Styles) (ti
 		base = styles.Accent
 		marker = "> "
 		// The detail line gets the transcript's dotted selection bar
-		// (issue #152's GlyphSelectBar) rather than blank columns.
+		// (issue #152's glyphSelectBar) rather than blank columns.
 		// Without it the cursor marks a LINE and the list is made of
 		// CELLS, so "> " on one line and nothing on the next reads as
 		// ambiguous the moment two cells are adjacent — is the second
@@ -268,7 +268,7 @@ func sessionCell(s SessionInfo, selected bool, filter string, styles Styles) (ti
 		// is exactly the idiom the transcript already established for
 		// a multi-line selection, so reuse it rather than invent a
 		// second vocabulary for the same question.
-		gutter = styles.Accent.Render(GlyphSelectBar) + " "
+		gutter = styles.Accent.Render(glyphSelectBar) + " "
 	}
 
 	// An empty Display must never leave line one blank — that is the
@@ -286,7 +286,7 @@ func sessionCell(s SessionInfo, selected bool, filter string, styles Styles) (ti
 	// as a session that exists. Their affordance is the ▸ chevron, and
 	// it belongs on the title line next to the label it qualifies.
 	if s.Input != nil {
-		title += "  " + styles.Muted.Render(GlyphCollapsed)
+		title += "  " + styles.Muted.Render(glyphCollapsed)
 	}
 
 	var meta []string

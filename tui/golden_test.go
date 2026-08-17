@@ -29,7 +29,7 @@
 //   - Every golden renders through goldenTheme() — one explicit
 //     Theme literal owned by this file. Never m.styles (which is
 //     whatever NewModel happened to seed) and never the
-//     background-detected theme. A later change to DefaultTheme
+//     background-detected theme. A later change to defaultTheme
 //     or to the provider palettes therefore churns zero goldens.
 //   - Syntax highlighting is pinned to a fixed named chroma style
 //     via pinChromaStyle. The production default lives in
@@ -66,7 +66,7 @@ var updateGolden = flag.Bool("update", false, "regenerate the golden files under
 const goldenChromaStyle = "github"
 
 // goldenTheme is THE theme for the corpus: a full, explicit Theme
-// literal with no reference to DefaultTheme or any provider
+// literal with no reference to defaultTheme or any provider
 // palette. Every field is spelled out on purpose — a new Theme
 // field added upstream should show up here as a deliberate choice
 // (and as a reviewable golden churn), not silently inherit.
@@ -96,7 +96,7 @@ func goldenTheme() Theme {
 		// OnPrimary is deliberately NOT spelled out: it is the
 		// token the normalizer derives, and leaving it zero here is
 		// what makes the corpus exercise that derivation on the one
-		// path (a bare Theme literal) that never sees DefaultTheme.
+		// path (a bare Theme literal) that never sees defaultTheme.
 		DiffAddBg:       lipgloss.Color("#1B2D1B"),
 		DiffDelBg:       lipgloss.Color("#3A1E1E"),
 		DiffAddGutterBg: lipgloss.Color("#102010"),
@@ -393,7 +393,7 @@ func goldenHelpModel(t *testing.T, w, h, page int) Model {
 //
 // Two fields are pinned because NewModel seeds them from the
 // environment and they both reach the frame. caps comes from
-// DetectCapabilities() (COLORTERM / TERM / TERM_PROGRAM and a dozen
+// detectCapabilities() (COLORTERM / TERM / TERM_PROGRAM and a dozen
 // terminal-specific vars), and newlineHint is derived from the same
 // TERM_PROGRAM — the footer reads `ctrl+j newline` under a bare
 // shell and `alt+enter newline` under VS Code's terminal, which is
@@ -411,7 +411,7 @@ func goldenModel(t *testing.T, w, h int) Model {
 		},
 	})
 	m.styles = goldenStyles()
-	m.caps = TerminalCapabilities{}
+	m.caps = terminalCapabilities{}
 	m.newlineHint = defaultNewlineHint("")
 	out, _ := m.Update(tea.WindowSizeMsg{Width: w, Height: h})
 	return out.(Model)

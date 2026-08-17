@@ -92,14 +92,14 @@ func TestThemeByName_EmptyFallsBackToDefault(t *testing.T) {
 // regression that would make /theme google indistinguishable
 // from /theme default.
 func TestGoogleAndGopherTinted(t *testing.T) {
-	def := DefaultTheme(true)
-	google := GoogleTheme(true)
-	gopher := GopherTheme(true)
+	def := defaultTheme(true)
+	google := googleTheme(true)
+	gopher := gopherTheme(true)
 	if google.Primary == def.Primary {
-		t.Error("GoogleTheme(true).Primary equals DefaultTheme.Primary — theme is not tinted")
+		t.Error("googleTheme(true).Primary equals defaultTheme.Primary — theme is not tinted")
 	}
 	if gopher.Primary == def.Primary {
-		t.Error("GopherTheme(true).Primary equals DefaultTheme.Primary — theme is not tinted")
+		t.Error("gopherTheme(true).Primary equals defaultTheme.Primary — theme is not tinted")
 	}
 	if google.Primary == gopher.Primary {
 		t.Error("Google + Gopher have identical Primary — palettes weren't differentiated")
@@ -134,8 +134,8 @@ func TestWordmarkSequencePresence(t *testing.T) {
 	// logo sequence. Other multicolor themes pick their own
 	// length (Cyberpunk = 3, Christmas = 2, etc. — those are
 	// design calls, not invariants).
-	if g := GoogleTheme(true); len(g.WordmarkSequence) != 6 {
-		t.Errorf("GoogleTheme WordmarkSequence: want 6 entries (B-R-Y-B-G-R), got %d", len(g.WordmarkSequence))
+	if g := googleTheme(true); len(g.WordmarkSequence) != 6 {
+		t.Errorf("googleTheme WordmarkSequence: want 6 entries (B-R-Y-B-G-R), got %d", len(g.WordmarkSequence))
 	}
 }
 
@@ -145,7 +145,7 @@ func TestWordmarkSequencePresence(t *testing.T) {
 // a regression where the new path overtakes themes that opted
 // out.
 func TestRenderWordmark_NoSequenceFallsBackToWordmarkStyle(t *testing.T) {
-	s := NewStylesWithTheme(true, DefaultTheme(true))
+	s := NewStylesWithTheme(true, defaultTheme(true))
 	want := s.Wordmark.Render("core-tui")
 	got := s.RenderWordmark("core-tui")
 	if got != want {
@@ -158,7 +158,7 @@ func TestRenderWordmark_NoSequenceFallsBackToWordmarkStyle(t *testing.T) {
 // fallback. Doesn't assert on exact bytes (ANSI sequences are
 // brittle); just that the two paths diverge.
 func TestRenderWordmark_SequenceProducesDifferentOutput(t *testing.T) {
-	s := NewStylesWithTheme(true, GoogleTheme(true))
+	s := NewStylesWithTheme(true, googleTheme(true))
 	multi := s.RenderWordmark("core-tui")
 	single := s.Wordmark.Render("core-tui")
 	if multi == single {
@@ -172,9 +172,9 @@ func TestRenderWordmark_SequenceProducesDifferentOutput(t *testing.T) {
 // (Unicode K8s logo character). If a contributor reorders the
 // sequence or drops the helm, GKE stops being identifiable.
 func TestGKESignature(t *testing.T) {
-	g := GKETheme(true)
+	g := gkeTheme(true)
 	if len(g.WordmarkSequence) != 4 {
-		t.Fatalf("GKETheme WordmarkSequence: want 4 entries (R-B-G-Y), got %d", len(g.WordmarkSequence))
+		t.Fatalf("gkeTheme WordmarkSequence: want 4 entries (R-B-G-Y), got %d", len(g.WordmarkSequence))
 	}
 	// Order assertion: R-B-G-Y from the GKE icon's clockwise
 	// quadrants (top-red, right-blue, bottom-green, left-yellow).
@@ -190,11 +190,11 @@ func TestGKESignature(t *testing.T) {
 	}
 	for i, c := range g.WordmarkSequence {
 		if c != want[i] {
-			t.Errorf("GKETheme WordmarkSequence[%d] = %v, want %v", i, c, want[i])
+			t.Errorf("gkeTheme WordmarkSequence[%d] = %v, want %v", i, c, want[i])
 		}
 	}
 	if g.PromptGlyph != "⎈ " {
-		t.Errorf("GKETheme PromptGlyph = %q, want %q", g.PromptGlyph, "⎈ ")
+		t.Errorf("gkeTheme PromptGlyph = %q, want %q", g.PromptGlyph, "⎈ ")
 	}
 }
 
@@ -221,12 +221,12 @@ func TestBuiltinThemes_IncludesNewThemes(t *testing.T) {
 
 // TestNewStylesWithTheme_NormalizesBareThemeLiteral is the reason
 // the normalizer sits in NewStylesWithTheme rather than in
-// DefaultTheme.
+// defaultTheme.
 //
 // Two of the four ways a Theme comes into existence never touch
-// DefaultTheme: a host handing a composite literal to the exported
+// defaultTheme: a host handing a composite literal to the exported
 // NewStylesWithTheme, and the golden corpus's goldenTheme(). Put
-// the derivation in DefaultTheme and both of those get a zero
+// the derivation in defaultTheme and both of those get a zero
 // ChromaStyleName, styles.Get("") silently falls back, and OnPrimary
 // stays nil for the one surface that paints on top of Primary.
 func TestNewStylesWithTheme_NormalizesBareThemeLiteral(t *testing.T) {
@@ -235,8 +235,8 @@ func TestNewStylesWithTheme_NormalizesBareThemeLiteral(t *testing.T) {
 		t.Fatal("test setup: the literal must start with both derived tokens unset")
 	}
 	got := NewStylesWithTheme(true, bare).Theme
-	if got.ChromaStyleName != DefaultChromaStyleName {
-		t.Errorf("ChromaStyleName = %q, want %q", got.ChromaStyleName, DefaultChromaStyleName)
+	if got.ChromaStyleName != defaultChromaStyleName {
+		t.Errorf("ChromaStyleName = %q, want %q", got.ChromaStyleName, defaultChromaStyleName)
 	}
 	if got.OnPrimary == nil {
 		t.Error("OnPrimary was not derived — text on a Primary fill has no color")

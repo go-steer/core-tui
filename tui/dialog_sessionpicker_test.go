@@ -311,7 +311,7 @@ func TestSessionPicker_RendersTwoLineCells(t *testing.T) {
 	if act < 0 {
 		t.Fatal("the action row is not on screen")
 	}
-	if !strings.Contains(lines[act], GlyphCollapsed) {
+	if !strings.Contains(lines[act], glyphCollapsed) {
 		t.Errorf("action row = %q, want the chevron on the title line", lines[act])
 	}
 }
@@ -364,7 +364,7 @@ func TestSessionPicker_EmptyDisplayFallsBackToTheID(t *testing.T) {
 	// marks a CELL and not just its first line.
 	d.HandleKey("down", &m)
 	lines = sessionPickerLines(d, &m)
-	if got := strings.TrimSpace(lines[lineWith(lines, "sess-bare")+1]); got != GlyphSelectBar {
+	if got := strings.TrimSpace(lines[lineWith(lines, "sess-bare")+1]); got != glyphSelectBar {
 		t.Errorf("selected bare cell's pad line = %q, want just the selection bar", got)
 	}
 }

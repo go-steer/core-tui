@@ -476,13 +476,13 @@ func TestUpdate_Esc_CancelsInFlightSlash(t *testing.T) {
 }
 
 func TestRenderStatusLine_NoCursorBlock(t *testing.T) {
-	// The cursor block (GlyphCursor) used to sit between the
+	// The cursor block (glyphCursor) used to sit between the
 	// wordmark and the model. It's gone — the AsyncSlashProvider
 	// "running" segment is the new alive-and-working affordance.
 	m := NewModel(Options{})
 	m.viewport.SetWidth(80)
 	line := m.renderStatusLine()
-	if strings.Contains(line, GlyphCursor) {
+	if strings.Contains(line, glyphCursor) {
 		t.Errorf("expected no cursor block in banner, got: %q", line)
 	}
 }

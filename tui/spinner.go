@@ -70,10 +70,10 @@ func (m *Model) renderBrailleFrame(step int) string {
 // allocator once per theme change.
 func buildSpinnerFrameCache(primary, secondary color.Color, dark bool) *spinnerFrameCache {
 	if primary == nil {
-		primary = BrandViolet
+		primary = brandViolet
 	}
 	if secondary == nil {
-		secondary = BrandPink
+		secondary = brandPink
 	}
 	ramp := lipgloss.Blend1D(len(brailleSpinnerGlyphs), primary, secondary)
 	frames := make([]string, len(brailleSpinnerGlyphs))

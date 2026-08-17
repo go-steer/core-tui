@@ -295,7 +295,7 @@ func (m *Model) applyModelSwitch(msg modelSwitchedMsg) tea.Cmd {
 	// Refresh the theme so per-provider palettes (when
 	// AutoProviderTheme is on) track the freshly-selected
 	// model's provider. No-op when AutoProviderTheme is off
-	// — resolveStyles returns the same DefaultTheme.
+	// — resolveStyles returns the same defaultTheme.
 	m.refreshTheme()
 	m.refreshViewport()
 	return persistChoiceCmd(m.sessionGen, "/model", m.opts.PersistModelChoice, msg.id)

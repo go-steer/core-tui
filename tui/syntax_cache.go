@@ -69,13 +69,13 @@ var lexerCache sync.Map
 var langCache sync.Map
 
 // chromaStyleByName resolves a Theme.ChromaStyleName to a Chroma
-// style. Empty answers DefaultChromaStyleName; an unknown name
+// style. Empty answers defaultChromaStyleName; an unknown name
 // falls through styles.Get, which returns Chroma's own fallback
 // rather than nil — a bad name in a host theme degrades to plain
 // highlighting, it never panics the render.
 func chromaStyleByName(name string) *chroma.Style {
 	if name == "" {
-		name = DefaultChromaStyleName
+		name = defaultChromaStyleName
 	}
 	return styles.Get(name)
 }
@@ -152,7 +152,7 @@ func bgKey(bg color.Color) string {
 // highlightLineUncached does the actual Chroma tokenize + format.
 // The lexer resolution + Coalesce wrap rides the lexerCache so
 // only the FIRST line for a given language pays for them; later
-// lines reuse the cached lexer. LipglossFormatter routes coloring
+// lines reuse the cached lexer. lipglossFormatter routes coloring
 // through the lipgloss color profile so 256-color / truecolor /
 // no-color terminals all get appropriate output.
 func highlightLineUncached(line, lang, styleName string, bg color.Color) string {
@@ -165,7 +165,7 @@ func highlightLineUncached(line, lang, styleName string, bg color.Color) string 
 		return line
 	}
 	var buf bytes.Buffer
-	if err := LipglossFormatter(bg).Format(&buf, chromaStyleByName(styleName), it); err != nil {
+	if err := lipglossFormatter(bg).Format(&buf, chromaStyleByName(styleName), it); err != nil {
 		return line
 	}
 	// Chroma's tokenizer sometimes appends a trailing newline from

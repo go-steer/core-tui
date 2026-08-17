@@ -297,8 +297,8 @@ func TestHighlightLine_ChromaStyleInCacheKey(t *testing.T) {
 // as a parameter rather than through a package-level variable.
 func TestRenderCodeInline_FollowsThemeChromaStyle(t *testing.T) {
 	const code = "func main() {}"
-	a := renderCodeInline(code, NewStylesWithTheme(true, MatrixTheme(true)), 0, "Go")
-	b := renderCodeInline(code, NewStylesWithTheme(true, ChristmasTheme(true)), 0, "Go")
+	a := renderCodeInline(code, NewStylesWithTheme(true, matrixTheme(true)), 0, "Go")
+	b := renderCodeInline(code, NewStylesWithTheme(true, christmasTheme(true)), 0, "Go")
 	if a == b {
 		t.Errorf("renderCodeInline ignored the theme's chroma style:\n%q", a)
 	}
@@ -306,8 +306,8 @@ func TestRenderCodeInline_FollowsThemeChromaStyle(t *testing.T) {
 
 func TestRenderDiffInline_FollowsThemeChromaStyle(t *testing.T) {
 	const diff = "@@ -1,1 +1,1 @@\n-func main() {}\n+func run() {}\n"
-	a := renderDiffInline(diff, NewStylesWithTheme(true, MatrixTheme(true)), 0, "Go")
-	b := renderDiffInline(diff, NewStylesWithTheme(true, ChristmasTheme(true)), 0, "Go")
+	a := renderDiffInline(diff, NewStylesWithTheme(true, matrixTheme(true)), 0, "Go")
+	b := renderDiffInline(diff, NewStylesWithTheme(true, christmasTheme(true)), 0, "Go")
 	if a == b {
 		t.Errorf("renderDiffInline ignored the theme's chroma style:\n%q", a)
 	}
