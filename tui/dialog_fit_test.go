@@ -76,6 +76,12 @@ type modalFitCase struct {
 	// break. It is deliberately the CLOSE key in every case: that is
 	// the row whose loss strands the operator.
 	footer string
+	// footerPairs are the key/action pairs the footer is built from,
+	// written with ordinary spaces. Empty for a surface whose hint is
+	// not a key legend. Read by
+	// TestModalFooters_KeysStayWithTheirActions (issue #230), which
+	// asserts each pair reaches the frame with its space bound.
+	footerPairs []string
 	// title is a substring of the modal's title line — the row shed
 	// LAST before the footer, and the marker for "this cell is below
 	// the floor where anything but the hint fits".
@@ -103,6 +109,7 @@ func modalFitCases() []modalFitCase {
 			},
 			render:        func(m *Model) string { return m.overlayStack.Render(m.width, m) },
 			footer:        "esc cancel",
+			footerPairs:   []string{"type to filter", "↑↓ preview", "enter accept", "esc cancel"},
 			title:         "Choose a Theme",
 			body:          filterPlaceholder,
 			minBodyHeight: modalEdgeRows + 3,
@@ -115,6 +122,7 @@ func modalFitCases() []modalFitCase {
 			},
 			render:        func(m *Model) string { return m.overlayStack.Render(m.width, m) },
 			footer:        "esc cancel",
+			footerPairs:   []string{"type to filter", "↑↓ choose", "enter accept", "esc cancel"},
 			title:         "Choose a Model",
 			body:          filterPlaceholder,
 			minBodyHeight: modalEdgeRows + 3,
@@ -127,6 +135,7 @@ func modalFitCases() []modalFitCase {
 			},
 			render:        func(m *Model) string { return m.overlayStack.Render(m.width, m) },
 			footer:        "esc cancel",
+			footerPairs:   []string{"type to filter", "↑↓ choose", "enter attach", "esc cancel"},
 			title:         "Choose a Session",
 			body:          filterPlaceholder,
 			minBodyHeight: modalEdgeRows + 3,
@@ -147,7 +156,9 @@ func modalFitCases() []modalFitCase {
 			render: func(m *Model) string { return m.renderPermissionModal() },
 			// permissionKeyHint glues each key to its action with a
 			// non-breaking space so the pair never wraps apart.
-			footer:        "esc deny",
+			footer: "esc deny",
+			footerPairs: []string{"y allow once", "n deny", "s allow session",
+				"v allow verb", "t allow tool", "a allow always", "esc deny"},
 			title:         "Permission required",
 			minBodyHeight: modalEdgeRows + 3,
 		},
@@ -172,6 +183,7 @@ func modalFitCases() []modalFitCase {
 			},
 			render:        func(m *Model) string { return m.renderElicitModal() },
 			footer:        "esc cancel",
+			footerPairs:   []string{"tab next field", "enter submit", "ctrl+d decline", "esc cancel"},
 			title:         "an-mcp-server-with-a-long-name",
 			minBodyHeight: modalEdgeRows + 3,
 		},
@@ -201,9 +213,10 @@ func modalFitCases() []modalFitCase {
 				m.overlayStack.Open(newToolCallDialog(2))
 				return m
 			},
-			render: func(m *Model) string { return m.overlayStack.Render(m.width, m) },
-			footer: "esc close",
-			title:  "Tool call detail",
+			render:      func(m *Model) string { return m.overlayStack.Render(m.width, m) },
+			footer:      "esc close",
+			footerPairs: []string{"← → walk", "↑↓ scroll", "esc close"},
+			title:       "Tool call detail",
 			// The header banner is this dialog's first body row, and
 			// the two-of-two counter is the part of it that cannot
 			// wrap away.
@@ -237,9 +250,10 @@ func modalFitCases() []modalFitCase {
 				m.overlayStack.Open(d)
 				return m
 			},
-			render: func(m *Model) string { return m.overlayStack.Render(m.width, m) },
-			footer: "esc close",
-			title:  "Subagent",
+			render:      func(m *Model) string { return m.overlayStack.Render(m.width, m) },
+			footer:      "esc close",
+			footerPairs: []string{"↑↓ scroll", "G follow", "esc close"},
+			title:       "Subagent",
 			// The status banner is the first body row; "running" is
 			// its leading chip.
 			body:          "running",
@@ -257,6 +271,7 @@ func modalFitCases() []modalFitCase {
 			},
 			render:        func(m *Model) string { return m.overlayStack.Render(m.width, m) },
 			footer:        "esc cancel",
+			footerPairs:   []string{"enter submit", "esc cancel"},
 			title:         "Attach to Endpoint",
 			body:          "URL:",
 			minBodyHeight: modalEdgeRows + 3,
@@ -321,7 +336,7 @@ func TestModalFit_ShortTerminal(t *testing.T) {
 					// mid-phrase still fails: the break puts a newline
 					// and a box edge between the two words, and no
 					// amount of space-normalizing removes those.
-					plain := strings.ReplaceAll(ansi.Strip(block), "\u00a0", " ")
+					plain := unbindLegend(ansi.Strip(block))
 					hasTitle := strings.Contains(plain, tc.title)
 
 					// (1) The modal composes inside the terminal
@@ -374,7 +389,7 @@ func TestModalFit_BelowTheChromeFloor(t *testing.T) {
 				m := newFrameModel(StatusHeader, w, h)
 				m.overlayStack.Open(newThemePickerDialog(m.themeName))
 				block := m.overlayStack.Render(m.width, &m)
-				plain := ansi.Strip(block)
+				plain := unbindLegend(ansi.Strip(block))
 				if !strings.Contains(plain, "esc cancel") {
 					t.Errorf("the last row spent is not the close key\n%s", plain)
 				}

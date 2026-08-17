@@ -302,8 +302,13 @@ func TestModelPicker_BodyFitsTheTerminal(t *testing.T) {
 			t.Errorf("height %d: picker is %d rows tall\n%s", h, got, ansi.Strip(rendered))
 		}
 		// The filter row is never the thing that gets windowed away:
-		// it is what the operator needs to edit to get back.
-		if !strings.Contains(ansi.Strip(rendered), filterPlaceholder) {
+		// it is what the operator needs to edit to get back. Probed
+		// on the prompt rail as well as the placeholder because the
+		// footer says "type to filter" too, and matching the phrase
+		// alone let the footer stand in for the row at heights that
+		// have no body at all (issue #230).
+		if h >= modalEdgeRows+3 &&
+			!strings.Contains(ansi.Strip(rendered), filterPromptRail+filterPlaceholder) {
 			t.Errorf("height %d: filter row scrolled out of the body\n%s", h, ansi.Strip(rendered))
 		}
 	}

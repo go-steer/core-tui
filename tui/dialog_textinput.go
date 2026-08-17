@@ -95,6 +95,15 @@ type TextInputConfig struct {
 
 	// Footer overrides the default "enter submit · esc cancel"
 	// hint line.
+	//
+	// It is rendered verbatim. The built-in legends bind each key to
+	// its action with U+00A0 so a narrow modal cannot wrap between
+	// them (issue #230), and a host footer gets none of that: this
+	// side cannot tell which of an arbitrary string's spaces hold a
+	// pair together and which merely separate two. A host that wants
+	// the same protection puts a literal U+00A0 between each key and
+	// its action, and leaves the spaces around the separators
+	// ordinary so the legend still wraps between pairs.
 	Footer string
 }
 
@@ -268,7 +277,7 @@ func (d *textInputDialog) Render(totalWidth int, m *Model) string {
 
 	footer := d.cfg.Footer
 	if footer == "" {
-		footer = "enter submit " + GlyphSeparator + " esc cancel"
+		footer = keyLegend("enter submit", "esc cancel")
 	}
 	return RenderContext{
 		Title:  d.cfg.Title,

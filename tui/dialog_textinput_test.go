@@ -59,7 +59,7 @@ func TestTextInputDialog_Defaults(t *testing.T) {
 	if !strings.Contains(out, "Enter a Value") {
 		t.Errorf("default title missing from render:\n%s", out)
 	}
-	if !strings.Contains(out, "esc cancel") {
+	if !strings.Contains(unbindLegend(out), "esc cancel") {
 		t.Errorf("default footer missing from render:\n%s", out)
 	}
 }
