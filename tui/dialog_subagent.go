@@ -183,10 +183,11 @@ func (d *subagentDialog) Render(totalWidth int, m *Model) string {
 	if width < 40 {
 		width = 40
 	}
-	// Two columns are reserved on the right for the scrollbar so the
-	// content doesn't reflow the moment the log outgrows the
-	// viewport.
-	content := nonNeg(width - 6)
+	// modalBodyWidth already reserves the scrollbar column and its
+	// gutter so the content doesn't reflow the moment the log outgrows
+	// the viewport; this overlay keeps two further columns of slack it
+	// has always had.
+	content := nonNeg(modalBodyWidth(width) - 2)
 
 	bodyLines := d.bodyLines(m.styles, content)
 	d.lastBody = len(bodyLines)

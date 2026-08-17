@@ -365,7 +365,7 @@ func (d *modelPickerDialog) Render(totalWidth int, m *Model) string {
 		}
 		view := modalBodyHeight(m.height, modalChromeRows+1)
 		d.off = listWindow(d.off, d.idx, len(rows), view)
-		lines = append(lines, scrollView(m.styles, rows, nonNeg(width-4), view, d.off)...)
+		lines = append(lines, scrollView(m.styles, rows, modalBodyWidth(width), view, d.off)...)
 		body = strings.Join(lines, "\n")
 	}
 	footer := "type to filter " + GlyphSeparator + " ↑↓ choose " +

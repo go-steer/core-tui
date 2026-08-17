@@ -193,9 +193,11 @@ func (d *toolCallDialog) Render(totalWidth int, m *Model) string {
 	viewport := toolCallBodyHeight(m.height)
 	d.lastBody, d.lastView = len(bodyLines), viewport
 	d.scroll = min(nonNeg(d.scroll), nonNeg(len(bodyLines)-viewport))
-	// Two columns on the right are reserved for the scrollbar so the
-	// body doesn't reflow the moment the detail starts overflowing.
-	visible := scrollView(m.styles, bodyLines, nonNeg(width-6), viewport, d.scroll)
+	// modalBodyWidth reserves the scrollbar column and its gutter so
+	// the body doesn't reflow the moment the detail starts
+	// overflowing; the further two columns are slack this overlay has
+	// always had.
+	visible := scrollView(m.styles, bodyLines, nonNeg(modalBodyWidth(width)-2), viewport, d.scroll)
 	body := header + "\n\n" + strings.Join(visible, "\n")
 
 	footer := renderToolCallFooter(len(tools), len(bodyLines), viewport)

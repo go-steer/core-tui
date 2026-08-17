@@ -329,7 +329,7 @@ func (m Model) elicitCursor() *tea.Cursor {
 	// re-run rather than threaded out of renderElicitModal: a field
 	// row can be two lines (description), so "field index" is not
 	// "row index", and the walk is a handful of Sprintf calls.
-	_, focusRow := m.elicitFormLines(m.elicitModalWidth() - 4)
+	_, focusRow := m.elicitFormLines(modalBodyWidth(m.elicitModalWidth()))
 
 	// Subtract the scroll offset the render just settled on. View
 	// calls renderElicitModal before this, and modalScroll is a
@@ -354,10 +354,10 @@ func (m Model) elicitCursor() *tea.Cursor {
 	typed, _ := m.elicitValues[f.Name].(string)
 	x := ansi.StringWidth(elicitFieldRow(label+":", "")) + ansi.StringWidth(typed)
 
-	// Modal-local: Padding(0, 1) puts content one column in, and
-	// RenderContext's chrome spends two rows (title line + blank)
-	// above the body.
-	return tea.NewCursor(x+1, focusRow+2)
+	// Modal-local: the box edge and Padding(0, 1) put content two
+	// columns in, and the chrome spends three rows (box edge, title
+	// line, blank) above the body.
+	return tea.NewCursor(x+modalContentX, focusRow+modalBodyTop)
 }
 
 // placeCenterOffset is the leading padding lipgloss.Place adds when

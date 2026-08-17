@@ -331,10 +331,16 @@ func TestElicitModal_AdvertisesTheKeysItHonors(t *testing.T) {
 			m, results := elicitFlowFor(t, tc.req)
 			m = pastGrace(m)
 
-			if got := ansi.Strip(m.renderElicitModal()); !strings.Contains(got, tc.key) {
+			// tc.key is the phrase as an operator reads it; the
+			// U+00A0 keyLegend binds it with is a rendering detail
+			// of where the line may break, not part of the promise.
+			plain := func(s string) string {
+				return strings.ReplaceAll(ansi.Strip(s), "\u00a0", " ")
+			}
+			if got := plain(m.renderElicitModal()); !strings.Contains(got, tc.key) {
 				t.Errorf("the modal footer does not offer %q:\n%s", tc.key, got)
 			}
-			if got := ansi.Strip(m.footerHint()); !strings.Contains(got, tc.key) {
+			if got := plain(m.footerHint()); !strings.Contains(got, tc.key) {
 				t.Errorf("the footer hint does not offer %q: %s", tc.key, got)
 			}
 

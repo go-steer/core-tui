@@ -234,25 +234,146 @@ type RenderContext struct {
 	Styles Styles
 }
 
+// A modal wears a box edge on all four sides (issue #199).
+//
+// Since #156 the block is spliced OVER the frame rather than drawn
+// instead of it, so there is transcript on both sides of every modal
+// row and nothing marked where the modal stopped: the left and right
+// edges were implied by wherever the content happened to end, and a
+// short body row left the eye no way to tell dialog from background.
+//
+// Drawn rather than dimmed, which was the alternative #199 put up.
+// A box character renders on every terminal we can be asked to run
+// on; a dimmed backdrop needs an SGR-aware pass that has to survive
+// host content already carrying its own colour and degrades to
+// nothing where the terminal has no dim. It is also a layout change,
+// which the frame invariants can police exactly — dimming is a
+// colour change, which they cannot see at all.
+//
+// The edge is charged to the modal's OWN budget rather than added
+// around it: total width and total height stay the numbers the layout
+// already agreed to, and the two columns and two rows come out of the
+// content. That is what keeps the centring, the margin and the
+// clip pass untouched. Both costs are named here because a dozen call
+// sites subtract them, and a subtraction copied by hand is precisely
+// the shape of #157, #159 and #210.
+const (
+	// modalEdgeCols / modalEdgeRows are what the box itself spends.
+	modalEdgeCols = 2
+	modalEdgeRows = 2
+	// modalPadCols is RenderContext's one column of padding inside
+	// the edge, on each side.
+	modalPadCols = 2
+	// modalScrollbarCols is the gutter plus the bar column scrollView
+	// glues onto the right of every windowed body row. Reserved
+	// whether or not the body currently overflows, so it doesn't
+	// reflow the moment it starts to.
+	modalScrollbarCols = 2
+)
+
+// modalContentX / modalBodyTop are the modal-local coordinates of the
+// body's first cell: past the box edge and the padding, and below the
+// box edge, the title line and the blank row under it. The three
+// caret paths (cursor.go, the picker filter row, the text-input
+// dialog) add these rather than spelling the chrome out again, so a
+// change to the chrome moves the hardware cursor with it — nothing
+// else would catch that drift, because the golden corpus captures
+// tea.View.Content and not tea.View.Cursor.
+const (
+	modalContentX = 1 + modalPadCols/2
+	modalBodyTop  = 1 + 2
+)
+
+// modalInnerWidth is the content column inside a modal whose total
+// width is w: what is left after the box edge and the padding on both
+// sides. Every rule, every body and every caret offset in the package
+// measures against this.
+func modalInnerWidth(w int) int { return nonNeg(w - modalEdgeCols - modalPadCols) }
+
+// modalBodyWidth is the column a WINDOWED body composes against —
+// modalInnerWidth less the scrollbar column and its gutter.
+func modalBodyWidth(w int) int { return nonNeg(modalInnerWidth(w) - modalScrollbarCols) }
+
+// modalSurface draws the outer edge every modal surface wears, and is
+// the single place it is drawn. The permission overlay, the elicit
+// form, the embedded huh form, the side answer and everything on the
+// Overlay stack all pass through here — a treatment applied to four
+// of the five would read as a rendering bug rather than as a style.
+//
+// width is the TOTAL column count, edge included; a non-positive
+// width leaves the block to size itself, which is what the huh form
+// needs since it brings its own layout. padY is the vertical padding:
+// zero for the RenderContext surfaces, whose chrome supplies its own
+// spacer rows, and one for the huh form, which supplies none.
+//
+// termHeight is the terminal's height, and it buys the one case where
+// the edge is NOT drawn. fitModalContent's last resort, on a terminal
+// too short even for the footer key hint, is to return the hint alone
+// and let clipFrame trim it: the operator gets the row that says which
+// key closes the modal and nothing else. Two rows of edge on top of
+// that block are two rows clipFrame takes off the bottom, and the
+// bottom is where "esc cancel" ends — so the edge would be buying its
+// own visibility with the only content #142 promised never to shed.
+// Below that floor the edge goes and the hint stays. Everywhere else,
+// including a fullscreen modal, it is drawn; a zero termHeight means
+// the geometry is unknown and the fit pass is skipped, as ever.
+//
+// The edge takes its colour from ModalBorder — the same
+// Theme.BorderActive token the title and footer rules already read —
+// rather than from a literal, so a palette swap moves all three
+// together. lipgloss does not inherit a style's Foreground into its
+// border, hence the explicit BorderForeground.
+func modalSurface(s Styles, content string, width, termHeight, padY int) string {
+	st := s.ModalBorder.Padding(padY, modalPadCols/2)
+	if width > 0 {
+		st = st.Width(width)
+	}
+	if modalEdgeFits(content, width, termHeight, padY) {
+		st = st.Border(lipgloss.RoundedBorder()).BorderForeground(s.Theme.BorderActive)
+	}
+	return st.Render(content)
+}
+
+// modalEdgeFits reports whether the terminal can afford the edge's two
+// rows on top of the content — see modalSurface for why the answer is
+// ever no.
+//
+// The content is measured WRAPPED, at the column it will occupy once
+// the edge is on it. Counting its logical lines instead would read
+// fitModalContent's last-resort return — one long footer hint, still
+// unwrapped — as a single row and conclude there was room for the box
+// on a four-row terminal that the hint alone fills.
+func modalEdgeFits(content string, width, termHeight, padY int) bool {
+	if termHeight <= 0 {
+		return true
+	}
+	rows := lipgloss.Height(content)
+	if width > 0 {
+		rows = modalRowCount(modalInnerWidth(width), strings.Split(content, "\n"))
+	}
+	return rows+2*padY+modalEdgeRows <= termHeight
+}
+
 // Render returns the framed dialog as a styled string. Title
 // renders bold-accent with a horizontal rule continuing to the
 // right edge; body sits in the middle with a single blank line
 // above and below; footer renders muted at the bottom with its
-// own rule.
+// own rule; the whole block sits inside the box edge.
 func (rc RenderContext) Render() string {
 	width := rc.Width
 	if width < 30 {
 		width = 30
 	}
+	inner := modalInnerWidth(width)
 	titleBar := rc.Styles.ModalTitle.Render(rc.Title)
-	titleRule := rc.Styles.ModalBorder.Render(strings.Repeat(GlyphRule, nonNeg(width-lipgloss.Width(titleBar)-3)))
+	titleRule := rc.Styles.ModalBorder.Render(strings.Repeat(GlyphRule, nonNeg(inner-lipgloss.Width(titleBar)-1)))
 	titleLine := titleBar + " " + titleRule
 
-	footerRule := rc.Styles.ModalBorder.Render(strings.Repeat(GlyphRule, nonNeg(width-2)))
+	footerRule := rc.Styles.ModalBorder.Render(strings.Repeat(GlyphRule, inner))
 	footerLine := rc.Styles.ModalFooter.Render(rc.Footer)
 
 	content := fitModalContent(width, rc.Height, titleLine, rc.Body, footerRule, footerLine)
-	return rc.Styles.ModalBorder.Padding(0, 1).Width(width).Render(content)
+	return modalSurface(rc.Styles, content, width, rc.Height, 0)
 }
 
 // fitModalContent is the single place the six-part modal chrome —
@@ -294,6 +415,11 @@ func (rc RenderContext) Render() string {
 //
 // A non-positive termHeight means the geometry is unknown; the fit
 // pass is skipped and the join is exactly what it always was.
+//
+// termHeight is the TERMINAL's height, not the content's: the two
+// rows of box edge modalSurface adds afterwards are subtracted here
+// (issue #199), so a caller still passes Model.height and does not
+// have to know the edge exists.
 func fitModalContent(width, termHeight int, titleLine, body, footerRule, footerLine string) string {
 	head := []string{titleLine, ""}
 	tail := []string{"", footerRule, footerLine}
@@ -301,11 +427,17 @@ func fitModalContent(width, termHeight int, titleLine, body, footerRule, footerL
 	if body != "" {
 		bodyLines = strings.Split(body, "\n")
 	}
-	// The content column inside Padding(0, 1) — what the outer
-	// Render wraps to, and therefore what the row count has to be
-	// measured against.
-	inner := nonNeg(width - 2)
-	for termHeight > 0 && modalRowCount(inner, head, bodyLines, tail) > termHeight {
+	// The content column inside the box edge and the padding — what
+	// modalSurface wraps to, and therefore what the row count has to
+	// be measured against.
+	inner := modalInnerWidth(width)
+	// The rows left for content once the edge has taken its two. The
+	// edge is drawn by modalSurface AFTER this function returns, so
+	// shedding against the raw terminal height would compose a block
+	// two rows too tall and hand clipFrame the footer key hint —
+	// which is issue #142's defect with a new cause.
+	budget := termHeight - modalEdgeRows
+	for termHeight > 0 && modalRowCount(inner, head, bodyLines, tail) > budget {
 		switch {
 		case len(tail) == 3:
 			tail = tail[1:]

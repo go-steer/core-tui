@@ -279,17 +279,21 @@ func TestModalFullscreen_ShedsMarginAndFloor(t *testing.T) {
 	}
 
 	for _, tc := range []struct{ h, chrome, want int }{
-		// Issue #142's worked example: shed the margin at eight rows
-		// and chrome 5 + body 3 is exactly eight.
-		{h: 8, chrome: modalChromeRows, want: 3},
-		{h: 8, chrome: modalPickerChromeRows, want: 2},
+		// Issue #142's worked example: shed the margin, and chrome
+		// plus a three-row body is exactly the terminal. It was
+		// written as "8 rows, chrome 5 + body 3" and is stated
+		// against modalChromeRows here because #199's box edge moved
+		// the chrome to 7 and the example with it — the claim is
+		// about the arithmetic, not about the number eight.
+		{h: modalChromeRows + 3, chrome: modalChromeRows, want: 3},
+		{h: modalChromeRows + 3, chrome: modalPickerChromeRows, want: 2},
 		// Relaxed floor: two rows, then one, rather than a hard 3.
-		{h: 7, chrome: modalChromeRows, want: 2},
-		{h: 6, chrome: modalChromeRows, want: 1},
+		{h: modalChromeRows + 2, chrome: modalChromeRows, want: 2},
+		{h: modalChromeRows + 1, chrome: modalChromeRows, want: 1},
 		// Below the chrome floor nothing helps. Never zero (which
 		// scrollView reads as "don't window", i.e. render the lot)
 		// and never negative.
-		{h: 5, chrome: modalChromeRows, want: 1},
+		{h: modalChromeRows, chrome: modalChromeRows, want: 1},
 		{h: 1, chrome: modalPickerChromeRows, want: 1},
 	} {
 		got := modalBodyHeight(tc.h, tc.chrome)

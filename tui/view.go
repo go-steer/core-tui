@@ -318,26 +318,7 @@ func (m Model) View() tea.View {
 	// what the cursor path measures to re-derive the modal's origin —
 	// a centered block's top-left cell is a function of its own size,
 	// so it has to be computed, not guessed.
-	var modalFrame string
-	var hasModal bool
-	switch {
-	case m.pendingPermission != nil && m.opts.PermissionLayout == PermissionOverlay:
-		modalFrame, hasModal = m.renderPermissionModal(), true
-	case m.pendingElicit != nil:
-		modalFrame, hasModal = m.renderElicitModal(), true
-	case m.pendingForm != nil:
-		// Embedded huh.Form (e.g. /pricing set) takes priority
-		// over all other overlays — its keystrokes are routed
-		// in Update before any cascade runs (see Update). huh's
-		// View returns a string (not bubbletea v2's tea.View),
-		// so wrap directly.
-		formView := m.pendingForm.View()
-		modalFrame, hasModal = m.styles.ModalBorder.Padding(1, 2).Render(formView), true
-	case m.sideAnswer != nil:
-		modalFrame, hasModal = m.renderSideAnswer(), true
-	case m.overlayStack.HasDialogs():
-		modalFrame, hasModal = m.overlayStack.Render(m.width, &m), true
-	}
+	modalFrame, hasModal := m.modalFrame()
 	if hasModal {
 		// Composited over the body rather than placed instead of it
 		// (issue #156). This used to be five identical
@@ -1273,13 +1254,13 @@ func (m Model) footerHint() string {
 			keys = append(keys, "v allow verb")
 		}
 		keys = append(keys, "t allow tool", "a allow always", "esc deny")
-		return "Permission required" + sep + strings.Join(keys, sep)
+		return "Permission required" + sep + keyLegend(keys...)
 	case m.pendingElicit != nil:
 		if m.pendingElicit.Mode == ElicitURLMode {
-			return "MCP elicitation" + sep + "a/enter accept" + sep + "n decline" + sep + "esc cancel"
+			return "MCP elicitation" + sep + keyLegend("a/enter accept", "n decline", "esc cancel")
 		}
-		return "MCP elicitation" + sep + "tab next field" + sep + "enter submit" +
-			sep + "ctrl+d decline" + sep + "esc cancel"
+		return "MCP elicitation" + sep + keyLegend(
+			"tab next field", "enter submit", "ctrl+d decline", "esc cancel")
 	case m.confirmingClear:
 		return "Confirm clear?" + sep + "type y / yes to wipe" + sep + "anything else cancels"
 	case m.sideAnswer != nil:
@@ -1365,6 +1346,42 @@ func (m Model) renderTurnFooter(msg Message) string {
 	return m.styles.Muted.Italic(true).Render("└ " + strings.Join(parts, " "+GlyphSeparator+" "))
 }
 
+// modalFrame returns the block View composites over the frame, and
+// whether there is one at all. The cascade is the modal z-order:
+// permission overlay, elicit, the embedded huh form, the side answer,
+// then whatever is on the Overlay stack.
+//
+// It is a method rather than five arms inline in View because every
+// modal surface has to wear the same edge (issue #199), and this is
+// the one place all five are named. Anything that has to reason about
+// "the modal, whichever one is up" — the caret path, the frame
+// invariants — asks here instead of restating the cascade, so a sixth
+// surface cannot be added to View and quietly miss the treatment.
+func (m *Model) modalFrame() (string, bool) {
+	switch {
+	case m.pendingPermission != nil && m.opts.PermissionLayout == PermissionOverlay:
+		return m.renderPermissionModal(), true
+	case m.pendingElicit != nil:
+		return m.renderElicitModal(), true
+	case m.pendingForm != nil:
+		// Embedded huh.Form (e.g. /pricing set) takes priority
+		// over all other overlays — its keystrokes are routed
+		// in Update before any cascade runs (see Update). huh's
+		// View returns a string (not bubbletea v2's tea.View),
+		// so wrap directly.
+		//
+		// The form brings no chrome of its own, so it is the one
+		// surface that asks modalSurface for a row of vertical
+		// padding and lets the block size itself.
+		return modalSurface(m.styles, m.pendingForm.View(), 0, m.height, 1), true
+	case m.sideAnswer != nil:
+		return m.renderSideAnswer(), true
+	case m.overlayStack.HasDialogs():
+		return m.overlayStack.Render(m.width, m), true
+	}
+	return "", false
+}
+
 // renderSideAnswer renders the /btw-style side-answer modal (R-CMD-5).
 // The question lands in the title bar (truncated), the answer renders
 // through Glamour in the body, the footer shows the dismiss keys.
@@ -1381,24 +1398,29 @@ func (m *Model) renderSideAnswer() string {
 		width = 20
 	}
 
+	inner := modalInnerWidth(width)
+	bodyWidth := modalBodyWidth(width)
+
 	q := m.sideAnswer.Question
-	if lipgloss.Width(q) > width-12 {
-		q = string([]rune(q)[:width-13]) + GlyphTruncate
+	// "by the way: " is 12 cells and the rule needs somewhere to
+	// start, so the question gets the inner column less that prefix.
+	if lipgloss.Width(q) > inner-10 {
+		q = string([]rune(q)[:nonNeg(inner-11)]) + GlyphTruncate
 	}
 	titleBar := m.styles.ModalTitle.Render("by the way: " + q)
-	titleRule := m.styles.ModalBorder.Render(strings.Repeat(GlyphRule, nonNeg(width-lipgloss.Width(titleBar)-3)))
+	titleRule := m.styles.ModalBorder.Render(strings.Repeat(GlyphRule, nonNeg(inner-lipgloss.Width(titleBar)-1)))
 	titleLine := titleBar + " " + titleRule
 
 	var body string
 	switch {
 	case m.sideAnswer.Err != nil:
-		body = m.styles.ErrorText.Render(wordWrap(m.sideAnswer.Err.Error(), width-4))
+		body = m.styles.ErrorText.Render(wordWrap(m.sideAnswer.Err.Error(), bodyWidth))
 	case strings.TrimSpace(m.sideAnswer.Answer) == "":
 		body = m.styles.SystemText.Render("(no answer)")
 	default:
 		// Wrapped to the modal, not to the chat column — see
 		// ensureModalMarkdown.
-		mr := m.ensureModalMarkdown(width - 4)
+		mr := m.ensureModalMarkdown(bodyWidth)
 		body = strings.TrimRight(mr.renderMarkdown(m.sideAnswer.Answer), "\n")
 	}
 
@@ -1410,17 +1432,17 @@ func (m *Model) renderSideAnswer() string {
 	view := modalBodyHeight(m.height, modalChromeRows)
 	sc := m.scroll()
 	sc.measure(len(lines), view)
-	body = strings.Join(scrollView(m.styles, lines, nonNeg(width-4), view, sc.offset), "\n")
+	body = strings.Join(scrollView(m.styles, lines, bodyWidth, view, sc.offset), "\n")
 
 	dismiss := "esc / enter / space dismiss"
 	if hint := scrollHint(sc.overflows()); hint != "" {
 		dismiss = hint + "  " + GlyphSeparator + "  " + dismiss
 	}
-	footerRule := m.styles.ModalBorder.Render(strings.Repeat(GlyphRule, nonNeg(width-2)))
+	footerRule := m.styles.ModalBorder.Render(strings.Repeat(GlyphRule, inner))
 	footerLine := m.styles.ModalFooter.Render(dismiss)
 
 	content := fitModalContent(width, m.height, titleLine, body, footerRule, footerLine)
-	return m.styles.ModalBorder.Padding(0, 1).Width(width).Render(content)
+	return modalSurface(m.styles, content, width, m.height, 0)
 }
 
 // renderToast renders the transient wake banner (R-WAKE-1) between
@@ -1450,31 +1472,36 @@ func (m Model) renderToast(width int) string {
 	return m.styles.PermissionWarn.Render(body)
 }
 
-// permissionKeyHint builds the "y allow once · n deny · …" key
-// legend for both permission renderers. Spaces WITHIN a key+action
-// pair are non-breaking (U+00A0) so wordWrap's space-break never
-// splits "a allow always" mid-pair onto two lines. The " · "
-// separator stays breakable so the legend wraps cleanly between
-// keys instead.
-func permissionKeyHint(verb string) string {
+// keyLegend joins key+action pairs into a "y allow once · n deny
+// · …" footer legend. Every space WITHIN a pair becomes
+// non-breaking (U+00A0), so wordWrap's space-break can never land
+// inside one: the failure it prevents is a narrow terminal putting
+// "esc" on one line and "cancel" on the next, which reads as two
+// keys, one of them unnamed. The " · " separators stay ordinary
+// spaces, so the legend still wraps — just between pairs, where a
+// break carries no meaning.
+//
+// A pair is written the way it reads on screen ("s allow session")
+// rather than as key and action apart; the caller composes the
+// legend, this only decides where it may break.
+func keyLegend(pairs ...string) string {
 	const nbsp = " "
-	pair := func(key, action string) string {
-		return key + nbsp + strings.ReplaceAll(action, " ", nbsp)
+	bound := make([]string, len(pairs))
+	for i, p := range pairs {
+		bound[i] = strings.ReplaceAll(p, " ", nbsp)
 	}
-	keys := []string{
-		pair("y", "allow once"),
-		pair("n", "deny"),
-		pair("s", "allow session"),
-	}
+	return strings.Join(bound, " "+GlyphSeparator+" ")
+}
+
+// permissionKeyHint builds the key legend for both permission
+// renderers.
+func permissionKeyHint(verb string) string {
+	keys := []string{"y allow once", "n deny", "s allow session"}
 	if verb != "" {
-		keys = append(keys, pair("v", "allow verb"))
+		keys = append(keys, "v allow verb")
 	}
-	keys = append(keys,
-		pair("t", "allow tool"),
-		pair("a", "allow always"),
-		pair("esc", "deny"),
-	)
-	return strings.Join(keys, " "+GlyphSeparator+" ")
+	keys = append(keys, "t allow tool", "a allow always", "esc deny")
+	return keyLegend(keys...)
 }
 
 // renderPermissionInline renders the permission prompt as a
@@ -1555,8 +1582,11 @@ func (m *Model) renderPermissionModal() string {
 		width = 30
 	}
 
+	inner := modalInnerWidth(width)
+	bodyWidth := modalBodyWidth(width)
+
 	titleBar := m.styles.ModalTitle.Render("Permission required: " + req.ToolName)
-	titleRule := m.styles.ModalBorder.Render(strings.Repeat(GlyphRule, nonNeg(width-lipgloss.Width(titleBar)-3)))
+	titleRule := m.styles.ModalBorder.Render(strings.Repeat(GlyphRule, nonNeg(inner-lipgloss.Width(titleBar)-1)))
 	titleLine := titleBar + " " + titleRule
 
 	var lines []string
@@ -1567,11 +1597,11 @@ func (m *Model) renderPermissionModal() string {
 		lines = append(lines, m.styles.Muted.Render("verb: "+req.Verb))
 	}
 	if req.Detail != "" {
-		lines = append(lines, m.renderPermissionDetail(req, width-4))
+		lines = append(lines, m.renderPermissionDetail(req, bodyWidth))
 	}
 
 	hint := permissionKeyHint(req.Verb)
-	footerRule := m.styles.ModalBorder.Render(strings.Repeat(GlyphRule, nonNeg(width-2)))
+	footerRule := m.styles.ModalBorder.Render(strings.Repeat(GlyphRule, inner))
 
 	// Window the body. A large diff or a long shell script used to
 	// run off the bottom of the screen with no way to reach the
@@ -1580,18 +1610,18 @@ func (m *Model) renderPermissionModal() string {
 	// narrow terminals, so measure it rather than assuming one row.
 	body := strings.Join(lines, "\n")
 	bodyLines := strings.Split(body, "\n")
-	chrome := modalChromeRows - 1 + wrappedRows(hint, width-2)
+	chrome := modalChromeRows - 1 + wrappedRows(hint, inner)
 	view := modalBodyHeight(m.height, chrome)
 	sc := m.scroll()
 	sc.measure(len(bodyLines), view)
-	body = strings.Join(scrollView(m.styles, bodyLines, nonNeg(width-4), view, sc.offset), "\n")
+	body = strings.Join(scrollView(m.styles, bodyLines, bodyWidth, view, sc.offset), "\n")
 	if sc.overflows() {
 		hint = scrollHint(true) + " " + GlyphSeparator + " " + hint
 	}
 	footerLine := m.styles.ModalFooter.Render(hint)
 
 	content := fitModalContent(width, m.height, titleLine, body, footerRule, footerLine)
-	return m.styles.ModalBorder.Padding(0, 1).Width(width).Render(content)
+	return modalSurface(m.styles, content, width, m.height, 0)
 }
 
 // renderPermissionDetail renders the payload styled per
@@ -1672,6 +1702,7 @@ func (m *Model) renderElicitModal() string {
 		return ""
 	}
 	width := m.elicitModalWidth()
+	inner := modalInnerWidth(width)
 
 	title := req.Title
 	if title == "" {
@@ -1681,7 +1712,7 @@ func (m *Model) renderElicitModal() string {
 		title = m.pendingElicitSrv + " " + GlyphSeparator + " " + title
 	}
 	titleBar := m.styles.ModalTitle.Render(title)
-	titleRule := m.styles.ModalBorder.Render(strings.Repeat(GlyphRule, nonNeg(width-lipgloss.Width(titleBar)-3)))
+	titleRule := m.styles.ModalBorder.Render(strings.Repeat(GlyphRule, nonNeg(inner-lipgloss.Width(titleBar)-1)))
 	titleLine := titleBar + " " + titleRule
 
 	var (
@@ -1695,13 +1726,12 @@ func (m *Model) renderElicitModal() string {
 			body = m.styles.Muted.Render(req.Description) + "\n\n" + body
 		}
 		bodyLines = strings.Split(body, "\n")
-		footer = "a / enter accept " + GlyphSeparator + " n decline " + GlyphSeparator + " esc cancel"
+		footer = keyLegend("a / enter accept", "n decline", "esc cancel")
 	} else {
-		bodyLines, focusLine = m.elicitFormLines(width - 4)
-		footer = "tab next " + GlyphSeparator + " shift+tab prev " + GlyphSeparator +
-			" space toggle " + GlyphSeparator + " ←/→ enum " + GlyphSeparator +
-			" enter submit " + GlyphSeparator + " ctrl+d decline " + GlyphSeparator +
-			" esc cancel"
+		bodyLines, focusLine = m.elicitFormLines(modalBodyWidth(width))
+		footer = keyLegend(
+			"tab next", "shift+tab prev", "space toggle", "←/→ enum",
+			"enter submit", "ctrl+d decline", "esc cancel")
 	}
 
 	// Window the field list. A form with more fields than the
@@ -1709,22 +1739,22 @@ func (m *Model) renderElicitModal() string {
 	// Tab could walk the focus down into the invisible part. The
 	// offset follows the focused field (listWindow) while arrow /
 	// page keys and the wheel move it directly.
-	chrome := modalChromeRows - 1 + wrappedRows(footer, width-2)
+	chrome := modalChromeRows - 1 + wrappedRows(footer, inner)
 	view := modalBodyHeight(m.height, chrome)
 	sc := m.scroll()
 	sc.measure(len(bodyLines), view)
 	if focusLine >= 0 {
 		sc.follow(focusLine)
 	}
-	body := strings.Join(scrollView(m.styles, bodyLines, nonNeg(width-4), view, sc.offset), "\n")
+	body := strings.Join(scrollView(m.styles, bodyLines, modalBodyWidth(width), view, sc.offset), "\n")
 	if sc.overflows() {
 		footer = scrollHint(true) + " " + GlyphSeparator + " " + footer
 	}
 
-	footerRule := m.styles.ModalBorder.Render(strings.Repeat(GlyphRule, nonNeg(width-2)))
+	footerRule := m.styles.ModalBorder.Render(strings.Repeat(GlyphRule, inner))
 	footerLine := m.styles.ModalFooter.Render(footer)
 	content := fitModalContent(width, m.height, titleLine, body, footerRule, footerLine)
-	return m.styles.ModalBorder.Padding(0, 1).Width(width).Render(content)
+	return modalSurface(m.styles, content, width, m.height, 0)
 }
 
 // elicitFormLines renders the form's fields, one per terminal row

@@ -55,10 +55,20 @@ import (
 // the chat behind it.
 const wheelScrollLines = 3
 
-// modalChromeRows is the row budget RenderContext spends on chrome:
-// title line, blank, blank, footer rule, footer text. Body height is
-// terminal height minus this minus modalMarginRows.
-const modalChromeRows = 5
+// modalChromeRows is the row budget a modal surface spends on chrome:
+// the box edge's top and bottom rows, then title line, blank, blank,
+// footer rule, footer text. Body height is terminal height minus this
+// minus modalMarginRows.
+//
+// It grew by modalEdgeRows in issue #199. The edge is charged to the
+// modal's own budget rather than added around it, so a bordered modal
+// occupies exactly the rows the unbordered one did and the margin the
+// operator sees is unchanged — the two rows come out of the body.
+// Every derived threshold below moves with it, which is the point of
+// deriving them: modalFullscreenBelow goes from 13 to 15, i.e. the
+// regime still changes at the height where the margin stops being
+// real rather than two rows after it.
+const modalChromeRows = modalEdgeRows + 5
 
 // modalMarginRows keeps a modal from painting edge-to-edge over the
 // terminal — the operator keeps a sliver of the chat visible above
@@ -93,14 +103,24 @@ const modalPickerChromeRows = modalChromeRows + 1
 //
 //	chrome + modalMarginRows + minModalBodyRows
 //
-// which is 6+4+3 = 13 for the tallest chrome. At 13 rows and up
+// which is 8+4+3 = 15 for the tallest chrome. At 15 rows and up
 // every modal composes strictly inside the terminal with its margin
-// intact and nothing needs to change. At 12 and below the margin is
-// already fiction (the floor is quietly eating into it), and by 8
-// rows the composed modal is taller than the terminal and clipFrame
-// takes the footer hint off the bottom — the one row that tells the
-// operator how to close the thing. So the margin goes at exactly the
-// height where it stopped being real.
+// intact and nothing needs to change. At 14 and below the margin is
+// already fiction (the floor is quietly eating into it), and a couple
+// of rows further down the composed modal is taller than the terminal
+// and clipFrame takes the footer hint off the bottom — the one row
+// that tells the operator how to close the thing. So the margin goes
+// at exactly the height where it stopped being real.
+//
+// The box edge (issue #199) does not get its own regime. In
+// fullscreen the modal is full-HEIGHT, not full-width: at every
+// terminal width the layout supports there is still transcript to the
+// left and right of it, which is the very ambiguity the edge exists
+// to remove, so suppressing it there would drop the treatment exactly
+// where the modal is least distinguishable from what it covers. It
+// would also make the edge appear and disappear on a one-row resize,
+// which reads as a rendering fault. The edge's two rows are inside
+// modalChromeRows, so both regimes have already paid for them.
 const modalFullscreenBelow = modalPickerChromeRows + modalMarginRows + minModalBodyRows
 
 // modalFullscreen reports whether the terminal is too short to hold

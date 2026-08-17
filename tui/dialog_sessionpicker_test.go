@@ -247,16 +247,13 @@ func openSessionPickerSized(t *testing.T, height int, sessions []SessionInfo) (M
 	return m, d
 }
 
-// sessionPickerLines renders the picker and returns its lines with
-// ANSI stripped and the right-hand padding removed — fitRow pads every
-// windowed row out to the content width, and that padding is noise for
-// a "which lines are on screen" assertion.
+// sessionPickerLines renders the picker and returns the lines inside
+// its box edge, ANSI stripped and the right-hand padding removed —
+// fitRow pads every windowed row out to the content width, and that
+// padding is noise for a "which lines are on screen" assertion, as is
+// the edge glyph now sitting on both ends of it.
 func sessionPickerLines(d *sessionPickerDialog, m *Model) []string {
-	lines := strings.Split(ansi.Strip(d.Render(100, m)), "\n")
-	for i, ln := range lines {
-		lines[i] = strings.TrimRight(ln, " ")
-	}
-	return lines
+	return modalContentLines(d.Render(100, m))
 }
 
 // lineWith returns the index of the first line containing want, or -1.
@@ -458,12 +455,16 @@ func TestSessionPicker_ShortTerminal(t *testing.T) {
 			// half worth keeping is the title — that is what the
 			// ordering of the two listWindow calls buys.
 			//
-			// Three rows is the exception, and it predates this
-			// change: title + filter row + footer already fills the
-			// terminal, so fitModalContent clips the list away
-			// entirely and there is no half to keep. The assertion
-			// that matters at that size is the height bound above.
-			if h < 4 {
+			// The shortest terminals are the exception, and it
+			// predates this change: title + filter row + footer
+			// already fills them, so fitModalContent clips the list
+			// away entirely and there is no half to keep. The
+			// assertion that matters at that size is the height
+			// bound above. The exception was three rows until the
+			// box edge claimed two more (issue #199) — it is stated
+			// against modalEdgeRows so that it tracks the chrome
+			// rather than having to be re-guessed.
+			if h < 4+modalEdgeRows {
 				return
 			}
 			want := sessions[d.idx]

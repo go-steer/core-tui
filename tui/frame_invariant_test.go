@@ -844,24 +844,18 @@ func composedStack(m Model) (stack []framePanel, sidebar framePanel, hasSidebar 
 }
 
 // modalBlock returns the block View would centre over the body, and
-// whether there is one. The switch is View's switch: an active modal
-// REPLACES the body rather than overlaying it, so when one is up the
-// panel stack is not what the frame contains and the survival question
-// becomes "did the modal keep its own footer" — which is #147.
+// whether there is one. An active modal REPLACES the body rather than
+// overlaying it, so when one is up the panel stack is not what the
+// frame contains and the survival question becomes "did the modal keep
+// its own footer" — which is #147.
+//
+// It calls the same modalFrame the View does rather than restating the
+// cascade. The copy this used to keep drifted the moment #199 gave
+// every modal surface an edge: an invariant that asserts against its
+// own reconstruction of the frame stops being an invariant and becomes
+// a second implementation that happens to agree.
 func modalBlock(m *Model) (string, bool) {
-	switch {
-	case m.pendingPermission != nil && m.opts.PermissionLayout == PermissionOverlay:
-		return m.renderPermissionModal(), true
-	case m.pendingElicit != nil:
-		return m.renderElicitModal(), true
-	case m.pendingForm != nil:
-		return m.styles.ModalBorder.Padding(1, 2).Render(m.pendingForm.View()), true
-	case m.sideAnswer != nil:
-		return m.renderSideAnswer(), true
-	case m.overlayStack.HasDialogs():
-		return m.overlayStack.Render(m.width, m), true
-	}
-	return "", false
+	return m.modalFrame()
 }
 
 // assertPanelsSurvive is the panel-survival invariant: every panel the
@@ -1058,8 +1052,71 @@ func assertModalSurvives(t *testing.T, m Model, frame []string, block string, w,
 			matched, bh, top, p.col, diff)
 	}
 
+	assertModalEdge(t, block, h)
+
 	stack, _, _ := composedStack(m)
 	assertBackgroundSurvives(t, frame, stack, top, bh)
+}
+
+// assertModalEdge is #199's invariant, and it is stated here rather
+// than beside one dialog because "every dialog surface" is the whole
+// claim. A treatment on four surfaces out of five reads as a bug, so
+// the assertion has to run wherever a modal does: this is the one
+// place the corpus composes each surface at each width.
+//
+// The edge is what tells the operator where the sheet stops. Since
+// #156 the modal is spliced over the transcript instead of onto a
+// blanked screen, so the cell to the left of the modal's first column
+// holds host content — often styled host content — and the boundary
+// was carried entirely by that change in colour. On a terminal with a
+// pale theme, or one whose transcript already ran to that column, the
+// block's extent was a guess. A glyph at both ends of every row is a
+// boundary that does not depend on what is behind it.
+//
+// Asserted on the raw block, before compositing: a failure here names
+// the dialog that skipped the surface, which is not recoverable once
+// the rows are in the frame.
+//
+// The one licensed exception is modalSurface's floor — a terminal so
+// short that the edge could only be drawn by clipping the footer key
+// hint off the bottom. That is checked here rather than waved through,
+// because "the edge is missing" and "the edge is missing AND there was
+// room for it" are the same picture on screen and different bugs.
+func assertModalEdge(t *testing.T, block string, h int) {
+	t.Helper()
+	lines := strings.Split(block, "\n")
+	w := lipgloss.Width(block)
+	b := lipgloss.RoundedBorder()
+	if !strings.HasPrefix(ansi.Strip(lines[0]), b.TopLeft) {
+		if len(lines)+modalEdgeRows <= h {
+			t.Errorf("modal has no edge at all in a %d-row terminal, and its %d rows leave "+
+				"%d to spare — the edge is only allowed off when drawing it would clip the "+
+				"footer key hint\n%s", h, len(lines), h-len(lines), ansi.Strip(block))
+		}
+		return
+	}
+	for i, line := range lines {
+		left, right := b.Left, b.Right
+		switch i {
+		case 0:
+			left, right = b.TopLeft, b.TopRight
+		case len(lines) - 1:
+			left, right = b.BottomLeft, b.BottomRight
+		}
+		bare := ansi.Strip(line)
+		if lipgloss.Width(line) != w {
+			t.Errorf("modal row %d is %d cells wide in a %d-cell block — a ragged row "+
+				"leaves the edge somewhere other than the block's own column\n     %q",
+				i, lipgloss.Width(line), w, bare)
+			return
+		}
+		if !strings.HasPrefix(bare, left) || !strings.HasSuffix(bare, right) {
+			t.Errorf("modal row %d does not carry the edge: want %q…%q, got %q — this dialog "+
+				"is composing its own block instead of going through modalSurface",
+				i, left, right, bare)
+			return
+		}
+	}
 }
 
 // assertBackgroundSurvives is #156's own invariant, and the reason the
