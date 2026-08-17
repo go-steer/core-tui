@@ -514,7 +514,7 @@ func assertPanelsSurvive(t *testing.T, m Model, w, h int) {
 	frame := frameCellRows(m.View().Content)
 
 	if block, ok := modalBlock(&m); ok {
-		assertModalSurvives(t, frame, block, w, h)
+		assertModalSurvives(t, m, frame, block, w, h)
 		return
 	}
 
@@ -673,9 +673,9 @@ func assertPanelsNotDegenerate(t *testing.T, stack []framePanel) {
 // #147 and #149 needed: a modal overflowing a short terminal kept its
 // title and lost its bottom, which is where the footer rule and the
 // key hint that closes the thing live. Asserting the whole block lands
-// inside the frame at the origin lipgloss.Place gives it says the
-// footer survived without naming the footer's text.
-func assertModalSurvives(t *testing.T, frame []string, block string, w, h int) {
+// inside the frame at its centred origin says the footer survived
+// without naming the footer's text.
+func assertModalSurvives(t *testing.T, m Model, frame []string, block string, w, h int) {
 	t.Helper()
 	bw, bh := lipgloss.Width(block), lipgloss.Height(block)
 	if bh > h || bw > w {
@@ -684,16 +684,61 @@ func assertModalSurvives(t *testing.T, frame []string, block string, w, h int) {
 			bw, bh, w, h)
 		return
 	}
-	// lipgloss.Place centres by integer division, so the block's
-	// top-left cell is a function of its own size.
-	p := framePanel{name: "modal", block: block, col: atLeast((w-bw)/2, 0), end: w}
+	// Centring is integer division, so the block's top-left cell is a
+	// function of its own size. The rectangle ends where the block
+	// ends, not at the frame's right edge: since #156 the modal is
+	// composited over the body rather than placed instead of it, so the
+	// cells beside it hold the transcript rather than blanks.
+	col := atLeast((w-bw)/2, 0)
 	top := atLeast((h-bh)/2, 0)
+	p := framePanel{name: "modal", block: block, col: col, end: col + bw}
 	if matched, diff := p.matchAt(frame, top); matched != bh {
 		if diff == "" {
 			diff = fmt.Sprintf("frame is %d rows", len(frame))
 		}
 		t.Errorf("modal is not in its rectangle: %d of %d rows match from frame row %d, col %d\n     %s",
 			matched, bh, top, p.col, diff)
+	}
+
+	stack, _, _ := composedStack(m)
+	assertBackgroundSurvives(t, frame, stack, top, bh)
+}
+
+// assertBackgroundSurvives is #156's own invariant, and the reason the
+// modal's rectangle above had to stop at the block's own right edge: a
+// modal is a sheet over the frame, not a mode switch. Every row the
+// modal does not cover has to be exactly what the panel rendered, so
+// the transcript stays readable behind a permission prompt and Esc
+// reveals the screen rather than restoring it.
+//
+// Rows the modal does cover are skipped rather than inverted. The
+// block's own cells are asserted above; the background cells beside it
+// are the splice's business, and composite_test.go owns those column by
+// column with styled and double-width input the frame corpus cannot
+// reach.
+func assertBackgroundSurvives(t *testing.T, frame []string, stack []framePanel, modalTop, modalRows int) {
+	t.Helper()
+	row := 0
+	for _, p := range stack {
+		lines := strings.Split(p.block, "\n")
+		for i, pl := range lines {
+			fr := row + i
+			if fr >= len(frame) {
+				break
+			}
+			if fr >= modalTop && fr < modalTop+modalRows {
+				continue
+			}
+			got := strings.TrimRight(cellWindow(frame[fr], p.col, p.end), " ")
+			want := strings.TrimRight(ansi.Strip(pl), " ")
+			if got != want {
+				t.Errorf("%s row %d was blanked by the modal even though the modal does not cover it "+
+					"(modal holds frame rows %d..%d)\n     frame row %d, cols %d..%d:\n     want %q\n     got  %q",
+					p.name, i, modalTop, modalTop+modalRows-1, fr, p.col, p.end, want, got)
+				break
+			}
+		}
+		row += len(lines)
 	}
 }
 

@@ -43,12 +43,19 @@ import (
 // that the suite stays quick.
 const slowHostDelay = 500 * time.Millisecond
 
-// nonBlockingBudget is the ceiling for one Update or View call. An
-// order of magnitude under slowHostDelay, so a call site that is
-// still inline cannot squeeze under it, and comfortably above what a
-// full sidebar-layout paint costs under -race (~15ms on CI) so the
-// assertion isn't measuring glamour instead of the host.
-const nonBlockingBudget = slowHostDelay / 10
+// nonBlockingBudget is the ceiling for one Update or View call. Half
+// of slowHostDelay: an inline call site cannot squeeze under it, and
+// nothing else in the frame comes anywhere near it.
+//
+// It was slowHostDelay/10 and tripped on a loaded macOS runner at
+// 51.6ms — a populated sidebar paint under -race, not a host call.
+// There is no useful signal in the gap between "a paint" and "half a
+// wedged host": the real discriminator is the agent.calls counter
+// these tests assert alongside the timing, which is exact. The clock
+// is here to catch a blocking call that somehow does not go through
+// the counted capability, so it should be set where a slow machine
+// cannot reach it.
+const nonBlockingBudget = slowHostDelay / 2
 
 // slowAgent implements every capability whose call sites issue #114
 // moved off the Update loop, and sleeps in all of them.
