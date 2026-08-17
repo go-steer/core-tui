@@ -25,6 +25,10 @@ The wire protocol in [`docs/sse-event-stream-protocol.md`](./docs/sse-event-stre
 
 ## [Unreleased]
 
+### Added
+
+- **CI builds and tests on macOS** ([#84](https://github.com/go-steer/core-tui/issues/84)). N-PORTABLE has promised macOS terminals since the first requirements draft, and every job in the pipeline was `runs-on: ubuntu-latest` — darwin had never been compiled, let alone tested. That is not a theoretical gap for a TUI: capability detection, the OSC-11 background query, the clipboard helper table ([#175](https://github.com/go-steer/core-tui/issues/175)) and mouse-mode handling all diverge there. A `test (macos)` job now runs vet, build and the race-enabled unit suite on `macos-latest`. It is a separate job rather than a `matrix.os` on `test` because matrix-expanding a job renames its check to `test (ubuntu-latest)`, and `test` is a required check on `main` — the rename would park every open PR on "Expected — Waiting for status" until branch protection was edited to match. It is also not required to merge yet: a macOS runner queues slower than ubuntu, and a required check that is merely slow blocks everything. `lint`, `tidy` and `govulncheck` stay ubuntu-only, being platform-independent. N-PORTABLE now states what CI actually proves — that the code compiles and its tests pass on both kernels — and keeps the named emulators as the manual-verification claim they have always been.
+
 ## [0.20.0] — 2026-08-17
 
 The transcript stops being a thing you scroll and becomes a thing you drive. `tab` hands it the keyboard, a cursor selects one item at a time, `space` folds the one you are on, `y` / `c` copy it, and `shift+←` / `shift+→` pan across the content that does not wrap — a table, a diff, a stack trace. Under all of it the render path is addressed by item instead of by one concatenated blob, which is what makes item-at-a-time navigation affordable at session length rather than an O(session) walk per keystroke.
