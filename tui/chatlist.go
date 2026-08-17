@@ -224,9 +224,13 @@ func (m Model) buildChatRule() string {
 // the cache neither knows nor needs to know that the row is folded.
 func (m Model) chatMessageLines(i, total int, msg Message) []string {
 	width := m.viewport.Width()
-	item := messageItem{msg: msg, idx: i, total: total}
-	lines, ok := m.listCache.getLines(item, width)
+	// Looked up by ID rather than through Item so the hit path does
+	// not build (and heap-allocate) a messageItem it would throw away
+	// — issue #204. The box is deferred to the miss branch, where put
+	// needs the interface and a render is being paid for regardless.
+	lines, ok := m.listCache.getLinesByID(msg.ID, msg.Version, width)
 	if !ok {
+		item := messageItem{msg: msg, idx: i, total: total}
 		lines = m.listCache.put(item, width, m.renderMessage(msg))
 	}
 	if m.chatRowCollapsed(msg) {
@@ -235,11 +239,17 @@ func (m Model) chatMessageLines(i, total int, msg Message) []string {
 	return lines
 }
 
-// chatRowCached reports whether history row i already has an exact
+// chatRowCached reports whether a history row already has an exact
 // render at the current width. The resize warm pass uses it to decide
 // whether a row still owes work.
-func (m Model) chatRowCached(i, total int, msg Message) bool {
-	_, ok := m.listCache.getLines(messageItem{msg: msg, idx: i, total: total}, m.viewport.Width())
+//
+// It takes the Message alone. The row index and transcript length it
+// used to take were only ever there to fill in a messageItem for the
+// lookup, and a lookup by ID does not want one — so asking for them
+// was asking the caller to assemble a value purely to be discarded
+// (issue #204).
+func (m Model) chatRowCached(msg Message) bool {
+	_, ok := m.listCache.getLinesByID(msg.ID, msg.Version, m.viewport.Width())
 	return ok
 }
 

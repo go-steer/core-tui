@@ -231,7 +231,7 @@ func (m *Model) warmReflowSlice() bool {
 		// and tool rows never touch Glamour, and the drag never drew
 		// them. They owe an assembly, and it is charged like any
 		// other so a screenful of them cannot land in one slice.
-		if !m.chatRowCached(m.reflowCursor, n, msg) {
+		if !m.chatRowCached(msg) {
 			work = true
 		}
 		if !work {
