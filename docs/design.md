@@ -262,10 +262,61 @@ func (a *cogoAgent) Run(ctx context.Context, prompt string) iter.Seq2[tui.Event,
 
 ### 3.3 Optional capability interfaces
 
-The TUI feature-detects each via type assertion. Each interface
-matches one user-visible feature and is documented as such.
+Each interface matches one user-visible feature and is documented as
+such. There are twenty, and this section declares all twenty: a
+capability that does not appear here is not part of the plug-in
+surface. [`api-surface.md`](./api-surface.md) §3.1 is the mechanical
+list the roster is checked against, and
+`TestDesignDocDeclarationsMatchSource` in `tui/design_doc_test.go`
+compares every declaration below against `package tui` on each test
+run, so the two can no longer disagree quietly.
+
+Seventeen of the twenty are feature-detected on the `Agent` by type
+assertion. The other three each differ in a way worth knowing:
+`UsageTracker` is supplied through `Options.UsageTracker` (§3.4)
+rather than found on the `Agent`, so it may live on a type of its own;
+`SessionByModelTracker` is asserted on that tracker rather than on the
+agent; and `ContentRunner` is asserted nowhere in `package tui` at
+all, being declared so hosts can drive each other through it, which is
+why #77 proposes deleting it.
+
+Detection by type assertion is why the declarations below have to be
+exact. A near-miss — the right method name with the wrong signature —
+is indistinguishable from declining the capability, so the host sees
+no compile error and no runtime error, just a feature that never
+appears. Write `var _ tui.X = (*adapter)(nil)` for every capability
+the adapter means to satisfy; `examples/core-agent` carries such a
+block for exactly this reason (§7). The two places the reference host
+names a capability it does not in fact satisfy — a `RequestWake()`
+that is not `WakeRequester`, and a comment naming an `Interruptible`
+interface that has never existed — are recorded in
+[`api-audit.md`](./api-audit.md) §3.
 
 ```go
+// LiveAgent is for hosts whose agent is not driven by per-turn Run
+// calls — a remote-attached daemon running autonomously, an observer
+// TUI watching MCP-triggered activity (issue #22). When implemented,
+// the TUI ranges over Events(ctx) in one long-lived goroutine started
+// at startup and paints every event, whether or not the operator
+// typed. LiveAgent WINS over Run: a host satisfying both has Run
+// skipped, and operator submissions route through InjectableAgent
+// when that is present too. Events is called exactly once, so
+// reconnection and replay are the implementation's own business.
+type LiveAgent interface {
+    Events(ctx context.Context) iter.Seq2[Event, error]
+}
+
+// PermanentStreamError, implemented by an error a LiveAgent yields,
+// says the condition is not worth retrying — the session is gone, the
+// auth was revoked. The TUI paints a terminal "session unavailable"
+// row instead of looping on the reconnect path (issue #51). Errors
+// that don't implement it fall back to a substring heuristic over the
+// HTTP status, so adapters that already stringify one keep working.
+type PermanentStreamError interface {
+    error
+    PermanentStreamErr() bool
+}
+
 // RemoteInterrupter lets the TUI cancel an in-flight turn it has no
 // local context for — a LiveAgent observer session watching a
 // daemon's autonomous turn. Without it, /interrupt short-circuits
@@ -279,13 +330,52 @@ type RemoteInterrupter interface {
     Interrupt(ctx context.Context) error
 }
 
-// StatusReporter feeds the header bar.
+// StatusReporter feeds the header bar. Most hosts leave the model
+// name and state for the TUI to derive from Options and skip this;
+// implement it when the agent has richer state to surface. Status()
+// is called off the event loop, so it must be safe for concurrent
+// calls and must return last-known state rather than doing I/O.
 type StatusReporter interface {
     Status() Status
 }
 type Status struct {
     ModelName string
     State     string // "idle" | "running" | "deferred" | ...
+    Provider  string // "gemini" | "anthropic" | "vertex" | ... — optional
+}
+
+// UsageTracker is the read-only side of the host's usage accounting;
+// it feeds the per-turn footer, /stats, the status surface and the
+// totals recorded in the session transcript (R-USE-1 / R-USE-3). It
+// is snapshotted at turn end rather than polled per frame. Unlike
+// every other capability here it is wired through
+// Options.UsageTracker rather than detected on the Agent, so it can
+// live on a type of its own. Same concurrency rule as StatusReporter:
+// the TUI pulls these off its event loop and expects cached values.
+type UsageTracker interface {
+    SessionTotals() Usage           // input + output tokens, cumulative
+    SessionCostUSD() float64        // accumulated dollar spend
+    LastTurn() (Usage, float64)     // most-recent turn's usage + cost
+    ContextWindowSize() int         // 0 when unknown
+    ContextWindowUsed() int         // 0 when unknown
+    SessionTurns() int              // 0 when unknown
+    SessionDuration() time.Duration // 0 when unknown
+}
+
+// SessionByModelTracker is a capability ON the UsageTracker, not on
+// the Agent (issue #18): hosts that account per-model satisfy it and
+// /stats grows a breakdown under the aggregate rows. The map key is
+// the model name and should match what StatusReporter reports. An
+// empty map or a single entry suppresses the breakdown, since one
+// entry would only restate SessionTotals.
+type SessionByModelTracker interface {
+    SessionByModel() map[string]ModelTotals
+}
+type ModelTotals struct {
+    Turns        int
+    InputTokens  int
+    OutputTokens int
+    CostUSD      float64
 }
 
 // ModelSwapper backs /model.
@@ -366,15 +456,24 @@ type SwitchTarget struct {
     Note         string              // optional post-switch system row
 }
 
-// PermissionController backs /permissions, /allow, /deny, persistence
-// of allow-always decisions.
+// PermissionController backs /permissions, /allow and /deny.
+// SessionApprovals is what the /permissions review picker lists — the
+// gate's recollection of the approval-shaped decisions taken this
+// session. Persisting an allow-always decision is NOT a method here:
+// it arrives on the Options.AlwaysAllow callback (§3.4), because the
+// decision is made in the TUI's own modal and the gate that would
+// implement this interface is not necessarily the thing that owns the
+// settings file.
 type PermissionController interface {
     SessionApprovals() []ApprovalLog
     AddAllowPatterns(patterns []string) error
     AddDenyPatterns(patterns []string) error
     AddBuiltinAllowExtra(bundleName string) error
-    AlwaysAllow(req PermissionRequest) error
-    Snapshot() PermissionSnapshot // for /permissions list
+}
+type ApprovalLog struct {
+    Tool     string
+    Key      string
+    Decision string // "allow-once" | "allow-session" | "deny" | ...
 }
 
 // PricingController backs /pricing.
@@ -403,6 +502,24 @@ type InjectableAgent interface {
     Inject(message string) error
 }
 
+// InboxDrainer is for hosts whose agent queues operator-injected
+// messages in an inbox distinct from the per-turn prompt. With
+// InjectableAgent it is what lets the TUI drive an auto-continue loop
+// over a runner it cannot reach into — the ADK case, where the
+// iterator-shaped runner owns its own loop and exposes no mid-turn
+// hook. DrainInbox returns the queued messages AND removes them in
+// the same call, because the TUI immediately submits them as a
+// synthetic turn; an empty return is "nothing to continue with".
+// PendingInboxCount is the non-destructive peek used for sizing and
+// hints, and may be a coarse upper bound.
+//
+// See issue #9 and Options.MidTurnInjectionMode ==
+// AutoContinueFromInbox.
+type InboxDrainer interface {
+    DrainInbox() []string
+    PendingInboxCount() int
+}
+
 // WakeRequester is an optional capability for hosts whose agent
 // emits "I need the operator's attention" signals. The TUI
 // subscribes once at startup; each receive triggers a transient
@@ -417,9 +534,11 @@ type WakeRequester interface {
 // ContentRunner is an optional Agent capability for hosts that
 // support structured-prompt entry — driving turns from `[]Content`
 // instead of a single string. Used for retry / replay flows where
-// the host has pre-built the conversation context. The TUI's
-// default submit path still uses Run(ctx, prompt); RunWithContents
-// is invoked by host-supplied affordances.
+// the host has pre-built the conversation context. Nothing in
+// package tui asserts it: the submit path always uses
+// Run(ctx, prompt), and RunWithContents is called only by
+// host-supplied affordances, which is why it is a deletion candidate
+// under #77.
 //
 // See R-CHAT-12.
 type Content struct {
@@ -479,18 +598,35 @@ type SubagentEvent struct {
     ToolCalls   []SubagentToolCall
     ToolResults []SubagentToolResult
 }
+type SubagentToolCall struct {
+    ID   string
+    Name string
+    Args map[string]any
+}
+type SubagentToolResult struct {
+    ID       string
+    Name     string
+    Response map[string]any
+    Error    string
+}
 type SubagentNotFoundError struct {
     Name      string
     Available []string
 }
 
 // SlashProvider lets an agent advertise its own slash commands. The
-// TUI queries SlashCommands at startup and after Reload, merges the
-// entries into /help and the palette under an agent-scoped section,
-// and routes invocations back via InvokeSlash. Names that collide
-// with built-ins are skipped (built-in wins) and a system warning
-// is logged. Entries that collide with Options.Commands resolve to
-// the host extension; the agent entry is shadowed.
+// TUI asks SlashCommands each time the operator opens the / palette
+// and again on /help — not once at startup — so a host whose catalog
+// changes mid-session does not have to announce it. Invocations route
+// back through InvokeSlash. /help renders the host's entries as their
+// own section below the built-ins; the palette merges them in as
+// ordinary rows after the built-ins it painted on the keystroke.
+//
+// Built-ins win, silently: dispatch tries the built-in table first
+// and only an unrecognized name reaches the host, so a spec that
+// reuses a built-in name is unreachable and stays visible in the
+// palette anyway. Pick names the built-in catalog does not already
+// have.
 type SlashProvider interface {
     SlashCommands() []SlashCommandSpec
     InvokeSlash(ctx context.Context, name, args string) (SlashResult, error)
@@ -501,8 +637,39 @@ type SlashCommandSpec struct {
     Description string   // shown in /help and the palette hint
 }
 type SlashResult struct {
-    SystemMessage string      // optional line rendered in chat after the call
-    ModalAnswer   *SideAnswer // optional /btw-style modal (R-CMD-5)
+    SystemMessage string        // optional line rendered in chat after the call
+    ModalAnswer   *SideAnswer   // optional /btw-style modal (R-CMD-5)
+    SwitchTo      *SwitchTarget // optional mid-run Agent swap (issue #48)
+}
+
+// AsyncSlashProvider and AsyncSlashProviderWithPreamble are the
+// non-blocking shapes, for hosts whose commands do network or file
+// I/O (issues #10 / #16). The channel carries exactly one
+// SlashResultOrErr and the ctx is cancelled when the operator hits
+// Esc, at which point the eventual value is discarded. The preamble
+// variant additionally returns a line to append to the chat
+// synchronously at dispatch, for work slow enough that the bottom-bar
+// toast is easy to miss.
+//
+// Both are refinements of SlashProvider rather than alternatives to
+// it: dispatch asserts SlashProvider FIRST and only then looks for an
+// async shape, so an adapter that implements one of these without
+// also implementing InvokeSlash has every one of its commands
+// silently declined. The two async shapes share a method name and
+// differ in return type, so one Go type can satisfy only one of them;
+// dispatch prefers the preamble variant. Collapsing all three into
+// SlashProvider is #77's proposal.
+type AsyncSlashProvider interface {
+    SlashCommands() []SlashCommandSpec
+    InvokeSlashAsync(ctx context.Context, name, args string) <-chan SlashResultOrErr
+}
+type AsyncSlashProviderWithPreamble interface {
+    SlashCommands() []SlashCommandSpec
+    InvokeSlashAsync(ctx context.Context, name, args string) (preamble string, results <-chan SlashResultOrErr)
+}
+type SlashResultOrErr struct {
+    Res SlashResult
+    Err error
 }
 
 // SideAnswer carries a /btw-style transient Q+A overlay. Renders as
@@ -516,12 +683,19 @@ type SideAnswer struct {
 }
 ```
 
-`MentionProvider` is not a capability on Agent — it's a host-side
-configuration item delivered through `Options.MentionProviders`. The
-TUI merges entries from every provider into the `@` palette under
-section headers (R-AT-4). Multiple providers can share the prefix
-namespace as long as their `Prefix` differs (e.g. one provider serves
-`@sym:`, another `@git:`).
+`MentionProvider` — **SPECIFIED, NOT SHIPPED as of v0.20.0.** Neither
+the type nor `Options.MentionProviders` exists in `package tui`; only
+the built-in file provider runs today, and `@sym:`-style prefixes are
+inert text. Whether to build R-AT-4 or drop it is part of the
+exported-surface audit (issue #78) — the same open question §3.5
+records against `UserPrompter`.
+
+As specified: not a capability on Agent but a host-side configuration
+item delivered through `Options.MentionProviders`. The TUI merges
+entries from every provider into the `@` palette under section headers
+(R-AT-4). Multiple providers can share the prefix namespace as long as
+their `Prefix` differs (e.g. one provider serves `@sym:`, another
+`@git:`).
 
 ```go
 type MentionProvider struct {
@@ -725,7 +899,7 @@ type Elicitor interface {
     Elicit(ctx context.Context, serverName string, req ElicitRequest) (ElicitResult, error)
 }
 
-// UserPrompter — SPECIFIED, NOT SHIPPED as of v0.19.0. Neither the
+// UserPrompter — SPECIFIED, NOT SHIPPED as of v0.20.0. Neither the
 // interface nor NewUserPrompter() exists in package tui; whether to
 // build it or drop R-PROMPT-1 is part of the exported-surface audit
 // (issue #78). Hosts needing agent-initiated questions today route
