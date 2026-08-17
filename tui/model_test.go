@@ -16,9 +16,13 @@ package tui
 
 import (
 	"image/color"
+	"os"
+	"path/filepath"
+	"strings"
 	"testing"
 
 	tea "charm.land/bubbletea/v2"
+	"github.com/charmbracelet/x/ansi"
 )
 
 // TestNewModel_SeedHistory pins that Options.SeedHistory is appended
@@ -272,5 +276,155 @@ func TestContextFillStyle_UnknownSizeIsMuted(t *testing.T) {
 	if got.GetForeground() != m.styles.Muted.GetForeground() {
 		t.Errorf("contextFillStyle with size=0 foreground = %v, want Muted %v",
 			got.GetForeground(), m.styles.Muted.GetForeground())
+	}
+}
+
+// TestDisplayCwd_ResolvedAtConstruction is issue #223.
+//
+// displayCwd used to call os.Getwd and os.UserHomeDir every time the
+// status header asked for it, which is twice per layout pass at
+// whatever rate the spinner ticks — I/O on a path documented as doing
+// none. The fix is to resolve it once in NewModel, and the only way to
+// tell a resolved-once value from a re-read one is to move the process
+// out from under a Model that has already been built and check that
+// the header does not follow.
+//
+// Moving the process is exactly what the golden corpus does to pin the
+// header (pinCwd), so the mechanism is the house one; this test just
+// moves it a second time, after construction.
+func TestDisplayCwd_ResolvedAtConstruction(t *testing.T) {
+	pinCwd(t)
+	want := "~" + string(filepath.Separator) + "core-tui"
+
+	m := NewModel(Options{Agent: &bareAgent{id: "cwd"}})
+	out, _ := m.Update(tea.WindowSizeMsg{Width: 100, Height: 24})
+	m = out.(Model)
+
+	if got := m.displayCwd(); got != want {
+		t.Fatalf("displayCwd() at construction = %q, want %q", got, want)
+	}
+	if frame := ansi.Strip(m.View().Content); !strings.Contains(frame, want) {
+		t.Fatalf("precondition: the first frame does not carry %q in the status header", want)
+	}
+
+	// Move the process. Anything that re-reads the working directory
+	// per call answers with this directory from here on.
+	moved := filepath.Join(filepath.Dir(mustGetwd(t)), "elsewhere")
+	if err := os.MkdirAll(moved, 0o755); err != nil {
+		t.Fatalf("creating the second directory: %v", err)
+	}
+	t.Chdir(moved)
+	if now := mustGetwd(t); now == want {
+		t.Fatalf("precondition: the process did not move, still at %q", now)
+	}
+
+	for frame := range 3 {
+		if got := m.displayCwd(); got != want {
+			t.Fatalf("frame %d: displayCwd() = %q, want %q — the value moved after "+
+				"construction, so it is still being read back from the process on the "+
+				"render path", frame, got, want)
+		}
+		if got := ansi.Strip(m.renderHeader()); !strings.Contains(got, want) {
+			t.Fatalf("frame %d: the status header stopped showing %q after the process "+
+				"chdir'd; the header is tracking the live working directory\n%s",
+				frame, want, got)
+		}
+		if got := ansi.Strip(m.View().Content); !strings.Contains(got, want) {
+			t.Fatalf("frame %d: the composed frame stopped showing %q after the process "+
+				"chdir'd", frame, want)
+		}
+	}
+}
+
+// mustGetwd is os.Getwd with the error turned into a test failure —
+// the tests above move the process deliberately and a Getwd that fails
+// there means the fixture is broken, not the code.
+func mustGetwd(t *testing.T) string {
+	t.Helper()
+	dir, err := os.Getwd()
+	if err != nil {
+		t.Fatalf("os.Getwd: %v", err)
+	}
+	return dir
+}
+
+// TestAbbreviateHome covers the shortening displayCwd used to do
+// inline. It is a pure function of two strings precisely so this can
+// be a table rather than a sequence of chdirs: the interesting cases
+// are a directory that is not under the home directory at all and a
+// home directory that could not be resolved, and neither is reachable
+// by moving the process around a temp dir.
+func TestAbbreviateHome(t *testing.T) {
+	cases := []struct {
+		name string
+		dir  string
+		home string
+		want string
+	}{
+		{
+			name: "under home",
+			dir:  "/home/op/projects/core-tui",
+			home: "/home/op",
+			want: "~/projects/core-tui",
+		},
+		{
+			name: "home itself",
+			dir:  "/home/op",
+			home: "/home/op",
+			want: "~",
+		},
+		{
+			name: "outside home",
+			dir:  "/srv/build/core-tui",
+			home: "/home/op",
+			want: "/srv/build/core-tui",
+		},
+		{
+			// os.UserHomeDir errors when HOME is unset. The empty
+			// string must not match everything as a prefix and turn
+			// every path into "~"+path.
+			name: "home unresolved",
+			dir:  "/srv/build/core-tui",
+			home: "",
+			want: "/srv/build/core-tui",
+		},
+		{
+			name: "root",
+			dir:  "/",
+			home: "/home/op",
+			want: "/",
+		},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			if got := abbreviateHome(tc.dir, tc.home); got != tc.want {
+				t.Errorf("abbreviateHome(%q, %q) = %q, want %q",
+					tc.dir, tc.home, got, tc.want)
+			}
+		})
+	}
+}
+
+// TestResolveDisplayCwd_ReadsHomePerCall guards the half of #223 that
+// says HOME is read once rather than per displayCwd call — once, not
+// never. Memoizing it in a package var would be filled by whichever
+// Model was constructed first in the process and stay wrong for every
+// later one, and the golden corpus depends on the opposite: pinCwd
+// installs a synthetic HOME per test so the captured frames do not
+// carry the checkout path of whoever ran -update.
+func TestResolveDisplayCwd_ReadsHomePerCall(t *testing.T) {
+	pinCwd(t)
+	want := "~" + string(filepath.Separator) + "core-tui"
+	if got := resolveDisplayCwd(); got != want {
+		t.Fatalf("resolveDisplayCwd() = %q, want %q", got, want)
+	}
+
+	// Same process, same directory, a HOME that no longer contains it.
+	t.Setenv("HOME", filepath.Join(mustGetwd(t), "not-a-parent"))
+	t.Setenv("USERPROFILE", filepath.Join(mustGetwd(t), "not-a-parent"))
+	if got, dir := resolveDisplayCwd(), mustGetwd(t); got != dir {
+		t.Errorf("resolveDisplayCwd() = %q, want the verbatim %q — HOME was cached "+
+			"across calls, so a later Model would abbreviate against an earlier "+
+			"Model's home directory", got, dir)
 	}
 }

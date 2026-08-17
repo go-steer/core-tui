@@ -555,6 +555,17 @@ type Model struct {
 	// NewModel; hosts can override post-construction.
 	caps TerminalCapabilities
 
+	// cwd is the working directory as the status header displays it,
+	// already shortened against the home directory. Resolved once in
+	// NewModel (issue #223) because View is not allowed to do I/O and
+	// the header would otherwise run getcwd(2) twice per layout pass.
+	// A process that chdir's mid-session would stop being tracked;
+	// no host does that today, and the fallback if one turns up is to
+	// refresh this on a turn boundary the way hostSnapshot is
+	// refreshed — which is a one-field write, because everything that
+	// reads it already goes through displayCwd and keys on it.
+	cwd string
+
 	// spinnerCache holds the pre-rendered Braille frame strings
 	// for the thinking spinner (agentic-tui skill §7). Rebuilt
 	// on theme change (primary / secondary color update).
@@ -719,6 +730,7 @@ func NewModel(opts Options) Model {
 		statusCache:     &statusCache{},
 		modalScroll:     &scrollState{},
 		caps:            caps,
+		cwd:             resolveDisplayCwd(),
 		newlineHint:     defaultNewlineHint(caps.TermProgram),
 		bannerFrame:     initialBannerFrame(caps, opts.Branding),
 	}
@@ -861,18 +873,59 @@ func defaultNewlineHint(termProgram string) string {
 	}
 }
 
-// displayCwd returns the operator's cwd, shortened with `~/` when
-// it sits under the home directory, for the status surface. Empty
-// when os.Getwd fails (no point displaying a stale or wrong path).
+// displayCwd returns the operator's cwd, shortened with `~/` when it
+// sits under the home directory, for the status surface. Empty when
+// the directory could not be resolved (no point displaying a stale or
+// wrong path).
+//
+// This is a field read, not a lookup. It used to call os.Getwd and
+// os.UserHomeDir on every call, and the status header calls it twice
+// per layout pass at whatever rate the spinner ticks — I/O on a path
+// documented as doing none, which is the same contract hostSnapshot
+// exists to keep for the host (issue #223). The value is resolved once
+// in NewModel by resolveDisplayCwd.
+//
+// It has to be a field resolved at construction rather than one filled
+// lazily on first use: Model is copied by value throughout the package
+// and View has a value receiver, so anything the render path writes to
+// its receiver lands in a copy that is discarded on return. A lazily
+// filled field would do the syscalls on every frame anyway and simply
+// throw the answer away each time.
 func (m Model) displayCwd() string {
+	return m.cwd
+}
+
+// resolveDisplayCwd does the two lookups displayCwd used to do per
+// call, once, off the render path. Called from NewModel.
+//
+// HOME is read here rather than memoized in a package var: a process
+// var would be filled by whichever Model was constructed first and
+// then be wrong for every later one, and the golden corpus constructs
+// models under a synthetic HOME (see pinCwd) precisely so the captured
+// frames do not carry the checkout path of whoever ran -update.
+func resolveDisplayCwd() string {
 	cwd, err := os.Getwd()
 	if err != nil {
 		return ""
 	}
-	if home, herr := os.UserHomeDir(); herr == nil && strings.HasPrefix(cwd, home) {
-		return "~" + cwd[len(home):]
+	home, herr := os.UserHomeDir()
+	if herr != nil {
+		home = ""
 	}
-	return cwd
+	return abbreviateHome(cwd, home)
+}
+
+// abbreviateHome shortens dir to `~/…` when it sits under home,
+// and returns it verbatim otherwise. Split out from resolveDisplayCwd
+// so the abbreviation is testable without moving the process.
+//
+// The match is textual, not path-aware, which is what the golden
+// corpus's synthetic HOME is symlink-resolved to line up with.
+func abbreviateHome(dir, home string) string {
+	if home == "" || !strings.HasPrefix(dir, home) {
+		return dir
+	}
+	return "~" + dir[len(home):]
 }
 
 // displayProvider extracts the provider tag from the host. Push-

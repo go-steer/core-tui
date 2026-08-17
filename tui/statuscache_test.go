@@ -38,10 +38,12 @@ import (
 // as a step moves it, which is the reason the table below is written
 // as one step per key field rather than as a plausible session.
 //
-// It cannot catch a field nobody ever moves. m.displayCwd() is the one
-// such input: it reads the process working directory, which a test has
-// no business changing, so the cwd leg of the key is asserted by
-// inspection rather than here.
+// It cannot catch a field nobody ever moves, and until issue #223 the
+// working directory was exactly that: displayCwd read it back out of
+// the process on every call, which a test has no business changing, so
+// the cwd leg of the key was asserted by inspection rather than here.
+// It is a plain Model field now, resolved once in NewModel, so the
+// steps below move it like any other input and the carve-out is gone.
 func TestStatusCache_StaysFresh(t *testing.T) {
 	m := benchModel(t, 3, 100, 40)
 
@@ -62,6 +64,9 @@ func TestStatusCache_StaysFresh(t *testing.T) {
 		{"model from the host snapshot", func(m *Model) { m.hostSnap.modelName = "snapshot-model" }},
 		{"provider", func(m *Model) { m.pushedProvider = "a-provider" }},
 		{"provider again", func(m *Model) { m.pushedProvider = "another-provider" }},
+		{"cwd", func(m *Model) { m.cwd = "~/projects/core-tui" }},
+		{"cwd again", func(m *Model) { m.cwd = "/srv/build/core-tui" }},
+		{"cwd unresolvable", func(m *Model) { m.cwd = "" }},
 		// The chip is only drawn when the host wired a setter, so the
 		// wiring and the mode are two separate inputs and both are keyed.
 		{"permission chip wired", func(m *Model) {
