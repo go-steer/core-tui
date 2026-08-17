@@ -323,9 +323,16 @@ func fitRow(ln string, width int) string {
 	if width <= 0 {
 		return closeSGR(ln)
 	}
-	if w := ansi.StringWidth(ln); w > width {
+	if ansi.StringWidth(ln) > width {
 		ln = ansi.Truncate(ln, width, "")
-	} else if w < width {
+	}
+	// Measured again after truncating, not folded into the branch
+	// above: ansi.Truncate cuts on grapheme boundaries, so an
+	// odd-width cut through a double-width rune drops the rune and
+	// returns width-1 cells rather than width. Padding only the
+	// already-short case would leave that row one cell narrow and
+	// step its scrollbar cell a column left of every other row's.
+	if w := ansi.StringWidth(ln); w < width {
 		ln += strings.Repeat(" ", width-w)
 	}
 	return closeSGR(ln)

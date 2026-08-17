@@ -671,6 +671,12 @@ func TestFitRow_BringsRowsToExactlyWidth(t *testing.T) {
 		{name: "truncates-styled-by-cells", in: styled, width: 3, want: "col"},
 		{name: "wide-runes-measured-in-cells", in: "日本語", width: 8, want: "日本語  "},
 		{name: "wide-runes-truncated-in-cells", in: "日本語", width: 4, want: "日本"},
+		// An odd-width cut lands inside a double-width rune, so
+		// ansi.Truncate drops the whole rune and hands back 4 cells
+		// for a width of 5. The row still has to reach the gutter, or
+		// its scrollbar cell sits a column left of every other row's.
+		{name: "wide-runes-cut-mid-rune-still-reach-width", in: "日本語テキスト", width: 5, want: "日本 "},
+		{name: "wide-runes-cut-mid-rune-after-narrow", in: "ab日本語", width: 5, want: "ab日 "},
 	}
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
@@ -779,12 +785,17 @@ func TestScrollView_RowsAreExactlyContentWidthPlusBar(t *testing.T) {
 	lines := make([]string, 30)
 	for i := range lines {
 		// Alternate short, exactly-at and overlong rows so every
-		// branch of fitRow is on screen at once.
-		switch i % 3 {
+		// branch of fitRow is on screen at once. The fourth is
+		// overlong in double-width runes offset by one narrow cell,
+		// so the cut lands mid-rune and ansi.Truncate returns a cell
+		// short of the width it was asked for.
+		switch i % 4 {
 		case 0:
 			lines[i] = "short-" + strconv.Itoa(i)
 		case 1:
 			lines[i] = strings.Repeat("x", 20)
+		case 2:
+			lines[i] = "x" + strings.Repeat("日", 15)
 		default:
 			lines[i] = strings.Repeat("overflowing-", 6)
 		}
