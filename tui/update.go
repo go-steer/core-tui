@@ -1452,12 +1452,12 @@ func (m Model) handleKey(msg tea.KeyPressMsg) (tea.Model, tea.Cmd) {
 			return m, pendingExitTick()
 		}
 		m.quitting = true
-		return m, tea.Quit
+		return m, m.quitCmd()
 	case "ctrl+d":
 		// Ctrl+D quits unconditionally — "EOF closes input" is the
 		// muscle memory and most TUIs honor it without a warning.
 		m.quitting = true
-		return m, tea.Quit
+		return m, m.quitCmd()
 
 	case "ctrl+l":
 		// Reset viewport scroll to the top. Mirrors the shell-style

@@ -42,6 +42,21 @@ func Run(ctx context.Context, opts Options) error {
 	}
 
 	m := NewModel(opts)
+	// Release the listener drain loops once the program is done,
+	// whatever ended it (issue #202). The Update paths that quit
+	// deliberately already do this for themselves via Model.quitCmd,
+	// and have to — they are the only ones that can release the
+	// goroutines while the program is still up. This defer is for
+	// everything Update cannot see: a cancelled ctx, SIGINT,
+	// tea.Program.Kill. Bubbletea v2 handles all of those by
+	// returning from its event loop without routing anything through
+	// model.Update first, so after the fact is the earliest the
+	// library can learn about them.
+	//
+	// Calling it on the local copy of the Model works because the
+	// cancel closure is shared with every copy bubbletea made; see
+	// the lifeCtx field comment in model.go.
+	defer m.endListeners()
 	// Mouse mode is set declaratively on the View (see view.go); no
 	// Program-level option needed in bubbletea v2.
 	p := tea.NewProgram(m, tea.WithContext(ctx))

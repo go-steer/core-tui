@@ -170,11 +170,66 @@ func pendingExitTick() tea.Cmd {
 	})
 }
 
+// listenerCtx is the context every drain-loop listener Cmd below
+// parks on, so that shutdown unblocks them instead of leaving them
+// wedged on a channel nobody will ever write to again (issue #202).
+// See the lifeCtx field comment in model.go for the lifecycle, and
+// for why a value copy of the Model is enough to share it.
+//
+// Falls back to context.Background() for a zero-value Model{}, which
+// is what many of the Update-level tests construct. Those tests call
+// a listener Cmd synchronously with the traffic already queued, so a
+// never-cancelled context is exactly right for them; the fallback
+// keeps this from being a nil-context panic in the one place where
+// the leak cannot happen anyway.
+func (m Model) listenerCtx() context.Context {
+	if m.lifeCtx == nil {
+		return context.Background()
+	}
+	return m.lifeCtx
+}
+
+// endListeners cancels the listener lifetime, releasing every parked
+// listener goroutine. Idempotent, as context.CancelFunc is — both
+// callers (Model.quitCmd and Run's defer) fire on an ordinary run.
+// Tolerates the nil a zero-value Model{} carries.
+func (m Model) endListeners() {
+	if m.lifeCancel != nil {
+		m.lifeCancel()
+	}
+}
+
+// quitCmd ends the listener lifetime and returns the Cmd that stops
+// the program. Every Update path that quits goes through here rather
+// than returning a bare tea.Quit, because this is the last moment the
+// Model is on the event loop: bubbletea v2 intercepts QuitMsg in its
+// own internal message switch and returns from the event loop without
+// ever calling model.Update with it, so there is no later handler
+// that could do this instead (issue #202).
+//
+// Cancelling before the program has actually stopped is safe. The
+// only thing this context gates is the listener drain loops, and a
+// listener that wakes in the window between here and the event loop
+// noticing QuitMsg returns a nil Msg, which bubbletea drops. A
+// handler that re-issues a listener in that same window gets a Cmd
+// that returns nil immediately.
+func (m Model) quitCmd() tea.Cmd {
+	m.endListeners()
+	return tea.Quit
+}
+
 // promptListener returns a Cmd that blocks on the prompter's
 // request channel and forwards each inbound request as a
 // permissionRequestMsg (R-PERM-1). Re-issued by Update after every
 // dispatch so the loop drains one request at a time. Returns nil
 // when no prompter is wired.
+//
+// The listener context is captured here, at Cmd-construction time on
+// the event loop, rather than read out of the Model inside the
+// closure — the same reasoning as the sessionGen snapshots elsewhere
+// in this file. It resolves to the same context either way, but
+// taking it eagerly leaves the closure with no reason to touch Model
+// state off the loop.
 func (m Model) promptListener() tea.Cmd {
 	if m.opts.Prompter == nil {
 		return nil
@@ -187,8 +242,9 @@ func (m Model) promptListener() tea.Cmd {
 		// path if someone substitutes their own.
 		return nil
 	}
+	ctx := m.listenerCtx()
 	return func() tea.Msg {
-		req, ok := p.nextRequest(context.Background())
+		req, ok := p.nextRequest(ctx)
 		if !ok {
 			return nil
 		}
@@ -201,20 +257,33 @@ func (m Model) promptListener() tea.Cmd {
 // noticeMsg (issue #30). Re-issued by Update after every notice
 // so the loop drains continuously. Returns nil when no Notifier
 // is wired (the common case — Notifier is opt-in).
+//
+// The listener context is the second exit, and it is what makes this
+// safe outside Run. Closing the Notifier is the primary one, but only
+// Run closes it, and only after tea.Program.Run has already returned
+// — so a host that skips Run and drives tui.NewModel through its own
+// tea.Program (which is exactly what the smoke tests do, and exactly
+// what embedding looks like) has nothing that ever closes the channel
+// and would park this goroutine for the life of the process.
 func (m Model) notifyListener() tea.Cmd {
 	if m.opts.Notifier == nil {
 		return nil
 	}
 	ch := m.opts.Notifier.ch
+	ctx := m.listenerCtx()
 	return func() tea.Msg {
-		env, ok := <-ch
-		if !ok {
-			return nil // channel closed; subscription ends
+		select {
+		case env, ok := <-ch:
+			if !ok {
+				return nil // channel closed; subscription ends
+			}
+			// Direct conversion — noticeEnvelope and noticeMsg have
+			// identical fields by design (the listener is just a
+			// channel-to-msg bridge). Keep them in sync if either grows.
+			return noticeMsg(env)
+		case <-ctx.Done():
+			return nil
 		}
-		// Direct conversion — noticeEnvelope and noticeMsg have
-		// identical fields by design (the listener is just a
-		// channel-to-msg bridge). Keep them in sync if either grows.
-		return noticeMsg(env)
 	}
 }
 
@@ -230,8 +299,9 @@ func (m Model) elicitListener() tea.Cmd {
 	if !ok {
 		return nil
 	}
+	ctx := m.listenerCtx()
 	return func() tea.Msg {
-		flow, ok := e.nextRequest(context.Background())
+		flow, ok := e.nextRequest(ctx)
 		if !ok {
 			return nil
 		}
@@ -243,16 +313,29 @@ func (m Model) elicitListener() tea.Cmd {
 // and forwards the next message into the Bubble Tea loop. Update
 // re-issues this Cmd after every event-flavored message so the loop
 // drains the channel one message at a time without buffering issues.
+//
+// eventCh is never closed — the Model owns it, the dispatch goroutines
+// only ever send on it, and closing it from any of them would race the
+// others — so the listener context is this loop's only way out. It is
+// also the listener most reliably parked at shutdown, because it is
+// armed from Init on every run regardless of which capabilities the
+// host wired.
 func (m Model) eventListener() tea.Cmd {
 	if m.eventCh == nil {
 		return nil
 	}
+	ch := m.eventCh
+	ctx := m.listenerCtx()
 	return func() tea.Msg {
-		msg, ok := <-m.eventCh
-		if !ok {
+		select {
+		case msg, ok := <-ch:
+			if !ok {
+				return nil
+			}
+			return msg
+		case <-ctx.Done():
 			return nil
 		}
-		return msg
 	}
 }
 
@@ -321,6 +404,12 @@ func (m *Model) endLiveStretch() {
 // (R-WAKE-1). Update re-issues the Cmd after every wakeMsg so the
 // loop drains continuously. Returns nil when the host's agent
 // doesn't satisfy WakeRequester.
+//
+// The wake channel belongs to the host's agent, which is precisely
+// why this needs the listener context: the TUI has no way to close
+// it and no contract entitling it to expect the host will, so
+// without a second case the drain parks until the host happens to
+// signal — which, at shutdown, it never does.
 func (m Model) wakeListener() tea.Cmd {
 	waker, ok := m.opts.Agent.(WakeRequester)
 	if !ok {
@@ -330,12 +419,17 @@ func (m Model) wakeListener() tea.Cmd {
 	if ch == nil {
 		return nil
 	}
+	ctx := m.listenerCtx()
 	return func() tea.Msg {
-		_, ok := <-ch
-		if !ok {
-			return nil // channel closed; subscription ends
+		select {
+		case _, ok := <-ch:
+			if !ok {
+				return nil // channel closed; subscription ends
+			}
+			return wakeMsg{}
+		case <-ctx.Done():
+			return nil
 		}
-		return wakeMsg{}
 	}
 }
 
