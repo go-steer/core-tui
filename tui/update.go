@@ -751,6 +751,16 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			return m, nil
 		}
 		return m, m.applySwitchLookup(msg)
+	case sessionInputSubmittedMsg:
+		// A SessionInfo action row's own Submit closure coming back
+		// (issue #194). Same pair of guards as the enumerate above,
+		// and the handler applies one more of its own: the dialog
+		// that asked has to still be open and still be waiting for
+		// exactly this answer.
+		if msg.gen != m.sessionGen || msg.seq != m.slashSeq {
+			return m, nil
+		}
+		return m, m.applySessionInputSubmit(msg)
 	case slashDispatchedMsg:
 		// The host's name match, and its InvokeSlash when the provider
 		// was the plain synchronous shape. Same seq guard, and here it

@@ -142,6 +142,18 @@ type textInputDialog struct {
 //	    },
 //	}))
 func NewTextInputDialog(cfg TextInputConfig) Dialog {
+	return newTextInputDialog(cfg)
+}
+
+// newTextInputDialog is NewTextInputDialog's concrete-typed twin, for
+// in-package callers that WRAP the primitive rather than merely open
+// it. The session picker's action-row dialog embeds it to add an
+// in-flight state around an async Submit (issue #194), and embedding
+// needs the struct: an interface value would promote only the four
+// Dialog methods and hide HandleKeyMsg and DialogCursor, which are
+// exactly the two optional extensions the wrapper has to keep
+// forwarding for the box to stay typeable and keep its caret.
+func newTextInputDialog(cfg TextInputConfig) *textInputDialog {
 	if cfg.ID == "" {
 		cfg.ID = textInputDialogID
 	}
@@ -218,7 +230,14 @@ func (d *textInputDialog) HandleKeyMsg(msg tea.KeyPressMsg, m *Model) DialogActi
 	return DialogAction{Consumed: true, Cmd: cmd}
 }
 
-func (d *textInputDialog) Render(totalWidth int, m *Model) string {
+// dialogWidth resolves the configured width against the terminal:
+// clamped to leave the modal's own margin, floored so the box stays
+// usable on a narrow pane. Split out of Render because a wrapper that
+// substitutes its own body for a frame — the action-row dialog's
+// in-flight state (issue #194) — has to compose it at exactly the
+// width the typed frame would have used, or the modal visibly jumps
+// the moment the operator presses Enter.
+func (d *textInputDialog) dialogWidth(totalWidth int) int {
 	width := d.cfg.Width
 	if totalWidth > 0 && width > totalWidth-4 {
 		width = totalWidth - 4
@@ -226,6 +245,11 @@ func (d *textInputDialog) Render(totalWidth int, m *Model) string {
 	if width < 30 {
 		width = 30
 	}
+	return width
+}
+
+func (d *textInputDialog) Render(totalWidth int, m *Model) string {
+	width := d.dialogWidth(totalWidth)
 
 	d.syncStyles(m.styles)
 	// Inner width: dialog width minus RenderContext's 1-col padding

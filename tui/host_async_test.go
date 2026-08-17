@@ -1532,3 +1532,310 @@ func TestSlashDispatched_StaleGenDropped(t *testing.T) {
 		}
 	}
 }
+
+// ---- the call site the #183 sweep left standing (issue #194) ----
+
+// slowAttachRow builds the row that motivated issue #194: the
+// "+ Attach to endpoint…" action row, whose Submit closure dials.
+// Slowly, and through the agent's own counter, so a Submit still
+// running inline shows up in exactly the instrument every other host
+// call in this file is measured with.
+func slowAttachRow(a *slowAgent, next Agent) SessionInfo {
+	return SessionInfo{
+		ID:      "+attach",
+		Display: "+ Attach to endpoint…",
+		Input: &SessionInput{
+			Title:  "Attach to Endpoint",
+			Prompt: "Daemon URL:",
+			Submit: func(v string) (SwitchTarget, error) {
+				a.sleep()
+				return SwitchTarget{Agent: next, Note: "Attached to " + v}, nil
+			},
+		},
+	}
+}
+
+// attachRowEntryPoints are the two ways an operator reaches the action
+// row's text input. Both landed in the same inline closure, so both
+// have to be proven off-loop. Each leaves the dialog frontmost with
+// the host counter zeroed, so what a test measures afterwards is the
+// commit and nothing that led up to it.
+var attachRowEntryPoints = []struct {
+	name string
+	open func(t *testing.T, m *Model, a *slowAgent)
+}{
+	{"enter on the picker's action row", func(t *testing.T, m *Model, a *slowAgent) {
+		t.Helper()
+		d := readySessionPicker(m)
+		m.overlayStack.Open(d)
+		d.idx = len(d.rows()) - 1 // the action row, appended last
+		if act := d.HandleKey("enter", m); !act.Consumed || act.Close {
+			t.Fatalf("enter on the action row = %+v, want Consumed and NOT Close", act)
+		}
+		a.calls.Store(0)
+	}},
+	{"/switch <action-row-id>", func(t *testing.T, m *Model, a *slowAgent) {
+		t.Helper()
+		out, cmd := m.dispatchSlash("/switch +attach")
+		*m = out.(Model)
+		if cmd == nil {
+			t.Fatal("/switch +attach returned no Cmd — the enumerate would never happen")
+		}
+		lookup, ok := cmd().(switchLookupMsg)
+		if !ok {
+			t.Fatalf("/switch +attach produced %T, want switchLookupMsg", lookup)
+		}
+		out, _ = m.Update(lookup)
+		*m = out.(Model)
+		a.calls.Store(0)
+	}},
+}
+
+// openAttachDialog wires a slow host whose session list ends in the
+// action row, opens the row's text input through entry, and types
+// value into it — leaving the model one Enter short of committing.
+func openAttachDialog(t *testing.T, open func(*testing.T, *Model, *slowAgent), value string) (Model, *slowAgent, Agent) {
+	t.Helper()
+	next := Agent(&bareAgent{id: "attached"})
+	agent := &slowAgent{id: "slow"}
+	agent.sessions = []SessionInfo{{ID: "b", Display: "other"}, slowAttachRow(agent, next)}
+	m := NewModel(Options{Agent: agent})
+	m.viewport.SetWidth(80)
+
+	open(t, &m, agent)
+	front := m.overlayStack.Front()
+	if front == nil || front.ID() != sessionInputDialogID {
+		t.Fatalf("entry point did not leave the action row's text input frontmost: %v", front)
+	}
+	typeInto(t, front, &m, value)
+	return m, agent, next
+}
+
+// TestSessionInputSubmit_RunsOffLoop — the defect. Enter on the action
+// row's text input called SessionInput.Submit inline, so a wedged
+// endpoint froze the Update goroutine for the whole dial: no repaint,
+// no keys, no Ctrl+C. Enter must now cost nothing but a Cmd, and the
+// attach must land only once that Cmd's reply is applied.
+func TestSessionInputSubmit_RunsOffLoop(t *testing.T) {
+	for _, tc := range attachRowEntryPoints {
+		t.Run(tc.name, func(t *testing.T) {
+			m, agent, next := openAttachDialog(t, tc.open, "http://wedged:7778")
+
+			// Timed by hand rather than through mustBeFast so the
+			// order of the two assertions can be chosen. The COUNTER
+			// is the exact instrument — Submit either ran in this
+			// goroutine or it did not — and it is the one that should
+			// speak first; the clock is a backstop for a block that
+			// somehow never reached a counted method, and it is the
+			// assertion a loaded CI runner can make lie.
+			start := time.Now()
+			consumed, cmd := pressEnter(&m)
+			elapsed := time.Since(start)
+
+			if got := agent.calls.Load(); got != 0 {
+				t.Fatalf("%d host call(s) ran on the Update goroutine — SessionInput.Submit is still inline", got)
+			}
+			if !consumed {
+				t.Fatal("enter on the text input was not consumed")
+			}
+			if cmd == nil {
+				t.Fatal("enter returned no Cmd — Submit would never run at all")
+			}
+			if elapsed > nonBlockingBudget {
+				t.Errorf("enter took %s, want under %s — something blocked outside the counted host calls",
+					elapsed, nonBlockingBudget)
+			}
+
+			// The dialog stays up and says what it is waiting for.
+			// That acknowledgement is the whole reason it stays: a
+			// modal that closed on Enter would leave the operator
+			// watching an unchanged chat screen with an attach
+			// happening invisibly behind it.
+			if !m.overlayStack.HasID(sessionInputDialogID) {
+				t.Fatal("the dialog closed before its answer arrived")
+			}
+			frame := renderPlain(m.overlayStack.Front(), &m)
+			if got := agent.calls.Load(); got != 0 {
+				t.Fatalf("the in-flight render made %d host call(s) — View must never touch the host", got)
+			}
+			if !strings.Contains(frame, "attaching to http://wedged:7778") {
+				t.Errorf("in-flight body does not name the endpoint it is waiting on:\n%s", frame)
+			}
+
+			msg, ok := cmd().(sessionInputSubmittedMsg)
+			if !ok {
+				t.Fatalf("Cmd produced %T, want sessionInputSubmittedMsg", msg)
+			}
+			if got := agent.calls.Load(); got != 1 {
+				t.Fatalf("the Cmd made %d host call(s), want exactly 1 (Submit)", got)
+			}
+
+			var out tea.Model
+			mustBeFast(t, "sessionInputSubmittedMsg", func() { out, _ = m.Update(msg) })
+			m = out.(Model)
+			if m.opts.Agent != next {
+				t.Fatalf("the attach never landed: agent = %v", m.opts.Agent)
+			}
+			if m.overlayStack.HasDialogs() {
+				t.Error("a completed attach should close the text input and the picker under it")
+			}
+			if last := lastText(m); !strings.Contains(last, "Attached to http://wedged:7778") {
+				t.Errorf("post-attach row = %q, want the target's note", last)
+			}
+		})
+	}
+}
+
+// TestSessionInputSubmit_SecondEnterDoesNotStackADial — the hazard a
+// non-blocking modal creates. The dialog is still on screen while the
+// first dial is out, so the keyboard is live and an impatient operator
+// will press Enter again. Keys are swallowed while the call is out —
+// the picker does the same under an in-flight SwitchToSession —
+// because otherwise an unresponsive endpoint collects one connection
+// per keypress. Esc is the deliberate exception: the defect being
+// fixed here is a UI that cannot be escaped.
+func TestSessionInputSubmit_SecondEnterDoesNotStackADial(t *testing.T) {
+	m, agent, _ := openAttachDialog(t, attachRowEntryPoints[0].open, "http://wedged:7778")
+
+	_, cmd := pressEnter(&m)
+	if cmd == nil {
+		t.Fatal("setup: the first enter produced no Cmd")
+	}
+
+	for _, stroke := range []string{"enter", "x", "backspace"} {
+		consumed, extra := m.overlayStack.HandleKeyMsg(keyMsgFromStroke(stroke), &m)
+		if !consumed {
+			t.Errorf("%q leaked out of an in-flight dialog — it would land in the chat textarea behind it", stroke)
+		}
+		if extra != nil {
+			t.Errorf("%q produced a Cmd (%T) while a dial was already out", stroke, extra)
+		}
+	}
+	if got := agent.calls.Load(); got != 0 {
+		t.Errorf("keys pressed during the dial made %d host call(s), want 0", got)
+	}
+	if !m.overlayStack.HasID(sessionInputDialogID) {
+		t.Fatal("a swallowed key closed the dialog")
+	}
+
+	consumed, _ := m.overlayStack.HandleKeyMsg(keyMsgFromStroke("esc"), &m)
+	if !consumed || m.overlayStack.HasID(sessionInputDialogID) {
+		t.Error("esc must still close an in-flight dialog — a wedged endpoint may not take the keyboard with it")
+	}
+	if !m.overlayStack.HasID(sessionPickerDialogID) {
+		t.Error("esc should pop back to the picker, as it does on an idle dialog")
+	}
+}
+
+// TestSessionInputSubmit_ReplyIsDiscardedWhenTheOperatorMovedOn —
+// the price of answering later. Three ways the answer can arrive
+// somewhere it no longer belongs; all three must attach nothing, say
+// nothing, and return no Cmd. Silence is the point on the dismissed
+// case in particular: esc is an explicit cancel, and swapping the
+// operator's whole session seconds later, with no keystroke to blame
+// it on, is worse than dropping a connection the host opened.
+func TestSessionInputSubmit_ReplyIsDiscardedWhenTheOperatorMovedOn(t *testing.T) {
+	for _, tc := range []struct {
+		name   string
+		moveOn func(t *testing.T, m *Model)
+	}{
+		{"esc dismissed the dialog", func(t *testing.T, m *Model) {
+			t.Helper()
+			m.overlayStack.HandleKeyMsg(keyMsgFromStroke("esc"), m)
+			if m.overlayStack.HasID(sessionInputDialogID) {
+				t.Fatal("setup: esc did not close the in-flight dialog")
+			}
+		}},
+		{"another /cmd was typed", func(t *testing.T, m *Model) {
+			t.Helper()
+			out, _ := m.dispatchSlash("/keys")
+			*m = out.(Model)
+		}},
+		{"the session turned over", func(t *testing.T, m *Model) { m.sessionGen++ }},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			m, _, _ := openAttachDialog(t, attachRowEntryPoints[0].open, "http://wedged:7778")
+			before := m.opts.Agent
+
+			_, cmd := pressEnter(&m)
+			if cmd == nil {
+				t.Fatal("setup: enter produced no Cmd")
+			}
+			// The host answers, eventually — after the operator has
+			// already gone elsewhere.
+			msg := cmd().(sessionInputSubmittedMsg)
+			tc.moveOn(t, &m)
+			rows := m.history.Len()
+
+			out, after := m.Update(msg)
+			m = out.(Model)
+			if after != nil {
+				t.Errorf("a discarded reply returned a Cmd (%T) — the attach was still dispatched", after)
+			}
+			if m.opts.Agent != before {
+				t.Errorf("a discarded reply attached %v", m.opts.Agent)
+			}
+			if m.history.Len() != rows {
+				t.Errorf("a discarded reply appended a transcript row: %q", lastText(m))
+			}
+		})
+	}
+}
+
+// TestSessionInputSubmit_ReplyDoesNotLandOnAReplacementDialog — the
+// case gen and seq cannot see. Reaching the action row through the
+// PICKER bumps neither counter (Ctrl+G is not a slash dispatch and
+// nothing switched), so an operator who gives up on one endpoint,
+// escapes, and immediately tries another has two replies in flight
+// wearing identical stamps. The first answer must not commit the
+// second dialog's question.
+func TestSessionInputSubmit_ReplyDoesNotLandOnAReplacementDialog(t *testing.T) {
+	m, agent, next := openAttachDialog(t, attachRowEntryPoints[0].open, "http://wedged:7778")
+	before := m.opts.Agent
+
+	_, cmd := pressEnter(&m)
+	if cmd == nil {
+		t.Fatal("setup: enter produced no Cmd")
+	}
+	stale := cmd().(sessionInputSubmittedMsg)
+
+	// Give up on that endpoint and type a different one. The picker
+	// is still underneath, with the cursor still on the action row.
+	m.overlayStack.HandleKeyMsg(keyMsgFromStroke("esc"), &m)
+	picker, ok := m.overlayStack.Front().(*sessionPickerDialog)
+	if !ok {
+		t.Fatalf("setup: esc left %T frontmost, want the picker", m.overlayStack.Front())
+	}
+	picker.HandleKey("enter", &m)
+	typeInto(t, m.overlayStack.Front(), &m, "http://elsewhere:7778")
+	agent.calls.Store(0)
+	_, second := pressEnter(&m)
+	if second == nil {
+		t.Fatal("setup: the replacement dialog produced no Cmd")
+	}
+
+	out, after := m.Update(stale)
+	m = out.(Model)
+	if after != nil {
+		t.Errorf("the abandoned reply returned a Cmd (%T)", after)
+	}
+	if m.opts.Agent != before {
+		t.Errorf("the abandoned reply attached %v", m.opts.Agent)
+	}
+	if !m.overlayStack.HasID(sessionInputDialogID) {
+		t.Fatal("the abandoned reply closed the replacement dialog")
+	}
+	if frame := renderPlain(m.overlayStack.Front(), &m); !strings.Contains(frame, "attaching to http://elsewhere:7778") {
+		t.Errorf("the replacement dialog stopped waiting for its own answer:\n%s", frame)
+	}
+
+	// And the replacement's own reply still commits normally.
+	out, _ = m.Update(second().(sessionInputSubmittedMsg))
+	m = out.(Model)
+	if m.opts.Agent != next {
+		t.Fatalf("the replacement never attached: agent = %v", m.opts.Agent)
+	}
+	if last := lastText(m); !strings.Contains(last, "Attached to http://elsewhere:7778") {
+		t.Errorf("post-attach row = %q, want the second endpoint's note", last)
+	}
+}

@@ -341,6 +341,29 @@ func switchLookupCmd(switcher SessionSwitcher, gen, seq uint64, id string) tea.C
 	}
 }
 
+// sessionInputSubmitCmd runs a SessionInfo action row's
+// SessionInput.Submit off the Update goroutine (issue #194). The
+// closure is documented as carrying SwitchToSession's contract, and
+// the row that motivates the feature at all dials an endpoint the
+// operator just typed — so it is a network call in every sense that
+// matters, one that simply arrives through the row instead of through
+// the capability interface.
+//
+// submit is handed in already resolved rather than as a SessionInfo:
+// the goroutine gets a function and two strings and reads nothing
+// else, least of all the dialog that dispatched it. gen and seq are
+// the caller's stamp as of the committing keystroke; rowID and value
+// come back untouched so Update can match the reply to the dialog
+// still waiting for it.
+func sessionInputSubmitCmd(submit func(string) (SwitchTarget, error), gen, seq uint64, rowID, value string) tea.Cmd {
+	return func() tea.Msg {
+		tgt, err := submit(value)
+		return sessionInputSubmittedMsg{
+			gen: gen, seq: seq, rowID: rowID, value: value, target: tgt, err: err,
+		}
+	}
+}
+
 // slashDispatchCmd runs the host-provider half of a `/cmd` off the
 // Update goroutine: the SlashCommands() name match and, when invoke is
 // set, the InvokeSlash call itself under slashInvokeTimeout.
