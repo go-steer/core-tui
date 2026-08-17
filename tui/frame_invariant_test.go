@@ -254,15 +254,14 @@ func frameStates() []frameState {
 			setup: func(_ *testing.T, m Model, _, _ int) Model {
 				m = withHostileTranscript(m)
 				m.opts.Agent = &switchAgent{id: "cur", sessions: frameSessions()}
-				d := newSessionPickerDialog()
-				d.applySessions(frameSessions())
+				q := askSessionPicker(&m, true)
+				q.applySessions(frameSessions())
 				// Off row 0: the cursor cell is two lines tall and
 				// listWindow is called twice to keep both of them on
-				// screen (see sessionPickerDialog.Render). At row 0
+				// screen (see sessionPickerQuestion.Body). At row 0
 				// that pair of calls is a no-op and the arithmetic it
 				// exists for never runs.
-				d.idx = 2
-				m.overlayStack.Open(d)
+				q.idx = 2
 				return m
 			},
 		},

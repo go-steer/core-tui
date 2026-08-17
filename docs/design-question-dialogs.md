@@ -1421,7 +1421,16 @@ stage-3 PR that creates its first user.
 session picker, **permission prompt** and **elicit form** onto them.
 This is the largest stage by far and should be at least four PRs:
 one per widget, one per migrated modal, each with its own external
-test. It also absorbs stage 2, above.
+test. It also absorbs stage 2, above. Across the whole stage it
+deletes `handleElicitKey` (130 lines), the permission arm of
+`handleKey` (50 lines), and five `Model` fields, and it fixes the
+unreachable-decline bug in §1.4 by construction, since `declined`
+becomes an option row.
+
+**Stage 3 is the stage that must land before the freeze**, because it
+is the one that removes `*Model` from the widget signatures and
+therefore the one that unblocks `docs/api-surface.md` §3.2's unexport
+sweep. Everything after it is additive.
 
 **Model picker: done, 2026-08-17.** `tui/dialog_modelpicker.go` is
 gone; `tui/question_modelpicker.go` replaces it. It is the first
@@ -1433,15 +1442,40 @@ render, the `history.Append`, and building a host `Cmd` out of
 `Update`'s `modelSwitchRequestedMsg` arm respectively. One behaviour
 change: a **failed** switch now leaves the picker open on its list
 rather than closing it, since the question was never answered and the
-operator's next move is almost always the next model down. It deletes `handleElicitKey` (130 lines), the permission arm of
-`handleKey` (50 lines), and five `Model` fields. Fixes the
-unreachable-decline bug in §1.4 by construction, since `declined`
-becomes an option row.
+operator's next move is almost always the next model down.
 
-  **This is the stage that must land before the freeze**, because it
-  is the one that removes `*Model` from the widget signatures and
-  therefore the one that unblocks `docs/api-surface.md` §3.2's
-  unexport sweep. Everything after it is additive.
+**Session picker: done, 2026-08-17.** `tui/dialog_sessionpicker.go` is
+gone; `tui/question_sessionpicker.go` replaces it. Same asynchronous
+shape as the model picker, plus the two things that make it the harder
+of the pair — and both are decided entirely from the row, so neither
+needed a `*Model`: an **action row** (issue #56) whose Enter starts
+somebody else's question, and the **attached row** whose Enter answers
+in the same keystroke because there is nothing to carry out. Three
+outcomes from one key.
+
+The action row is where the seam's own rules bite. It cannot open its
+text input from `Key` — `Overlay.HandleKeyMsg` pops the front dialog
+after `Key` returns — and it cannot open it from a resolver either, for
+the same reason applied to `Overlay.resolve` (§6.5). So `Key` returns a
+`sessionInputRequestedMsg` and `Update` does the `Open`, which is the
+shape `applySwitchLookup` already used.
+
+`sessionInputDialog` is deliberately **not** migrated. It stays a
+`Dialog` because it is the one modal that has to END somebody else's
+question, and it now does so through `Overlay.resolve` rather than
+`Overlay.Close`: closing the picker by ID would pop it with its resolver
+never run, which is precisely the §1.4 hole. `sessionInputAnswer` maps
+the outcome honestly — `chosen{rowID}` when the endpoint attached, since
+the operator did pick that row and the address is merely how it got
+resolved, and `dismissed{dismissSuperseded}` when it failed, since
+nobody chose a session and it was the input, not the operator, that tore
+the list down.
+
+Same behaviour change as the model picker, for the same reason and
+deliberately for consistency: a **failed** attach now leaves the picker
+open on its list. The action row's failure is the exception and still
+closes both modals — the error row in the transcript is the report, and
+a modal left up would bury it.
 
 **Stage 4 — the exported break.** Remove `KeyMsgDialog`,
 `Overlay.HandleKey`; change `TextInputConfig.Submit`. Write the three
@@ -1590,3 +1624,13 @@ that does not exist.
   The seam it added is `Overlay.resolve` (§6.5), together with the two
   rules that fall out of pop ordering: a resolver may not open a
   dialog, and a committed question is not an answered one.
+- 2026-08-17 — the session picker followed. Its action row (#56) is the
+  first question that has to START another one, and pop ordering rules
+  out doing it from either `Key` or a resolver, so it names the row and
+  `Update` opens the input. `sessionInputDialog` stays a `Dialog` on
+  purpose — it is the one modal that ENDS somebody else's question —
+  and now does it through `Overlay.resolve`, with `sessionInputAnswer`
+  mapping a successful attach to `chosen` and a failed one to
+  `dismissed{dismissSuperseded}`. Failed attaches leave the list up, as
+  failed model switches now do; the two pickers behaving differently on
+  the same failure would be worse than either choice on its own.

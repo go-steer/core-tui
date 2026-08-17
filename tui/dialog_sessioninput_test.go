@@ -78,12 +78,17 @@ func (a *attachRowAgent) Sessions() []SessionInfo {
 // what happens after.
 func openAttachRow(t *testing.T, m *Model) {
 	t.Helper()
-	d := readySessionPicker(m)
-	m.overlayStack.Open(d)
-	d.idx = 2 // the action row
-	act := d.HandleKey("enter", m)
-	if !act.Consumed || act.Close {
-		t.Fatalf("enter on action row = %+v, want Consumed and NOT Close", act)
+	q := readySessionPicker(m)
+	q.idx = 2 // the action row
+	ans, cmd := q.Key(keyMsgFromStroke("enter"))
+	if ans != nil || cmd == nil {
+		t.Fatalf("enter on action row = (%#v, %v), want a Cmd and no answer", ans, cmd)
+	}
+	// The widget only NAMES the row; Update is what opens the input,
+	// because Overlay pops the front dialog after Key returns.
+	for _, msg := range drainBatch(t, cmd) {
+		out, _ := m.Update(msg)
+		*m = out.(Model)
 	}
 	if !m.overlayStack.HasID(sessionInputDialogID) {
 		t.Fatalf("action row did not open the text-input dialog")
@@ -307,15 +312,16 @@ func TestSessionPicker_ActionRowRender(t *testing.T) {
 	m := NewModel(Options{Agent: agent})
 	m.viewport.SetWidth(80)
 
-	d := readySessionPicker(&m)
+	readySessionPicker(&m)
+	lines := sessionPickerLines(&m)
 	var row string
-	for _, l := range strings.Split(renderPlain(d, &m), "\n") {
+	for _, l := range lines {
 		if strings.Contains(l, "Attach to endpoint") {
 			row = l
 		}
 	}
 	if row == "" {
-		t.Fatalf("action row missing from the picker render:\n%s", renderPlain(d, &m))
+		t.Fatalf("action row missing from the picker render:\n%s", strings.Join(lines, "\n"))
 	}
 	if strings.Contains(row, "+attach") {
 		t.Errorf("action row leaked its magic ID: %q", row)

@@ -204,13 +204,15 @@ func readyModelPicker(m *Model) *modelPickerQuestion {
 	return q
 }
 
-// readySessionPicker is readyModelPicker's session-list twin.
-func readySessionPicker(m *Model) *sessionPickerDialog {
-	d := newSessionPickerDialog()
-	if sw, ok := m.opts.Agent.(SessionSwitcher); ok {
-		d.applySessions(sw.Sessions())
+// readySessionPicker is readyModelPicker's session-list twin, and asks
+// the same way: on the stack, with the host list already snapshotted.
+func readySessionPicker(m *Model) *sessionPickerQuestion {
+	sw, wired := m.opts.Agent.(SessionSwitcher)
+	q := askSessionPicker(m, wired)
+	if wired {
+		q.applySessions(sw.Sessions())
 	}
-	return d
+	return q
 }
 
 // mustBeFast fails when fn takes longer than nonBlockingBudget.
@@ -282,7 +284,7 @@ func TestView_NeverCallsHost(t *testing.T) {
 	mustBeFast(t, "View with a loading model picker", func() { _ = m.View() })
 	m.overlayStack.Close(modelPickerDialogID)
 
-	m.overlayStack.Open(newSessionPickerDialog())
+	askSessionPicker(&m, true)
 	mustBeFast(t, "View with a loading session picker", func() { _ = m.View() })
 	m.overlayStack.Close(sessionPickerDialogID)
 
@@ -475,24 +477,37 @@ func TestSessionPicker_EnterSwitchesOffLoop(t *testing.T) {
 	m := NewModel(Options{Agent: agent})
 	m.viewport.SetWidth(80)
 
-	d := readySessionPicker(&m)
-	m.overlayStack.Open(d)
-	d.idx = 1
+	q := readySessionPicker(&m)
+	q.idx = 1
 
-	var act DialogAction
+	var (
+		ans answer
+		cmd tea.Cmd
+	)
 	mustBeFast(t, "enter on the session picker", func() {
-		act = d.HandleKey("enter", &m)
+		ans, cmd = q.Key(keyMsgFromStroke("enter"))
 	})
-	if act.Cmd == nil || act.Close {
-		t.Fatalf("enter = %+v, want a Cmd and NOT Close", act)
+	if ans != nil || cmd == nil {
+		t.Fatalf("enter = (%#v, %v), want a Cmd and no answer yet", ans, cmd)
 	}
-	if d.switching != "other" {
-		t.Errorf("switching = %q, want other", d.switching)
+	if q.switching != "other" {
+		t.Errorf("switching = %q, want other", q.switching)
 	}
 
-	msg := act.Cmd().(sessionSwitchedMsg)
-	out, _ := m.Update(msg)
-	m = out.(Model)
+	// Enter only NAMES the session; Update is what reaches the host,
+	// and it has to hand that off rather than dial inline too.
+	var follow tea.Cmd
+	mustBeFast(t, "the switch request", func() {
+		out, c := m.Update(cmd().(sessionSwitchRequestedMsg))
+		m, follow = out.(Model), c
+	})
+	if follow == nil {
+		t.Fatal("the request produced no Cmd — the host call would never happen")
+	}
+	for _, msg := range drainBatch(t, follow) {
+		out, _ := m.Update(msg)
+		m = out.(Model)
+	}
 	if got, ok := m.opts.Agent.(*bareAgent); !ok || got.id != "other" {
 		t.Fatalf("session not attached: %v", m.opts.Agent)
 	}
@@ -1579,11 +1594,21 @@ var attachRowEntryPoints = []struct {
 }{
 	{"enter on the picker's action row", func(t *testing.T, m *Model, a *slowAgent) {
 		t.Helper()
-		d := readySessionPicker(m)
-		m.overlayStack.Open(d)
-		d.idx = len(d.rows()) - 1 // the action row, appended last
-		if act := d.HandleKey("enter", m); !act.Consumed || act.Close {
-			t.Fatalf("enter on the action row = %+v, want Consumed and NOT Close", act)
+		q := readySessionPicker(m)
+		q.idx = len(q.rows()) - 1 // the action row, appended last
+		ans, cmd := q.Key(keyMsgFromStroke("enter"))
+		if ans != nil || cmd == nil {
+			t.Fatalf("enter on the action row = (%#v, %v), want a Cmd and no answer", ans, cmd)
+		}
+		// The Open is Update's, not the widget's: Overlay pops the
+		// front dialog after Key returns, so a question that pushed
+		// one would watch it be popped again.
+		for _, msg := range drainBatch(t, cmd) {
+			out, _ := m.Update(msg)
+			*m = out.(Model)
+		}
+		if !m.overlayStack.HasID(sessionInputDialogID) {
+			t.Fatal("the action row did not open its text input")
 		}
 		a.calls.Store(0)
 	}},
@@ -1815,11 +1840,18 @@ func TestSessionInputSubmit_ReplyDoesNotLandOnAReplacementDialog(t *testing.T) {
 	// Give up on that endpoint and type a different one. The picker
 	// is still underneath, with the cursor still on the action row.
 	m.overlayStack.HandleKeyMsg(keyMsgFromStroke("esc"), &m)
-	picker, ok := m.overlayStack.Front().(*sessionPickerDialog)
-	if !ok {
+	picker := sessionPickerOn(&m.overlayStack)
+	if picker == nil {
 		t.Fatalf("setup: esc left %T frontmost, want the picker", m.overlayStack.Front())
 	}
-	picker.HandleKey("enter", &m)
+	if want := len(picker.rows()) - 1; picker.idx != want {
+		t.Fatalf("setup: cursor is at %d, want it still on the action row %d", picker.idx, want)
+	}
+	_, reopen := m.overlayStack.HandleKeyMsg(keyMsgFromStroke("enter"), &m)
+	for _, msg := range drainBatch(t, reopen) {
+		out, _ := m.Update(msg)
+		m = out.(Model)
+	}
 	typeInto(t, m.overlayStack.Front(), &m, "http://elsewhere:7778")
 	agent.calls.Store(0)
 	_, second := pressEnter(&m)

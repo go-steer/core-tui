@@ -594,6 +594,388 @@ func TestModelQuestion_CaretFollowsTheFilter(t *testing.T) {
 	}
 }
 
+// ---- the session picker (stage 3) ----
+//
+// The same asynchronous shape as the model picker above, plus the two
+// things that make it the harder of the pair: a row whose Enter starts
+// somebody ELSE's question, and a row whose Enter answers in the same
+// keystroke. Three outcomes from one key, and which one you get is
+// decided entirely from the row — no Model, which is the claim.
+
+// probeSessions is a fixed five-row snapshot covering every row kind
+// the picker has to tell apart: the attached one, plain ones whose
+// display names and IDs disagree, one with no display name at all, and
+// an action row (issue #56).
+func probeSessions() []tui.SessionInfo {
+	return []tui.SessionInfo{
+		{ID: "sess-001", Display: "nightly refactor", Current: true},
+		{ID: "sess-002", Display: "docs sweep"},
+		{ID: "sess-003", Display: "flaky test hunt", Description: "2 days ago"},
+		{ID: "prod-042"},
+		{ID: "+attach", Display: "+ Attach to endpoint…", Input: &tui.SessionInput{
+			Prompt: "Daemon URL:",
+		}},
+	}
+}
+
+// loadedSessionPicker is the picker once the open-time Sessions()
+// snapshot has landed.
+func loadedSessionPicker() *tui.SessionPickerQuestion {
+	q := tui.NewSessionPickerQuestion(true)
+	tui.LoadSessions(q, probeSessions())
+	return q
+}
+
+// requestedAttach pulls the session ID out of whatever Enter scheduled.
+// Same reason as requestedSwitch: the widget holds neither the
+// SessionSwitcher nor the generation, so naming the row is all it can
+// do.
+func requestedAttach(t *testing.T, msgs []tea.Msg) string {
+	t.Helper()
+	if len(msgs) != 1 {
+		t.Fatalf("scheduled %d messages, want exactly the attach request: %#v", len(msgs), msgs)
+	}
+	req, ok := msgs[0].(tui.SessionSwitchRequestedMsg)
+	if !ok {
+		t.Fatalf("scheduled a %T, want SessionSwitchRequestedMsg", msgs[0])
+	}
+	return req.ID
+}
+
+// TestSessionQuestion_EnterOnAPlainRowCommitsWithoutAnswering — the
+// model picker's headline, restated because attaching is the slower
+// call of the two and the one most likely to look like a hang.
+func TestSessionQuestion_EnterOnAPlainRowCommitsWithoutAnswering(t *testing.T) {
+	q := loadedSessionPicker()
+
+	ans, msgs := drive(t, q, namedKey(tea.KeyDown), namedKey(tea.KeyEnter))
+	if ans != nil {
+		t.Fatalf("enter answered %#v; the host's reply is the answer", ans)
+	}
+	if got := requestedAttach(t, msgs); got != "sess-002" {
+		t.Errorf("requested %q, want the highlighted row sess-002", got)
+	}
+	// And the list says what it is waiting for rather than freezing.
+	if body := q.Body(q.Width(100), 24, tui.Styles{}); !strings.Contains(body, "attaching to sess-002") {
+		t.Errorf("body = %q, want the progress line", body)
+	}
+}
+
+// TestSessionQuestion_OpensOnRowZero is the deliberate difference from
+// the model picker, which #110 made open on the current row. A session
+// list is a history and the attached session is the one row the
+// operator is least likely to want, so seeding the cursor onto it would
+// put it on the least useful row every time.
+func TestSessionQuestion_OpensOnRowZero(t *testing.T) {
+	q := tui.NewSessionPickerQuestion(true)
+	// The attached session deliberately NOT first, so landing on it
+	// could only be a seed.
+	tui.LoadSessions(q, []tui.SessionInfo{
+		{ID: "sess-002", Display: "docs sweep"},
+		{ID: "sess-001", Display: "nightly refactor", Current: true},
+	})
+	if got := requestedAttach(t, mustSchedule(t, q, namedKey(tea.KeyEnter))); got != "sess-002" {
+		t.Errorf("enter on open committed %q, want row 0", got)
+	}
+}
+
+// mustSchedule drives one key and insists the question stayed open.
+func mustSchedule(t *testing.T, q tui.Question, k tea.KeyPressMsg) []tea.Msg {
+	t.Helper()
+	ans, msgs := drive(t, q, k)
+	if ans != nil {
+		t.Fatalf("%v answered %#v, want the question still open", k, ans)
+	}
+	return msgs
+}
+
+// TestSessionQuestion_EnterOnTheAttachedRowAnswers is the third
+// outcome, and the one that cannot be deferred to a host reply: there
+// is no session to attach to and no call to make, so the answer exists
+// the moment the key lands. Getting this wrong is destructive rather
+// than merely wrong — the attach path wipes the transcript.
+func TestSessionQuestion_EnterOnTheAttachedRowAnswers(t *testing.T) {
+	q := loadedSessionPicker()
+
+	ans, msgs := drive(t, q, namedKey(tea.KeyEnter))
+	got, ok := ans.(tui.Chosen)
+	if !ok {
+		t.Fatalf("answer is %T, want Chosen", ans)
+	}
+	if got.ID != "sess-001" || got.Index != 0 {
+		t.Errorf("answer = %+v, want the attached row sess-001@0", got)
+	}
+	if len(msgs) != 0 {
+		t.Errorf("the attached row scheduled %#v; there is nothing to call", msgs)
+	}
+}
+
+// TestSessionQuestion_EnterOnAnActionRowStartsAnotherQuestion — the
+// second outcome. The row needs an address typed, which this question
+// cannot ask for, so it neither answers nor dismisses: it names the row
+// and leaves the Open to Update, because Overlay pops the front dialog
+// after Key returns and a question that pushed one would watch it be
+// popped again.
+func TestSessionQuestion_EnterOnAnActionRowStartsAnotherQuestion(t *testing.T) {
+	q := loadedSessionPicker()
+
+	// Filter down to it, so the row Enter reads is the FILTERED one.
+	drive(t, q, key('e'), key('n'), key('d'))
+	ans, msgs := drive(t, q, namedKey(tea.KeyEnter))
+	if ans != nil {
+		t.Fatalf("the action row answered %#v; it starts a question, it does not end one", ans)
+	}
+	if len(msgs) != 1 {
+		t.Fatalf("scheduled %#v, want exactly the input request", msgs)
+	}
+	req, ok := msgs[0].(tui.SessionInputRequestedMsg)
+	if !ok {
+		t.Fatalf("scheduled a %T, want SessionInputRequestedMsg", msgs[0])
+	}
+	// The whole row, not just its ID: the title, prompt, placeholder and
+	// validator the input needs all live on SessionInput.
+	if req.Row.ID != "+attach" || req.Row.Input == nil || req.Row.Input.Prompt != "Daemon URL:" {
+		t.Errorf("request carried %+v, want the action row whole", req.Row)
+	}
+}
+
+// TestSessionQuestion_FilterMatchesTheIDToo — a session whose host
+// gave it no display name is findable only by its ID, and it is on
+// screen, so it has to be searchable.
+func TestSessionQuestion_FilterMatchesTheIDToo(t *testing.T) {
+	q := loadedSessionPicker()
+
+	drive(t, q, key('p'), key('r'), key('o'), key('d'))
+	if got := requestedAttach(t, mustSchedule(t, q, namedKey(tea.KeyEnter))); got != "prod-042" {
+		t.Errorf("enter committed %q, want the ID-only row prod-042", got)
+	}
+}
+
+// TestSessionQuestion_FilterMatchingNothingStaysOpen keeps the two
+// empty states apart. This one is the operator's own doing and the next
+// keystroke is a backspace; the host enumerating nothing is inert and
+// answers, below.
+func TestSessionQuestion_FilterMatchingNothingStaysOpen(t *testing.T) {
+	q := loadedSessionPicker()
+
+	drive(t, q, key('z'), key('z'), key('z'))
+	for _, k := range []tea.KeyPressMsg{
+		namedKey(tea.KeyDown), namedKey(tea.KeyUp), namedKey(tea.KeyEnter),
+	} {
+		ans, msgs := drive(t, q, k)
+		if ans != nil {
+			t.Errorf("%v on an empty filter result answered %#v", k, ans)
+		}
+		if len(msgs) != 0 {
+			t.Errorf("%v on an empty filter result scheduled %#v", k, msgs)
+		}
+	}
+	body := ansi.Strip(q.Body(q.Width(100), 24, tui.Styles{}))
+	if !strings.Contains(body, "no sessions match") {
+		t.Errorf("empty-result body does not say so:\n%s", body)
+	}
+	if !strings.Contains(body, "zzz") {
+		t.Errorf("empty-result body does not echo the filter:\n%s", body)
+	}
+	if !strings.Contains(body, "0/5") {
+		t.Errorf("empty-result body is missing the 0/5 count:\n%s", body)
+	}
+}
+
+// TestSessionQuestion_CursorWrapsAndSurvivesAShrinkingList. The
+// wrapping is the pre-filter behaviour, preserved; surviving the shrink
+// is what the filter added, since the old (idx ± 1 + len) % len divides
+// by zero the moment the list empties.
+func TestSessionQuestion_CursorWrapsAndSurvivesAShrinkingList(t *testing.T) {
+	q := loadedSessionPicker()
+
+	// Down past the end wraps to the top, up from the top wraps to the
+	// end — asserted through what Enter then commits to, since the
+	// cursor index is not the widget's contract, the row it lands on is.
+	drive(t, q, namedKey(tea.KeyUp))
+	if _, msgs := drive(t, q, namedKey(tea.KeyEnter)); len(msgs) != 1 {
+		t.Fatalf("up from row 0 scheduled %#v, want the action row's input request", msgs)
+	}
+
+	q = loadedSessionPicker()
+	for range len(probeSessions()) + 1 {
+		drive(t, q, namedKey(tea.KeyDown))
+	}
+	if got := requestedAttach(t, mustSchedule(t, q, namedKey(tea.KeyEnter))); got != "sess-002" {
+		t.Errorf("a full lap plus one committed %q, want row 1", got)
+	}
+
+	q = loadedSessionPicker()
+	script := "sesszzz"
+	for _, r := range script {
+		drive(t, q, key(r), namedKey(tea.KeyDown), namedKey(tea.KeyDown), namedKey(tea.KeyUp))
+		q.Body(q.Width(100), 24, tui.Styles{})
+	}
+	for range script {
+		drive(t, q, namedKey(tea.KeyBackspace), namedKey(tea.KeyUp), namedKey(tea.KeyDown))
+		q.Body(q.Width(100), 24, tui.Styles{})
+	}
+	body := ansi.Strip(q.Body(q.Width(100), 24, tui.Styles{}))
+	for _, want := range sessionLabels() {
+		if !strings.Contains(body, want) {
+			t.Errorf("session %q missing after the filter was deleted:\n%s", want, body)
+		}
+	}
+}
+
+// sessionLabels is what each probe row actually PRINTS. Not simply the
+// IDs: an action row's ID is a magic token the picker deliberately
+// keeps off screen, and a row with no display name falls back to its
+// ID as the title.
+func sessionLabels() []string {
+	rows := probeSessions()
+	out := make([]string, len(rows))
+	for i, s := range rows {
+		out[i] = s.Display
+		if out[i] == "" {
+			out[i] = s.ID
+		}
+	}
+	return out
+}
+
+// TestSessionQuestion_TheFourInertStates — the model picker's four,
+// with the wording this picker owns.
+func TestSessionQuestion_TheFourInertStates(t *testing.T) {
+	cases := []struct {
+		name string
+		q    func() *tui.SessionPickerQuestion
+		// wantAnswer is true when a keystroke ends the question.
+		wantAnswer bool
+		wantBody   string
+	}{
+		{
+			name:       "the agent is not a SessionSwitcher",
+			q:          func() *tui.SessionPickerQuestion { return tui.NewSessionPickerQuestion(false) },
+			wantAnswer: true,
+			wantBody:   "does not implement SessionSwitcher",
+		},
+		{
+			name: "the host enumerated nothing",
+			q: func() *tui.SessionPickerQuestion {
+				q := tui.NewSessionPickerQuestion(true)
+				tui.LoadSessions(q, nil)
+				return q
+			},
+			wantAnswer: true,
+			wantBody:   "no sessions advertised",
+		},
+		{
+			name:     "the snapshot has not landed yet",
+			q:        func() *tui.SessionPickerQuestion { return tui.NewSessionPickerQuestion(true) },
+			wantBody: "loading sessions",
+		},
+		{
+			name: "an attach is in flight",
+			q: func() *tui.SessionPickerQuestion {
+				q := loadedSessionPicker()
+				drive(t, q, namedKey(tea.KeyDown), namedKey(tea.KeyEnter))
+				return q
+			},
+			wantBody: "attaching to sess-002",
+		},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			q := tc.q()
+			if body := q.Body(q.Width(100), 24, tui.Styles{}); !strings.Contains(body, tc.wantBody) {
+				t.Errorf("body = %q, want it to mention %q", body, tc.wantBody)
+			}
+			if c := q.Cursor(q.Width(100)); c != nil {
+				t.Errorf("claimed the caret at (%d,%d) with no filter row on screen", c.X, c.Y)
+			}
+
+			ans, _ := drive(t, q, namedKey(tea.KeyDown), key('g'), namedKey(tea.KeyEnter))
+			if tc.wantAnswer {
+				got, ok := ans.(tui.Dismissed)
+				if !ok {
+					t.Fatalf("answer is %T, want Dismissed", ans)
+				}
+				if got.Reason != tui.DismissUnrenderable {
+					t.Errorf("reason = %v, want DismissUnrenderable", got.Reason)
+				}
+				return
+			}
+			if ans != nil {
+				t.Errorf("an inert state answered %#v; it should swallow", ans)
+			}
+			// Esc gets out mid-attach too. The call is committed and its
+			// reply still applies the target — the operator is declining
+			// to watch it, not cancelling it.
+			ans, _ = drive(t, q, namedKey(tea.KeyEsc))
+			if got, ok := ans.(tui.Dismissed); !ok || got.Reason != tui.DismissEscape {
+				t.Errorf("esc answered %#v, want Dismissed{DismissEscape}", ans)
+			}
+		})
+	}
+}
+
+// TestSessionQuestion_EscIsDismissedNotDeclined — nobody declined
+// anything by escaping a list; §1.4's hole was exactly this conflation.
+func TestSessionQuestion_EscIsDismissedNotDeclined(t *testing.T) {
+	q := loadedSessionPicker()
+	ans, _ := drive(t, q, namedKey(tea.KeyEsc))
+	got, ok := ans.(tui.Dismissed)
+	if !ok {
+		t.Fatalf("esc answered %T, want Dismissed", ans)
+	}
+	if got.Reason != tui.DismissEscape {
+		t.Errorf("esc reason = %v, want DismissEscape", got.Reason)
+	}
+}
+
+// TestSessionQuestion_RendersUnstyled is the "no theme, no host" half.
+// Body used to call m.opts.Agent.(SessionSwitcher).Sessions() to get
+// the list it painted, which is one of the three documented ways a host
+// call ended up inside View().
+func TestSessionQuestion_RendersUnstyled(t *testing.T) {
+	q := loadedSessionPicker()
+
+	body := q.Body(q.Width(100), 24, tui.Styles{})
+	if body != ansi.Strip(body) {
+		t.Errorf("the zero Styles still produced escape sequences:\n%q", body)
+	}
+	for _, want := range sessionLabels() {
+		if !strings.Contains(body, want) {
+			t.Errorf("session %q missing from the body:\n%s", want, body)
+		}
+	}
+	if !strings.Contains(body, "(current)") {
+		t.Errorf("the attached row is not marked:\n%s", body)
+	}
+	if q.Title() == "" || q.Footer() == "" {
+		t.Errorf("chrome strings are empty: title %q footer %q", q.Title(), q.Footer())
+	}
+	if got := q.Width(20); got < 30 {
+		t.Errorf("Width(20) = %d; the modal has a floor", got)
+	}
+}
+
+// TestSessionQuestion_CaretFollowsTheFilter — same contract as the
+// model picker's, and the same compile-time claim.
+func TestSessionQuestion_CaretFollowsTheFilter(t *testing.T) {
+	q := loadedSessionPicker()
+	var cq tui.CursorQuestion = q
+
+	before := cq.Cursor(72)
+	if before == nil {
+		t.Fatal("the picker owns the caret even with an empty filter")
+	}
+	drive(t, q, key('d'), key('o'))
+	after := cq.Cursor(72)
+	if after == nil {
+		t.Fatal("the caret vanished once something was typed")
+	}
+	if after.X <= before.X {
+		t.Errorf("caret did not advance: %d -> %d", before.X, after.X)
+	}
+}
+
 // TestAnswer_TheSetIsSealedAndTotal walks every variant through one
 // switch. It is not coverage for its own sake: gochecksumtype fails
 // this switch if a variant is added and not named here, so this is
