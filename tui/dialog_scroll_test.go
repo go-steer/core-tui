@@ -423,8 +423,8 @@ func TestOverlayHandleWheel_ScrollDialogVsPicker(t *testing.T) {
 	pm := NewModel(Options{Agent: &bareAgent{id: "a"}})
 	pm.width, pm.height = 100, 30
 	pm.resize()
-	tp := newThemePickerDialog("default")
-	pm.overlayStack.Open(tp)
+	pm.applyNamedTheme("default")
+	tp := askThemePicker(&pm)
 	start := tp.idx
 	if consumed, _ := pm.overlayStack.HandleWheel(wheelScrollLines, &pm); !consumed {
 		t.Fatal("theme picker did not consume the wheel")
@@ -618,9 +618,10 @@ func TestThemePicker_WindowsLongListToTerminal(t *testing.T) {
 	m := Model{}
 	m.styles = NewStyles(true, Branding{})
 	m.width, m.height = 100, 14
-	d := newThemePickerDialog("default")
+	m.themeName = "default"
+	askThemePicker(&m)
 
-	rendered := d.Render(m.width, &m)
+	rendered := m.overlayStack.Render(m.width, &m)
 	if h := strings.Count(rendered, "\n") + 1; h > m.height {
 		t.Errorf("theme picker is %d rows tall in a %d-row terminal", h, m.height)
 	}
@@ -628,9 +629,9 @@ func TestThemePicker_WindowsLongListToTerminal(t *testing.T) {
 	// Walking the cursor past the fold pulls the window along.
 	last := len(BuiltinThemes()) - 1
 	for i := 0; i < last; i++ {
-		d.HandleKey("down", &m)
+		m.overlayStack.HandleKey("down", &m)
 	}
-	rendered = d.Render(m.width, &m)
+	rendered = m.overlayStack.Render(m.width, &m)
 	if !strings.Contains(rendered, BuiltinThemes()[last].Name) {
 		t.Errorf("last theme %q not visible after scrolling to it:\n%s", BuiltinThemes()[last].Name, rendered)
 	}
@@ -641,8 +642,9 @@ func TestThemePicker_WindowsLongListToTerminal(t *testing.T) {
 func TestThemePicker_UnsizedRendersEveryRow(t *testing.T) {
 	m := Model{}
 	m.styles = NewStyles(true, Branding{})
-	d := newThemePickerDialog("default")
-	rendered := d.Render(80, &m)
+	m.themeName = "default"
+	askThemePicker(&m)
+	rendered := m.overlayStack.Render(80, &m)
 	for _, bt := range BuiltinThemes() {
 		if !strings.Contains(rendered, bt.Name) {
 			t.Errorf("theme %q missing from an unsized render", bt.Name)
@@ -860,7 +862,7 @@ func TestGolden_ModalFrameScrolled(t *testing.T) {
 	for _, w := range goldenWidths {
 		t.Run("width-"+strconv.Itoa(w), func(t *testing.T) {
 			m := goldenModel(t, w, 18)
-			m.overlayStack.Open(newThemePickerDialog(m.themeName))
+			askThemePicker(&m)
 			frame := m.View().Content
 			if !strings.Contains(frame, "█") {
 				t.Fatalf("width %d did not window the picker body; the capture would be pointless", w)

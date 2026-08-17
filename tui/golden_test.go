@@ -288,7 +288,7 @@ func TestGolden_ModalFrame(t *testing.T) {
 	for _, w := range goldenWidths {
 		t.Run("width-"+strconv.Itoa(w), func(t *testing.T) {
 			m := goldenModel(t, w, 24)
-			m.overlayStack.Open(newThemePickerDialog(m.themeName))
+			askThemePicker(&m)
 			assertGolden(t, "modal_frame_w"+strconv.Itoa(w), m.View().Content)
 		})
 	}

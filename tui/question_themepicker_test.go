@@ -12,14 +12,13 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-// Theme picker tests. Windowing is covered from dialog_scroll_test.go
-// and esc-restores from dialog_sessioninput_test.go; this file is the
-// dialog's own, added with type-to-filter (#117).
+// Theme picker tests, from the app's side. What the widget answers on
+// its own, with no Model anywhere, is question_external_test.go; this
+// file is the other half — that the resolver turns those answers into
+// the effects the picker has always had.
 //
-// The theme picker is the odd one of the three: it had no rows()
-// accessor at all, reading BuiltinThemes() directly from both
-// HandleKey and Render, and it previews the focused theme live. Both
-// of those interact with a filter.
+// Windowing is covered from dialog_scroll_test.go and the esc cascade
+// from dialog_sessioninput_test.go.
 
 package tui
 
@@ -31,16 +30,46 @@ import (
 	"github.com/charmbracelet/x/ansi"
 )
 
-func openThemePickerFixture(t *testing.T) (Model, *themePickerDialog) {
+// askThemePicker opens the picker exactly as /theme does — the
+// question, plus the resolver that knows what its answer means.
+func askThemePicker(m *Model) *themePickerQuestion {
+	q := newThemePickerQuestion(BuiltinThemes(), m.themeName)
+	m.overlayStack.ask(q, themePickerResolver(m.themeName))
+	return q
+}
+
+func openThemePickerFixture(t *testing.T) (Model, *themePickerQuestion) {
 	t.Helper()
 	m := NewModel(Options{Agent: &bareAgent{id: "theme"}})
 	m.styles = NewStylesWithTheme(true, goldenTheme())
 	out, _ := m.Update(tea.WindowSizeMsg{Width: 100, Height: 30})
 	m = out.(Model)
 	m.applyNamedTheme("default")
-	d := newThemePickerDialog(m.themeName)
-	m.overlayStack.Open(d)
-	return m, d
+	return m, askThemePicker(&m)
+}
+
+// pressPicker sends one stroke to the front-most overlay and applies
+// everything it schedules, so the test observes what an operator sees
+// once the frame settles.
+//
+// Settling is the part that is new. The live preview is no longer a
+// write the widget makes to a *Model it was handed — it cannot be,
+// since Model.Update has a value receiver and any *Model the widget
+// held would be a dead per-Update copy — so it arrives as a
+// themePreviewMsg the Update loop applies. Commit and restore still
+// happen synchronously, inside the resolver.
+func pressPicker(t *testing.T, m *Model, stroke string) (consumed bool) {
+	t.Helper()
+	consumed, cmd := m.overlayStack.HandleKeyMsg(keyMsgFromStroke(stroke), m)
+	for _, msg := range drainBatch(t, cmd) {
+		out, follow := m.Update(msg)
+		*m = out.(Model)
+		for _, next := range drainBatch(t, follow) {
+			out, _ = m.Update(next)
+			*m = out.(Model)
+		}
+	}
+	return consumed
 }
 
 func themeNames(themes []BuiltinTheme) []string {
@@ -55,19 +84,19 @@ func themeNames(themes []BuiltinTheme) []string {
 // on this registry: several names contain it and the tiers put the
 // prefix matches first.
 func TestThemePicker_TypingNarrowsTheList(t *testing.T) {
-	m, d := openThemePickerFixture(t)
-	if got := len(d.rows()); got != len(BuiltinThemes()) {
+	m, q := openThemePickerFixture(t)
+	if got := len(q.rows()); got != len(BuiltinThemes()) {
 		t.Fatalf("precondition: unfiltered picker has %d rows, want %d",
 			got, len(BuiltinThemes()))
 	}
 
 	typeIntoPicker(&m, "matrix")
-	assertNameOrder(t, themeNames(d.rows()), []string{"matrix"})
+	assertNameOrder(t, themeNames(q.rows()), []string{"matrix"})
 
 	// Case folding, and a filter that matches several names.
-	d.filter = newPickerFilter()
+	q.filter = newPickerFilter()
 	typeIntoPicker(&m, "GE")
-	got := themeNames(d.rows())
+	got := themeNames(q.rows())
 	if len(got) == 0 {
 		t.Fatalf("filter %q matched nothing", "GE")
 	}
@@ -90,21 +119,54 @@ func TestThemePicker_TypingNarrowsTheList(t *testing.T) {
 // a strobe rather than a preview. The footer promises "↑↓ preview",
 // and that is exactly what it does.
 func TestThemePicker_FilteringDoesNotPreview(t *testing.T) {
-	m, d := openThemePickerFixture(t)
+	m, q := openThemePickerFixture(t)
 	before := m.themeName
 
 	typeIntoPicker(&m, "matrix")
 	if m.themeName != before {
 		t.Errorf("typing a filter previewed %q; only ↑↓ should preview", m.themeName)
 	}
-	if got := themeNames(d.rows()); len(got) != 1 || got[0] != "matrix" {
+	if got := themeNames(q.rows()); len(got) != 1 || got[0] != "matrix" {
 		t.Fatalf("filter did not narrow to matrix: %v", got)
 	}
 
 	// ↑↓ still previews, over the FILTERED list.
-	d.HandleKey("down", &m)
+	pressPicker(t, &m, "down")
 	if m.themeName != "matrix" {
 		t.Errorf("down previewed %q, want the only filtered row matrix", m.themeName)
+	}
+}
+
+// TestThemePicker_PreviewDiesWithThePicker: the preview is scheduled
+// as a message rather than written straight to the model, so it can
+// land after the operator has already cancelled. It must not win when
+// it does — the theme the operator explicitly escaped out of would
+// otherwise reappear a frame later.
+func TestThemePicker_PreviewDiesWithThePicker(t *testing.T) {
+	m, _ := openThemePickerFixture(t)
+	original := m.themeName
+
+	_, cmd := m.overlayStack.HandleKeyMsg(keyMsgFromStroke("down"), &m)
+	stale := drainBatch(t, cmd)
+	if len(stale) != 1 {
+		t.Fatalf("down scheduled %d messages, want just the preview", len(stale))
+	}
+	if _, ok := stale[0].(themePreviewMsg); !ok {
+		t.Fatalf("down scheduled %T, want themePreviewMsg", stale[0])
+	}
+
+	// Esc first: the picker closes and the resolver restores.
+	pressPicker(t, &m, "esc")
+	if m.themeName != original {
+		t.Fatalf("esc left theme = %q, want %q", m.themeName, original)
+	}
+
+	// Now the preview arrives, too late.
+	out, _ := m.Update(stale[0])
+	m = out.(Model)
+	if m.themeName != original {
+		t.Errorf("a preview delivered after esc changed the theme to %q, want %q",
+			m.themeName, original)
 	}
 }
 
@@ -113,24 +175,27 @@ func TestThemePicker_FilteringDoesNotPreview(t *testing.T) {
 // at that index of the unfiltered registry.
 func TestThemePicker_EnterCommitsTheFilteredRow(t *testing.T) {
 	var persisted []string
-	m, d := openThemePickerFixture(t)
+	m, q := openThemePickerFixture(t)
 	m.opts.PersistThemeChoice = func(name string) error {
 		persisted = append(persisted, name)
 		return nil
 	}
 
 	typeIntoPicker(&m, "cyber")
-	if got := themeNames(d.rows()); len(got) != 1 || got[0] != "cyberpunk" {
+	if got := themeNames(q.rows()); len(got) != 1 || got[0] != "cyberpunk" {
 		t.Fatalf("filter matched %v, want just cyberpunk", got)
 	}
-	act := d.HandleKey("enter", &m)
-	if !act.Consumed || !act.Close {
-		t.Errorf("enter = %+v, want Consumed and Close", act)
+	consumed, cmd := m.overlayStack.HandleKeyMsg(keyMsgFromStroke("enter"), &m)
+	if !consumed {
+		t.Error("enter was not consumed")
+	}
+	if m.overlayStack.HasDialogs() {
+		t.Error("enter left the picker open")
 	}
 	if m.themeName != "cyberpunk" {
 		t.Errorf("theme = %q, want cyberpunk", m.themeName)
 	}
-	if act.Cmd == nil {
+	if cmd == nil {
 		t.Fatal("expected a Cmd carrying ThemeChangedMsg + the persist call")
 	}
 	// Persistence is host code and runs in the Cmd now (issue #137),
@@ -139,7 +204,7 @@ func TestThemePicker_EnterCommitsTheFilteredRow(t *testing.T) {
 		t.Errorf("PersistThemeChoice ran on the Update goroutine: %v", persisted)
 	}
 	var announced bool
-	for _, msg := range drainBatch(t, act.Cmd) {
+	for _, msg := range drainBatch(t, cmd) {
 		switch v := msg.(type) {
 		case ThemeChangedMsg:
 			announced = v.Name == "cyberpunk"
@@ -161,17 +226,19 @@ func TestThemePicker_EnterCommitsTheFilteredRow(t *testing.T) {
 // theme that was live when the picker opened, whatever previewing and
 // filtering happened in between.
 func TestThemePicker_EscRestoresAfterFiltering(t *testing.T) {
-	m, d := openThemePickerFixture(t)
+	m, _ := openThemePickerFixture(t)
 	original := m.themeName
 
 	typeIntoPicker(&m, "vapor")
-	d.HandleKey("down", &m) // preview the filtered row
+	pressPicker(t, &m, "down") // preview the filtered row
 	if m.themeName == original {
 		t.Fatalf("precondition: the preview should have changed the theme")
 	}
-	act := d.HandleKey("esc", &m)
-	if !act.Consumed || !act.Close {
-		t.Errorf("esc = %+v, want Consumed and Close", act)
+	if !pressPicker(t, &m, "esc") {
+		t.Error("esc was not consumed")
+	}
+	if m.overlayStack.HasDialogs() {
+		t.Error("esc left the picker open")
 	}
 	if m.themeName != original {
 		t.Errorf("esc left theme = %q, want the pre-picker %q", m.themeName, original)
@@ -182,21 +249,24 @@ func TestThemePicker_EscRestoresAfterFiltering(t *testing.T) {
 // matches, so the picker holds the row on screen rather than closing
 // or previewing something arbitrary.
 func TestThemePicker_FilterMatchingNothingStaysOpen(t *testing.T) {
-	m, d := openThemePickerFixture(t)
+	m, q := openThemePickerFixture(t)
 	before := m.themeName
 	typeIntoPicker(&m, "zzz")
-	if got := len(d.rows()); got != 0 {
+	if got := len(q.rows()); got != 0 {
 		t.Fatalf("filter %q matched %d rows, want none", "zzz", got)
 	}
 	for _, stroke := range []string{"down", "up", "enter"} {
-		if act := d.HandleKey(stroke, &m); !act.Consumed || act.Close {
-			t.Errorf("%q on an empty filter result = %+v, want Consumed and not Close", stroke, act)
+		if consumed := pressPicker(t, &m, stroke); !consumed {
+			t.Errorf("%q on an empty filter result was not consumed", stroke)
+		}
+		if !m.overlayStack.HasDialogs() {
+			t.Fatalf("%q on an empty filter result closed the picker", stroke)
 		}
 	}
 	if m.themeName != before {
 		t.Errorf("an empty filter result changed the theme to %q", m.themeName)
 	}
-	body := ansi.Strip(d.Render(100, &m))
+	body := ansi.Strip(m.overlayStack.Render(100, &m))
 	if !strings.Contains(body, "no themes match") {
 		t.Errorf("empty-result body does not say so:\n%s", body)
 	}
@@ -206,16 +276,23 @@ func TestThemePicker_FilterMatchingNothingStaysOpen(t *testing.T) {
 // here was (idx ± 1 + len) % len with len = len(BuiltinThemes()),
 // which could not be zero. It can now.
 func TestThemePicker_ShrinkingListNeverPanics(t *testing.T) {
-	m, d := openThemePickerFixture(t)
+	m, q := openThemePickerFixture(t)
 	for _, r := range "gemzz" {
+		if !m.overlayStack.HasDialogs() {
+			// An enter on a non-empty result commits and closes;
+			// re-open and keep narrowing.
+			q = askThemePicker(&m)
+		}
 		typeIntoPicker(&m, string(r))
 		for _, stroke := range []string{"down", "down", "up", "enter"} {
-			d.HandleKey(stroke, &m)
+			if m.overlayStack.HasDialogs() {
+				pressPicker(t, &m, stroke)
+			}
 		}
-		if n := len(d.rows()); n > 0 && (d.idx < 0 || d.idx >= n) {
-			t.Fatalf("cursor %d is outside the %d filtered rows", d.idx, n)
+		if n := len(q.rows()); n > 0 && (q.idx < 0 || q.idx >= n) {
+			t.Fatalf("cursor %d is outside the %d filtered rows", q.idx, n)
 		}
-		d.Render(100, &m)
+		q.Body(100, m.height, m.styles)
 	}
 }
 
@@ -239,10 +316,10 @@ func TestThemePicker_CursorSitsInTheFilterRow(t *testing.T) {
 func TestThemePicker_UnsizedRendersEveryFilteredRow(t *testing.T) {
 	m := Model{}
 	m.styles = NewStyles(true, Branding{})
-	d := newThemePickerDialog("default")
-	typeIntoFilter(&d.filter, "e")
-	rendered := ansi.Strip(d.Render(80, &m))
-	rows := d.rows()
+	q := askThemePicker(&m)
+	typeIntoFilter(&q.filter, "e")
+	rendered := ansi.Strip(m.overlayStack.Render(80, &m))
+	rows := q.rows()
 	if len(rows) < 2 {
 		t.Fatalf("filter %q matched %d rows; the test needs several", "e", len(rows))
 	}

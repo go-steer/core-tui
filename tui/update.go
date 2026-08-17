@@ -685,6 +685,17 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			m.refreshAndScroll()
 		}
 		return m, nil
+	case themePreviewMsg:
+		// The theme picker's live preview, applied on the Update
+		// goroutine because the widget has no *Model to apply it
+		// with. Guarded on the picker still being open: the message
+		// is asynchronous, so an operator who arrows and immediately
+		// escapes can have it land after the resolver already put the
+		// original theme back.
+		if m.overlayStack.HasID(themePickerDialogID) {
+			m.applyNamedTheme(msg.Name)
+		}
+		return m, nil
 	case persistDoneMsg:
 		if msg.gen != m.sessionGen || msg.err == nil {
 			return m, nil

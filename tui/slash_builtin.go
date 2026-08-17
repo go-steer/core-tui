@@ -252,7 +252,10 @@ func (m Model) dispatchBuiltinSlash(name, args string) (bool, tea.Model, tea.Cmd
 			// Singleton — re-opening while already showing is
 			// a no-op.
 			if !m.overlayStack.HasID(themePickerDialogID) {
-				m.overlayStack.Open(newThemePickerDialog(m.themeName))
+				m.overlayStack.ask(
+					newThemePickerQuestion(BuiltinThemes(), m.themeName),
+					themePickerResolver(m.themeName),
+				)
 			}
 			m.input.Reset()
 			return true, m, nil

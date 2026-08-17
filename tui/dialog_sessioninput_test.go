@@ -372,9 +372,8 @@ func TestOverlay_ThemePickerEscRestores(t *testing.T) {
 	m.applyNamedTheme(BuiltinThemes()[0].Name)
 	original := m.themeName
 
-	d := newThemePickerDialog(m.themeName)
-	m.overlayStack.Open(d)
-	d.HandleKey("down", &m) // live-previews the next theme
+	askThemePicker(&m)
+	pressPicker(t, &m, "down") // live-previews the next theme
 	if m.themeName == original {
 		t.Fatalf("cursor move should have previewed a different theme")
 	}

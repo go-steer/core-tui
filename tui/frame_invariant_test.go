@@ -176,7 +176,7 @@ func frameStates() []frameState {
 			name: "theme-picker",
 			setup: func(_ *testing.T, m Model, _, _ int) Model {
 				m = withHostileTranscript(m)
-				m.overlayStack.Open(newThemePickerDialog(m.themeName))
+				askThemePicker(&m)
 				return m
 			},
 		},

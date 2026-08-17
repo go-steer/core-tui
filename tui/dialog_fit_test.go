@@ -104,7 +104,7 @@ func modalFitCases() []modalFitCase {
 			name: "theme-picker",
 			open: func(_ *testing.T, w, h int) Model {
 				m := newFrameModel(StatusHeader, w, h)
-				m.overlayStack.Open(newThemePickerDialog(m.themeName))
+				askThemePicker(&m)
 				return m
 			},
 			render:        func(m *Model) string { return m.overlayStack.Render(m.width, m) },
@@ -387,7 +387,7 @@ func TestModalFit_BelowTheChromeFloor(t *testing.T) {
 		for _, h := range []int{1, 2} {
 			t.Run(strconv.Itoa(w)+"x"+strconv.Itoa(h), func(t *testing.T) {
 				m := newFrameModel(StatusHeader, w, h)
-				m.overlayStack.Open(newThemePickerDialog(m.themeName))
+				askThemePicker(&m)
 				block := m.overlayStack.Render(m.width, &m)
 				plain := unbindLegend(ansi.Strip(block))
 				if !strings.Contains(plain, "esc cancel") {

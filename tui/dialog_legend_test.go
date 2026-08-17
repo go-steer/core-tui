@@ -113,7 +113,7 @@ func TestModalFooters_LegendsBreakOnASeparator(t *testing.T) {
 	keys := []string{"type", "↑↓", "enter", "esc"}
 
 	m := newFrameModel(StatusHeader, 40, 24)
-	m.overlayStack.Open(newThemePickerDialog(m.themeName))
+	askThemePicker(&m)
 	block := ansi.Strip(m.overlayStack.Render(m.width, &m))
 
 	// Footer rows are the boxed rows carrying a bound pair. The
