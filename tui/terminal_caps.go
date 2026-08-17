@@ -57,6 +57,27 @@ type TerminalCapabilities struct {
 	// future image-rendering paths.
 	KittyGraphics bool
 
+	// NoColor reports that the operator has asked for uncoloured
+	// output via NO_COLOR (https://no-color.org — any non-empty
+	// value). Lipgloss already degrades colour for the output
+	// profile; this bit exists for renderers whose *content* should
+	// change when colour is gone, not just its styling — a decorative
+	// element that carries no information without colour should not
+	// be emitting escape sequences at all.
+	NoColor bool
+
+	// ReducedMotion reports that animation should be skipped and its
+	// end state rendered instead. Sniffed from NO_MOTION, from
+	// ACCESSIBLE (the convention charm's own prompts use), and from
+	// TERM=dumb, which cannot address the cursor and so cannot
+	// meaningfully animate anything.
+	//
+	// This governs one-shot decorative animation — today, the startup
+	// banner. It deliberately does NOT stop the spinner: the spinner
+	// is the only signal that a turn is in flight, and freezing it
+	// would remove information rather than motion.
+	ReducedMotion bool
+
 	// TermProgram is the canonical name of the terminal program
 	// when known (TERM_PROGRAM / KITTY_WINDOW_ID / WT_SESSION /
 	// VSCODE_PID etc.). Used by other capability checks; surfaced
@@ -75,6 +96,13 @@ func DetectCapabilities() TerminalCapabilities {
 	caps := TerminalCapabilities{
 		TermProgram: prog,
 		TrueColor:   colorterm == "truecolor" || colorterm == "24bit" || strings.Contains(term, "direct"),
+		NoColor:     os.Getenv("NO_COLOR") != "",
+		// TERM=dumb implies both: it cannot address the cursor, so
+		// there is nothing to animate and nothing to colour.
+		ReducedMotion: os.Getenv("NO_MOTION") != "" || os.Getenv("ACCESSIBLE") != "" || term == "dumb",
+	}
+	if term == "dumb" {
+		caps.NoColor = true
 	}
 	switch prog {
 	case "kitty":

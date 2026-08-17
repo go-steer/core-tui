@@ -527,6 +527,15 @@ func (m *Model) buildChatTail() []string {
 		b.WriteString(inProgress)
 	}
 	if m.history.Len() == 0 && m.state == stateIdle {
+		// Startup wordmark above the hint (issue #165). "" whenever
+		// the banner cannot or should not draw, in which case what
+		// follows is exactly the empty state as it was before it
+		// existed. Measured against the chat window rather than the
+		// terminal, because that is the room it actually gets.
+		if banner := m.renderBanner(m.viewport.Width(), m.viewport.Height()); banner != "" {
+			b.WriteString(banner)
+			b.WriteString("\n\n")
+		}
 		hint := m.opts.Branding.EmptyStateHint
 		if hint == "" {
 			hint = "Ask me anything to get started."

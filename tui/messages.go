@@ -111,6 +111,13 @@ type turnCancelledMsg struct{ gen uint64 }
 // alongside the current one. Same guard shape as resizeReflowMsg.
 type spinnerTickMsg struct{ gen uint64 }
 
+// bannerTickMsg advances the startup wordmark wipe by one frame
+// (issue #165). No generation stamp, unlike spinnerTickMsg: the chain
+// is armed once from Init and re-armed only by its own handler, so
+// there is no second chain a stale tick could belong to, and the frame
+// counter it drives is monotonic and bounded. See armBanner.
+type bannerTickMsg struct{}
+
 // initialPromptMsg fires exactly once from Init() when the host set
 // Options.InitialPrompt to a non-empty value. Update routes it
 // through the same submitTurn path an operator-typed submission uses,
