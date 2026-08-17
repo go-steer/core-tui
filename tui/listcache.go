@@ -180,8 +180,31 @@ func (c *listCache) get(item Item, width int) (string, bool) {
 // is not there. The clamp is chatView's, applied per drawn line
 // (chatCutLine).
 func (c *listCache) getLines(item Item, width int) ([]string, bool) {
-	entry, ok := c.entries[listCacheKey{id: item.Identity(), width: width}]
-	if !ok || entry.version != item.Version() {
+	return c.getLinesByID(item.Identity(), item.Version(), width)
+}
+
+// getLinesByID is getLines addressed by the two scalars a lookup
+// actually consults — the identity that selects the entry and the
+// version that decides whether it is still current. Everything else
+// Item carries (Finished, Render) is miss-path machinery, and a
+// lookup that never misses never needs it.
+//
+// It exists because the interface was costing an allocation on the
+// hit path (issue #204). getLines calls Identity and Version through
+// Item, which escape analysis cannot see past, so every caller that
+// built a messageItem to ask "is this row cached?" heap-allocated the
+// box first — once per visible row per frame, on the one path in the
+// renderer whose whole purpose is to not allocate. Passing the two
+// numbers leaves the boxing to put, where a render is about to be
+// paid for anyway and one more allocation is noise.
+//
+// This is deliberately not the start of a de-interfacing of Item.
+// Item is the seam the item-addressed transcript is built on and put
+// still takes it; what moved is the lookup, which never used the seam
+// for anything but two accessor calls.
+func (c *listCache) getLinesByID(id, version uint64, width int) ([]string, bool) {
+	entry, ok := c.entries[listCacheKey{id: id, width: width}]
+	if !ok || entry.version != version {
 		return nil, false
 	}
 	return entry.lines, true
