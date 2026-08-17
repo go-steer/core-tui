@@ -354,6 +354,14 @@ type Model struct {
 	spinnerFrame  int
 	spinnerActive bool // gates spinner tick scheduling
 
+	// bannerFrame is how far the startup wipe has got (issue #165).
+	// Counts up to bannerFrames and stops; at bannerFrames the banner
+	// is the settled wordmark and no tick is armed. NewModel seeds it
+	// AT bannerFrames when the wipe is not going to run at all, so the
+	// still frame is the default and the animation is the exception —
+	// see initialBannerFrame.
+	bannerFrame int
+
 	// spinnerGen identifies the spinner tick chain that is allowed to
 	// be live (issue #112). Bumped wherever a new animation starts —
 	// submitTurn (per turn) and applyStreamChunk (per LiveAgent
@@ -629,6 +637,11 @@ func NewModel(opts Options) Model {
 	case ThemeDark:
 		initialDark = true
 	}
+	// Sniffed once and read three times below — the bag itself, the
+	// newline hint, and the banner's starting frame. It reads the
+	// environment, so calling it per use is both wasted work and a way
+	// for the three readings to disagree.
+	caps := DetectCapabilities()
 	m := Model{
 		opts:            opts,
 		styles:          NewStyles(initialDark, opts.Branding), // overwritten on BackgroundColorMsg unless ForceTheme is set
@@ -646,8 +659,9 @@ func NewModel(opts Options) Model {
 		now:             time.Now,
 		listCache:       newListCache(),
 		modalScroll:     &scrollState{},
-		caps:            DetectCapabilities(),
-		newlineHint:     defaultNewlineHint(DetectCapabilities().TermProgram),
+		caps:            caps,
+		newlineHint:     defaultNewlineHint(caps.TermProgram),
+		bannerFrame:     initialBannerFrame(caps, opts.Branding),
 	}
 	// LiveAgent precedence (issue #22): when the host satisfies
 	// LiveAgent, the per-turn Run path is bypassed entirely and a

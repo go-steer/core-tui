@@ -42,6 +42,13 @@ func (m Model) Init() tea.Cmd {
 		m.elicitListener(),
 		m.notifyListener(),
 	}
+	// Startup wordmark wipe (issue #165). nil unless the banner is
+	// actually going to animate — a host that has turned it off, or an
+	// environment asking for reduced motion, gets no tick chain at all
+	// and keeps the settled wordmark NewModel already seeded.
+	if c := m.armBanner(); c != nil {
+		cmds = append(cmds, c)
+	}
 	// Prime the render-path host cache (see host_snapshot.go) so the
 	// status header reads model/provider/usage from a snapshot refreshed
 	// off the event loop instead of calling the host from View(). nil
@@ -893,6 +900,26 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			return m, tea.Batch(m.armSpinner(), refresh)
 		}
 		return m, m.armSpinner()
+	case bannerTickMsg:
+		// One frame of the startup wipe (issue #165). Advance first,
+		// then ask armBanner whether there is another — bannerAnimates
+		// reads the counter, so incrementing past bannerFrames is what
+		// terminates the chain, and the last tick is the one that
+		// paints the settled wordmark.
+		//
+		// No stale-chain guard is needed here (see bannerTickMsg), but
+		// the transcript-empty gate inside bannerAnimates is: the
+		// operator can type during the wipe, and once the banner is
+		// off screen there is nothing left for a tick to repaint.
+		if m.bannerFrame >= bannerFrames {
+			return m, nil
+		}
+		m.bannerFrame++
+		m.markViewportDirty()
+		if refresh := m.scheduleCoalescedRefresh(); refresh != nil {
+			return m, tea.Batch(m.armBanner(), refresh)
+		}
+		return m, m.armBanner()
 	case initialPromptMsg:
 		// Options.InitialPrompt lands here exactly once, right after
 		// Init. Defensive guards mirror the Enter-key handler at the
