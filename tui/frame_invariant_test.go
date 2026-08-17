@@ -742,6 +742,132 @@ func assertBackgroundSurvives(t *testing.T, frame []string, stack []framePanel, 
 	}
 }
 
+// --- The width contract at the render site (issue #159) ------------
+//
+// assertFrameFits measures View()'s output, and View()'s output is
+// post-clipFrame. That makes every renderer in the package look
+// well-behaved by construction: a panel that hands the layout a line
+// twenty columns too wide scores exactly the same as one that does
+// not, because the clamp trimmed the difference before the assertion
+// ran. The clamp is therefore both the only enforcement of the width
+// contract AND the reason no test can see the contract being broken.
+//
+// This is the assertion that can see it. It renders each panel
+// directly — the same call View makes, at the same width — and
+// measures the block BEFORE it enters a join. A failure names the
+// renderer, which is the piece of information clipping destroys: by
+// the time an oversized line has been composed into a frame, "who
+// produced it" is not recoverable from the frame.
+//
+// # Why this is not the same list as composedStack
+//
+// composedStack (above) locates panels in the composed frame, so its
+// column bands are the bands the LAYOUT gives a panel. The width a
+// renderer was ASKED for is a different number in one case: the
+// sidebar band is chromeWidth's leftover, which is sidebarWidth plus
+// the two columns of slack chromeWidth() reserves, while
+// renderSidebar composes against the sidebarWidth constant itself.
+// Asserting against the band would let the sidebar overrun its own
+// fixed column by up to two cells and call it legal — which is
+// exactly how the section rule came to be one cell too long without
+// any frame-level test noticing.
+//
+// # Why transcript rows are not in the list
+//
+// They are contracted to overrun. Since #154 the render cache holds
+// rows at their NATURAL width so that panning has columns left to
+// pan to, and the bound is applied per drawn line in chatView
+// (chatCutLine). chatView's output is in the list; the rows behind it
+// deliberately are not.
+//
+// # The tab clause
+//
+// Every width measurement in this package — ansi.StringWidth,
+// lipgloss.Width, and therefore chatCutLine and clipFrame — prices a
+// TAB at zero cells. lipgloss's Render expands it to contentTabWidth
+// spaces on its way to the terminal. A raw tab that survives into a
+// rendered block is therefore four cells the frame's own arithmetic
+// cannot see, and neither the render-time cut nor the compose-time
+// clamp can bound the line it sits on. Today no renderer emits one —
+// every styled path goes through lipgloss and every untrusted path
+// goes through sanitizeLine, whose truncateCells prices the tab at
+// contentTabWidth precisely so the two agree. The clause is here so
+// that stays true: `withPreview` splices Message.ToolPreview into a
+// tool row verbatim, so a host that pre-renders its own preview is
+// one raw tab away from a frame whose width nothing in the package
+// can measure.
+
+// widthContract is one renderer's output paired with the width it was
+// handed. name is the function that produced it, so a failure reads
+// as an accusation rather than as a coordinate.
+type widthContract struct {
+	name  string
+	block string
+	width int
+}
+
+// renderedBlocks calls every renderer whose output View joins into
+// the frame, at the width View calls it with.
+//
+// The conditional members are included on the same conditions View
+// includes them on — a non-empty render — because a renderer that
+// returns "" has composed nothing and has no contract to break.
+func renderedBlocks(m *Model) []widthContract {
+	cw := m.chromeWidth()
+	out := []widthContract{
+		// chatView pads to the viewport plus the selection gutter,
+		// which together are the column the frame gave the transcript.
+		{"chatView", m.chatView(), m.viewport.Width() + chatGutterWidth},
+		{"renderInputBox", m.renderInputBox(), cw},
+		{"renderFooter", m.renderFooter(cw), cw},
+	}
+	if m.effectiveLayout() == StatusSidebar {
+		out = append(out, widthContract{"renderSidebar", m.renderSidebar(), sidebarWidth})
+	} else {
+		out = append(out, widthContract{"renderHeader", m.renderHeader(), m.width})
+	}
+	if help := m.renderHelpPanel(cw); help != "" {
+		out = append(out, widthContract{"renderHelpPanel", help, cw})
+	}
+	if pal := m.renderPalette(cw); pal != "" {
+		out = append(out, widthContract{"renderPalette", pal, cw})
+	}
+	if toast := m.renderToast(cw); toast != "" {
+		out = append(out, widthContract{"renderToast", toast, cw})
+	}
+	if block, ok := modalBlock(m); ok {
+		// A modal is centred over the whole terminal rather than
+		// stacked in the chrome column, so its width is m.width.
+		out = append(out, widthContract{"modal", block, m.width})
+	}
+	return out
+}
+
+// assertRenderersHonorWidth is the invariant: no renderer hands the
+// layout a line wider than the width it was asked for, and no
+// renderer hands it a line whose width the layout cannot measure.
+func assertRenderersHonorWidth(t *testing.T, m Model) {
+	t.Helper()
+	for _, c := range renderedBlocks(&m) {
+		for i, line := range strings.Split(c.block, "\n") {
+			if got := ansi.StringWidth(line); got > c.width {
+				t.Errorf("%s produced line %d at %d cols after being asked for %d (overflow %d) — "+
+					"it reaches the layout that wide and clipFrame trims it at the frame edge, "+
+					"which is a silent loss of whatever was in those %d cells and, for a panel "+
+					"joined horizontally, a shift of everything to its right:\n     %q",
+					c.name, i, got, c.width, got-c.width, got-c.width,
+					ansi.Truncate(ansi.Strip(line), c.width+20, "…"))
+			}
+			if strings.Contains(line, "\t") {
+				t.Errorf("%s produced line %d containing a raw TAB — ansi.StringWidth prices it at 0 "+
+					"and lipgloss expands it to %d spaces at draw time, so neither chatCutLine nor "+
+					"clipFrame can bound this line:\n     %q",
+					c.name, i, contentTabWidth, ansi.Strip(line))
+			}
+		}
+	}
+}
+
 // TestFrameInvariants_Grid is the core of issue #101: every cell of
 // the width x height x state x layout matrix must produce a frame
 // that fits the terminal in both dimensions.
@@ -823,6 +949,83 @@ func TestFrameInvariants_PanelSurvival(t *testing.T) {
 				}
 			}
 		}
+	}
+}
+
+// TestFrameInvariants_RenderersHonorWidth is issue #159: the same
+// matrix again, asserting that the frame which fits and keeps its
+// panels is also a frame the clip pass did not have to rescue.
+//
+// A separate walk rather than another assertion inside the Grid test,
+// for the reason TestFrameInvariants_PanelSurvival gives: "the frame
+// is too wide", "the frame lost its footer" and "the sidebar renderer
+// overran its own fixed column" are three different bugs with three
+// different fixes, and the third is the only one that can be true
+// while the other two are false.
+func TestFrameInvariants_RenderersHonorWidth(t *testing.T) {
+	layouts := []struct {
+		name   string
+		layout StatusLayout
+	}{
+		{"header", StatusHeader},
+		{"sidebar", StatusSidebar},
+	}
+	for _, lay := range layouts {
+		for _, st := range frameStates() {
+			for _, w := range frameWidths {
+				for _, h := range frameHeights {
+					name := lay.name + "/" + st.name + "/" +
+						strconv.Itoa(w) + "x" + strconv.Itoa(h)
+					t.Run(name, func(t *testing.T) {
+						m := newFrameModel(lay.layout, w, h)
+						m = st.setup(t, m, w, h)
+						assertRenderersHonorWidth(t, m)
+					})
+				}
+			}
+		}
+	}
+}
+
+// TestRenderSidebar_BoundsHostSuppliedContent is the case the grid
+// above cannot reach: the sidebar's content comes from the HOST — a
+// model id from displayModelName, a roster from SubagentLister — and
+// the grid drives a bare agent that supplies neither, so every cell of
+// it renders a sidebar whose longest line is the word "subagents".
+//
+// The width it is asserted against is sidebarWidth rather than the
+// column band the layout leaves beside the chat, because those are
+// different numbers: chromeWidth() reserves two columns of slack, and
+// a bound that permits the slack permits a panel that is not the
+// fixed-width panel it is documented to be. The values here are
+// deliberately realistic rather than pathological — a provider-
+// qualified model id is what a host actually passes, and it is 50-odd
+// cells against a 32-cell column.
+func TestRenderSidebar_BoundsHostSuppliedContent(t *testing.T) {
+	m := newFrameModel(StatusSidebar, 120, 40)
+	m.currentModel = "anthropic/claude-opus-4-1-20250805-extended-thinking"
+	m.hostSnap.valid = true
+	m.hostSnap.subagents = []SubagentInfo{
+		{Name: "a-subagent-with-a-really-quite-long-name", Status: "running"},
+		{Name: "short", Status: "idle"},
+	}
+
+	lines := strings.Split(m.renderSidebar(), "\n")
+	for i, line := range lines {
+		if got := ansi.StringWidth(line); got > sidebarWidth {
+			t.Errorf("sidebar line %d is %d cols against a %d-column panel (overflow %d) — "+
+				"JoinVertical widens the whole block to the longest line, JoinHorizontal then "+
+				"makes the composed body that much wider than the terminal, and clipFrame takes "+
+				"the difference off the right edge of EVERY row: %q",
+				i, got, sidebarWidth, got-sidebarWidth, ansi.Strip(line))
+		}
+	}
+	// A bound that achieved the width by rendering nothing would pass
+	// the loop above, so pin that the rows still carry their content up
+	// to the cut.
+	if want := "anthropic/claude"; !strings.Contains(ansi.Strip(lines[0]), want) {
+		t.Errorf("sidebar row 0 = %q, want the model id truncated rather than dropped (looking for %q)",
+			ansi.Strip(lines[0]), want)
 	}
 }
 

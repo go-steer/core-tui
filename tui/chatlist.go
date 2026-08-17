@@ -576,9 +576,21 @@ func (m *Model) buildChatTail() []string {
 // that leaves the LINE COUNT alone, and the line count is what the
 // whole lazy walk budgets against.
 //
-// The unpanned case keeps using ansi.Truncate rather than a
-// zero-origin Cut so the frame is byte-identical to what it was
-// before panning existed.
+// It is the transcript's render-site enforcement (issue #159), sited
+// at the LAST moment rather than the first on purpose. The obvious
+// reading of "bound it where the content is rendered" is to cut on
+// the way into the render cache, which is where it used to happen and
+// is what #154 had to undo: a cached row already cut to the window
+// has no columns left to pan to. Drawing is the earliest point at
+// which the window is the only thing left to serve, so it is the
+// earliest point at which the cut costs nothing. Nothing upstream has
+// to re-measure, because the cut leaves the row's line count alone.
+//
+// The unpanned case goes through fitCells (view.go) — the same bound
+// renderSidebar owes its fixed column, and where the ansi.Truncate
+// caveats are written down — rather than a zero-origin ansi.Cut, so
+// the frame stays byte-identical to what it was before panning
+// existed.
 func chatCutLine(ln string, x, width int) string {
 	if width <= 0 {
 		return ln
@@ -586,10 +598,7 @@ func chatCutLine(ln string, x, width int) string {
 	if x > 0 {
 		return ansi.Cut(ln, x, x+width)
 	}
-	if ansi.StringWidth(ln) > width {
-		return ansi.Truncate(ln, width, "")
-	}
-	return ln
+	return fitCells(ln, width)
 }
 
 // ---------------------------------------------------------------

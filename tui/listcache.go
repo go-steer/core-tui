@@ -171,8 +171,14 @@ func (c *listCache) get(item Item, width int) (string, bool) {
 	return entry.content, true
 }
 
-// getLines returns the cached render of item at width already split
-// into lines and clamped to the width. Same hit conditions as get.
+// getLines returns the cached render of item at width, already split
+// into lines. Same hit conditions as get.
+//
+// The lines are NOT clamped to width — the entry's own comment above
+// says why, and this one used to claim the opposite, which is the
+// sort of stale reassurance that makes a reader trust a bound that
+// is not there. The clamp is chatView's, applied per drawn line
+// (chatCutLine).
 func (c *listCache) getLines(item Item, width int) ([]string, bool) {
 	entry, ok := c.entries[listCacheKey{id: item.Identity(), width: width}]
 	if !ok || entry.version != item.Version() {
