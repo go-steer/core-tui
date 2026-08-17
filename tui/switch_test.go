@@ -445,7 +445,7 @@ func TestSwitchBuiltin_SessAlias(t *testing.T) {
 // dispatches SwitchToSession off the Update loop (issue #114) and
 // stays open showing progress; the reply attaches the target and
 // closes the dialog from Update.
-func TestSessionPickerDialog_EnterCommits(t *testing.T) {
+func TestSessionPickerQuestion_EnterCommits(t *testing.T) {
 	next := &bareAgent{id: "next"}
 	agent := &switchAgent{
 		id: "cur",
@@ -458,22 +458,29 @@ func TestSessionPickerDialog_EnterCommits(t *testing.T) {
 	m := NewModel(Options{Agent: agent})
 	m.viewport.SetWidth(80)
 
-	d := readySessionPicker(&m)
-	m.overlayStack.Open(d)
-	d.idx = 1 // point at "other"
-	act := d.HandleKey("enter", &m)
-	if !act.Consumed || act.Close {
-		t.Errorf("HandleKey(enter) = %+v, want Consumed and NOT Close", act)
+	q := readySessionPicker(&m)
+	q.idx = 1 // point at "other"
+	ans, cmd := q.Key(keyMsgFromStroke("enter"))
+	if ans != nil {
+		t.Errorf("enter answered %#v; the host's reply is the answer", ans)
 	}
-	if act.Cmd == nil {
+	if cmd == nil {
 		t.Fatalf("expected the off-loop SwitchToSession Cmd")
 	}
 	if len(agent.switchCalls) != 0 {
 		t.Errorf("SwitchToSession ran inline: %v", agent.switchCalls)
 	}
 
-	out, _ := m.Update(act.Cmd())
-	m = out.(Model)
+	// Enter names the session; Update resolves the switcher and makes
+	// the call, and its reply is what ends the question.
+	for _, msg := range drainBatch(t, cmd) {
+		out, follow := m.Update(msg)
+		m = out.(Model)
+		for _, reply := range drainBatch(t, follow) {
+			out, _ = m.Update(reply)
+			m = out.(Model)
+		}
+	}
 	if m.opts.Agent != Agent(next) {
 		t.Errorf("Agent not swapped: %v", m.opts.Agent)
 	}
@@ -485,77 +492,11 @@ func TestSessionPickerDialog_EnterCommits(t *testing.T) {
 	}
 }
 
-// TestSessionPickerDialog_EnterOnCurrent — Enter on the currently-
-// attached row closes without swapping.
-func TestSessionPickerDialog_EnterOnCurrent(t *testing.T) {
-	agent := &switchAgent{
-		id: "cur",
-		sessions: []SessionInfo{
-			{ID: "cur", Display: "current", Current: true},
-		},
-	}
-	m := NewModel(Options{Agent: agent})
-	m.viewport.SetWidth(80)
-	beforeAgent := m.opts.Agent
-
-	d := readySessionPicker(&m)
-	act := d.HandleKey("enter", &m)
-	if !act.Consumed || !act.Close {
-		t.Errorf("expected close on enter-current row, got %+v", act)
-	}
-	if len(agent.switchCalls) != 0 {
-		t.Errorf("SwitchToSession should not be called on current row, got %v", agent.switchCalls)
-	}
-	if m.opts.Agent != beforeAgent {
-		t.Errorf("Agent should not swap on current row")
-	}
-}
-
-// TestSessionPickerDialog_EscCloses — Esc closes without swap.
-func TestSessionPickerDialog_EscCloses(t *testing.T) {
-	agent := &switchAgent{
-		id:       "cur",
-		sessions: []SessionInfo{{ID: "cur", Current: true}, {ID: "b"}},
-	}
-	m := NewModel(Options{Agent: agent})
-	m.viewport.SetWidth(80)
-
-	d := readySessionPicker(&m)
-	d.idx = 1
-	act := d.HandleKey("esc", &m)
-	if !act.Consumed || !act.Close {
-		t.Errorf("Esc = %+v, want Consumed+Close", act)
-	}
-	if len(agent.switchCalls) != 0 {
-		t.Errorf("Esc must not call SwitchToSession")
-	}
-}
-
-// TestSessionPickerDialog_CursorMoves — up/down wrap the cursor
-// through Sessions().
-func TestSessionPickerDialog_CursorMoves(t *testing.T) {
-	agent := &switchAgent{
-		id:       "cur",
-		sessions: []SessionInfo{{ID: "a"}, {ID: "b"}, {ID: "c"}},
-	}
-	m := NewModel(Options{Agent: agent})
-	m.viewport.SetWidth(80)
-
-	d := readySessionPicker(&m)
-	d.HandleKey("down", &m)
-	if d.idx != 1 {
-		t.Errorf("after down: idx = %d, want 1", d.idx)
-	}
-	d.HandleKey("down", &m)
-	d.HandleKey("down", &m)
-	if d.idx != 0 {
-		t.Errorf("after 3 downs (wrap): idx = %d, want 0", d.idx)
-	}
-	d.HandleKey("up", &m)
-	if d.idx != 2 {
-		t.Errorf("after up (wrap): idx = %d, want 2", d.idx)
-	}
-}
+// Enter on the attached row, Esc, and the wrapping cursor are all
+// widget behaviour with no Model in them, so they moved out to
+// question_external_test.go with the migration (#164 stage 3) — the
+// in-package half of the picker's coverage is in
+// question_sessionpicker_test.go.
 
 // TestApplySwitchTarget_RedetectsLiveMode — swapping to a LiveAgent
 // flips m.liveMode and returns a live-stream spawn Cmd; swapping

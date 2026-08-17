@@ -641,21 +641,61 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		if msg.gen != m.sessionGen {
 			return m, nil
 		}
-		if d, ok := m.overlayStack.Get(sessionPickerDialogID).(*sessionPickerDialog); ok {
-			d.applySessions(msg.sessions)
+		if q := sessionPickerOn(&m.overlayStack); q != nil {
+			q.applySessions(msg.sessions)
 			m.refreshViewport()
 		}
 		return m, nil
+	case sessionInputRequestedMsg:
+		// Enter on an action row (issue #56). Opened from here rather
+		// than from the picker because Overlay pops the front dialog
+		// after Key returns, so a modal pushed from inside Key is the
+		// one that gets popped. Guarded the same way applySwitchLookup
+		// guards its Open: two Enters in flight must not stack two
+		// inputs.
+		if !m.overlayStack.HasID(sessionInputDialogID) {
+			m.overlayStack.Open(newSessionInputDialog(msg.Row))
+		}
+		return m, nil
+	case sessionSwitchRequestedMsg:
+		// Enter on an ordinary row, resolved against the LIVE agent and
+		// generation — see sessionSwitchRequestedMsg for why the picker
+		// could not hold either.
+		q := sessionPickerOn(&m.overlayStack)
+		if q == nil || q.switching != msg.ID {
+			return m, nil
+		}
+		switcher, wired := m.opts.Agent.(SessionSwitcher)
+		if !wired {
+			// The agent lost SessionSwitcher since the picker opened.
+			// Release the in-flight state so the list is usable again.
+			q.switching = ""
+			return m, nil
+		}
+		return m, switchToSessionCmd(switcher, m.sessionGen, msg.ID)
 	case sessionSwitchedMsg:
 		if msg.gen != m.sessionGen {
 			return m, nil
 		}
-		// Same ownership check as modelSwitchedMsg.
-		if d, ok := m.overlayStack.Get(sessionPickerDialogID).(*sessionPickerDialog); ok && d.switching == msg.id {
-			d.switching = ""
-			m.overlayStack.Close(sessionPickerDialogID)
+		cmd := m.applySessionSwitch(msg)
+		// Same ownership check as modelSwitchedMsg: answer the picker
+		// only if it is the one that issued this attach. Esc mid-flight
+		// pops it, and the operator may have re-opened a fresh picker
+		// before the reply landed. The attach applies either way.
+		q := sessionPickerOn(&m.overlayStack)
+		if q == nil || q.switching != msg.id {
+			return m, cmd
 		}
-		return m, m.applySessionSwitch(msg)
+		q.switching = ""
+		if msg.err != nil || msg.target.Agent == nil {
+			// The attach failed. The question was never answered, so
+			// leave the picker open on its list — the same call the
+			// model picker makes, and for the same reason: the next
+			// move after "endpoint unreachable" is almost always the
+			// next session down.
+			return m, cmd
+		}
+		return m, tea.Batch(cmd, m.overlayStack.resolve(sessionPickerDialogID, chosen{ID: msg.id}, &m))
 	case slashCommandsMsg:
 		// Host slash commands merging into an already-open / palette.
 		if msg.gen != m.sessionGen || m.palette == nil ||

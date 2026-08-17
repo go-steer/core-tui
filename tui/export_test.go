@@ -54,6 +54,10 @@ type (
 
 	ModelPickerQuestion     = modelPickerQuestion
 	ModelSwitchRequestedMsg = modelSwitchRequestedMsg
+
+	SessionPickerQuestion     = sessionPickerQuestion
+	SessionSwitchRequestedMsg = sessionSwitchRequestedMsg
+	SessionInputRequestedMsg  = sessionInputRequestedMsg
 )
 
 const (
@@ -78,4 +82,13 @@ var (
 	// asynchronously (#114), which is exactly the property that makes
 	// the picker worth having an external test for.
 	LoadModels = (*modelPickerQuestion).applyModels
+
+	NewSessionPickerQuestion = newSessionPickerQuestion
+
+	// LoadSessions is applySessions the same way, and the difference
+	// from LoadModels is the point of testing both: this one seeds no
+	// cursor. A session list has no "the one you are on" to open on —
+	// the attached row is where you already are, and the row worth
+	// landing on is the one you are leaving it for.
+	LoadSessions = (*sessionPickerQuestion).applySessions
 )

@@ -124,10 +124,12 @@ func (d *sessionInputDialog) submit(value string, m *Model) DialogAction {
 		// check and not a host call, so it is still answered in the
 		// dispatching frame, and it closes both dialogs the way
 		// every other terminal outcome here does.
-		m.overlayStack.Close(sessionPickerDialogID)
+		cmd := m.endSessionPicker(dismissed{Reason: dismissSuperseded})
 		m.history.Append(Message{Role: RoleError, Text: "/switch: session row " + d.row.ID + " has no Submit closure"})
 		m.refreshViewport()
-		return DialogAction{Consumed: true, Close: true}
+		// Close pops the FRONT dialog, which is this one: the picker
+		// underneath went through endSessionPicker, by ID.
+		return DialogAction{Consumed: true, Close: true, Cmd: cmd}
 	}
 	d.inflight, d.value = true, value
 	// Stay open. The operator gets the in-flight body as their
@@ -229,11 +231,16 @@ func (m *Model) applySessionInputSubmit(msg sessionInputSubmittedMsg) tea.Cmd {
 	}
 	d.inflight = false
 	// Both dialogs go, on every outcome: the text input that asked
-	// the question and the picker underneath it. Failures used to
-	// close both too — an error row in the transcript is the report,
-	// and leaving the modal up would bury it.
+	// the question and the picker underneath it. Failures close both
+	// too — an error row in the transcript is the report, and leaving
+	// the modal up would bury it. That is the one place this path
+	// deliberately differs from the picker's own Enter, where a failed
+	// attach leaves the list up: there the operator is still looking at
+	// somewhere else to go, here they typed an address that did not
+	// work and the report is the point.
 	m.overlayStack.Close(sessionInputDialogID)
-	m.overlayStack.Close(sessionPickerDialogID)
+	attached := msg.err == nil && msg.target.Agent != nil
+	pickerCmd := m.endSessionPicker(sessionInputAnswer(msg.rowID, attached))
 	if msg.err == nil && msg.target.Agent == nil {
 		// Checked here rather than left to applySessionSwitch only
 		// so the row names the closure that actually misbehaved;
@@ -241,15 +248,47 @@ func (m *Model) applySessionInputSubmit(msg sessionInputSubmittedMsg) tea.Cmd {
 		// never ran.
 		m.history.Append(Message{Role: RoleError, Text: "/switch: SessionInput.Submit returned nil Agent"})
 		m.refreshViewport()
-		return nil
+		return pickerCmd
 	}
 	// Everything else is the SwitchToSession tail verbatim — the
 	// error row, the attach, the listener batch — so the two ways of
 	// arriving at a new session cannot drift apart.
-	return m.applySessionSwitch(sessionSwitchedMsg{
+	return tea.Batch(pickerCmd, m.applySessionSwitch(sessionSwitchedMsg{
 		gen:    msg.gen,
 		id:     msg.rowID,
 		target: msg.target,
 		err:    msg.err,
-	})
+	}))
+}
+
+// sessionInputAnswer is what the action row's outcome means to the
+// PICKER underneath it, which is a different question from what it
+// means to the operator.
+//
+// A successful attach is the picker's answer arriving by proxy: the
+// operator picked that row, the address they typed is how it got
+// resolved, so chosen carries the row ID exactly as an ordinary Enter
+// would have. A failure is not an answer at all — nobody chose a
+// session — and it is not the operator dismissing the list either, so
+// esc is the wrong reason. It is dismissSuperseded: the input took over
+// as the surface asking the question, and it is what tore the picker
+// down.
+func sessionInputAnswer(rowID string, ok bool) answer {
+	if ok {
+		return chosen{ID: rowID}
+	}
+	return dismissed{Reason: dismissSuperseded}
+}
+
+// endSessionPicker answers whatever session picker is open underneath
+// and pops it, returning the Cmd its resolver scheduled.
+//
+// Through Overlay.resolve rather than Overlay.Close because the picker
+// is a question now (#164 stage 3): closing it by ID would pop it with
+// its resolver never run, which is the "torn down and nobody was told"
+// hole the whole design exists to remove. A no-op when the input was
+// opened by `/switch <id>` naming an action row, which has no picker
+// under it at all.
+func (m *Model) endSessionPicker(ans answer) tea.Cmd {
+	return m.overlayStack.resolve(sessionPickerDialogID, ans, m)
 }
