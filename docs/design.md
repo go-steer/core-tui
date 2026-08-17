@@ -655,7 +655,7 @@ type SideAnswer struct {
 }
 ```
 
-`MentionProvider` — **SPECIFIED, NOT SHIPPED as of v0.20.0.** Neither
+`MentionProvider` — **SPECIFIED, NOT SHIPPED as of v0.21.0.** Neither
 the type nor `Options.MentionProviders` exists in `package tui`; only
 the built-in file provider runs today, and `@sym:`-style prefixes are
 inert text. Whether to build R-AT-4 or drop it is part of the
@@ -871,11 +871,11 @@ type Elicitor interface {
     Elicit(ctx context.Context, serverName string, req ElicitRequest) (ElicitResult, error)
 }
 
-// UserPrompter — SPECIFIED, NOT SHIPPED as of v0.20.0. Neither the
+// UserPrompter — SPECIFIED, NOT SHIPPED as of v0.21.0. Neither the
 // interface nor NewUserPrompter() exists in package tui; whether to
-// build it or drop R-PROMPT-1 is part of the exported-surface audit
-// (issue #78). Hosts needing agent-initiated questions today route
-// them through Elicitor.
+// build it or drop R-PROMPT-1 is stage 5 of issue #164, which is
+// gated on §14 Q1 of docs/design-question-dialogs.md. Hosts needing
+// agent-initiated questions today route them through Elicitor.
 //
 // As specified: implemented by the TUI, with hosts passing the value
 // returned by tui.NewUserPrompter() into their agent so the agent
