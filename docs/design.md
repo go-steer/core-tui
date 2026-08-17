@@ -101,10 +101,64 @@ Helper modules (transcript, markdown, palette state) stay in the same
 package; the design contracts that consumers should depend on are
 called out explicitly in §3.
 
+**Re-checked for 1.0 (issue #78): the decision stands.** The specific
+question was whether the render-side interfaces (`Dialog`, `Item`,
+`Focusable`, `ToolRenderer`, …) should move to a subpackage so the
+contract is structural rather than conventional. They cannot —
+`Dialog` and `Item` take `*Model` in their method signatures, so a
+subpackage holding them would import `tui` while `tui` imports it, an
+import cycle — and they should not, because none of them is
+implementable from outside the package today, so a package named for
+extension would advertise a seam that does not exist. The reasoning
+and what it means for #115 is in
+[`api-surface.md`](./api-surface.md) §4. What the flat package needed
+was not a boundary but an enumeration, which §3 now has.
+
 ## 3. The plug-in surface
 
 This section is normative — it is the only stable API hosts may rely
 on. Everything else in `package tui` is subject to change.
+
+**The frozen surface is 156 exported symbols**, enumerated one by one in
+[`api-surface.md`](./api-surface.md) §3.1. That is every symbol below plus
+its transitive closure: the argument and result types of the capability
+interfaces, the SSE payload structs hanging off `Event`, and the string
+vocabularies those payloads carry. The sections that follow describe the
+surface; `api-surface.md` is the list, and it is the list that §8's
+compatibility promise is made about.
+
+The rest of `package tui` is 109 more exported symbols in two groups, also
+classified there:
+
+- **42 host-useful but unpromised** — the render extension points
+  (`Dialog`, `Item`, `Focusable`, `ToolRenderer`, `Overlay`, …), the
+  theming registry, the transcript reader, `Styles`. Each carries a
+  promote-or-unexport recommendation in `api-surface.md` §3.2. Five of
+  them (`Theme`, `BuiltinTheme`, `BuiltinThemes`, `ThemeByName`,
+  `ThemeChangedMsg`), the seven transcript symbols, and
+  `SystemClipboardWriter` are recommended for promotion into the list
+  above; nothing is promoted until it is.
+- **67 incidental** — the `Glyph*` and `Brand*` vocabularies, the named
+  theme constructors, `History`, the queue types, `Model` / `NewModel`.
+  Exported without a host-facing purpose; being narrowed before the
+  freeze.
+
+A host that finds itself naming something outside §3.1's list is either
+using an unpromised symbol — file an issue asking for promotion — or has
+found a gap in the list, which is a bug in this document.
+
+Two properties of the surface are easy to miss and are promises too:
+
+- **Untyped vocabularies.** `Options.ForceTheme`, `StatusUpdate.TurnState`,
+  `TurnError.Kind`, `InboxEvent.State` and `ToolSavings.Path` are plain
+  `string` fields whose legal values are exported constants
+  (`ThemeAuto`, `TurnStateIdle`, `TurnErrorConfig`, `InboxStateQueued`,
+  `SavingsPathAgentic`, …). Those constants are contract even though no
+  type-level walk reaches them.
+- **`errors.As` targets.** `SubagentNotFoundError` is returned as a bare
+  `error` from `SubagentEventReader`; hosts match it with `errors.As`.
+  Its identity is contract even though its name never appears in a
+  signature.
 
 ### 3.1 Required: `Agent`
 
@@ -1057,9 +1111,11 @@ Adapter LOC budget: ~400 lines (more capabilities to wire).
 ## 8. Compatibility & versioning
 
 - v0.x — pre-1.0; treat all surface as breakable except the items in
-  §3 (Agent + Event + capability interfaces + Options field names).
-  Field additions to Options are non-breaking by Go-module rules
-  (struct literal with explicit field names is the documented usage).
+  §3, which are enumerated symbol by symbol in
+  [`api-surface.md`](./api-surface.md) §3.1 (156 of the 265 exported
+  symbols). Field additions to Options are non-breaking by Go-module
+  rules (struct literal with explicit field names is the documented
+  usage).
 - v1.0 — declared once the reference host (core-agent) has been
   migrated and green for one minor release, AND the pre-freeze work
   in the [v1.0 milestone](https://github.com/go-steer/core-tui/milestone/1)
