@@ -28,8 +28,26 @@ import (
 
 const sessionPickerDialogID = "session-picker"
 
-// sessionPickerDialog renders SessionSwitcher.Sessions() with a
-// cursor + "(current)" marker on the attached row, dispatches
+// sessionCellLines is how many terminal rows one session occupies in
+// the list: a title line and a detail line, always both (issue #163).
+//
+// Constant, and it has to stay constant. The window arithmetic below
+// converts an item index to a line index by multiplying by this, and
+// that only works while every cell is the same height. Letting a cell
+// grow — a second detail line when the host sets a long Description,
+// say, or dropping the detail line when there is nothing to put on it
+// — turns `d.idx * sessionCellLines` into a prefix sum over the
+// filtered rows that has to be rebuilt on every filter keystroke, and
+// drags clampIndex / stepIndex / the wheel handler along with it. The
+// cost of holding the constant is a blank detail line on a session
+// whose host advertises nothing but an ID; that is a much better
+// trade than a variable-height list, and it goes away on its own as
+// hosts start populating Display.
+const sessionCellLines = 2
+
+// sessionPickerDialog renders SessionSwitcher.Sessions() as a list of
+// two-line cells — title over ID + metadata (issue #163) — with a
+// cursor + "(current)" marker on the attached row, and dispatches
 // SwitchToSession + applySwitchTarget on Enter.
 //
 // Mirrors dialog_modelpicker.go's snapshot shape (issue #114): the
@@ -52,9 +70,12 @@ type sessionPickerDialog struct {
 	// idx is the cursor, an index into rows().
 	idx int
 
-	// off is the first visible row. Session lists are host-supplied
-	// and unbounded — a long-running endpoint can advertise dozens —
-	// so the list windows around the cursor.
+	// off is the first visible LINE, not the first visible session:
+	// cells are sessionCellLines tall (issue #163), so the window
+	// arithmetic runs in line units while idx above stays
+	// item-indexed. Session lists are host-supplied and unbounded — a
+	// long-running endpoint can advertise dozens — so the list windows
+	// around the cursor.
 	off int
 
 	// filter is the type-to-filter row (issue #117), narrowing rows().
@@ -214,6 +235,92 @@ func (m *Model) applySessionSwitch(msg sessionSwitchedMsg) tea.Cmd {
 	return m.applySwitchTarget(&tgt)
 }
 
+// sessionCell renders one session as its two lines: a title line the
+// operator reads, and a muted detail line carrying the identity and
+// whatever metadata the host advertised.
+//
+// The split is the whole point of issue #163. Everything used to be
+// concatenated onto one row — "> nightly refactor  (sess-001)
+// (current)  2 days ago" — which meant the title, the thing being
+// chosen, competed for the row with three pieces of bookkeeping and
+// lost the moment the dialog narrowed. Stacked, the first line is the
+// choice and the second is the evidence, and truncation on a narrow
+// terminal now eats the evidence instead of the choice.
+//
+// The title cannot be inferred here: core-tui sees an ID and whatever
+// the host chose to put in Display, and has no transcript to
+// summarise. Populating Display is host work (issue #163's
+// "host-side" section); this function's job is to make the empty case
+// survivable rather than to fill it.
+func sessionCell(s SessionInfo, selected bool, filter string, styles Styles) (title, detail string) {
+	base := lipgloss.NewStyle()
+	marker, gutter := "  ", "  "
+	if selected {
+		base = styles.Accent
+		marker = "> "
+		// The detail line gets the transcript's dotted selection bar
+		// (issue #152's GlyphSelectBar) rather than blank columns.
+		// Without it the cursor marks a LINE and the list is made of
+		// CELLS, so "> " on one line and nothing on the next reads as
+		// ambiguous the moment two cells are adjacent — is the second
+		// line the tail of the selection or the head of the row
+		// below? Drawing the bar down the gutter of the selected item
+		// is exactly the idiom the transcript already established for
+		// a multi-line selection, so reuse it rather than invent a
+		// second vocabulary for the same question.
+		gutter = styles.Accent.Render(GlyphSelectBar) + " "
+	}
+
+	// An empty Display must never leave line one blank — that is the
+	// state EVERY host is in until it starts setting the field, so the
+	// fallback is the common path and not the edge case. Fall back to
+	// the ID: opaque, but it is what the picker showed before this
+	// change and it is at least selectable.
+	label := s.Display
+	if label == "" {
+		label = s.ID
+	}
+	title = base.Render(marker) + highlightSpan(label, filter, base)
+	// Action rows (issue #56) carry no session identity — showing
+	// "(id)" or "(current)" next to "+ Attach to endpoint…" would read
+	// as a session that exists. Their affordance is the ▸ chevron, and
+	// it belongs on the title line next to the label it qualifies.
+	if s.Input != nil {
+		title += "  " + styles.Muted.Render(GlyphCollapsed)
+	}
+
+	var meta []string
+	if s.Input == nil {
+		// Only when it differs from the label: with Display unset the
+		// ID is already the title, and repeating it underneath would
+		// spend the second line saying nothing.
+		if s.ID != "" && s.ID != label {
+			meta = append(meta, highlightSpan(s.ID, filter, styles.Muted))
+		}
+		if s.Current {
+			meta = append(meta, styles.Muted.Render("(current)"))
+		}
+	}
+	if s.Description != "" {
+		meta = append(meta, styles.Muted.Render(s.Description))
+	}
+	// No parenthesis around the ID any more: it was there to fence the
+	// ID off from the title it shared a row with, and on a line of its
+	// own it has nothing to be fenced from.
+	switch {
+	case len(meta) > 0:
+		detail = gutter + strings.Join(meta, "  ")
+	case selected:
+		// Nothing to say, but the selection bar still has to reach the
+		// bottom of the cell or the cell stops looking two lines tall.
+		detail = gutter
+	default:
+		// The pad that holds sessionCellLines constant.
+		detail = ""
+	}
+	return title, detail
+}
+
 func (d *sessionPickerDialog) Render(totalWidth int, m *Model) string {
 	width := 72
 	if totalWidth > 0 && width > totalWidth-4 {
@@ -249,41 +356,53 @@ func (d *sessionPickerDialog) Render(totalWidth int, m *Model) string {
 		// Clamp cursor into range in case Sessions() shrank
 		// between opens, or the filter shrank the list under it.
 		d.idx = clampIndex(d.idx, len(sessions))
-		rows := make([]string, 0, len(sessions))
+		// One APPENDED ROW PER LINE, never one row holding a "\n".
+		// scrollView hands every row it windows to fitRow, which
+		// measures and pads it to exactly contentWidth (issue #157);
+		// an embedded newline would be measured as one row, padded as
+		// one row, and then painted as two — putting the scrollbar
+		// cell on the wrong line and overflowing the height budget
+		// the modal was composed against.
+		rows := make([]string, 0, len(sessions)*sessionCellLines)
 		for i, s := range sessions {
-			disp := s.Display
-			if disp == "" {
-				disp = s.ID
-			}
-			base := lipgloss.NewStyle()
-			marker := "  "
-			if i == d.idx {
-				marker, base = "> ", m.styles.Accent
-			}
-			row := base.Render(marker) + highlightSpan(disp, filter, base)
-			// Action rows (issue #56) carry no session identity
-			// — showing "(id)" or "(current)" next to
-			// "+ Attach to endpoint…" would read as a session
-			// that exists. Their affordance is the ▸ chevron.
-			if s.Input != nil {
-				row += "  " + m.styles.Muted.Render(GlyphCollapsed)
-			} else {
-				if s.ID != disp {
-					row += m.styles.Muted.Render("  (") +
-						highlightSpan(s.ID, filter, m.styles.Muted) +
-						m.styles.Muted.Render(")")
-				}
-				if s.Current {
-					row += "  " + m.styles.Muted.Render("(current)")
-				}
-			}
-			if s.Description != "" {
-				row += "  " + m.styles.Muted.Render(s.Description)
-			}
-			rows = append(rows, row)
+			title, detail := sessionCell(s, i == d.idx, filter, m.styles)
+			rows = append(rows, title, detail)
 		}
 		view := modalBodyHeight(m.height, modalChromeRows+1)
-		d.off = listWindow(d.off, d.idx, len(rows), view)
+		// Line units from here down: d.idx stays item-indexed (so
+		// HandleKeyMsg, clampIndex, stepIndex, the filter and the
+		// ranker are all untouched) and only the window arithmetic
+		// is scaled.
+		//
+		// listWindow keeps ONE cursor line visible, and a cell is
+		// two, so a single call can only ever hold half of the
+		// selected cell: pass the title line and the detail line
+		// clips off the bottom edge while scrolling down, pass the
+		// detail line and the title clips off the top edge while
+		// scrolling back up. Both have to be held.
+		//
+		// Two calls, not one call plus a clamp. A clamp would have to
+		// restate listWindow's own edge cases — the total<=view
+		// short-circuit and the min() against total-view — to stay
+		// consistent with it, and would then have to decide what to
+		// do when view is 1 and the cell simply does not fit. Calling
+		// twice inherits all of that. Order is load-bearing and is
+		// the reason it works: the detail line goes first, then the
+		// title line, so the title wins the tie on a one-row window
+		// (a very short terminal), which is the half of the cell
+		// worth keeping. For any view >= 2 the second call can only
+		// move the offset UP to reveal the title, which cannot push
+		// the detail line — one line below it — back out.
+		first := d.idx * sessionCellLines
+		d.off = listWindow(d.off, first+sessionCellLines-1, len(rows), view)
+		d.off = listWindow(d.off, first, len(rows), view)
+		// The offset is deliberately NOT snapped to a cell boundary.
+		// Snapping would keep unselected cells whole at the window
+		// edges, but rounding an odd offset down can push the
+		// selected cell's last line back off the bottom, which is
+		// the invariant the two calls above exist to establish;
+		// rounding up breaks the top edge symmetrically. A half cell
+		// peeking in at an edge is the cheaper cosmetic defect.
 		lines = append(lines, scrollView(m.styles, rows, nonNeg(width-4), view, d.off)...)
 		body = strings.Join(lines, "\n")
 	}
