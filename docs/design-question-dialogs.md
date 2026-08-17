@@ -167,6 +167,15 @@ Three observable consequences, each verified against
   sibling `"decline"` and returns it to the MCP server, so the server
   is being told "the user declined" for a case where no user was ever
   asked.
+
+  *Both halves are fixed, ahead of and independently of this design —
+  the line numbers above are as they stood when it was written. Form
+  mode declines on `ctrl+d`, and the unrenderable case is now an
+  `ErrElicitUnsupported` paired with `ElicitActionCancel` rather than
+  a decline (issue #209, R-ELIC-3). It is left here because it is the
+  clearest example in the inventory of §1.4's real subject: an answer
+  channel narrow enough that two unlike outcomes have to share a
+  value.*
 - **`ThemeChangedMsg` has no consumer.** `grep -rn ThemeChangedMsg`
   across core-agent returns zero hits; the host learns about a theme
   pick only through the `PersistThemeChoice` callback. The

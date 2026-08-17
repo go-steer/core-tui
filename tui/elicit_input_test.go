@@ -16,6 +16,8 @@ package tui
 
 import (
 	"context"
+	"errors"
+	"fmt"
 	"strings"
 	"testing"
 	"time"
@@ -385,17 +387,27 @@ func TestElicitURLMode_ActionRow(t *testing.T) {
 	}
 }
 
+// elicitReply is both halves of what Elicit handed back. The
+// unsupported path is the only one that sets err, and on that path
+// the error IS the answer, so a helper that returned the result alone
+// — the way awaitElicit's chan ElicitResult does — would be throwing
+// away the thing under test.
+type elicitReply struct {
+	result ElicitResult
+	err    error
+}
+
 // unsupportedElicitFlow wires a real elicitor to a real model and
 // hands it a request the modal cannot draw, the way an MCP server
 // would. It deliberately does NOT use elicitFlowFor, which asserts a
 // modal opened: not opening one is the behaviour under test.
-func unsupportedElicitFlow(t *testing.T, req ElicitRequest, server string) (Model, chan ElicitResult, tea.Cmd) {
+func unsupportedElicitFlow(t *testing.T, req ElicitRequest, server string) (Model, chan elicitReply, tea.Cmd) {
 	t.Helper()
 	e := NewElicitor().(*elicitor)
-	results := make(chan ElicitResult, 1)
+	replies := make(chan elicitReply, 1)
 	go func() {
-		r, _ := e.Elicit(context.Background(), server, req)
-		results <- r
+		r, err := e.Elicit(context.Background(), server, req)
+		replies <- elicitReply{result: r, err: err}
 	}()
 	if _, ok := e.nextRequest(context.Background()); !ok {
 		t.Fatal("setup: nextRequest returned !ok with a pending request")
@@ -404,15 +416,51 @@ func unsupportedElicitFlow(t *testing.T, req ElicitRequest, server string) (Mode
 	out, _ := m.Update(tea.WindowSizeMsg{Width: 100, Height: 40})
 	m = out.(Model)
 	out, cmd := m.Update(elicitRequestMsg{serverName: server, req: req})
-	return out.(Model), results, cmd
+	return out.(Model), replies, cmd
 }
 
-// R-ELIC-3 has two halves — decline the undrawable schema, and tell
+// awaitElicitReply is awaitElicit for the unsupported path, where the
+// error half matters.
+func awaitElicitReply(t *testing.T, replies chan elicitReply) elicitReply {
+	t.Helper()
+	select {
+	case r := <-replies:
+		return r
+	case <-time.After(time.Second):
+		t.Fatal("no result reached the host")
+		return elicitReply{}
+	}
+}
+
+// assertRefusedNotDeclined checks the half of issue #209 that is
+// about who said what. A request the TUI cannot draw must not reach
+// the server as ElicitActionDecline: no operator was consulted, and a
+// decline is an operator's word. It arrives as an error instead, and
+// the Action beside it is the inert Cancel.
+func assertRefusedNotDeclined(t *testing.T, got elicitReply, reason string) {
+	t.Helper()
+	if got.result.Action == ElicitActionDecline {
+		t.Error("the TUI declined on the operator's behalf — nobody was asked")
+	}
+	if got.result.Action != ElicitActionCancel {
+		t.Errorf("action = %v, want Cancel", got.result.Action)
+	}
+	if !errors.Is(got.err, ErrElicitUnsupported) {
+		t.Errorf("err = %v, want it to match ErrElicitUnsupported", got.err)
+	}
+	if reason != "" && !strings.Contains(fmt.Sprint(got.err), reason) {
+		t.Errorf("the error does not say which part could not be drawn: %v", got.err)
+	}
+}
+
+// R-ELIC-3 has two halves — refuse the undrawable schema, and tell
 // the operator it happened — and only the first was built. The
-// decline was issued inside Elicit, on the server's goroutine, where
+// refusal was issued inside Elicit, on the server's goroutine, where
 // there is no transcript to write to, so a request the TUI refused
-// left no trace anywhere the operator could see it (issue #209).
-func TestElicit_UnsupportedSchemaIsDeclinedAndRecorded(t *testing.T) {
+// left no trace anywhere the operator could see it. It was also sent
+// as a decline, which told the server the operator had read the
+// request and said no (issue #209).
+func TestElicit_UnsupportedSchemaIsRefusedAndRecorded(t *testing.T) {
 	cases := []struct {
 		name   string
 		req    ElicitRequest
@@ -440,14 +488,12 @@ func TestElicit_UnsupportedSchemaIsDeclinedAndRecorded(t *testing.T) {
 	}
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
-			m, results, cmd := unsupportedElicitFlow(t, tc.req, tc.server)
+			m, replies, cmd := unsupportedElicitFlow(t, tc.req, tc.server)
 
 			if m.pendingElicit != nil {
 				t.Error("a modal opened for a schema the modal cannot draw")
 			}
-			if got := awaitElicit(t, results).Action; got != ElicitActionDecline {
-				t.Errorf("action = %v, want Decline", got)
-			}
+			assertRefusedNotDeclined(t, awaitElicitReply(t, replies), tc.reason)
 
 			last := lastSystemRow(t, m)
 			for _, want := range []string{"schema unsupported", tc.reason, tc.server} {
@@ -503,10 +549,8 @@ func TestElicit_UnsupportedSchemaIsDeclinedAndRecorded(t *testing.T) {
 // without a dangling "from" and without a double space where the name
 // would have been.
 func TestElicit_UnsupportedNoticeOmitsAnAbsentServerName(t *testing.T) {
-	m, results, _ := unsupportedElicitFlow(t, ElicitRequest{Mode: ElicitFormMode}, "")
-	if got := awaitElicit(t, results).Action; got != ElicitActionDecline {
-		t.Fatalf("action = %v, want Decline", got)
-	}
+	m, replies, _ := unsupportedElicitFlow(t, ElicitRequest{Mode: ElicitFormMode}, "")
+	assertRefusedNotDeclined(t, awaitElicitReply(t, replies), "")
 	last := lastSystemRow(t, m)
 	if strings.Contains(last, "from") {
 		t.Errorf("the notice names a server the host did not name: %s", last)
@@ -520,11 +564,65 @@ func TestElicit_UnsupportedNoticeOmitsAnAbsentServerName(t *testing.T) {
 // the screen — a Message the renderer drops is the same silence the
 // bug was.
 func TestElicit_UnsupportedNoticeReachesTheFrame(t *testing.T) {
-	m, results, _ := unsupportedElicitFlow(t,
+	m, replies, _ := unsupportedElicitFlow(t,
 		ElicitRequest{Mode: ElicitFormMode}, "github")
-	awaitElicit(t, results)
+	awaitElicitReply(t, replies)
 	if got := ansi.Strip(m.View().Content); !strings.Contains(got, "schema unsupported") {
 		t.Errorf("the refusal is not on screen:\n%s", got)
+	}
+}
+
+// The operator's row must not say the TUI declined. That word is the
+// bug one layer up, restated to the only person who cannot check it:
+// an operator reading "declined automatically" has been told a
+// decline went out over their name (issue #209).
+func TestElicit_UnsupportedNoticeDoesNotClaimTheOperatorDeclined(t *testing.T) {
+	m, replies, _ := unsupportedElicitFlow(t,
+		ElicitRequest{Mode: ElicitFormMode}, "github")
+	awaitElicitReply(t, replies)
+	last := lastSystemRow(t, m)
+	if strings.Contains(strings.ToLower(last), "declin") {
+		t.Errorf("the refusal row credits the operator with a decline: %s", last)
+	}
+	if !strings.Contains(last, "without asking you") {
+		t.Errorf("the refusal row does not say nobody was asked: %s", last)
+	}
+}
+
+// The operator's account and the server's account of a refusal come
+// out of one function, so they cannot drift into describing different
+// failures. That property is the whole reason elicitUnsupportedReason
+// exists, and it is invisible in either caller on its own.
+func TestElicit_TheNoticeAndTheErrorAgreeOnTheReason(t *testing.T) {
+	for _, req := range []ElicitRequest{
+		{Mode: ElicitFormMode},
+		{Mode: ElicitURLMode},
+		{Mode: ElicitMode(42)},
+	} {
+		reason := elicitUnsupportedReason(req)
+		if reason == "" {
+			t.Fatalf("mode %v has no reason", req.Mode)
+		}
+		if got := elicitUnsupportedNotice("srv", req); !strings.Contains(got, reason) {
+			t.Errorf("the operator's row omits the reason %q: %s", reason, got)
+		}
+		if got := fmt.Sprint(elicitUnsupportedError(req)); !strings.Contains(got, reason) {
+			t.Errorf("the server's error omits the reason %q: %s", reason, got)
+		}
+	}
+}
+
+// A host cannot branch on an error it cannot name. errors.Is against
+// the exported sentinel is the whole affordance this change adds, so
+// it is asserted against the wrapped value a host actually receives
+// rather than against the sentinel itself.
+func TestElicit_HostsCanMatchTheUnsupportedSentinel(t *testing.T) {
+	err := elicitUnsupportedError(ElicitRequest{Mode: ElicitFormMode})
+	if !errors.Is(err, ErrElicitUnsupported) {
+		t.Fatalf("errors.Is did not match: %v", err)
+	}
+	if errors.Is(err, context.Canceled) {
+		t.Error("the refusal matches context.Canceled, which is the other error Elicit returns")
 	}
 }
 
