@@ -1382,6 +1382,12 @@ your `Submit` closure into the resolver you pass to `Ask`, delete the
 a `RoleError` row yourself." `MIGRATION.md` gets a §-entry with that
 recipe.
 
+**Superseded by what stage 4 actually did — see §12.** `Submit` was not
+reshaped, so there is no recipe: the breaks are four unexports with no
+caller outside this package, and the `MIGRATION.md` entry says to
+delete the reference. `examples/local` and `examples/core-agent` turned
+out to name none of the four.
+
 ---
 
 ## 12. Staged plan
@@ -1559,19 +1565,49 @@ open on its list. The action row's failure is the exception and still
 closes both modals — the error row in the transcript is the report, and
 a modal left up would bury it.
 
-**Stage 4 — the exported break.** Remove `KeyMsgDialog`,
-`Overlay.HandleKey`; change `TextInputConfig.Submit`. Write the three
-`dev/api-breaks.txt` entries and the `MIGRATION.md` recipe. **Point of
-no return**: after this PR the pre-1.0 break has been spent, and
-reverting stages 1-3 means a second break to undo it. Everything
-before stage 4 is revertible with no external consequence.
+**Stage 4 — the exported break. Done, 2026-08-18 (issue #254).**
+**Point of no return**: after this PR the pre-1.0 break has been spent,
+and reverting stages 1-3 means a second break to undo it. Everything
+before stage 4 was revertible with no external consequence.
 
-**Stage 5 (optional, gated on §14 Q1) — `Asker`.** The 17 exported
-additions from §10.3, `Options.Asker`, the `AskLongText` /
-`editorQuestion` member, and a `examples/local` demonstration. Purely
-additive; can land after the freeze if the answer to Q1 is "not yet",
-at the cost of leaving core-agent's `ask_user` broken under the TUI
-for another release.
+Four removals rather than the two-removals-and-a-reshape §10.1 planned,
+and the difference is the interesting part. `KeyMsgDialog` and
+`Overlay.HandleKey` went as designed. `TextInputConfig.Submit` did not
+change shape: the narrowing to `func(value string) error` was premised
+on the text input becoming a question and its effects moving to a
+resolver, and it did not — §13 keeps it a `Dialog`, and its one caller
+is the action row's in-flight commit, which has to return a `Cmd` and
+has to stay OPEN while the host's dial is out (`dialog_sessioninput.go`).
+An error return can say neither.
+
+So `TextInputConfig` and `NewTextInputDialog` were unexported whole
+instead, which is what `docs/api-surface.md` §3.2 recommends for them
+anyway. The argument that settled it is arithmetic rather than taste:
+reshaping `Submit` spends a pre-1.0 break on a field of a type the §3.2
+sweep removes from the surface later, so the same corner would be
+broken twice. Unexporting the pair spends one break on it, forever.
+Neither had a caller outside this package's own tests — verified in
+this repo and against core-agent — and the in-package user embeds the
+concrete `newTextInputDialog` twin rather than going through the
+exported constructor, so nothing in the tree changed except the case of
+a letter.
+
+`Submit` therefore keeps `func(value string, m *Model) DialogAction`,
+one storey down, where it is nobody's promise. The `MIGRATION.md`
+entry is correspondingly not a recipe: with no way for a host to have
+reached any of the four, the upgrade action is to delete the
+reference.
+
+**Stage 5 (optional, gated on §14 Q1) — `Asker`. Issue #255,
+scheduled for v0.23.** The 17 exported additions from §10.3,
+`Options.Asker`, the `AskLongText` / `editorQuestion` member, and a
+`examples/local` demonstration. Purely additive; Q1's precondition
+("only after stage 3 has landed and proved the internal contract") was
+met on 2026-08-18, so the slip is a sequencing call and not a design
+one — v0.22 carries the break and this is the item that can move
+without blocking anything else. The cost is that R-PROMPT-1 keeps its
+⚠️ for another release and core-agent's `ask_user` stays unanswerable
+under the TUI.
 
 **Stage 6 — `multiSelectQuestion` + R-PERM-4.** Gated on Q3.
 
@@ -1762,6 +1798,17 @@ that does not exist.
   frames. Every agent-opened modal is now a question; what is left on
   `Model` is the `/btw` side answer and the embedded huh form, neither
   of which the agent opens.
+- 2026-08-18 — stages 4 and 5 became issues #254 and #255 and this
+  issue was closed. Stages 0-3 had shipped, stage 6 is unscheduled
+  behind Q3, and an umbrella holding one spent stage and one deferred
+  one reads worse in a milestone than two scoped items.
+- 2026-08-18 — stage 4 landed as four removals rather than §10.1's two
+  removals and a reshape. `TextInputConfig.Submit` could not narrow to
+  `func(string) error` — the shape assumed a resolver the text input
+  never got — so the type and its constructor were unexported whole,
+  which §3.2 wanted anyway and which spends ONE break on that corner
+  instead of one now and another at the sweep. The break is spent; from
+  here a revert of the question seam costs a second one.
 - 2026-08-18 — `inlineQuestion` is the third optional extension, and it
   says where a question draws rather than what it can do. It exists
   because the permission prompt's default layout is a transcript block,

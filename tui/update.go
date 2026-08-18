@@ -197,13 +197,13 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		// likely operator move at an "Attach to endpoint (URL):"
 		// prompt. Route it to the front dialog as a synthetic
 		// key press carrying the whole run in Key.Text. Since #117
-		// the three pickers implement KeyMsgDialog too, so a paste
+		// the three pickers implement keyMsgDialog too, so a paste
 		// lands in their filter row — which is what you want when
 		// the clipboard holds the model ID you are looking for. The
 		// dialogs that still don't implement it (the tool-call and
 		// subagent overlays) never see it and the paste falls
 		// through as before.
-		if _, ok := m.overlayStack.Front().(KeyMsgDialog); ok {
+		if _, ok := m.overlayStack.Front().(keyMsgDialog); ok {
 			if key, ok := pasteKeyMsg(msg.Content); ok {
 				if consumed, cmd := m.overlayStack.HandleKeyMsg(key, &m); consumed {
 					m.refreshViewport()

@@ -60,7 +60,7 @@ import (
 // #117 gave them a filter row.
 //
 // This is deliberately shaped as an optional extension, exactly like
-// KeyMsgDialog, because "where does the cursor go" is slated to
+// keyMsgDialog, because "where does the cursor go" is slated to
 // become part of the Dialog contract itself (issue #105's closing
 // note, tracked under #115). When that lands, the change is to move
 // DialogCursor into Dialog and delete the type assertion in

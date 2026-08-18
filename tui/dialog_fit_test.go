@@ -266,7 +266,7 @@ func modalFitCases() []modalFitCase {
 			name: "text-input",
 			open: func(_ *testing.T, w, h int) Model {
 				m := newFrameModel(StatusHeader, w, h)
-				m.overlayStack.Open(NewTextInputDialog(TextInputConfig{
+				m.overlayStack.Open(newTextInputDialog(textInputConfig{
 					Title:  "Attach to Endpoint",
 					Prompt: "URL:",
 				}))

@@ -625,3 +625,28 @@ Glamour, queueing, palette, modals, help panel — is identical.
 The capability map and adapter sketches generalize. Replace
 "cogo" / "core-agent" with your own agent types and follow the same
 four-step adapter contract from §1.
+
+**v0.22 removed `Dialog`-adjacent symbols I can see in my editor —
+`KeyMsgDialog`, `Overlay.HandleKey`, `NewTextInputDialog`,
+`TextInputConfig`. What is the migration?**
+There isn't one, and that is the point of the removal
+([#254](https://github.com/go-steer/core-tui/issues/254)). Building a
+dialog is only half of opening one: the other half is an `Overlay`, and
+the only `Overlay` in existence is an unexported field of `Model`. So
+an implementation of `KeyMsgDialog`, or a `TextInputConfig` you filled
+in outside this module, compiled and then had nowhere to go. If your
+adapter names one of these it is in dead code, and deleting it is the
+whole recipe.
+
+The dialogs an operator actually sees are opened by core-tui itself in
+response to your capability interfaces — `PermissionPrompter`,
+`Elicitor`, `ModelSwapper`, `SessionLister` and the rest — and none of
+those changed. `SessionInput` in particular is untouched: an action row
+still opens a text input, and `SessionInput.Submit` still has the
+signature it always had.
+
+`docs/api-surface.md` §3.2 recommends the same treatment for the rest
+of the render-extension set, for the same reason. If you are relying on
+one of those and would be hurt by its removal, that is worth an issue —
+a seam somebody is really using is a different argument from a seam
+nobody can reach.

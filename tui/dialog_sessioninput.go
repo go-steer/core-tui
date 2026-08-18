@@ -17,7 +17,7 @@
 // and the off-loop plumbing behind the host closure it commits with
 // (issue #194).
 //
-// It was a bare NewTextInputDialog whose submit closure called
+// It was a bare newTextInputDialog whose submit closure called
 // SessionInput.Submit inline and returned the result in the same
 // frame. That closure is host code with the same contract as
 // SwitchToSession — the motivating row is "+ Attach to endpoint…",
@@ -34,7 +34,7 @@
 // own Enter already used.
 //
 // The dialog is a wrapper rather than a configured primitive because
-// "in flight" is not something TextInputConfig can express: the box
+// "in flight" is not something textInputConfig can express: the box
 // has to stop accepting keys, stop claiming the caret, and say what
 // it is waiting for, and all three are states the generic dialog has
 // no concept of.
@@ -96,7 +96,7 @@ func newSessionInputDialog(row SessionInfo) *sessionInputDialog {
 		title = "Enter a Value"
 	}
 	d := &sessionInputDialog{row: row}
-	d.textInputDialog = newTextInputDialog(TextInputConfig{
+	d.textInputDialog = newTextInputDialog(textInputConfig{
 		ID:          sessionInputDialogID,
 		Title:       title,
 		Prompt:      in.Prompt,
@@ -109,7 +109,7 @@ func newSessionInputDialog(row SessionInfo) *sessionInputDialog {
 	return d
 }
 
-// submit is the TextInputConfig.Submit closure, so it runs on the
+// submit is the textInputConfig.Submit closure, so it runs on the
 // Update goroutine and must not touch the host itself. Its whole job
 // is to arm the in-flight state and hand back the Cmd that does.
 //

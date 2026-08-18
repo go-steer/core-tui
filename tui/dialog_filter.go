@@ -29,7 +29,7 @@
 // Two deliberate shapes:
 //
 //   - The input is a real bubbles textinput fed real
-//     tea.KeyPressMsg values through KeyMsgDialog, not
+//     tea.KeyPressMsg values through keyMsgDialog, not
 //     Dialog.HandleKey. HandleKey receives a NORMALIZED stroke
 //     ("ctrl+u", "shift+enter"), which drops Key.Text — the grapheme
 //     the terminal actually delivered, which is the one thing a text

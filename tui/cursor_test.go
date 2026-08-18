@@ -203,14 +203,14 @@ func TestCursor_ModalTakesCursor(t *testing.T) {
 		t.Fatal("precondition: the textarea should own the cursor before the modal opens")
 	}
 
-	m.overlayStack.Open(NewTextInputDialog(TextInputConfig{
+	m.overlayStack.Open(newTextInputDialog(textInputConfig{
 		Title:   "Attach to Endpoint",
 		Prompt:  "Daemon URL:",
 		Initial: "https://example.test",
 	}))
 	v := m.View()
 
-	// "▎ " is the dialog input's own prompt rail (NewTextInputDialog).
+	// "▎ " is the dialog input's own prompt rail (newTextInputDialog).
 	assertCursorFollows(t, v, "▎ https://example.test")
 	if v.Cursor.Y == behind.Cursor.Y && v.Cursor.X == behind.Cursor.X {
 		t.Error("cursor stayed on the chat textarea while a modal owned input")
@@ -240,7 +240,7 @@ func TestCursor_ModalCaretCountsCells(t *testing.T) {
 	} {
 		t.Run(initial, func(t *testing.T) {
 			m := cursorModel(t, StatusHeader, 100, 30)
-			m.overlayStack.Open(NewTextInputDialog(TextInputConfig{
+			m.overlayStack.Open(newTextInputDialog(textInputConfig{
 				Title:   "Attach to Endpoint",
 				Prompt:  "Daemon URL:",
 				Initial: initial,

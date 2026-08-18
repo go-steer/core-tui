@@ -529,6 +529,6 @@ func (o *Overlay) HandleWheel(delta int, m *Model) (consumed bool, cmd tea.Cmd) 
 	if delta > 0 {
 		stroke = "down"
 	}
-	_, cmd = o.HandleKey(stroke, m)
+	_, cmd = o.HandleKeyMsg(keyMsgFromStroke(stroke), m)
 	return true, cmd
 }
