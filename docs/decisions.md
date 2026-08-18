@@ -604,3 +604,166 @@ matched runes" wording is fuzzy-subsequence language and was amended
 to match. Whether to adopt real fuzzy matching — for the palette and
 the pickers together, so they cannot drift — is a follow-up
 evaluation, not something to half-implement on one surface.
+
+---
+
+## D28. Do not adopt a cell-buffer compositor
+
+**Question:** Should the frame be composed into an addressable cell
+buffer — a canvas that renderers draw into by coordinate, with a `Hit`
+method for routing clicks — instead of the string joins plus clip pass
+the library uses today?
+
+**Context:** this was **H2** of the architecture spike
+([`architecture-spike-results.md`](./architecture-spike-results.md)),
+whose kill criteria were fixed in writing before any challenger code
+existed, and which carried an explicit clause that **H2 may not be
+reported as a performance win under any outcome**. Three
+interchangeable backends were built behind one interface and one
+golden suite was run against all three.
+
+**Options:**
+
+- (A) **`strjoin+clip` plus a ~50-line ANSI-aware overlay** — what the
+  library already has in `clipFrame` and `compositeModal`.
+- (B) A cell-buffer compositor: a canvas, coordinate addressing, and
+  `Compositor.Hit`.
+
+**Recommendation: (A). H2 is killed, on its own terms, on every
+clause.**
+
+| clause | what the measurement said |
+|---|---|
+| the cheap control passes 100% of the overflow goldens (5 widths × 3 heights × {plain, modal}) | it does — `strjoin+clip` scores 15/15 and 15/15, the same as the canvas, where bare `strjoin` scores 0/15 and 9/15 |
+| a floating modal over live content is deliverable without a canvas | it is — clip + overlay leaves **16** live rows visible behind the modal against the canvas's 14. `lipgloss.Place` discards the body, which is why the control needs an overlay of its own |
+| only `Compositor.Hit` can route a click into modal-local coordinates | false. The layout already computes every rectangle, and a containment test over that struct agrees exactly: same layer, same local coordinates, same z-order for a click outside the modal |
+| canvas frame cost under 8 ms at 400 turns | met, and beside the point — at 100×40 with a modal the compositor is **1.27× slower and allocates 7.0× the bytes** of the control it was supposed to beat |
+
+Then the finding nobody hypothesised, which settles this independently
+of cost: **the canvas backend drops combining marks.** A combining mark
+on a narrow base does not round-trip — NFD (`e` + U+0301) goes 54 runes
+in and 51 out; a keycap sequence (base + U+FE0F + U+20E3) goes 47 in
+and 43 out. ZWJ families, flags, CJK, precomposed U+00E9 and skin-tone
+modifiers are all fine. macOS hands NFD out of the filesystem, so this
+is the path an accented **filename** takes into a diff header or a file
+picker. The design had predicted a width *disagreement* between
+lipgloss's grapheme-cluster width and Bubble Tea's wcwidth; what is
+actually there is content loss.
+
+**Tradeoff acknowledged:** keeping `strjoin+clip` keeps the clip pass,
+and a clip pass is a safety net that also hides the fall — an
+oversized panel is silently legal to it, and every frame-invariant test
+scores perfectly on a frame that has lost a whole panel. That is not a
+reason to buy a canvas; it is a reason the panel-survival assertion
+([#158](https://github.com/go-steer/core-tui/issues/158)) has to sit
+beside the clip pass, which it now does. See D29.
+
+---
+
+## D29. What the rendering rewrite actually targets
+
+**Question:** the spike's hypotheses were arranged around the idea that
+the steady frame is the O(N) problem. Is there a rewrite at all, what
+does it touch, and in what order?
+
+**Context:** [`architecture-spike-results.md`](./architecture-spike-results.md),
+six hypotheses with pre-registered kill criteria. **H6 was the negative
+control** — the pre-registered chance to cancel the list and compositor
+work entirely — and it was evaluated first, because firing it would
+have saved a quarter of the engineering. It did not fire.
+
+| | hypothesis | verdict | the number that decided it |
+|---|---|---|---|
+| **H6** | the O(N) refresh is not user-visible | **FAILS** — the rewrite case survives | p99 keystroke latency under stream: 84 ms at 400 turns, 154 ms at 1000, against a 25 ms kill gate |
+| **H1** | item-addressed lazy list | **passes** | renders/frame flat at 7 from 10 to 4000 items; warm frame 18 µs / 42 KB against gates of 500 µs / 1 MB |
+| **H2** | cell-buffer compositor | **killed** — see D28 | the cheap control matches it on every correctness clause at 0.79× the time and 0.14× the bytes |
+| **H3** | interactive resize | **passes**, and **kills the baseline** | drag p95: baseline 62 / 239 / 143 ms against challenger 6.8 / 6.3 / 6.5 ms, gate 16 ms |
+| **H4** | 20 fps spinner | **passes** | exactly 1 item render per tick at every size; 4.02% CPU against a 5% gate |
+| **H5** | typed-`Action` dialogs | **passes**, including the partial-failure clause | dialog tests compile in an external package importing only the dialog package; the grace period touches 1 file |
+
+**Recommendation: do the rewrite, but not the one the hypotheses were
+arranged around, and not in the order they were numbered.**
+
+**The target is the refresh and resize paths, not `View()`.** `View()`
+is already flat at ~3.5 ms at every transcript size in *both* arms,
+because it renders a pre-sliced viewport. All of the growth is in
+`Update` — the linear reassembly. **A rewrite aimed at rendering would
+move none of the numbers in the results document.** This is the single
+most load-bearing sentence in the spike and the easiest one to lose.
+
+The order, with where each step now stands:
+
+- **Step 0 — hygiene, no architecture. Already landed; nothing to do.**
+  The spike's three cheapest findings were each re-verified against
+  `main` on 2026-08-18 and all three are already fixed, by work that
+  shipped in v0.21.0 after the snapshot the spike measured.
+  - **F1, stop using a word-wrapper to pad already-measured rows.** A
+    width-setting lipgloss `Style` is a word-wrapper, not a padder:
+    handed a row you have already measured it re-measures it, hunts for
+    break points, allocates on the way, and can return *more rows than
+    it was given*. Replaced with measure-truncate-pad in all three
+    places it occurred —
+    [#157](https://github.com/go-steer/core-tui/issues/157) (`fitRow`,
+    one modal row at a time),
+    [#160](https://github.com/go-steer/core-tui/issues/160)
+    (`chatBlock`, the whole visible transcript) and
+    [#203](https://github.com/go-steer/core-tui/issues/203)
+    (`stackColumn`, the left column). The width-setting `Style`
+    survives in two places on purpose: as `chatBlock`'s whole-block
+    fallback for rows with tabs or open styling, and as the modal
+    frame's own wrap, whose row count `modalRowCount` measures through
+    the identical wrap so the two cannot disagree.
+  - **F2, a clip pass hides panel loss and the tests cannot see it.**
+    The assertion landed as
+    [#158](https://github.com/go-steer/core-tui/issues/158):
+    `assertPanelsSurvive` checks that each region's content is actually
+    present in the composed frame, walked over the same grid as the fit
+    invariant but as a separate test, so a failure names which
+    invariant broke.
+  - **F3, tabs make cell-width arithmetic wrong, silently.** A tab is
+    one byte, one cell to `ansi.StringWidth`, and `contentTabWidth`
+    columns to lipgloss at draw time.
+    [#216](https://github.com/go-steer/core-tui/issues/216) fixed the
+    pad half with `renderedWidth`, which prices the expansion, and
+    [#217](https://github.com/go-steer/core-tui/issues/217) fixed the
+    wrap half with `expandTabs` (`tui/view.go`), which performs it
+    before the measurement is taken.
+  - H6's secondary observation — an idle frame allocating 1.29 MB
+    across 50,297 allocations, flagged in the spike as worth its own
+    ticket — is the same story:
+    [#161](https://github.com/go-steer/core-tui/issues/161) and #157
+    took roughly 10× of it and #160 took the rest, leaving a static
+    repaint at 1,026 allocations. No ticket is needed.
+- **Step 1 — H5, typed-`Action` dialogs.**
+  [#164](https://github.com/go-steer/core-tui/issues/164). Independent
+  of the rendering work, mechanical, and it unblocks the picker
+  backlog. Seal the interface: a bare `any` result defeats
+  exhaustiveness at every call site, so a `switch` over it silently
+  stops covering a variant added later. Keep the keystroke grace period
+  in one file.
+- **Step 2 — H1 and H3 together, as one work item.**
+  [#247](https://github.com/go-steer/core-tui/issues/247). They are not
+  separable: H3's win *is* the width-keyed per-item cache, which is
+  H1's list. Sequencing them apart would build the drag mode on top of
+  the thing it depends on. F4 — the width contract belongs to the
+  producer, so truncate on the cache-miss path — belongs to this item
+  too.
+- **Step 3 — H4 falls out for free** once items are individually
+  invalidatable. [#248](https://github.com/go-steer/core-tui/issues/248).
+  Nothing beyond a prerendered frame table, which `tui/spinner.go`
+  already has, and pausing off-screen animation. The 3000 ms verb hold
+  can go.
+
+**Tradeoff acknowledged:** H3's fourth clause was **not answered**. A
+suppression-only arm — the Glamour pass suppressed *without* the lazy
+list — was never built, so the criterion that would have demoted H1 was
+never run on its own terms. What is known is that the library already
+ships a debounce, which is a suppression mechanism, and the drag
+numbers above *are* that debounce measured under a real drag, missing
+the gate by 4–15×. That is evidence against suppression-alone in its
+current form, not proof that no stronger suppression would do. #247
+carries building that arm as its first task. Separately, the spike
+never exercised the mouse, selection, search or copy paths, never grew
+a corpus during a run (so cache eviction was never designed), wrote
+every probe to `io.Discard`, and ran on one Linux box — the ratios are
+the trustworthy part, not the absolutes.
