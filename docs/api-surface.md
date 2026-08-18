@@ -244,6 +244,18 @@ library without these. Frozen at 1.0.
 
 #### Prompter / elicitor (41)
 
+> **Grew by 16 top-level symbols in v0.23**, in
+> [#255](https://github.com/go-steer/core-tui/issues/255): `Asker`,
+> `NewAsker`, `AskKind` + its 5 constants, `AskOption`, `AskRequest`,
+> `AskAction` + its 3 constants, `AskResult`, `ErrAskUnsupported` — plus the
+> `Options.Asker` and `SwitchTarget.Asker` fields, which §1 does not
+> enumerate because a field inherits its parent's bucket. All are contract, on the
+> same ground as the two interfaces beside them: the TUI implements them and
+> the host wires them in, so there is no version of this that is reachable
+> only from inside. All are additions — `verify-apidiff` reports compatible
+> and `api-breaks.txt` is untouched. The table is left as the snapshot it
+> was; this note is the status.
+
 | symbol | kind | declared | reached from |
 |---|---|---|---|
 | `DecisionAllowAlways` | const (`PermissionDecision`) | `prompter.go:108` | `PermissionPrompter.AskApproval` result. |

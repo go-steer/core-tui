@@ -26,7 +26,10 @@ import (
 // Compile-time enforcement that the unexported *elicitor satisfies
 // the public Elicitor interface — flags a regression early if the
 // method set drifts.
-var _ Elicitor = (*elicitor)(nil)
+var (
+	_ Elicitor = (*elicitor)(nil)
+	_ Asker    = (*asker)(nil)
+)
 
 // spinnerCadence is the rotation period for thinking/working verbs
 // (R-CHAT-3).
@@ -306,6 +309,29 @@ func (m Model) elicitListener() tea.Cmd {
 			return nil
 		}
 		return elicitRequestMsg{serverName: flow.serverName, req: flow.req}
+	}
+}
+
+// askListener returns a Cmd that blocks on the asker's request channel
+// and forwards each inbound question as an askRequestMsg (R-PROMPT-1).
+// Same drain-loop pattern as elicitListener, down to the type
+// assertion: a host may hand Options.Asker its own implementation for a
+// test, and there is nothing for the loop to drain in that case.
+func (m Model) askListener() tea.Cmd {
+	if m.opts.Asker == nil {
+		return nil
+	}
+	a, ok := m.opts.Asker.(*asker)
+	if !ok {
+		return nil
+	}
+	ctx := m.listenerCtx()
+	return func() tea.Msg {
+		flow, ok := a.nextRequest(ctx)
+		if !ok {
+			return nil
+		}
+		return askRequestMsg{req: flow.req}
 	}
 }
 

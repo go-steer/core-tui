@@ -158,6 +158,25 @@ type elicitRequestMsg struct {
 	req        ElicitRequest
 }
 
+// askRequestMsg fires when the asker's request channel surfaces an
+// inbound AskRequest — the agent's own question to the operator
+// (R-PROMPT-1, issue #255). Update screens it and opens the question;
+// the answer goes back via asker.dispatchResult.
+type askRequestMsg struct {
+	req AskRequest
+}
+
+// askEditorDoneMsg carries the outcome of the AskLongText round trip
+// through $EDITOR: the saved buffer, or the reason there isn't one.
+//
+// It is the answer arriving as a message rather than as a keystroke,
+// which is why Update resolves the open question through
+// overlay.resolve instead of the key path (question_ask_editor.go).
+type askEditorDoneMsg struct {
+	text string
+	err  error
+}
+
 // slashResultMsg carries the eventual outcome of an
 // AsyncSlashProvider.InvokeSlashAsync call (issue #10). Posted
 // onto m.eventCh by a goroutine the dispatcher spawns, then

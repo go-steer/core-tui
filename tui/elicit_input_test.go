@@ -172,8 +172,13 @@ func elicitFlowFor(t *testing.T, req ElicitRequest) (Model, chan ElicitResult) {
 // stamp belongs to the seam, not to the widget, which is what lets
 // every future agent-opened question inherit the window without
 // writing any of it.
-func pastGrace(m Model) Model {
-	if aq := m.overlayStack.asked(elicitDialogID); aq != nil {
+func pastGrace(m Model) Model { return pastGraceFor(m, elicitDialogID) }
+
+// pastGraceFor is pastGrace for any question on the stack — the same
+// backdating, reached by id, because the window belongs to the seam
+// and every agent-opened question inherits it.
+func pastGraceFor(m Model, id string) Model {
+	if aq := m.overlayStack.asked(id); aq != nil {
 		aq.shownAt = time.Now().Add(-modalInputGrace - time.Millisecond)
 	}
 	return m

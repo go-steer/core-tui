@@ -286,7 +286,7 @@ Other notable host pieces:
 | `SlashProvider` | `/subagent` flag parser + `/btw` invocation | **Needed.** See §3.3 below — `/subagent` is pure SlashProvider; `/btw` needs the resolution from §5. |
 | `PermissionPrompter` (TUI-provided) | `gate.SetPrompter` | Wire. |
 | `Elicitor` (TUI-provided) | each MCP server's elicit callback | Wire per server. |
-| `UserPrompter` (TUI-provided) | (not used today — core-agent has no `ask_question` tool) | Nothing to do: core-tui doesn't ship this interface either. R-PROMPT-1 is specified but unimplemented — see design.md §3.4 and issue #78. |
+| `Asker` (TUI-provided) | an `ask_user` tool that reads stdin | **Needed if the tool is enabled.** Under the TUI a stdin read contends with Bubble Tea for the terminal. Construct `tui.NewAsker()`, pass it to `Options.Asker` AND into the tool, and have the tool call `Ask` instead of reading stdin. Shipped in v0.23.0 (R-PROMPT-1); specified as `UserPrompter` / `AskUser`. |
 | `Options.UsageTracker` | `internal/usage.Tracker` | Same as cogo. |
 | `Options.MentionProviders` | (not needed) | Built-in file provider is sufficient. |
 | `Options.Branding.Wordmark` | `AgentConfig.DisplayName` | Pass through. |

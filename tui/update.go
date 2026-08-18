@@ -39,6 +39,7 @@ func (m Model) Init() tea.Cmd {
 		m.wakeListener(),
 		m.promptListener(),
 		m.elicitListener(),
+		m.askListener(),
 		m.notifyListener(),
 	}
 	// Startup wordmark wipe (issue #165). nil unless the banner is
@@ -1151,6 +1152,51 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		// — hosts that deliver elicit requests from a remote bridge
 		// or background goroutine need the kick so the form paints.
 		return m, forceRenderTick()
+	case askRequestMsg:
+		r := msg.req
+		// The same screen, and the same two halves, as the elicit path
+		// above: a question this TUI cannot draw is refused with an
+		// error to the agent and a row to the operator (issue #209).
+		// Never a decline — nobody was asked.
+		if !supportedAsk(r) {
+			m.history.Append(Message{Role: RoleSystem, Text: askUnsupportedNotice(r)})
+			m.dispatchAskErr(AskResult{Action: AskCancelled}, askUnsupportedError(r))
+			m.refreshAndScroll()
+			return m, tea.Batch(m.askListener(), forceRenderTick())
+		}
+		// askAgent: the question arrived unbidden, so its committing
+		// keys stay inert for modalInputGrace (#95).
+		m.overlayStack.ask(newAskQuestion(r), askAgent, askResolver)
+		m.refreshViewport()
+		return m, forceRenderTick()
+	case askEditorDoneMsg:
+		// The AskLongText round trip landing. The question is still open
+		// and unresolved — Key returned a Cmd rather than an answer —
+		// so anything that is not an answer leaves it that way and says
+		// why, rather than sending the agent something the operator did
+		// not write.
+		q, _ := m.openAsk().(*askEditorQuestion)
+		var cmd tea.Cmd
+		switch {
+		case msg.err != nil:
+			if q != nil {
+				q.setNote("editor: " + collapseWhitespace(msg.err.Error()))
+			}
+		case msg.text == "":
+			// Quitting the editor without writing anything is how a
+			// long-answer surface says "not this way" — the same reflex
+			// `git commit` trains. Left open so esc or ctrl+d can say
+			// which of the two it was.
+			if q != nil {
+				q.setNote("editor returned an empty answer — nothing sent")
+			}
+		default:
+			cmd = m.overlayStack.resolve(askDialogID, text{Value: msg.text}, &m)
+		}
+		m.refreshViewport()
+		// The child process owned the terminal; the frame it left behind
+		// is not one Bubble Tea drew, so the repaint is not optional.
+		return m, tea.Batch(cmd, forceRenderTick())
 	case noticeMsg:
 		// Issue #30: host-initiated chat row, drained from
 		// Options.Notifier. Append as RoleNotice (distinct from
@@ -2604,21 +2650,22 @@ func (m *Model) applySwitchTarget(tgt *SwitchTarget) tea.Cmd {
 	// cancels, which is the host's business and not something the
 	// contract requires of it. Deny and cancel are the honest answers:
 	// the operator switched away instead of approving, so nothing may
-	// proceed on their behalf. Both dispatchers must run before step 4
-	// swaps opts, so the reply reaches the Prompter / Elicitor that
-	// asked, and the decision rows they append are wiped with the rest
-	// of the outgoing transcript by step 3 rather than following the
-	// operator into the new session.
+	// proceed on their behalf. Every dispatcher must run before step 4
+	// swaps opts, so the reply reaches the Prompter / Elicitor / Asker
+	// that asked, and the decision rows they append are wiped with the
+	// rest of the outgoing transcript by step 3 rather than following
+	// the operator into the new session.
 	//
-	// Both are questions on the overlay stack now, so both are resolved
-	// by id rather than cleared: resolveAll would take the pickers with
-	// it, and step 2 keeps those on purpose so a picker can close itself
-	// after returning the switch Cmd. Superseded rather than escape —
-	// the operator did not dismiss anything, and each resolver reads the
-	// reason to decide NOT to re-arm its listener, which step 8 below
-	// re-arms for the new session.
+	// All three are questions on the overlay stack now, so all three are
+	// resolved by id rather than cleared: resolveAll would take the
+	// pickers with it, and step 2 keeps those on purpose so a picker can
+	// close itself after returning the switch Cmd. Superseded rather
+	// than escape — the operator did not dismiss anything, and each
+	// resolver reads the reason to decide NOT to re-arm its listener,
+	// which step 8 below re-arms for the new session.
 	m.overlayStack.resolve(permissionDialogID, dismissed{Reason: dismissSuperseded}, m)
 	m.overlayStack.resolve(elicitDialogID, dismissed{Reason: dismissSuperseded}, m)
+	m.overlayStack.resolve(askDialogID, dismissed{Reason: dismissSuperseded}, m)
 	m.sideAnswer = nil
 	m.scroll().reset()
 	m.pendingForm = nil
@@ -2655,6 +2702,9 @@ func (m *Model) applySwitchTarget(tgt *SwitchTarget) tea.Cmd {
 	}
 	if tgt.Elicitor != nil {
 		m.opts.Elicitor = tgt.Elicitor
+	}
+	if tgt.Asker != nil {
+		m.opts.Asker = tgt.Asker
 	}
 	if tgt.Notifier != nil {
 		m.opts.Notifier = tgt.Notifier
@@ -2700,7 +2750,7 @@ func (m *Model) applySwitchTarget(tgt *SwitchTarget) tea.Cmd {
 	// goroutines that were reading from replaced channels are
 	// harmless leaks (no future traffic → GC on program exit;
 	// same pattern accepted for LiveAgent teardown).
-	cmds := make([]tea.Cmd, 0, 7)
+	cmds := make([]tea.Cmd, 0, 8)
 	if c := m.eventListener(); c != nil {
 		cmds = append(cmds, c)
 	}
@@ -2708,6 +2758,9 @@ func (m *Model) applySwitchTarget(tgt *SwitchTarget) tea.Cmd {
 		cmds = append(cmds, c)
 	}
 	if c := m.elicitListener(); c != nil {
+		cmds = append(cmds, c)
+	}
+	if c := m.askListener(); c != nil {
 		cmds = append(cmds, c)
 	}
 	if c := m.notifyListener(); c != nil {
@@ -2891,6 +2944,23 @@ func (m *Model) dispatchElicit(r ElicitResult) {
 func (m *Model) dispatchElicitErr(r ElicitResult, err error) {
 	if e, ok := m.opts.Elicitor.(*elicitor); ok {
 		e.dispatchResult(r, err)
+	}
+	m.refreshViewport()
+}
+
+// dispatchAsk writes the operator's answer back to the pending ask
+// flow (R-PROMPT-1). Same split, for the same reason, as the elicit
+// pair above: this one is always relaying a person.
+func (m *Model) dispatchAsk(r AskResult) {
+	m.dispatchAskErr(r, nil)
+}
+
+// dispatchAskErr is dispatchAsk for the case where the TUI answers on
+// its own account — today only the ErrAskUnsupported refusal, which
+// never opens a modal, so no operator saw the question.
+func (m *Model) dispatchAskErr(r AskResult, err error) {
+	if a, ok := m.opts.Asker.(*asker); ok {
+		a.dispatchResult(r, err)
 	}
 	m.refreshViewport()
 }

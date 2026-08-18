@@ -104,13 +104,14 @@ type SwitchTarget struct {
 	// status header reflect the new session's totals.
 	UsageTracker UsageTracker
 
-	// Prompter / Elicitor / Notifier replace the corresponding
-	// Options fields when non-nil. Nil = keep the existing
-	// subscriber so cross-session permission / elicit / notice
-	// pipes keep working. Hosts that want to fully sever those
-	// channels supply fresh instances here.
+	// Prompter / Elicitor / Asker / Notifier replace the
+	// corresponding Options fields when non-nil. Nil = keep the
+	// existing subscriber so cross-session permission / elicit /
+	// question / notice pipes keep working. Hosts that want to fully
+	// sever those channels supply fresh instances here.
 	Prompter PermissionPrompter
 	Elicitor Elicitor
+	Asker    Asker
 	Notifier *Notifier
 
 	// Memory / Skills / MCPServers replace the corresponding
