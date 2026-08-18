@@ -20,3 +20,30 @@
 # Emptied at v0.21.0. The 38 entries that were here — #77, #78 and #213 —
 # are behind that tag now, and each is written up under Removed in the
 # v0.21.0 section of CHANGELOG.md.
+
+# #254: the four dialog symbols nothing outside the package could reach.
+# Opening a modal needs an Overlay, and the only Overlay in existence is
+# an unexported field of Model — so an external implementation of these
+# compiled and had nowhere to be installed. docs/api-surface.md §3.2
+# recommends unexporting the whole 25-symbol render-extension set on
+# exactly that ground; these four are the ones #164's question seam
+# freed, and the rest of the sweep is not this change.
+#
+# Overlay.HandleKey was the stroke-string half of a two-entry-point
+# routing split whose other half, HandleKeyMsg, does everything it did
+# without discarding Key.Text. Its last caller synthesizes a
+# tea.KeyPressMsg instead.
+./tui.(*Overlay).HandleKey: removed
+# KeyMsgDialog opted a dialog into that full-fidelity half. Every
+# implementor is in this package; it is keyMsgDialog now.
+./tui.KeyMsgDialog: removed
+# NewTextInputDialog and TextInputConfig are the text-input primitive,
+# unexported together because the constructor is the only way to build
+# the config into anything. Zero callers outside the package's own
+# tests, in this repo or in core-agent; the one in-package user embeds
+# the concrete twin. Unexported rather than reshaped: #164 §10.1 had
+# planned to narrow TextInputConfig.Submit in place, which would have
+# spent a break on a field of a type the sweep above takes off the
+# surface anyway.
+./tui.NewTextInputDialog: removed
+./tui.TextInputConfig: removed

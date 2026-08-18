@@ -13,7 +13,7 @@
 // limitations under the License.
 
 // Tests for the text-input Dialog primitive (issue #56): typing,
-// validation-keeps-open, submit-closure wiring, the KeyMsgDialog
+// validation-keeps-open, submit-closure wiring, the keyMsgDialog
 // key path, and bracketed-paste routing.
 
 package tui
@@ -51,7 +51,7 @@ func TestTextInputDialog_Defaults(t *testing.T) {
 	m := NewModel(Options{Agent: &bareAgent{id: "a"}})
 	m.viewport.SetWidth(80)
 
-	d := NewTextInputDialog(TextInputConfig{})
+	d := newTextInputDialog(textInputConfig{})
 	if d.ID() != textInputDialogID {
 		t.Errorf("ID() = %q, want %q", d.ID(), textInputDialogID)
 	}
@@ -73,7 +73,7 @@ func TestTextInputDialog_TypeAndSubmit(t *testing.T) {
 
 	var got string
 	var sawModel bool
-	d := NewTextInputDialog(TextInputConfig{
+	d := newTextInputDialog(textInputConfig{
 		Title:  "Attach",
 		Prompt: "Daemon URL:",
 		Submit: func(v string, mm *Model) DialogAction {
@@ -104,7 +104,7 @@ func TestTextInputDialog_Editing(t *testing.T) {
 	m.viewport.SetWidth(80)
 
 	var got string
-	d := NewTextInputDialog(TextInputConfig{
+	d := newTextInputDialog(textInputConfig{
 		Submit: func(v string, _ *Model) DialogAction {
 			got = v
 			return DialogAction{Consumed: true, Close: true}
@@ -135,7 +135,7 @@ func TestTextInputDialog_SpaceIsTyped(t *testing.T) {
 	m.viewport.SetWidth(80)
 
 	var got string
-	d := NewTextInputDialog(TextInputConfig{
+	d := newTextInputDialog(textInputConfig{
 		Submit: func(v string, _ *Model) DialogAction {
 			got = v
 			return DialogAction{Consumed: true, Close: true}
@@ -158,7 +158,7 @@ func TestTextInputDialog_ValidateKeepsOpen(t *testing.T) {
 	m.viewport.SetWidth(80)
 
 	submits := 0
-	d := NewTextInputDialog(TextInputConfig{
+	d := newTextInputDialog(textInputConfig{
 		Validate: func(v string) string {
 			if !strings.HasPrefix(v, "http") {
 				return "must start with http"
@@ -183,7 +183,7 @@ func TestTextInputDialog_ValidateKeepsOpen(t *testing.T) {
 		t.Errorf("validation error not rendered:\n%s", out)
 	}
 	// The buffer survives so the operator can edit rather than retype.
-	if v := d.(*textInputDialog).Value(); v != "nope" {
+	if v := d.Value(); v != "nope" {
 		t.Errorf("value after failed validation = %q, want %q", v, "nope")
 	}
 
@@ -208,7 +208,7 @@ func TestTextInputDialog_EscCloses(t *testing.T) {
 	m.viewport.SetWidth(80)
 
 	submits := 0
-	d := NewTextInputDialog(TextInputConfig{
+	d := newTextInputDialog(textInputConfig{
 		Submit: func(string, *Model) DialogAction {
 			submits++
 			return DialogAction{Consumed: true, Close: true}
@@ -230,7 +230,7 @@ func TestTextInputDialog_NilSubmitCloses(t *testing.T) {
 	m := NewModel(Options{Agent: &bareAgent{id: "a"}})
 	m.viewport.SetWidth(80)
 
-	d := NewTextInputDialog(TextInputConfig{})
+	d := newTextInputDialog(textInputConfig{})
 	typeInto(t, d, &m, "x")
 	if act := d.HandleKey("enter", &m); !act.Close {
 		t.Errorf("nil Submit should close, got %+v", act)
@@ -243,12 +243,12 @@ func TestTextInputDialog_InitialAndPlaceholder(t *testing.T) {
 	m := NewModel(Options{Agent: &bareAgent{id: "a"}})
 	m.viewport.SetWidth(80)
 
-	empty := NewTextInputDialog(TextInputConfig{Placeholder: "http://host:7778"})
+	empty := newTextInputDialog(textInputConfig{Placeholder: "http://host:7778"})
 	if out := renderPlain(empty, &m); !strings.Contains(out, "http://host:7778") {
 		t.Errorf("placeholder not rendered while empty:\n%s", out)
 	}
 
-	pre := NewTextInputDialog(TextInputConfig{
+	pre := newTextInputDialog(textInputConfig{
 		Initial:     "http://seed:1",
 		Placeholder: "http://host:7778",
 	})
@@ -261,7 +261,7 @@ func TestTextInputDialog_InitialAndPlaceholder(t *testing.T) {
 	}
 	// Cursor lands at the end, so typing appends.
 	var got string
-	pre.(*textInputDialog).cfg.Submit = func(v string, _ *Model) DialogAction {
+	pre.cfg.Submit = func(v string, _ *Model) DialogAction {
 		got = v
 		return DialogAction{Consumed: true, Close: true}
 	}
@@ -273,14 +273,14 @@ func TestTextInputDialog_InitialAndPlaceholder(t *testing.T) {
 }
 
 // TestOverlay_HandleKeyMsg_PrefersKeyMsgDialog — the Overlay routes
-// the raw KeyPressMsg to a KeyMsgDialog and falls back to the
+// the raw KeyPressMsg to a keyMsgDialog and falls back to the
 // stroke-string contract for plain Dialogs.
 func TestOverlay_HandleKeyMsg_PrefersKeyMsgDialog(t *testing.T) {
 	m := NewModel(Options{Agent: &bareAgent{id: "a"}})
 	m.viewport.SetWidth(80)
 
 	var got string
-	d := NewTextInputDialog(TextInputConfig{
+	d := newTextInputDialog(textInputConfig{
 		Submit: func(v string, _ *Model) DialogAction {
 			got = v
 			return DialogAction{Consumed: true, Close: true}
@@ -288,7 +288,7 @@ func TestOverlay_HandleKeyMsg_PrefersKeyMsgDialog(t *testing.T) {
 	})
 	m.overlayStack.Open(d)
 
-	// Key.Text is what a KeyMsgDialog inserts — a stroke-string
+	// Key.Text is what a keyMsgDialog inserts — a stroke-string
 	// round trip would lose it for anything exotic.
 	for _, r := range "hé∂" {
 		key := tea.KeyPressMsg(tea.Key{Code: r, Text: string(r)})
@@ -309,12 +309,12 @@ func TestOverlay_HandleKeyMsg_PrefersKeyMsgDialog(t *testing.T) {
 
 	// A plain Dialog still works through the same entry point via
 	// the HandleKey fallback. The model picker used to be the
-	// example here; issue #117 made all three pickers KeyMsgDialogs,
+	// example here; issue #117 made all three pickers keyMsgDialogs,
 	// so the tool-call detail overlay is what exercises the fallback
 	// now.
 	m.overlayStack.Open(newToolCallDialog(0))
-	if _, ok := m.overlayStack.Front().(KeyMsgDialog); ok {
-		t.Fatal("the fallback arm needs a dialog that is NOT a KeyMsgDialog")
+	if _, ok := m.overlayStack.Front().(keyMsgDialog); ok {
+		t.Fatal("the fallback arm needs a dialog that is NOT a keyMsgDialog")
 	}
 	consumed, _ = m.overlayStack.HandleKeyMsg(tea.KeyPressMsg(tea.Key{Code: tea.KeyEnter}), &m)
 	if !consumed {
@@ -329,7 +329,7 @@ func TestTextInputDialog_PasteRoutesToDialog(t *testing.T) {
 	m.viewport.SetWidth(80)
 
 	var got string
-	d := NewTextInputDialog(TextInputConfig{
+	d := newTextInputDialog(textInputConfig{
 		Submit: func(v string, _ *Model) DialogAction {
 			got = v
 			return DialogAction{Consumed: true, Close: true}

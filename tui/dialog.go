@@ -56,8 +56,8 @@ type Dialog interface {
 	Render(width int, m *Model) string
 }
 
-// KeyMsgDialog is an optional extension of Dialog for modals whose
-// body owns a real text-editing widget (issue #56's TextInputDialog
+// keyMsgDialog is an optional extension of Dialog for modals whose
+// body owns a real text-editing widget (issue #56's text-input dialog
 // is the first). Dialog.HandleKey receives a NORMALIZED stroke
 // ("ctrl+u", "shift+enter") which is lossy for an input widget: it
 // drops Key.Text — the grapheme(s) the terminal actually delivered,
@@ -70,7 +70,12 @@ type Dialog interface {
 // still provide HandleKey (Dialog is embedded) — the convention is
 // to synthesize a KeyPressMsg from the stroke and delegate, so both
 // entry points stay behaviorally identical.
-type KeyMsgDialog interface {
+//
+// Unexported in #254. It was exported for a host that might implement
+// a text-editing modal, and no host can: Overlay is an unexported
+// field of Model, so there is nothing outside the package to install
+// an implementation into. Every implementor is in this package.
+type keyMsgDialog interface {
 	Dialog
 
 	// HandleKeyMsg is the full-fidelity twin of HandleKey.
@@ -97,7 +102,7 @@ type DialogAction struct {
 }
 
 // Overlay is the modal z-order stack. Open() pushes onto the top;
-// HandleKey routes only to the front; Render iterates in stack
+// HandleKeyMsg routes only to the front; Render iterates in stack
 // order so later opens render on top. Empty stack = no modal.
 type Overlay struct {
 	dialogs []Dialog
@@ -165,35 +170,28 @@ func (o *Overlay) Front() Dialog {
 	return o.dialogs[len(o.dialogs)-1]
 }
 
-// HandleKey routes the keystroke to the front-most dialog and
+// HandleKeyMsg routes the keystroke to the front-most dialog and
 // applies the returned action. Returns Consumed so the caller
-// (handleKey) can decide whether to fall through, plus an
-// optional Cmd for dialogs that need to emit a msg (e.g. the
-// theme picker firing ThemeChangedMsg on commit).
-func (o *Overlay) HandleKey(stroke string, m *Model) (consumed bool, cmd tea.Cmd) {
-	front := o.Front()
-	if front == nil {
-		return false, nil
-	}
-	act := front.HandleKey(stroke, m)
-	if act.Close {
-		o.CloseFront()
-	}
-	return act.Consumed, act.Cmd
-}
-
-// HandleKeyMsg is HandleKey with the raw keystroke preserved. When
-// the front-most dialog implements KeyMsgDialog it gets the full
+// (handleKey) can decide whether to fall through, plus an optional
+// Cmd for dialogs that need to emit a msg (e.g. the theme picker
+// firing ThemeChangedMsg on commit).
+//
+// When the front-most dialog implements keyMsgDialog it gets the full
 // tea.KeyPressMsg; otherwise we fall back to the normalized-stroke
-// contract. This is the entry point handleKey uses — HandleKey
-// stays for callers that only hold a stroke string.
+// contract.
+//
+// There used to be a stroke-string twin of this, Overlay.HandleKey,
+// removed in #254. It was the older of the two entry points and by the
+// end its only caller was HandleWheel's synthesized up/down, which
+// builds a tea.KeyPressMsg with keyMsgFromStroke instead. Two entry
+// points into the same routing is one place for the two to drift.
 func (o *Overlay) HandleKeyMsg(msg tea.KeyPressMsg, m *Model) (consumed bool, cmd tea.Cmd) {
 	front := o.Front()
 	if front == nil {
 		return false, nil
 	}
 	var act DialogAction
-	if kd, ok := front.(KeyMsgDialog); ok {
+	if kd, ok := front.(keyMsgDialog); ok {
 		act = kd.HandleKeyMsg(msg, m)
 	} else {
 		act = front.HandleKey(msg.String(), m)

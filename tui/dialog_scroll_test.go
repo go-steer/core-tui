@@ -644,7 +644,7 @@ func TestThemePicker_WindowsLongListToTerminal(t *testing.T) {
 	// Walking the cursor past the fold pulls the window along.
 	last := len(BuiltinThemes()) - 1
 	for i := 0; i < last; i++ {
-		m.overlayStack.HandleKey("down", &m)
+		m.overlayStack.HandleKeyMsg(keyMsgFromStroke("down"), &m)
 	}
 	rendered = m.overlayStack.Render(m.width, &m)
 	if !strings.Contains(rendered, BuiltinThemes()[last].Name) {

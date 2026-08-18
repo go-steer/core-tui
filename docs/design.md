@@ -425,15 +425,17 @@ type SessionInput struct {
 }
 
 // The primitive behind it is a general one — any Dialog can stack a
-// text prompt on top of itself:
+// text prompt on top of itself — but it is package-internal, and so
+// is the optional extension a dialog implements to receive the raw
+// tea.KeyPressMsg instead of the normalized stroke string. Both were
+// exported until #254 and neither was reachable: opening a dialog
+// needs an Overlay, and the only Overlay is an unexported field of
+// Model. A host stacks a text prompt by setting SessionInfo.Input,
+// above, which is the seam that actually exists.
 //
-//   NewTextInputDialog(TextInputConfig{...}) Dialog
-//
-// Dialogs that own a text widget implement KeyMsgDialog (optional
-// extension of Dialog) to receive the raw tea.KeyPressMsg instead
-// of the normalized stroke string, and cursorDialog (also optional)
-// to say where the terminal cursor belongs — a position relative to
-// the dialog's own top-left cell, which View offsets by wherever it
+// cursorDialog (also internal, also optional) is how a dialog says
+// where the terminal cursor belongs — a position relative to the
+// dialog's own top-left cell, which View offsets by wherever it
 // composited the dialog (R-CUR-1..3). Folding that into Dialog
 // itself is part of the contract work in #115.
 

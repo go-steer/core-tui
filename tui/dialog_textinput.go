@@ -35,8 +35,8 @@ import (
 	"charm.land/lipgloss/v2"
 )
 
-// textInputDialogID is the default Dialog ID when TextInputConfig
-// leaves ID empty. Hosts that stack several text inputs (or want to
+// textInputDialogID is the default Dialog ID when textInputConfig
+// leaves ID empty. Callers that stack several text inputs (or want to
 // Overlay.Close a specific one) supply their own.
 const textInputDialogID = "text-input"
 
@@ -44,7 +44,7 @@ const textInputDialogID = "text-input"
 // opened from a picker doesn't visibly jump in size.
 const defaultTextInputWidth = 64
 
-// TextInputConfig configures a text-input Dialog. Only Submit is
+// textInputConfig configures a text-input Dialog. Only Submit is
 // strictly required — everything else has a sane default:
 //
 //	ID     → "text-input"
@@ -53,7 +53,15 @@ const defaultTextInputWidth = 64
 //
 // The zero value is therefore usable for a throwaway prompt, but a
 // Title + Prompt pair is what makes the modal self-explanatory.
-type TextInputConfig struct {
+//
+// Unexported in #254, with the NewTextInputDialog constructor that
+// took it. Both were exported for a host that never had a way to reach
+// them: opening one needs an Overlay, and the only Overlay in
+// existence is an unexported field of Model. Submit's signature is
+// unchanged — it still takes the live Model and returns a
+// DialogAction, because the one caller that wraps this primitive needs
+// exactly that. See the field's own comment.
+type textInputConfig struct {
 	// ID is the Overlay identity (Overlay.Close / HasID). Empty
 	// falls back to textInputDialogID.
 	ID string
@@ -91,6 +99,15 @@ type TextInputConfig struct {
 	// close this dialog (Close: true), leave it open, emit a Cmd,
 	// and/or Open another dialog on the stack. Nil Submit closes
 	// the dialog without doing anything.
+	//
+	// #164 §10.1 planned to narrow this to func(value string) error
+	// on the way out of the exported surface, on the assumption that
+	// the text input would become a question and its effects would
+	// move to a resolver. It did not — §13 keeps this a Dialog — and
+	// the shape does not fit its one caller: the action row's
+	// in-flight commit (dialog_sessioninput.go) has to return a Cmd
+	// and has to stay OPEN while the host's dial is out, and an error
+	// return can say neither.
 	Submit func(value string, m *Model) DialogAction
 
 	// Footer overrides the default "enter submit · esc cancel"
@@ -108,11 +125,11 @@ type TextInputConfig struct {
 }
 
 // textInputDialog is the Dialog implementation behind
-// NewTextInputDialog. It implements KeyMsgDialog so the embedded
+// newTextInputDialog. It implements keyMsgDialog so the embedded
 // textinput sees real tea.KeyPressMsg values (Key.Text, modifiers,
 // synthesized pastes) instead of normalized stroke strings.
 type textInputDialog struct {
-	cfg   TextInputConfig
+	cfg   textInputConfig
 	input textinput.Model
 
 	// errMsg holds the last Validate() failure. Rendered under the
@@ -128,11 +145,11 @@ type textInputDialog struct {
 	styled      bool
 }
 
-// NewTextInputDialog builds a single-line text-entry Dialog ready
+// newTextInputDialog builds a single-line text-entry Dialog ready
 // for Overlay.Open. Typical use from inside another Dialog's
 // HandleKey — note the submit closure closing BOTH dialogs:
 //
-//	m.overlayStack.Open(NewTextInputDialog(TextInputConfig{
+//	m.overlayStack.Open(newTextInputDialog(textInputConfig{
 //	    Title:  "Attach to Endpoint",
 //	    Prompt: "Daemon URL:",
 //	    Validate: func(v string) string {
@@ -150,19 +167,18 @@ type textInputDialog struct {
 //	        return DialogAction{Consumed: true, Close: true, Cmd: m.applySwitchTarget(&tgt)}
 //	    },
 //	}))
-func NewTextInputDialog(cfg TextInputConfig) Dialog {
-	return newTextInputDialog(cfg)
-}
-
-// newTextInputDialog is NewTextInputDialog's concrete-typed twin, for
-// in-package callers that WRAP the primitive rather than merely open
-// it. The session picker's action-row dialog embeds it to add an
-// in-flight state around an async Submit (issue #194), and embedding
-// needs the struct: an interface value would promote only the four
-// Dialog methods and hide HandleKeyMsg and DialogCursor, which are
-// exactly the two optional extensions the wrapper has to keep
-// forwarding for the box to stay typeable and keep its caret.
-func newTextInputDialog(cfg TextInputConfig) *textInputDialog {
+//
+// It returns the concrete type rather than a Dialog because the one
+// caller that WRAPS the primitive rather than merely opening it needs
+// the struct: the session picker's action-row dialog embeds it to add
+// an in-flight state around an async Submit (issue #194), and an
+// interface value would promote only the three Dialog methods and hide
+// HandleKeyMsg and DialogCursor — exactly the two optional extensions
+// the wrapper has to keep forwarding for the box to stay typeable and
+// keep its caret. There was an interface-returning NewTextInputDialog
+// alongside it until #254; nothing outside the package could open what
+// it built.
+func newTextInputDialog(cfg textInputConfig) *textInputDialog {
 	if cfg.ID == "" {
 		cfg.ID = textInputDialogID
 	}
@@ -201,8 +217,8 @@ func (d *textInputDialog) ID() string { return d.cfg.ID }
 func (d *textInputDialog) Value() string { return d.input.Value() }
 
 // HandleKey satisfies Dialog for callers holding only a normalized
-// stroke (Overlay.HandleKey). It synthesizes a KeyPressMsg and
-// delegates so both entry points behave identically.
+// stroke. It synthesizes a KeyPressMsg and delegates so both entry
+// points behave identically.
 func (d *textInputDialog) HandleKey(stroke string, m *Model) DialogAction {
 	return d.HandleKeyMsg(keyMsgFromStroke(stroke), m)
 }
@@ -357,7 +373,7 @@ func textInputStyles(s Styles) textinput.Styles {
 // comes back as a zero Key, which the textinput ignores.
 //
 // This exists so the stroke-string and KeyPressMsg entry points
-// stay behaviorally identical — see KeyMsgDialog's godoc.
+// stay behaviorally identical — see keyMsgDialog's godoc.
 func keyMsgFromStroke(stroke string) tea.KeyPressMsg {
 	if named, ok := namedKeyStrokes[stroke]; ok {
 		return tea.KeyPressMsg(named)
@@ -407,7 +423,7 @@ var namedKeyStrokes = map[string]tea.Key{
 }
 
 // pasteKeyMsg wraps bracketed-paste content in a KeyPressMsg so a
-// KeyMsgDialog's input widget can insert it. bubbletea delivers a
+// keyMsgDialog's input widget can insert it. bubbletea delivers a
 // paste as tea.PasteMsg, which never reaches handleKey — without
 // this the pasted text would land in the chat textarea BEHIND the
 // modal, which is the single most likely thing an operator does

@@ -94,7 +94,7 @@ func openModelPickerFixture(t *testing.T) (Model, *modelPickerQuestion) {
 }
 
 // typeIntoPicker drives text through the Overlay the way handleKey
-// does, so the test exercises the real KeyMsgDialog routing rather
+// does, so the test exercises the real keyMsgDialog routing rather
 // than poking the widget.
 func typeIntoPicker(m *Model, text string) {
 	for _, r := range text {

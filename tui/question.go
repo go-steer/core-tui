@@ -477,7 +477,10 @@ func (a *askedQuestion) resolve(ans answer, m *Model) tea.Cmd {
 func (a *askedQuestion) ID() string { return a.q.ID() }
 
 // HandleKey satisfies Dialog for callers holding only a normalized
-// stroke — the wheel synthesizer, and Overlay.HandleKey itself.
+// stroke. Nothing in the package reaches a question this way any more
+// — Overlay.HandleKey went in #254 and the wheel synthesizer builds a
+// real KeyPressMsg — but Dialog still declares it, and an adapter that
+// panicked on the one method it is asked for least would be a trap.
 func (a *askedQuestion) HandleKey(stroke string, m *Model) DialogAction {
 	return a.HandleKeyMsg(keyMsgFromStroke(stroke), m)
 }
@@ -605,5 +608,5 @@ func (a *askedQuestion) DialogCursor(width int, _ *Model) *tea.Cursor {
 // scrollBy instead, and only a question that opted into
 // scrollQuestion gets lines.
 var _ Dialog = (*askedQuestion)(nil)
-var _ KeyMsgDialog = (*askedQuestion)(nil)
+var _ keyMsgDialog = (*askedQuestion)(nil)
 var _ cursorDialog = (*askedQuestion)(nil)
