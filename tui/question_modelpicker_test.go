@@ -273,6 +273,110 @@ func TestModelPicker_FailedSwitchKeepsTheListUp(t *testing.T) {
 	}
 }
 
+// TestModelPicker_FailedSwitchSaysWhyOnThePicker is the other half of
+// the test above, and issue #245: keeping the list up is only the right
+// call if the operator can tell that something happened. The reason
+// applyModelSwitch writes goes to the transcript, which is BEHIND this
+// modal — on its own that is Enter, a pause, and an unchanged list.
+//
+// Asserted on the rendered frame rather than on the field, because the
+// field being set while the row is not drawn is exactly the bug: the
+// list is windowed and the row is appended after it.
+func TestModelPicker_FailedSwitchSaysWhyOnThePicker(t *testing.T) {
+	cases := []struct {
+		name string
+		msg  modelSwitchedMsg
+		want string
+	}{
+		{"host returned an error", modelSwitchedMsg{
+			id: "meta/llama-4", err: errors.New("provider unreachable"),
+		}, "switch failed: provider unreachable"},
+		{"host returned a nil Agent", modelSwitchedMsg{
+			id: "meta/llama-4",
+		}, "ModelSwapper returned nil Agent"},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			m, q := openModelPickerFixture(t)
+			q.switching = "meta/llama-4"
+			msg := tc.msg
+			msg.gen = m.sessionGen
+
+			out, _ := m.Update(msg)
+			m = out.(Model)
+
+			lines := modalContentLines(m.overlayStack.Render(100, &m))
+			at := lineWith(lines, tc.want)
+			if at < 0 {
+				t.Fatalf("the frame does not say why the switch failed:\n%s",
+					strings.Join(lines, "\n"))
+			}
+			if !strings.Contains(lines[at], GlyphWarn) {
+				t.Errorf("the reason row is missing its warn glyph: %q", lines[at])
+			}
+			// The list is still there under it — the row is an addition
+			// to the picker, not a replacement for it.
+			if last := lineWith(lines, "meta/llama-4"); last < 0 || last > at {
+				t.Errorf("the reason is not under the list:\n%s", strings.Join(lines, "\n"))
+			}
+			// And the transcript still carries its own copy: /model <id>
+			// reaches this same handler with no modal in the way.
+			snap := m.history.Snapshot()
+			if len(snap) == 0 || !strings.Contains(snap[len(snap)-1].Text, tc.want) {
+				t.Errorf("history = %+v, want a row mentioning %q", snap, tc.want)
+			}
+		})
+	}
+}
+
+// TestModelPicker_FailureRowClearsOnTheNextMove. The reason names a
+// model, so it stops being true the moment the operator is looking at a
+// different one — otherwise "provider unreachable" sits under a list
+// whose cursor has moved three rows on, reading as a fact about
+// whatever is selected now.
+func TestModelPicker_FailureRowClearsOnTheNextMove(t *testing.T) {
+	fail := func(t *testing.T) (Model, *modelPickerQuestion) {
+		t.Helper()
+		m, q := openModelPickerFixture(t)
+		q.switching = "meta/llama-4"
+		out, _ := m.Update(modelSwitchedMsg{
+			gen: m.sessionGen, id: "meta/llama-4", err: errors.New("provider unreachable"),
+		})
+		m = out.(Model)
+		if q.fail.rows() != 1 {
+			t.Fatal("the failed switch left no reason to clear")
+		}
+		return m, q
+	}
+
+	t.Run("a cursor step", func(t *testing.T) {
+		m, q := fail(t)
+		m.overlayStack.HandleKeyMsg(keyMsgFromStroke("down"), &m)
+		if q.fail.rows() != 0 {
+			t.Error("the reason survived a cursor move")
+		}
+	})
+
+	t.Run("a filter edit", func(t *testing.T) {
+		m, q := fail(t)
+		typeIntoPicker(&m, "g")
+		if q.fail.rows() != 0 {
+			t.Error("the reason survived the list being narrowed under it")
+		}
+	})
+
+	t.Run("esc does not, because the picker is going away", func(t *testing.T) {
+		m, q := fail(t)
+		m.overlayStack.HandleKeyMsg(keyMsgFromStroke("esc"), &m)
+		if m.overlayStack.HasDialogs() {
+			t.Fatal("esc did not close the picker")
+		}
+		if q.fail.rows() != 1 {
+			t.Error("esc cleared the reason on a picker nobody will render again")
+		}
+	})
+}
+
 // TestModelPicker_ReplyForSomeoneElsesSwitchLeavesThePicker: esc
 // mid-flight pops the picker, and the operator may have re-opened a
 // fresh one before the reply landed. The switch still applies — the
