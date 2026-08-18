@@ -597,8 +597,8 @@ func TestApplySwitchTarget_AnswersAPendingPrompt(t *testing.T) {
 		}
 		out, _ := m.Update(elicitRequestMsg{serverName: flow.serverName, req: flow.req})
 		m = out.(Model)
-		if m.pendingElicit == nil {
-			t.Fatal("pendingElicit not seeded; the arm proves nothing")
+		if m.openElicit() == nil {
+			t.Fatal("the elicit form is not open; the arm proves nothing")
 		}
 
 		m.applySwitchTarget(&SwitchTarget{Agent: &bareAgent{id: "new"}})
@@ -611,8 +611,8 @@ func TestApplySwitchTarget_AnswersAPendingPrompt(t *testing.T) {
 		case <-time.After(time.Second):
 			t.Fatal("Elicit still blocked 1s after the switch")
 		}
-		if m.pendingElicit != nil {
-			t.Errorf("pendingElicit should be nil after the switch")
+		if m.openElicit() != nil {
+			t.Errorf("the elicit form should be closed after the switch")
 		}
 	})
 }

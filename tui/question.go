@@ -39,6 +39,8 @@
 package tui
 
 import (
+	"time"
+
 	tea "charm.land/bubbletea/v2"
 )
 
@@ -196,6 +198,50 @@ type question interface {
 	Body(width, termHeight int, st Styles) string
 }
 
+// gracedQuestion is a question that can say which of its keystrokes
+// COMMIT — send something the operator cannot take back to whoever
+// asked. It is consulted only for questions opened by the agent, and
+// only inside the modalInputGrace window after they appeared (issue
+// #95, docs/design-question-dialogs.md §9).
+//
+// The extension is opt-in and the default is the safe one: an
+// agent-opened question that does not implement this has EVERY
+// keystroke held for the window, because a question whose author has
+// not said which keys are irreversible is a question we cannot
+// assume any of them are not. Declining to implement it costs a
+// third of a second of inertness; guessing wrong costs a grant the
+// operator never made.
+//
+// It takes the keystroke rather than the normalized stroke string —
+// departing from §9.2, which spelled it Commits(stroke string) — so
+// the seam has one keyboard vocabulary. A question already reads
+// tea.KeyPressMsg in Key, and two representations of "which key" is
+// how the two answers drift apart on modified strokes and pastes.
+type gracedQuestion interface {
+	question
+
+	// Commits reports whether msg would end the question with an
+	// answer the operator cannot retract.
+	Commits(msg tea.KeyPressMsg) bool
+}
+
+// scrollQuestion is a question whose body scrolls by LINES rather
+// than by cursor rows — the elicit form, whose fields can outrun the
+// terminal. It is the question-side counterpart of ScrollDialog, and
+// it exists now rather than in stage 1 because the elicit form is its
+// first implementor: an interface with no implementor is not a seam,
+// it is a guess.
+//
+// Questions without it keep the pickers' behaviour, one selection
+// step per wheel tick. See the comment at the foot of this file.
+type scrollQuestion interface {
+	question
+
+	// ScrollBy moves the body by delta rows — negative is toward the
+	// top. Clamping is the question's business.
+	ScrollBy(delta int)
+}
+
 // cursorQuestion is a question with a text caret — anything with a
 // filter row or an input box. Mirrors today's cursorDialog, minus the
 // *Model argument, which was the only thing keeping that interface
@@ -233,6 +279,13 @@ type resolver func(a answer, m *Model) tea.Cmd
 type askedQuestion struct {
 	q question
 	r resolver
+	// shownAt is the grace stamp, and it is zero for a question the
+	// OPERATOR opened. Typing "/theme", pressing enter and then typing
+	// again is one continuous act; there is no buffered input to
+	// protect against because the operator caused the modal on
+	// purpose. A question the AGENT opened gets a stamp — see
+	// askOrigin and held.
+	shownAt time.Time
 	// resolved is the exactly-once latch. A question can be answered
 	// by a keystroke and then swept by resolveAll in the same frame
 	// (esc on the last modal while a session switch is landing), and
@@ -240,6 +293,27 @@ type askedQuestion struct {
 	// back a theme the operator just committed.
 	resolved bool
 }
+
+// askOrigin says who caused a question to appear, and it is the only
+// input to the grace window (issue #95).
+//
+// It is a required parameter of ask rather than a default, because
+// the two answers are not interchangeable and neither is the obvious
+// one: a call site that has not thought about it is exactly the call
+// site that would get it wrong, and the failure mode of the wrong
+// answer — an agent-opened modal answered by whatever the operator
+// happened to be typing — is silent.
+type askOrigin uint8
+
+const (
+	// askOperator is a question the operator asked for: a slash
+	// command, a keybinding, a picker opened from another picker.
+	askOperator askOrigin = iota
+	// askAgent is a question that arrived unbidden — an MCP
+	// elicitation, a permission prompt — and therefore lands in front
+	// of an operator who may be mid-word.
+	askAgent
+)
 
 // ask pushes a question onto the overlay stack together with the
 // resolver that will receive its answer. It is Open for questions;
@@ -250,8 +324,12 @@ type askedQuestion struct {
 // parameters are: an exported Ask a host cannot name the arguments of
 // would be API surface with no caller. Exporting the family is
 // posture B in the design, and it is not stage 1's to decide.
-func (o *Overlay) ask(q question, r resolver) {
-	o.Open(&askedQuestion{q: q, r: r})
+func (o *Overlay) ask(q question, origin askOrigin, r resolver) {
+	aq := &askedQuestion{q: q, r: r}
+	if origin == askAgent {
+		aq.shownAt = time.Now()
+	}
+	o.Open(aq)
 }
 
 // resolveAll answers every outstanding question with reason and
@@ -349,6 +427,13 @@ func (a *askedQuestion) HandleKey(stroke string, m *Model) DialogAction {
 // exactly what a filter row or an input box needs and a stroke string
 // drops both.
 func (a *askedQuestion) HandleKeyMsg(msg tea.KeyPressMsg, m *Model) DialogAction {
+	if a.held(msg) {
+		// Swallowed rather than forwarded anywhere. Consumed is what
+		// every keystroke into an open modal returns, and it is also
+		// what keeps the held stroke from falling through to the
+		// composer behind the modal.
+		return DialogAction{Consumed: true}
+	}
 	ans, cmd := a.q.Key(msg)
 	if ans == nil {
 		return DialogAction{Consumed: true, Cmd: cmd}
@@ -356,6 +441,53 @@ func (a *askedQuestion) HandleKeyMsg(msg tea.KeyPressMsg, m *Model) DialogAction
 	return DialogAction{Consumed: true, Close: true, Cmd: tea.Batch(cmd, a.resolve(ans, m))}
 }
 
+// held reports whether the grace window should swallow msg — the one
+// place the window is enforced, for every question that will ever
+// have one (issue #95, docs/design-question-dialogs.md §9).
+//
+// Esc is exempt, always and at this level rather than per question.
+// Esc dismisses, which is the fail-safe direction for every modal the
+// agent can open: a buffered esc costs at most a re-ask, while a
+// buffered esc that is HELD leaves the operator pressing a key that
+// visibly does nothing on a modal they are trying to get out of.
+func (a *askedQuestion) held(msg tea.KeyPressMsg) bool {
+	if !withinGrace(a.shownAt) {
+		return false
+	}
+	if msg.String() == "esc" {
+		return false
+	}
+	gq, ok := a.q.(gracedQuestion)
+	if !ok {
+		return true
+	}
+	return gq.Commits(msg)
+}
+
+// scrollBy hands a wheel tick to a scrollQuestion, reporting whether
+// the question wanted it. Overlay.HandleWheel asks here rather than
+// type-asserting the adapter to ScrollDialog, because the adapter
+// wraps every question and an unconditional implementation would give
+// the pickers line scrolling — see the comment at the foot of this
+// file for why that is wrong for them.
+func (a *askedQuestion) scrollBy(delta int) bool {
+	sq, ok := a.q.(scrollQuestion)
+	if !ok {
+		return false
+	}
+	sq.ScrollBy(delta)
+	return true
+}
+
+// Render composes the question's three strings into the shared modal
+// chrome.
+//
+// The field order in the literal below is load-bearing: Go evaluates
+// the function calls in a composite literal in lexical order, so Body
+// runs before Footer. A question whose footer reports on something
+// Body measured — the elicit form's scroll hint is the one today —
+// depends on that, and swapping the two lines to read more nicely
+// would report last frame's answer.
 func (a *askedQuestion) Render(totalWidth int, m *Model) string {
 	width := a.q.Width(totalWidth)
 	return RenderContext{
@@ -385,10 +517,11 @@ func (a *askedQuestion) DialogCursor(width int, _ *Model) *tea.Cursor {
 // routes a wheel tick to ScrollBy when the front dialog has it and
 // otherwise synthesizes one up/down keystroke, and the second is the
 // right behaviour for a list: a wheel nudge that jumps three rows
-// past the one you wanted is worse than no wheel at all. A scrolling
-// question — the permission prompt with a long diff — arrives in
-// stage 3 and brings the scrollQuestion extension with it, since an
-// interface with no implementor is not a seam, it is a guess.
+// past the one you wanted is worse than no wheel at all. Since the
+// adapter wraps every question, implementing the interface here would
+// take that away from the pickers wholesale — so HandleWheel asks
+// scrollBy instead, and only a question that opted into
+// scrollQuestion gets lines.
 var _ Dialog = (*askedQuestion)(nil)
 var _ KeyMsgDialog = (*askedQuestion)(nil)
 var _ cursorDialog = (*askedQuestion)(nil)

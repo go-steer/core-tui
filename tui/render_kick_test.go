@@ -48,7 +48,7 @@ func TestForceRenderMsg_NoOpHandler(t *testing.T) {
 	if got.history.Len() != historyBefore {
 		t.Errorf("forceRenderMsg should not append history, got %d → %d", historyBefore, got.history.Len())
 	}
-	if got.pendingPermission != nil || got.pendingElicit != nil {
+	if got.pendingPermission != nil || got.openElicit() != nil {
 		t.Errorf("forceRenderMsg should not touch modal state")
 	}
 }
@@ -92,8 +92,8 @@ func TestElicitRequestMsg_ReturnsRenderKickCmd(t *testing.T) {
 		},
 	})
 	got := out.(Model)
-	if got.pendingElicit == nil {
-		t.Fatal("expected pendingElicit set")
+	if got.openElicit() == nil {
+		t.Fatal("expected the elicit form on the overlay stack")
 	}
 	if cmd == nil {
 		t.Fatal("expected non-nil Cmd (render kick), got nil")

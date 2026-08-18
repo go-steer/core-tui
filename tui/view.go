@@ -1262,12 +1262,6 @@ func (m Model) footerHint() string {
 		}
 		keys = append(keys, "t allow tool", "a allow always", "esc deny")
 		return "Permission required" + sep + keyLegend(keys...)
-	case m.pendingElicit != nil:
-		if m.pendingElicit.Mode == ElicitURLMode {
-			return "MCP elicitation" + sep + keyLegend("a/enter accept", "n decline", "esc cancel")
-		}
-		return "MCP elicitation" + sep + keyLegend(
-			"tab next field", "enter submit", "ctrl+d decline", "esc cancel")
 	case m.confirmingClear:
 		return "Confirm clear?" + sep + "type y / yes to wipe" + sep + "anything else cancels"
 	case m.sideAnswer != nil:
@@ -1275,6 +1269,16 @@ func (m Model) footerHint() string {
 			return "Side answer" + sep + "↑↓ scroll" + sep + "enter/space/esc dismiss"
 		}
 		return "Side answer" + sep + "enter/space/esc dismiss"
+	case m.openElicit() != nil:
+		// Below the side answer, matching the z-order it moved to when
+		// the form became a question (#164 stage 3): the overlay stack
+		// is the bottom-most modal layer, and the legend has to name
+		// the surface the operator can actually see.
+		if m.openElicit().req.Mode == ElicitURLMode {
+			return "MCP elicitation" + sep + keyLegend("a/enter accept", "n decline", "esc cancel")
+		}
+		return "MCP elicitation" + sep + keyLegend(
+			"tab next field", "enter submit", "ctrl+d decline", "esc cancel")
 	case m.focus == focusTranscript && m.copyNotice != "":
 		// A copy leaves the frame exactly as it found it, so the only
 		// evidence it happened is this line (issue #153). It takes the
@@ -1355,21 +1359,20 @@ func (m Model) renderTurnFooter(msg Message) string {
 
 // modalFrame returns the block View composites over the frame, and
 // whether there is one at all. The cascade is the modal z-order:
-// permission overlay, elicit, the embedded huh form, the side answer,
-// then whatever is on the Overlay stack.
+// permission overlay, the embedded huh form, the side answer, then
+// whatever is on the Overlay stack — which since #164 stage 3
+// includes the elicit form.
 //
-// It is a method rather than five arms inline in View because every
+// It is a method rather than four arms inline in View because every
 // modal surface has to wear the same edge (issue #199), and this is
-// the one place all five are named. Anything that has to reason about
+// the one place all four are named. Anything that has to reason about
 // "the modal, whichever one is up" — the caret path, the frame
-// invariants — asks here instead of restating the cascade, so a sixth
+// invariants — asks here instead of restating the cascade, so a fifth
 // surface cannot be added to View and quietly miss the treatment.
 func (m *Model) modalFrame() (string, bool) {
 	switch {
 	case m.pendingPermission != nil && m.opts.PermissionLayout == PermissionOverlay:
 		return m.renderPermissionModal(), true
-	case m.pendingElicit != nil:
-		return m.renderElicitModal(), true
 	case m.pendingForm != nil:
 		// Embedded huh.Form (e.g. /pricing set) takes priority
 		// over all other overlays — its keystrokes are routed
@@ -1686,169 +1689,6 @@ func renderArgsDetail(text string, width int, styles Styles) string {
 		return ""
 	}
 	return styles.Muted.Render(wordWrap(text, width))
-}
-
-// elicitModalWidth is the elicit modal's column count: 72 clamped to
-// the terminal, floored at 30. Shared with the cursor path
-// (cursor.go), which has to lay out the focused field row at exactly
-// the width the renderer used.
-func (m Model) elicitModalWidth() int {
-	width := 72
-	if m.width > 0 && width > m.width-4 {
-		width = m.width - 4
-	}
-	if width < 30 {
-		width = 30
-	}
-	return width
-}
-
-// renderElicitModal renders an MCP elicit request as either a form
-// (per-field) or URL action row (R-ELIC-1 / R-ELIC-2).
-func (m *Model) renderElicitModal() string {
-	req := m.pendingElicit
-	if req == nil {
-		return ""
-	}
-	width := m.elicitModalWidth()
-	inner := modalInnerWidth(width)
-
-	title := req.Title
-	if title == "" {
-		title = "MCP request"
-	}
-	if m.pendingElicitSrv != "" {
-		title = m.pendingElicitSrv + " " + GlyphSeparator + " " + title
-	}
-	titleBar := m.styles.ModalTitle.Render(title)
-	titleRule := m.styles.ModalBorder.Render(strings.Repeat(GlyphRule, nonNeg(inner-lipgloss.Width(titleBar)-1)))
-	titleLine := titleBar + " " + titleRule
-
-	var (
-		bodyLines []string
-		focusLine = -1 // -1 = no cursor to keep on screen (URL mode)
-		footer    string
-	)
-	if req.Mode == ElicitURLMode {
-		body := m.styles.Accent.Render(req.URL)
-		if req.Description != "" {
-			body = m.styles.Muted.Render(req.Description) + "\n\n" + body
-		}
-		bodyLines = strings.Split(body, "\n")
-		footer = keyLegend("a / enter accept", "n decline", "esc cancel")
-	} else {
-		bodyLines, focusLine = m.elicitFormLines(modalBodyWidth(width))
-		footer = keyLegend(
-			"tab next", "shift+tab prev", "space toggle", "←/→ enum",
-			"enter submit", "ctrl+d decline", "esc cancel")
-	}
-
-	// Window the field list. A form with more fields than the
-	// terminal has rows used to bury everything past the fold — and
-	// Tab could walk the focus down into the invisible part. The
-	// offset follows the focused field (listWindow) while arrow /
-	// page keys and the wheel move it directly.
-	chrome := modalChromeRows - 1 + wrappedRows(footer, inner)
-	view := modalBodyHeight(m.height, chrome)
-	sc := m.scroll()
-	sc.measure(len(bodyLines), view)
-	if focusLine >= 0 {
-		sc.follow(focusLine)
-	}
-	body := strings.Join(scrollView(m.styles, bodyLines, modalBodyWidth(width), view, sc.offset), "\n")
-	if sc.overflows() {
-		footer = scrollHint(true) + " " + GlyphSeparator + " " + footer
-	}
-
-	footerRule := m.styles.ModalBorder.Render(strings.Repeat(GlyphRule, inner))
-	footerLine := m.styles.ModalFooter.Render(footer)
-	content := fitModalContent(width, m.height, titleLine, body, footerRule, footerLine)
-	return modalSurface(m.styles, content, width, m.height, 0)
-}
-
-// elicitFormLines renders the form's fields, one per terminal row
-// with the focused row highlighted in the accent color, and returns
-// the row index the focused field starts on. The caller needs both to
-// window a form taller than the modal while keeping the Tab cursor on
-// screen — a field row can be two lines when it carries a
-// description, so "field index" and "row index" differ.
-func (m *Model) elicitFormLines(width int) (lines []string, focus int) {
-	req := m.pendingElicit
-	if req == nil {
-		return nil, 0
-	}
-	for i, f := range req.Fields {
-		focused := i == m.elicitFieldIdx
-		if focused {
-			focus = len(lines)
-		}
-		lines = append(lines, strings.Split(m.renderElicitField(f, focused, width), "\n")...)
-	}
-	return lines, focus
-}
-
-// elicitFieldRow lays out one "  label:           value" form row.
-// Factored out of renderElicitField so the cursor path (cursor.go)
-// can measure the prefix — everything left of the value — with the
-// exact padding the renderer applies, instead of re-deriving the
-// column arithmetic and drifting from it. The focused row swaps the
-// two-space lead for "> ", which is the same width.
-func elicitFieldRow(label, value string) string {
-	return fmt.Sprintf("  %-16s %s", label, value)
-}
-
-// renderElicitField renders one field row (label : value), styling
-// the focused one accent-bold. Width is reserved for future
-// per-field truncation; unused today but kept on the signature so
-// callers don't have to refactor when it lands.
-func (m *Model) renderElicitField(f ElicitField, focused bool, _ int) string {
-	label := f.Name
-	if f.Required {
-		label += "*"
-	}
-	value := m.formatElicitValue(f)
-	row := elicitFieldRow(label+":", value)
-	rendered := m.styles.AssistantText.Render(row)
-	if focused {
-		rendered = m.styles.Accent.Render("> " + strings.TrimPrefix(row, "  "))
-	}
-	// Per-field description (when set) renders on the line below
-	// the value in muted text. Parity with internal/tui:191-195
-	// so MCP elicits with explanatory help text actually surface
-	// it to the operator.
-	if f.Description != "" {
-		desc := m.styles.Muted.Render("    " + strings.ReplaceAll(f.Description, "\n", " "))
-		return rendered + "\n" + desc
-	}
-	return rendered
-}
-
-// formatElicitValue renders the current value of a field for the
-// modal — booleans as checkboxes, enums with arrow hints, strings/
-// numbers as the literal value or a placeholder.
-func (m *Model) formatElicitValue(f ElicitField) string {
-	switch f.Type {
-	case ElicitFieldBoolean:
-		on, _ := m.elicitValues[f.Name].(bool)
-		if on {
-			return "[✓]"
-		}
-		return "[ ]"
-	case ElicitFieldEnum:
-		v, _ := m.elicitValues[f.Name].(string)
-		if v == "" && len(f.EnumChoices) > 0 {
-			v = f.EnumChoices[0]
-		}
-		return "‹ " + v + " ›"
-	case ElicitFieldString, ElicitFieldNumber, ElicitFieldInteger:
-	}
-	// The typed-text field kinds, and anything outside the declared
-	// set, render the literal value.
-	v, _ := m.elicitValues[f.Name].(string)
-	if v == "" {
-		return m.styles.Muted.Render("(empty)")
-	}
-	return v
 }
 
 // nonNeg returns x when x > 0, else 0. Used for the modal-width

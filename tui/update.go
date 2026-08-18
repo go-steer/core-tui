@@ -20,7 +20,6 @@ import (
 	"strconv"
 	"strings"
 	"time"
-	"unicode"
 
 	"charm.land/bubbles/v2/textarea"
 	tea "charm.land/bubbletea/v2"
@@ -1144,17 +1143,9 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			m.refreshAndScroll()
 			return m, tea.Batch(m.elicitListener(), forceRenderTick())
 		}
-		m.pendingElicit = &r
-		m.elicitShownAt = time.Now()
-		m.scroll().reset()
-		m.pendingElicitSrv = msg.serverName
-		m.elicitFieldIdx = 0
-		m.elicitValues = make(map[string]any, len(r.Fields))
-		for _, f := range r.Fields {
-			if f.Default != nil {
-				m.elicitValues[f.Name] = f.Default
-			}
-		}
+		// askAgent, not askOperator: the request arrived unbidden, so
+		// its committing keys stay inert for modalInputGrace (#95).
+		m.overlayStack.ask(newElicitQuestion(msg.serverName, r), askAgent, elicitResolver)
 		m.refreshViewport()
 		// Issue #24: same render-kick rationale as permissionRequestMsg
 		// — hosts that deliver elicit requests from a remote bridge
@@ -1257,9 +1248,6 @@ func (m *Model) handleWheel(msg tea.MouseWheelMsg) (tea.Cmd, bool) {
 		}
 		m.scroll().by(delta)
 		return nil, true
-	case m.pendingElicit != nil:
-		m.scroll().by(delta)
-		return nil, true
 	case m.sideAnswer != nil:
 		m.scroll().by(delta)
 		return nil, true
@@ -1293,8 +1281,10 @@ const modalInputGrace = 300 * time.Millisecond
 // withinGrace reports whether a modal stamped at shownAt is still
 // inside its no-commit window. A zero stamp is treated as expired so
 // a directly-constructed Model (tests, hosts poking state) behaves
-// exactly as it did before the window existed.
-func (m Model) withinGrace(shownAt time.Time) bool {
+// exactly as it did before the window existed — and so that a
+// question the OPERATOR opened, which carries no stamp, is never held
+// (see askOrigin).
+func withinGrace(shownAt time.Time) bool {
 	return !shownAt.IsZero() && time.Since(shownAt) < modalInputGrace
 }
 
@@ -1327,10 +1317,6 @@ func (m Model) handleKey(msg tea.KeyPressMsg) (tea.Model, tea.Cmd) {
 		if m.pendingPermission != nil {
 			m.dispatchPermission(DecisionDeny)
 			return m, m.promptListener()
-		}
-		if m.pendingElicit != nil {
-			m.dispatchElicit(ElicitResult{Action: ElicitActionCancel})
-			return m, m.elicitListener()
 		}
 		if m.sideAnswer != nil {
 			m.sideAnswer = nil
@@ -1428,7 +1414,7 @@ func (m Model) handleKey(msg tea.KeyPressMsg) (tea.Model, tea.Cmd) {
 	// which is the fail-safe direction, and a buffered Esc costs at
 	// most a re-ask.
 	if m.pendingPermission != nil {
-		if m.withinGrace(m.permissionShownAt) && isPermissionDecisionKey(stroke) {
+		if withinGrace(m.permissionShownAt) && isPermissionDecisionKey(stroke) {
 			var cmd tea.Cmd
 			m.input, cmd = m.input.Update(msg)
 			if m.syncInputHeight() {
@@ -1468,18 +1454,6 @@ func (m Model) handleKey(msg tea.KeyPressMsg) (tea.Model, tea.Cmd) {
 			m.scroll().applyStroke(stroke)
 		}
 		// Swallow any other key — modal is exclusive while open.
-		return m, nil
-	}
-
-	// Elicit modal — Tab/Shift+Tab nav, Enter submit, ctrl+d decline,
-	// Space toggle bool/enum, and printable chars feed the focused
-	// string/number field. Decline is a control stroke in form mode
-	// and a letter in URL mode for the same reason: in a form every
-	// printable key belongs to whichever field has the keyboard.
-	if m.pendingElicit != nil {
-		if cmd := m.handleElicitKey(stroke); cmd != nil {
-			return m, cmd
-		}
 		return m, nil
 	}
 
@@ -2717,14 +2691,15 @@ func (m *Model) applySwitchTarget(tgt *SwitchTarget) tea.Cmd {
 	if m.pendingPermission != nil {
 		m.dispatchPermission(DecisionDeny)
 	}
-	if m.pendingElicit != nil {
-		m.dispatchElicit(ElicitResult{Action: ElicitActionCancel})
-	}
+	// The elicit form is a question on the overlay stack, so it is
+	// resolved by id rather than cleared: resolveAll would take the
+	// pickers with it, and step 2 keeps those on purpose so a picker
+	// can close itself after returning the switch Cmd. Superseded
+	// rather than escape — the operator did not dismiss anything, and
+	// the resolver reads the reason to decide NOT to re-arm the elicit
+	// listener, which step 8 below re-arms for the new session.
+	m.overlayStack.resolve(elicitDialogID, dismissed{Reason: dismissSuperseded}, m)
 	m.pendingPermission = nil
-	m.pendingElicit = nil
-	m.pendingElicitSrv = ""
-	m.elicitFieldIdx = 0
-	m.elicitValues = nil
 	m.sideAnswer = nil
 	m.scroll().reset()
 	m.pendingForm = nil
@@ -2995,184 +2970,7 @@ func (m *Model) dispatchElicitErr(r ElicitResult, err error) {
 	if e, ok := m.opts.Elicitor.(*elicitor); ok {
 		e.dispatchResult(r, err)
 	}
-	m.pendingElicit = nil
-	m.pendingElicitSrv = ""
-	m.elicitFieldIdx = 0
-	m.elicitValues = nil
 	m.refreshViewport()
-}
-
-// handleElicitKey routes a keystroke to the elicit form's nav /
-// per-field-edit handlers (R-ELIC-2). Returns the Cmd to issue
-// after the keystroke (the re-armed elicit listener when a result
-// is dispatched, otherwise nil for in-form moves).
-func (m *Model) handleElicitKey(stroke string) tea.Cmd {
-	req := m.pendingElicit
-	// Arrow / page keys scroll the modal body first — a form with
-	// more fields than the terminal has rows was unreachable below
-	// the fold. None of the form bindings below use them (field nav
-	// is Tab / Shift+Tab, enum cycling is left/right), and printable
-	// input is single-rune, so nothing is shadowed.
-	if m.scroll().applyStroke(stroke) {
-		m.refreshViewport()
-		return func() tea.Msg { return nil }
-	}
-	// Same asynchronous-arrival problem as the permission modal
-	// (issue #95): hold the keys that COMMIT a result — URL-mode
-	// accept / decline and form submit — inert for modalInputGrace.
-	// Field editing and navigation stay live throughout: they're
-	// visible, reversible, and nothing leaves the TUI until a commit.
-	if m.withinGrace(m.elicitShownAt) && isElicitCommitKey(*req, stroke) {
-		return func() tea.Msg { return nil }
-	}
-	if req.Mode == ElicitURLMode {
-		switch stroke {
-		case "a", "enter":
-			m.dispatchElicit(ElicitResult{Action: ElicitActionSubmit})
-			return m.elicitListener()
-		case "n":
-			m.dispatchElicit(ElicitResult{Action: ElicitActionDecline})
-			return m.elicitListener()
-		}
-		// 'o' would open the URL in a browser — deferred to a
-		// later slice (we don't depend on os/exec yet).
-		return func() tea.Msg { return nil } // swallow other keys
-	}
-
-	// Form mode.
-	switch stroke {
-	case "enter":
-		// Validate required fields; on success submit.
-		for _, f := range req.Fields {
-			if !f.Required {
-				continue
-			}
-			v, ok := m.elicitValues[f.Name]
-			if !ok || isElicitEmpty(v) {
-				// Move cursor to the missing field; don't submit.
-				for i, ff := range req.Fields {
-					if ff.Name == f.Name {
-						m.elicitFieldIdx = i
-						break
-					}
-				}
-				m.refreshViewport()
-				return func() tea.Msg { return nil }
-			}
-		}
-		m.dispatchElicit(ElicitResult{Action: ElicitActionSubmit, Values: m.elicitValues})
-		return m.elicitListener()
-	case "ctrl+d":
-		// Decline, not cancel: the operator read the request and
-		// answered no. Esc a few lines up in Update is the other
-		// answer — dismissed without deciding — and a server may
-		// treat them differently, so the form needs both (issue
-		// #209). No validation runs: a decline is a complete answer
-		// whatever the fields hold, and the values are dropped
-		// rather than sent, because nothing in them was agreed to.
-		m.dispatchElicit(ElicitResult{Action: ElicitActionDecline})
-		return m.elicitListener()
-	case "tab":
-		m.elicitFieldIdx = (m.elicitFieldIdx + 1) % len(req.Fields)
-		m.refreshViewport()
-		return func() tea.Msg { return nil }
-	case "shift+tab":
-		m.elicitFieldIdx = (m.elicitFieldIdx - 1 + len(req.Fields)) % len(req.Fields)
-		m.refreshViewport()
-		return func() tea.Msg { return nil }
-	case "space":
-		f := req.Fields[m.elicitFieldIdx]
-		if f.Type == ElicitFieldBoolean {
-			cur, _ := m.elicitValues[f.Name].(bool)
-			m.elicitValues[f.Name] = !cur
-			m.refreshViewport()
-			return func() tea.Msg { return nil }
-		}
-	case "left", "right":
-		f := req.Fields[m.elicitFieldIdx]
-		if f.Type == ElicitFieldEnum && len(f.EnumChoices) > 0 {
-			idx := indexOfEnum(f.EnumChoices, m.elicitValues[f.Name])
-			delta := 1
-			if stroke == "left" {
-				delta = -1
-			}
-			idx = (idx + delta + len(f.EnumChoices)) % len(f.EnumChoices)
-			m.elicitValues[f.Name] = f.EnumChoices[idx]
-			m.refreshViewport()
-			return func() tea.Msg { return nil }
-		}
-	case "backspace":
-		f := req.Fields[m.elicitFieldIdx]
-		if f.Type == ElicitFieldString {
-			cur, _ := m.elicitValues[f.Name].(string)
-			if cur != "" {
-				// Delete one rune, not one byte: slicing a string by
-				// byte cuts a multi-byte encoding in half and leaves
-				// invalid UTF-8 in m.elicitValues, which then flows
-				// into the frame AND into the ElicitResult the host
-				// receives.
-				r := []rune(cur)
-				m.elicitValues[f.Name] = string(r[:len(r)-1])
-				m.refreshViewport()
-				return func() tea.Msg { return nil }
-			}
-		}
-	}
-	// Printable single-rune keystrokes — append to string fields.
-	// Count runes, not bytes: every printable character outside ASCII
-	// is 2-4 bytes, so a byte-length guard silently drops é / 日 / 😀
-	// and the form is unusable for anything but ASCII. Multi-rune
-	// named strokes ("ctrl+b", "enter") still fail the count, and
-	// IsPrint keeps a lone control rune out of the value.
-	if r := []rune(stroke); len(r) == 1 && unicode.IsPrint(r[0]) {
-		f := req.Fields[m.elicitFieldIdx]
-		if f.Type == ElicitFieldString || f.Type == ElicitFieldNumber || f.Type == ElicitFieldInteger {
-			cur, _ := m.elicitValues[f.Name].(string)
-			m.elicitValues[f.Name] = cur + stroke
-			m.refreshViewport()
-			return func() tea.Msg { return nil }
-		}
-	}
-	return func() tea.Msg { return nil }
-}
-
-// isElicitCommitKey reports whether a keystroke sends a result back
-// to the host — the elicit modal's equivalent of a permission
-// decision. URL mode commits on accept / submit / decline; form mode
-// commits on Enter and on the ctrl+d decline (issue #209) — both send
-// an answer to the host, which is the whole test.
-func isElicitCommitKey(req ElicitRequest, stroke string) bool {
-	if req.Mode == ElicitURLMode {
-		return stroke == "a" || stroke == "enter" || stroke == "n"
-	}
-	return stroke == "enter" || stroke == "ctrl+d"
-}
-
-// isElicitEmpty reports whether v is the zero value for its type
-// — used by Enter's submit-time validation against required fields.
-func isElicitEmpty(v any) bool {
-	switch t := v.(type) {
-	case nil:
-		return true
-	case string:
-		return t == ""
-	case bool:
-		return false // every bool is a valid choice
-	default:
-		return false
-	}
-}
-
-// indexOfEnum returns the index of v in choices, defaulting to 0
-// when v is nil or not found. Used by enum left/right cycling.
-func indexOfEnum(choices []string, v any) int {
-	s, _ := v.(string)
-	for i, c := range choices {
-		if c == s {
-			return i
-		}
-	}
-	return 0
 }
 
 // maybeDrainQueue auto-starts the next Queued prompt as a fresh turn

@@ -220,27 +220,12 @@ type Model struct {
 	pendingPermission *PermissionRequest
 	permissionShownAt time.Time
 
-	// pendingElicit is the active ElicitRequest awaiting form
-	// submission / decline / cancel (R-ELIC-1). Nil = no modal
-	// open. Per-field cursor + values tracked in elicitFieldIdx +
-	// elicitValues. Key handler dispatches back via
-	// opts.Elicitor.dispatchResult.
-	//
-	// elicitShownAt is the permission modal's grace stamp for the
-	// same reason: the keys that dispatch a result (submit / accept /
-	// decline) stay inert for modalInputGrace so buffered input can't
-	// answer the form before the operator has seen it.
-	pendingElicit    *ElicitRequest
-	pendingElicitSrv string         // server name for the title bar
-	elicitFieldIdx   int            // currently-focused field (Tab/Shift+Tab nav)
-	elicitValues     map[string]any // in-progress form values
-	elicitShownAt    time.Time
-
 	// modalScroll is the shared scroll offset for the modals that
 	// live inline on the Model rather than on the Overlay stack —
-	// the permission overlay, the elicit form, and the /btw side
-	// answer. Only one of them renders at a time (View's precedence
-	// cascade), so one offset is enough; each open resets it.
+	// the permission overlay and the /btw side answer. Only one of
+	// them renders at a time (View's precedence cascade), so one
+	// offset is enough; each open resets it. Questions on the stack
+	// own their own scrollState instead; see elicitQuestion.sc.
 	//
 	// It's a POINTER because View() has a value receiver: the render
 	// path measures the body and writes the geometry back here so

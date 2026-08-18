@@ -1090,6 +1090,29 @@ R-PERM-8 and R-ELIC-4 then collapse into one requirement about
 agent-opened questions. That is a `requirements.md` edit, not an API
 change.
 
+**What shipped, 2026-08-18** (with the elicit form, per §12). Three
+deviations from the sketch above, each one the safer reading:
+
+- `Commits` takes the `tea.KeyPressMsg`, not the stroke string. A
+  question already reads keystrokes in `Key`, and two representations
+  of "which key" is how the gate and the handler drift apart on
+  modified strokes and pastes.
+- It is an **optional extension** (`gracedQuestion`) rather than a
+  method on `question` with a base implementation, because there is no
+  embedded base to put the default in — §7.7 settled that the base
+  provides a frame, not a renderer, and no question embeds anything
+  today.
+- The default is therefore inverted from the sketch. A question with
+  no `Commits` is not treated as committing nothing; if it was opened
+  by the agent, **every** keystroke is held for the window. A widget
+  whose author has not said which of its keys are irreversible is one
+  we cannot assume any of them are not. The cost of the default is a
+  third of a second of inertness; the cost of guessing the other way
+  is an answer the operator never gave.
+
+`esc` is exempt at the seam, as specified, and unconditionally — the
+exemption does not depend on the extension being implemented.
+
 ---
 
 ## 10. API impact
@@ -1436,6 +1459,20 @@ deletes `handleElicitKey` (130 lines), the permission arm of
 unreachable-decline bug in §1.4 by construction, since `declined`
 becomes an option row.
 
+*The elicit form landed 2026-08-18* (`tui/question_elicit.go`), and it
+took the stage-2 machinery with it: `askOrigin`, the `gracedQuestion`
+extension and the one grace gate in `askedQuestion.HandleKeyMsg`
+(§9.2), plus the `scrollQuestion` extension stage 1 declined to
+declare without an implementor. Five `Model` fields and the three
+scattered halves of the form — the key handler in `update.go`, the
+renderer in `view.go`, the caret in `cursor.go` — are one type. Two
+behaviour changes came with it, both deliberate and both in the
+CHANGELOG: the form now sits **below** the `/btw` side answer in the
+z-order, which is what the key routing already believed, and `space`
+types a space into a text field, which it never did through the real
+key path. The permission prompt is the last one left, and it goes last
+on purpose (§14 Q4).
+
 **Stage 3 is the stage that must land before the freeze**, because it
 is the one that removes `*Model` from the widget signatures and
 therefore the one that unblocks `docs/api-surface.md` §3.2's unexport
@@ -1643,3 +1680,21 @@ that does not exist.
   `dismissed{dismissSuperseded}`. Failed attaches leave the list up, as
   failed model switches now do; the two pickers behaving differently on
   the same failure would be worse than either choice on its own.
+- 2026-08-18 — the elicit form migrated, and brought stage 2 with it.
+  `askOrigin` and `gracedQuestion` are on the seam and the gate is in
+  `askedQuestion.HandleKeyMsg`; the three deviations from §9.2's sketch
+  are recorded there, the load-bearing one being that a question which
+  does not declare its committing keys has all of them held rather than
+  none. `scrollQuestion` is declared now that it has an implementor,
+  and `Overlay.HandleWheel` consults it through `askedQuestion.scrollBy`
+  rather than the adapter implementing `ScrollDialog` — the adapter
+  wraps every question, so implementing it there would take one-step
+  wheel scrolling away from the pickers wholesale.
+- 2026-08-18 — the elicit form's dismissal on a session switch goes
+  through `Overlay.resolve(elicitDialogID, …)` rather than
+  `resolveAll`, for the reason §12's stage-2 note gives: the stack
+  survives a switch on purpose. `dismissSuperseded` and
+  `dismissShutdown` are also the two reasons whose resolver returns no
+  `Cmd`, because `applySwitchTarget`'s step 8 already re-arms every
+  listener and a second armed elicit listener is a second consumer of
+  one channel.

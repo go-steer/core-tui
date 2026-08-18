@@ -254,6 +254,7 @@ func (m Model) dispatchBuiltinSlash(name, args string) (bool, tea.Model, tea.Cmd
 			if !m.overlayStack.HasID(themePickerDialogID) {
 				m.overlayStack.ask(
 					newThemePickerQuestion(BuiltinThemes(), m.themeName),
+					askOperator,
 					themePickerResolver(m.themeName),
 				)
 			}

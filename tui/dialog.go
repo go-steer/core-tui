@@ -18,11 +18,13 @@
 // instead of two new fields + a new case in the Esc cascade + a
 // new case in renderTUI's z-order switch.
 //
-// Permission and Elicit modals still use their inline state in
-// Model (pendingPermission / pendingElicit) because they're tied
-// to the channel-based Prompter / Elicitor lifecycle that needs
-// special dispatch semantics. New modals (model picker today;
-// settings / debug panels future) ride the Overlay.
+// The permission prompt is the last modal still using inline state
+// in Model (pendingPermission), and it goes next — the elicit form
+// left in #164 stage 3 and rides the Overlay as a question
+// (question_elicit.go), which is where the channel-based
+// Prompter / Elicitor lifecycle turned out to fit after all: the
+// dispatch happens in the question's resolver rather than in the
+// widget. Everything else is here already.
 
 package tui
 

@@ -181,7 +181,7 @@ func (m *Model) openSessionPicker() tea.Cmd {
 	}
 	_, wired := m.opts.Agent.(SessionSwitcher)
 	q := newSessionPickerQuestion(wired)
-	m.overlayStack.ask(q, sessionPickerResolver(q))
+	m.overlayStack.ask(q, askOperator, sessionPickerResolver(q))
 	return m.sessionsCmd()
 }
 

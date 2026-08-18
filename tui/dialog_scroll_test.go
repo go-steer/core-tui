@@ -579,36 +579,50 @@ func TestElicitModal_FollowsFocusedField(t *testing.T) {
 	for i := range fields {
 		fields[i] = ElicitField{Name: "field" + strconv.Itoa(i), Type: ElicitFieldString}
 	}
-	m.pendingElicit = &ElicitRequest{Title: "big form", Fields: fields}
-	m.elicitValues = map[string]any{}
-	m.renderElicitModal()
-	if !m.scroll().overflows() {
+	q := newElicitQuestion("srv", ElicitRequest{Title: "big form", Fields: fields})
+	m.overlayStack.ask(q, askAgent, nil)
+	m.overlayStack.Render(m.width, &m)
+	if !q.sc.overflows() {
 		t.Fatal("40-field form in a 24-row terminal should overflow")
 	}
 
 	for i := 0; i < 30; i++ {
-		m.handleElicitKey("tab")
+		q.Key(keyMsgFromStroke("tab"))
 	}
-	m.renderElicitModal()
-	sc := m.scroll()
-	if m.elicitFieldIdx != 30 {
-		t.Fatalf("field index = %d, want 30", m.elicitFieldIdx)
+	m.overlayStack.Render(m.width, &m)
+	if q.idx != 30 {
+		t.Fatalf("field index = %d, want 30", q.idx)
 	}
-	if sc.offset == 0 {
+	if q.sc.offset == 0 {
 		t.Error("focused field walked below the fold without scrolling the form")
 	}
-	if 30 < sc.offset || 30 >= sc.offset+sc.view {
-		t.Errorf("focused row 30 outside the window [%d,%d)", sc.offset, sc.offset+sc.view)
+	if 30 < q.sc.offset || 30 >= q.sc.offset+q.sc.view {
+		t.Errorf("focused row 30 outside the window [%d,%d)", q.sc.offset, q.sc.offset+q.sc.view)
 	}
 
 	// Arrow keys scroll the form body rather than falling through.
-	before := sc.offset
-	m.handleElicitKey("up")
-	if m.scroll().offset != before-1 {
-		t.Errorf("up in the elicit form: offset %d → %d, want %d", before, m.scroll().offset, before-1)
+	before := q.sc.offset
+	q.Key(keyPress("up"))
+	if q.sc.offset != before-1 {
+		t.Errorf("up in the elicit form: offset %d → %d, want %d", before, q.sc.offset, before-1)
 	}
-	if m.elicitFieldIdx != 30 {
-		t.Errorf("up moved the field cursor to %d; it should only scroll", m.elicitFieldIdx)
+	if q.idx != 30 {
+		t.Errorf("up moved the field cursor to %d; it should only scroll", q.idx)
+	}
+
+	// And the wheel moves it by lines rather than by one cursor step,
+	// which is what scrollQuestion buys the form and deliberately
+	// does not buy the pickers.
+	before = q.sc.offset
+	consumed, _ := m.overlayStack.HandleWheel(wheelScrollLines, &m)
+	if !consumed {
+		t.Fatal("the form did not consume a wheel tick")
+	}
+	if q.sc.offset != before+wheelScrollLines {
+		t.Errorf("wheel: offset %d → %d, want %d", before, q.sc.offset, before+wheelScrollLines)
+	}
+	if q.idx != 30 {
+		t.Errorf("the wheel moved the field cursor to %d; it should only scroll", q.idx)
 	}
 }
 

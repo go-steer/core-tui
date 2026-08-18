@@ -58,7 +58,7 @@ func recordAnswers(into *[]answer) resolver {
 func TestOverlayAsk_KeystrokeAnswersAndPops(t *testing.T) {
 	var got []answer
 	m := Model{}
-	m.overlayStack.ask(&probeQuestion{id: "probe", ans: chosen{ID: "x", Index: 3}}, recordAnswers(&got))
+	m.overlayStack.ask(&probeQuestion{id: "probe", ans: chosen{ID: "x", Index: 3}}, askOperator, recordAnswers(&got))
 
 	consumed, _ := m.overlayStack.HandleKeyMsg(keyMsgFromStroke("enter"), &m)
 	if !consumed {
@@ -81,7 +81,7 @@ func TestOverlayAsk_KeystrokeAnswersAndPops(t *testing.T) {
 func TestOverlayAsk_StillAskingKeepsTheQuestion(t *testing.T) {
 	var got []answer
 	m := Model{}
-	m.overlayStack.ask(&probeQuestion{id: "probe"}, recordAnswers(&got))
+	m.overlayStack.ask(&probeQuestion{id: "probe"}, askOperator, recordAnswers(&got))
 
 	consumed, _ := m.overlayStack.HandleKeyMsg(keyMsgFromStroke("x"), &m)
 	if !consumed {
@@ -105,11 +105,11 @@ func TestOverlayResolveAll_TellsEveryQuestionWhy(t *testing.T) {
 	} {
 		var first, second []answer
 		m := Model{}
-		m.overlayStack.ask(&probeQuestion{id: "one"}, recordAnswers(&first))
+		m.overlayStack.ask(&probeQuestion{id: "one"}, askOperator, recordAnswers(&first))
 		// A viewer with nothing to answer, in the middle of the
 		// stack, to prove it is dropped rather than skipped over.
 		m.overlayStack.Open(newToolCallDialog(0))
-		m.overlayStack.ask(&probeQuestion{id: "two"}, recordAnswers(&second))
+		m.overlayStack.ask(&probeQuestion{id: "two"}, askOperator, recordAnswers(&second))
 
 		m.overlayStack.resolveAll(reason, &m)
 
@@ -152,11 +152,11 @@ func TestOverlayResolveAll_ReturnsWhatTheResolversScheduled(t *testing.T) {
 			return func() tea.Msg { return toldMsg{id: id} }
 		}
 	}
-	m.overlayStack.ask(&probeQuestion{id: "one"}, tell("one"))
-	m.overlayStack.ask(&probeQuestion{id: "two"}, tell("two"))
+	m.overlayStack.ask(&probeQuestion{id: "one"}, askOperator, tell("one"))
+	m.overlayStack.ask(&probeQuestion{id: "two"}, askOperator, tell("two"))
 	// A question with no resolver contributes nothing rather than a
 	// nil Cmd in the batch.
-	m.overlayStack.ask(&probeQuestion{id: "three"}, nil)
+	m.overlayStack.ask(&probeQuestion{id: "three"}, askOperator, nil)
 
 	cmd := m.overlayStack.resolveAll(dismissShutdown, &m)
 	if cmd == nil {
@@ -184,7 +184,7 @@ func TestOverlayResolveAll_NeverResolvesTwice(t *testing.T) {
 	var got []answer
 	m := Model{}
 	q := &probeQuestion{id: "probe", ans: chosen{ID: "kept"}}
-	m.overlayStack.ask(q, recordAnswers(&got))
+	m.overlayStack.ask(q, askOperator, recordAnswers(&got))
 
 	// Answer it, but put it back on the stack as if a teardown were
 	// racing the pop.
@@ -210,7 +210,7 @@ func TestAskedQuestion_CaretOnlyWhenTheQuestionHasOne(t *testing.T) {
 	m := Model{}
 	m.styles = NewStyles(true, Branding{})
 
-	m.overlayStack.ask(&probeQuestion{id: "probe"}, nil)
+	m.overlayStack.ask(&probeQuestion{id: "probe"}, askOperator, nil)
 	if c := m.overlayStack.cursor(100, &m); c != nil {
 		t.Errorf("a question with no text surface reported a caret at %+v", c)
 	}

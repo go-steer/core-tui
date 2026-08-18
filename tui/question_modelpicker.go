@@ -135,7 +135,7 @@ func (m *Model) openModelPicker() tea.Cmd {
 	}
 	_, wired := m.opts.Agent.(ModelSwapper)
 	q := newModelPickerQuestion(wired)
-	m.overlayStack.ask(q, modelPickerResolver(q))
+	m.overlayStack.ask(q, askOperator, modelPickerResolver(q))
 	if !wired {
 		return nil
 	}

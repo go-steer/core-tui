@@ -63,7 +63,7 @@ func pickerSessions() []SessionInfo {
 // choose what the snapshot contains.
 func askSessionPicker(m *Model, wired bool) *sessionPickerQuestion {
 	q := newSessionPickerQuestion(wired)
-	m.overlayStack.ask(q, sessionPickerResolver(q))
+	m.overlayStack.ask(q, askOperator, sessionPickerResolver(q))
 	return q
 }
 

@@ -34,7 +34,7 @@ import (
 // question, plus the resolver that knows what its answer means.
 func askThemePicker(m *Model) *themePickerQuestion {
 	q := newThemePickerQuestion(BuiltinThemes(), m.themeName)
-	m.overlayStack.ask(q, themePickerResolver(m.themeName))
+	m.overlayStack.ask(q, askOperator, themePickerResolver(m.themeName))
 	return q
 }
 
