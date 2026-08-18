@@ -53,7 +53,11 @@ examples/             runnable host examples.
                       core-agent module.
 dev/                  build / test / lint tooling — see dev/README.md.
 docs/                 source-of-truth design docs (requirements,
-                      design, decisions).
+                      design, decisions). The rendering architecture
+                      was measured rather than argued — see
+                      architecture-spike-results.md and decisions.md
+                      D28 + D29 before proposing anything that
+                      touches the refresh or resize path.
 docs/site/            published Hugo+Docsy site.
 .github/workflows/    thin delegators to dev/ci/presubmits/.
 CHANGELOG.md          every release back to v0.1.0 + the stability
