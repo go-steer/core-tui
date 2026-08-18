@@ -1101,10 +1101,10 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		// and a tick that auto-clears the toast after toastTTL.
 		return m, tea.Batch(m.wakeListener(), toastTick())
 	case permissionRequestMsg:
-		req := msg.req
-		m.pendingPermission = &req
-		m.permissionShownAt = time.Now()
-		m.scroll().reset()
+		// askAgent, not askOperator: the prompt arrived unbidden, so
+		// its decision keys stay inert for modalInputGrace (#95).
+		q := newPermissionQuestion(msg.req, m.opts.PermissionLayout)
+		m.overlayStack.ask(q, askAgent, permissionResolver(q))
 		// Inline permission layout: force-snap viewport to bottom
 		// so the prompt is visible (operator was likely watching
 		// the assistant text; the new prompt appears below it and
@@ -1220,12 +1220,13 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 // handleWheel routes a mouse-wheel tick to whichever modal surface
 // is on screen. Returns handled=false when the event belongs to the
 // chat viewport instead — no modal open, an inline permission prompt
-// (which lives IN the chat flow and scrolls with it), or a
-// horizontal wheel, which no modal consumes.
+// (which lives IN the chat flow and scrolls with it, and declines the
+// tick in Overlay.HandleWheel), or a horizontal wheel, which no modal
+// consumes.
 //
-// Mirrors View's z-order cascade: permission → elicit → side answer
-// → Dialog stack. The embedded huh form never reaches here; Update
-// hands it every msg before the switch.
+// Mirrors View's z-order cascade: side answer → Dialog stack. The
+// embedded huh form never reaches here; Update hands it every msg
+// before the switch.
 func (m *Model) handleWheel(msg tea.MouseWheelMsg) (tea.Cmd, bool) {
 	var delta int
 	switch msg.Button {
@@ -1238,16 +1239,6 @@ func (m *Model) handleWheel(msg tea.MouseWheelMsg) (tea.Cmd, bool) {
 	}
 
 	switch {
-	case m.pendingPermission != nil:
-		// Only the centered overlay scrolls here. The default
-		// inline layout renders the prompt inside the chat
-		// viewport, so the wheel should keep scrolling the chat —
-		// that IS the surface showing the prompt.
-		if m.opts.PermissionLayout != PermissionOverlay {
-			return nil, false
-		}
-		m.scroll().by(delta)
-		return nil, true
 	case m.sideAnswer != nil:
 		m.scroll().by(delta)
 		return nil, true
@@ -1288,18 +1279,6 @@ func withinGrace(shownAt time.Time) bool {
 	return !shownAt.IsZero() && time.Since(shownAt) < modalInputGrace
 }
 
-// isPermissionDecisionKey reports whether a keystroke commits a
-// permission decision — R-PERM-2's six. "v" is included regardless of
-// whether the request carries a Verb: during the grace window the
-// safe reading of any of these is "the operator was typing".
-func isPermissionDecisionKey(stroke string) bool {
-	switch stroke {
-	case "y", "n", "s", "v", "t", "a":
-		return true
-	}
-	return false
-}
-
 // handleKey runs the keymap for the visual-preview slice. The slice
 // owns these bindings (no real agent dispatch yet); follow-up slices
 // will replace this with full slash routing and modal state machines.
@@ -1314,10 +1293,6 @@ func (m Model) handleKey(msg tea.KeyPressMsg) (tea.Model, tea.Cmd) {
 	// other modal → help panel → palette → interrupt-in-flight →
 	// no-op. Never quits.
 	if stroke == "esc" {
-		if m.pendingPermission != nil {
-			m.dispatchPermission(DecisionDeny)
-			return m, m.promptListener()
-		}
 		if m.sideAnswer != nil {
 			m.sideAnswer = nil
 			m.resize()
@@ -1400,60 +1375,6 @@ func (m Model) handleKey(msg tea.KeyPressMsg) (tea.Model, tea.Cmd) {
 	// here also stops "up" from quietly walking prompt history
 	// behind the modal, which is what it did before.
 	if m.sideAnswer != nil && m.scroll().applyStroke(stroke) {
-		return m, nil
-	}
-
-	// Permission modal — R-PERM-2's six decision keys. Highest
-	// precedence after Esc so nothing else fires while pending.
-	//
-	// A prompt arrives asynchronously, so for the first
-	// modalInputGrace the decision keys are inert and anything the
-	// operator was already typing goes to the prompt instead of
-	// answering a modal they haven't seen (issue #95). Esc is
-	// deliberately outside the window (handled above): it denies,
-	// which is the fail-safe direction, and a buffered Esc costs at
-	// most a re-ask.
-	if m.pendingPermission != nil {
-		if withinGrace(m.permissionShownAt) && isPermissionDecisionKey(stroke) {
-			var cmd tea.Cmd
-			m.input, cmd = m.input.Update(msg)
-			if m.syncInputHeight() {
-				m.resize()
-			}
-			m.refreshViewport()
-			return m, cmd
-		}
-		switch stroke {
-		case "y":
-			m.dispatchPermission(DecisionAllowOnce)
-			return m, m.promptListener()
-		case "n":
-			m.dispatchPermission(DecisionDeny)
-			return m, m.promptListener()
-		case "s":
-			m.dispatchPermission(DecisionAllowSession)
-			return m, m.promptListener()
-		case "v":
-			if m.pendingPermission.Verb != "" {
-				m.dispatchPermission(DecisionAllowSessionVerb)
-				return m, m.promptListener()
-			}
-		case "t":
-			m.dispatchPermission(DecisionAllowSessionTool)
-			return m, m.promptListener()
-		case "a":
-			m.dispatchPermission(DecisionAllowAlways)
-			return m, m.promptListener()
-		}
-		// Arrow / page keys scroll the detail body — a 200-line diff
-		// in the centered overlay was previously readable only down
-		// to whatever fit on screen. Inline layout needs nothing
-		// here: it renders in the chat viewport, which already
-		// scrolls.
-		if m.opts.PermissionLayout == PermissionOverlay {
-			m.scroll().applyStroke(stroke)
-		}
-		// Swallow any other key — modal is exclusive while open.
 		return m, nil
 	}
 
@@ -2688,18 +2609,16 @@ func (m *Model) applySwitchTarget(tgt *SwitchTarget) tea.Cmd {
 	// asked, and the decision rows they append are wiped with the rest
 	// of the outgoing transcript by step 3 rather than following the
 	// operator into the new session.
-	if m.pendingPermission != nil {
-		m.dispatchPermission(DecisionDeny)
-	}
-	// The elicit form is a question on the overlay stack, so it is
-	// resolved by id rather than cleared: resolveAll would take the
-	// pickers with it, and step 2 keeps those on purpose so a picker
-	// can close itself after returning the switch Cmd. Superseded
-	// rather than escape — the operator did not dismiss anything, and
-	// the resolver reads the reason to decide NOT to re-arm the elicit
-	// listener, which step 8 below re-arms for the new session.
+	//
+	// Both are questions on the overlay stack now, so both are resolved
+	// by id rather than cleared: resolveAll would take the pickers with
+	// it, and step 2 keeps those on purpose so a picker can close itself
+	// after returning the switch Cmd. Superseded rather than escape —
+	// the operator did not dismiss anything, and each resolver reads the
+	// reason to decide NOT to re-arm its listener, which step 8 below
+	// re-arms for the new session.
+	m.overlayStack.resolve(permissionDialogID, dismissed{Reason: dismissSuperseded}, m)
 	m.overlayStack.resolve(elicitDialogID, dismissed{Reason: dismissSuperseded}, m)
-	m.pendingPermission = nil
 	m.sideAnswer = nil
 	m.scroll().reset()
 	m.pendingForm = nil
@@ -2893,10 +2812,17 @@ func sliceContains(xs []string, target string) bool {
 	return false
 }
 
-// dispatchPermission writes the operator's decision back to the
-// pending Prompter flow, invokes the host's AlwaysAllow callback
-// when the decision is DecisionAllowAlways, echoes a system
-// message naming the decision, and clears the modal state.
+// dispatchPermission writes decision d about req back to the pending
+// Prompter flow, invokes the host's AlwaysAllow callback when the
+// decision is DecisionAllowAlways, and echoes a system message naming
+// the decision.
+//
+// req is a parameter rather than Model state: the prompt is a question
+// on the overlay stack (question_permission.go), which owns the request
+// for as long as it is open and hands it here through its resolver. It
+// is still on the stack while this runs — Overlay.resolve pops after
+// the resolver returns — so the pop is not this function's to do, and
+// there is no field left to clear.
 //
 // The system-message echo (parity with internal/tui:239) preserves
 // what the operator chose in the transcript / scroll history —
@@ -2907,26 +2833,22 @@ func sliceContains(xs []string, target string) bool {
 // writing to permissions.allow or path_scope.allow in .agents/
 // config.json). Errors are surfaced inline so the operator knows
 // the allow-always didn't stick.
-func (m *Model) dispatchPermission(d PermissionDecision) {
-	req := m.pendingPermission
-	if d == DecisionAllowAlways && m.opts.AlwaysAllow != nil && req != nil {
-		if err := m.opts.AlwaysAllow(*req); err != nil {
+func (m *Model) dispatchPermission(d PermissionDecision, req PermissionRequest) {
+	if d == DecisionAllowAlways && m.opts.AlwaysAllow != nil {
+		if err := m.opts.AlwaysAllow(req); err != nil {
 			m.history.Append(Message{
 				Role: RoleError,
 				Text: "allow-always persistence failed: " + err.Error(),
 			})
 		}
 	}
-	if req != nil {
-		m.history.Append(Message{
-			Role: RoleSystem,
-			Text: "Permission " + permissionDecisionLabel(d) + ": " + req.ToolName + " — " + truncate(req.Detail, 80),
-		})
-	}
+	m.history.Append(Message{
+		Role: RoleSystem,
+		Text: "Permission " + permissionDecisionLabel(d) + ": " + req.ToolName + " — " + truncate(req.Detail, 80),
+	})
 	if p, ok := m.opts.Prompter.(*Prompter); ok {
 		p.dispatchDecision(d)
 	}
-	m.pendingPermission = nil
 	m.refreshViewport()
 }
 

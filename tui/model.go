@@ -208,24 +208,10 @@ type Model struct {
 	// Esc / Enter / Space.
 	sideAnswer *SideAnswer
 
-	// pendingPermission is the active PermissionRequest awaiting an
-	// operator decision (R-PERM-1). Nil = no modal open. Key
-	// handler dispatches back via opts.Prompter.dispatchDecision.
-	//
-	// permissionShownAt stamps when the modal appeared. Decision keys
-	// are inert for modalInputGrace after that — a prompt arrives
-	// asynchronously, and without the window whatever the operator
-	// happened to be typing is consumed as their answer to a modal
-	// they have not seen yet (issue #95).
-	pendingPermission *PermissionRequest
-	permissionShownAt time.Time
-
-	// modalScroll is the shared scroll offset for the modals that
-	// live inline on the Model rather than on the Overlay stack —
-	// the permission overlay and the /btw side answer. Only one of
-	// them renders at a time (View's precedence cascade), so one
-	// offset is enough; each open resets it. Questions on the stack
-	// own their own scrollState instead; see elicitQuestion.sc.
+	// modalScroll is the scroll offset for the one modal that still
+	// lives on the Model rather than on the Overlay stack: the /btw
+	// side answer. Questions on the stack own their own scrollState
+	// instead; see elicitQuestion.sc and permissionQuestion.sc.
 	//
 	// It's a POINTER because View() has a value receiver: the render
 	// path measures the body and writes the geometry back here so

@@ -239,7 +239,46 @@ type scrollQuestion interface {
 
 	// ScrollBy moves the body by delta rows — negative is toward the
 	// top. Clamping is the question's business.
+	//
+	// Only ever called on a question that is currently drawing itself
+	// in the modal frame: an inlineQuestion is not a wheel surface at
+	// all, and Overlay.HandleWheel bounces the tick to the transcript
+	// before reaching here.
 	ScrollBy(delta int)
+}
+
+// inlineQuestion is a question that draws itself somewhere other than
+// the modal frame — today, in the transcript flow.
+//
+// The permission prompt's DEFAULT layout is a gutter block rendered
+// where the spinner line would be, under the streamed text that asked
+// for the tool call, and that is a better place for it than a centered
+// box: the operator reads what is being approved next to the reason it
+// is being asked. It is still a question in every other respect — the
+// key routing, the grace window, the resolver and the teardown on a
+// session switch are all the seam's — so where it draws is a property
+// of the question rather than a second place for a prompt to live.
+//
+// A question that answers true here is NOT on the modal frame at all:
+// modalFrame reports no modal, the caret path falls through to the
+// composer, and the frame invariants see the surface they actually
+// have. Anything behind it on the stack waits rather than drawing,
+// which is the same exclusivity every other modal has — and better
+// than what the inline prompt had before, where a modal opened over it
+// hid the block while the keys still went to the block.
+type inlineQuestion interface {
+	question
+
+	// Inline reports whether this question is currently drawing itself
+	// outside the modal frame. It is a method rather than a marker
+	// interface because the permission prompt answers it from the
+	// host's PermissionLayout, so the same type says both.
+	Inline() bool
+
+	// InlineBody renders the block at width columns — the chat column,
+	// not a modal width. There is no frame to fit inside, so the
+	// question owns all of its own chrome here.
+	InlineBody(width int, st Styles) string
 }
 
 // cursorQuestion is a question with a text caret — anything with a
@@ -373,6 +412,27 @@ func (o *Overlay) asked(id string) *askedQuestion {
 	return aq
 }
 
+// inlineFront returns the front question when it draws itself outside
+// the modal frame, and is how View asks "is there a modal on screen"
+// without assuming that a non-empty stack means yes.
+//
+// Only the front is consulted, and deliberately: the front is the one
+// taking keystrokes, so it is the one that has to be the one on
+// screen. A question behind an inline one waits — the alternative,
+// drawing the frontmost FRAMED question in the box while an inline
+// question owns the keyboard, is the pixels-and-keys disagreement the
+// elicit form was moved to get out of.
+func (o *Overlay) inlineFront() (inlineQuestion, bool) {
+	if len(o.dialogs) == 0 {
+		return nil, false
+	}
+	aq, ok := o.dialogs[len(o.dialogs)-1].(*askedQuestion)
+	if !ok {
+		return nil, false
+	}
+	return aq.inline()
+}
+
 // resolve answers the question under id, pops it, and returns whatever
 // its resolver scheduled. A no-op when nothing matches or when the
 // question has already been answered.
@@ -428,10 +488,22 @@ func (a *askedQuestion) HandleKey(stroke string, m *Model) DialogAction {
 // drops both.
 func (a *askedQuestion) HandleKeyMsg(msg tea.KeyPressMsg, m *Model) DialogAction {
 	if a.held(msg) {
-		// Swallowed rather than forwarded anywhere. Consumed is what
-		// every keystroke into an open modal returns, and it is also
-		// what keeps the held stroke from falling through to the
-		// composer behind the modal.
+		// A held stroke that would have TYPED a character is not
+		// swallowed — it is declined, so it falls through to the
+		// composer, which is where the operator was aiming it. That is
+		// the whole of issue #95: the keys the window protects are the
+		// ones an operator is most likely to be mid-word on, and a
+		// window that ate them would trade three unintended grants for
+		// three lost characters.
+		//
+		// Anything else IS swallowed. The keystrokes a question holds
+		// that carry no text are enter, ctrl+d and their kind, and
+		// those do not mean "type this" to the composer — they mean
+		// submit. Forwarding one would send the operator's half-written
+		// prompt to the agent because a modal appeared.
+		if msg.Text != "" {
+			return DialogAction{}
+		}
 		return DialogAction{Consumed: true}
 	}
 	ans, cmd := a.q.Key(msg)
@@ -477,6 +549,16 @@ func (a *askedQuestion) scrollBy(delta int) bool {
 	}
 	sq.ScrollBy(delta)
 	return true
+}
+
+// inline returns the question as an inlineQuestion when it is drawing
+// itself outside the modal frame right now.
+func (a *askedQuestion) inline() (inlineQuestion, bool) {
+	iq, ok := a.q.(inlineQuestion)
+	if !ok || !iq.Inline() {
+		return nil, false
+	}
+	return iq, true
 }
 
 // Render composes the question's three strings into the shared modal

@@ -48,7 +48,7 @@ func TestForceRenderMsg_NoOpHandler(t *testing.T) {
 	if got.history.Len() != historyBefore {
 		t.Errorf("forceRenderMsg should not append history, got %d → %d", historyBefore, got.history.Len())
 	}
-	if got.pendingPermission != nil || got.openElicit() != nil {
+	if got.openPermission() != nil || got.openElicit() != nil {
 		t.Errorf("forceRenderMsg should not touch modal state")
 	}
 }
@@ -66,8 +66,8 @@ func TestPermissionRequestMsg_ReturnsRenderKickCmd(t *testing.T) {
 		req: PermissionRequest{ToolName: "bash", Detail: "ls /tmp"},
 	})
 	got := out.(Model)
-	if got.pendingPermission == nil {
-		t.Fatal("expected pendingPermission set")
+	if got.openPermission() == nil {
+		t.Fatal("expected the permission question on the overlay stack")
 	}
 	if cmd == nil {
 		t.Fatal("expected non-nil Cmd (render kick), got nil")

@@ -335,13 +335,14 @@ func TestPermissionInline_StaysInTheColumnWithTabs(t *testing.T) {
 				for _, width := range []int{40, 80} {
 					m := NewModel(Options{})
 					m.viewport.SetWidth(width)
-					m.pendingPermission = &PermissionRequest{
+					q := newPermissionQuestion(PermissionRequest{
 						ToolName:   "bash",
 						Verb:       "run",
 						Detail:     tc.s,
 						DetailKind: k.kind,
-					}
-					for i, line := range strings.Split(m.renderPermissionInline(), "\n") {
+					}, PermissionInline)
+					block := q.InlineBody(m.viewport.Width(), m.styles)
+					for i, line := range strings.Split(block, "\n") {
 						if w := drawnWidth(line); w > width {
 							t.Errorf("width %d: line %d draws at %d cells: %q",
 								width, i, w, ansi.Strip(line))

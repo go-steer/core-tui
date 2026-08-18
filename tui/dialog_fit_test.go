@@ -143,6 +143,9 @@ func modalFitCases() []modalFitCase {
 		{
 			name: "permission-modal",
 			open: func(_ *testing.T, w, h int) Model {
+				// newFrameModel asks for PermissionOverlay: the
+				// centered layout is the one with a modal frame to fit,
+				// and the default inline layout has no box at all.
 				m := newFrameModel(StatusHeader, w, h)
 				out, _ := m.Update(permissionRequestMsg{req: PermissionRequest{
 					Kind:     PermissionKindBash,
@@ -153,8 +156,8 @@ func modalFitCases() []modalFitCase {
 				}})
 				return out.(Model)
 			},
-			render: func(m *Model) string { return m.renderPermissionModal() },
-			// permissionKeyHint glues each key to its action with a
+			render: func(m *Model) string { return m.overlayStack.Render(m.width, m) },
+			// keyLegend glues each key to its action with a
 			// non-breaking space so the pair never wraps apart.
 			footer: "esc deny",
 			footerPairs: []string{"y allow once", "n deny", "s allow session",

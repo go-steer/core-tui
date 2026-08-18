@@ -385,18 +385,18 @@ func TestHandleWheel_ScrollsSideAnswer(t *testing.T) {
 // An inline permission prompt lives in the chat flow, so the wheel
 // belongs to the viewport; the centered overlay owns it instead.
 func TestHandleWheel_PermissionLayoutDecidesOwner(t *testing.T) {
-	req := &PermissionRequest{ToolName: "bash", Detail: strings.Repeat("echo hi\n", 200), DetailKind: DetailShell}
+	req := PermissionRequest{ToolName: "bash", Detail: strings.Repeat("echo hi\n", 200), DetailKind: DetailShell}
 
 	inline := NewModel(Options{Agent: &bareAgent{id: "a"}})
 	inline.width, inline.height = 100, 30
-	inline.pendingPermission = req
+	inline.overlayStack.ask(newPermissionQuestion(req, PermissionInline), askAgent, nil)
 	if _, handled := inline.handleWheel(wheel(tea.MouseWheelDown)); handled {
 		t.Error("inline permission layout claimed the wheel; the chat viewport should keep it")
 	}
 
 	overlay := NewModel(Options{Agent: &bareAgent{id: "a"}, PermissionLayout: PermissionOverlay})
 	overlay.width, overlay.height = 100, 30
-	overlay.pendingPermission = req
+	overlay.overlayStack.ask(newPermissionQuestion(req, PermissionOverlay), askAgent, nil)
 	if _, handled := overlay.handleWheel(wheel(tea.MouseWheelDown)); !handled {
 		t.Error("centered permission overlay did not claim the wheel")
 	}
@@ -541,27 +541,28 @@ func TestPermissionOverlay_ScrollsWithKeys(t *testing.T) {
 	m := NewModel(Options{Agent: &bareAgent{id: "a"}, PermissionLayout: PermissionOverlay})
 	m.width, m.height = 100, 30
 	m.resize()
-	m.pendingPermission = &PermissionRequest{
+	q := newPermissionQuestion(PermissionRequest{
 		ToolName:   "bash",
 		Detail:     strings.Repeat("echo hello\n", 200),
 		DetailKind: DetailShell,
-	}
-	m.renderPermissionModal()
-	if !m.scroll().overflows() {
+	}, PermissionOverlay)
+	m.overlayStack.ask(q, askAgent, nil)
+	m.overlayStack.Render(m.width, &m)
+	if !q.sc.overflows() {
 		t.Fatal("200-line shell detail in a 30-row terminal should overflow")
 	}
 
 	out, _ := m.handleKey(keyPress("pgdn"))
 	got := out.(Model)
-	if got.pendingPermission == nil {
+	if got.openPermission() == nil {
 		t.Fatal("pgdn resolved the permission prompt; it should only scroll")
 	}
-	if got.scroll().offset == 0 {
+	if q.sc.offset == 0 {
 		t.Error("pgdn did not scroll the permission detail")
 	}
 
 	// Decision keys still take precedence over scroll keys.
-	rendered := got.renderPermissionModal()
+	rendered := got.overlayStack.Render(got.width, &got)
 	if !strings.Contains(rendered, "↑↓ scroll") {
 		t.Error("overflowing permission overlay does not advertise the scroll keys")
 	}

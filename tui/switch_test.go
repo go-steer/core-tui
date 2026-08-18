@@ -106,7 +106,7 @@ func TestApplySwitchTarget_ResetsState(t *testing.T) {
 	m.spinnerActive = true
 	m.inProgressText = "half done"
 	m.currentModel = "old-model"
-	m.pendingPermission = &PermissionRequest{ToolName: "bash"}
+	m.overlayStack.ask(newPermissionQuestion(PermissionRequest{ToolName: "bash"}, PermissionInline), askAgent, nil)
 	m.pendingExit = true
 	m.confirmingClear = true
 	m.queue = []QueueEntry{{Text: "queued", State: QueueQueued}}
@@ -135,8 +135,8 @@ func TestApplySwitchTarget_ResetsState(t *testing.T) {
 	if m.inProgressText != "" {
 		t.Errorf("inProgressText = %q, want empty", m.inProgressText)
 	}
-	if m.pendingPermission != nil {
-		t.Errorf("pendingPermission should be nil")
+	if m.openPermission() != nil {
+		t.Errorf("the permission question should be off the stack")
 	}
 	if m.pendingExit || m.confirmingClear {
 		t.Errorf("pendingExit / confirmingClear should be cleared")
@@ -558,8 +558,8 @@ func TestApplySwitchTarget_AnswersAPendingPrompt(t *testing.T) {
 		}
 		out, _ := m.Update(permissionRequestMsg{req: req})
 		m = out.(Model)
-		if m.pendingPermission == nil {
-			t.Fatal("pendingPermission not seeded; the arm proves nothing")
+		if m.openPermission() == nil {
+			t.Fatal("the permission question was not seeded; the arm proves nothing")
 		}
 
 		m.applySwitchTarget(&SwitchTarget{Agent: &bareAgent{id: "new"}})
@@ -572,8 +572,8 @@ func TestApplySwitchTarget_AnswersAPendingPrompt(t *testing.T) {
 		case <-time.After(time.Second):
 			t.Fatal("AskApproval still blocked 1s after the switch")
 		}
-		if m.pendingPermission != nil {
-			t.Errorf("pendingPermission should be nil after the switch")
+		if m.openPermission() != nil {
+			t.Errorf("the permission question should be off the stack after the switch")
 		}
 	})
 

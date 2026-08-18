@@ -23,7 +23,7 @@ import (
 )
 
 // graceRig wires a real Prompter to a model and delivers a permission
-// request through the normal msg path, so permissionShownAt is
+// request through the normal msg path, so the question's shownAt is
 // stamped exactly as it is in production. decisions receives whatever
 // the blocked AskApproval call returns.
 func graceRig(t *testing.T) (Model, *Prompter, <-chan PermissionDecision) {
@@ -44,11 +44,11 @@ func graceRig(t *testing.T) (Model, *Prompter, <-chan PermissionDecision) {
 	m = out.(Model)
 	out, _ = m.Update(permissionRequestMsg{req: req})
 	m = out.(Model)
-	if m.pendingPermission == nil {
+	if m.openPermission() == nil {
 		t.Fatal("setup: expected the permission modal to be open")
 	}
-	if m.permissionShownAt.IsZero() {
-		t.Fatal("setup: permissionRequestMsg did not stamp permissionShownAt")
+	if m.overlayStack.asked(permissionDialogID).shownAt.IsZero() {
+		t.Fatal("setup: permissionRequestMsg did not stamp the grace window")
 	}
 	return m, p, decisions
 }
@@ -71,7 +71,7 @@ func TestPermissionGrace_BufferedKeysDoNotDecide(t *testing.T) {
 
 	m = typeWord(m, "say")
 
-	if m.pendingPermission == nil {
+	if m.openPermission() == nil {
 		t.Fatal("buffered keystrokes answered a modal the operator had not seen")
 	}
 	select {
@@ -91,12 +91,12 @@ func TestPermissionGrace_BufferedKeysDoNotDecide(t *testing.T) {
 func TestPermissionGrace_ExpiresAndDecidesNormally(t *testing.T) {
 	m, _, decisions := graceRig(t)
 	// Backdate rather than sleep.
-	m.permissionShownAt = time.Now().Add(-modalInputGrace - time.Millisecond)
+	m.overlayStack.asked(permissionDialogID).shownAt = time.Now().Add(-modalInputGrace - time.Millisecond)
 
 	out, _ := m.Update(tea.KeyPressMsg(tea.Key{Code: 'y', Text: "y"}))
 	m = out.(Model)
 
-	if m.pendingPermission != nil {
+	if m.openPermission() != nil {
 		t.Fatal("y after the grace window did not close the modal")
 	}
 	if got := m.input.Value(); got != "" {
@@ -119,7 +119,7 @@ func TestPermissionGrace_CoversEveryDecisionKey(t *testing.T) {
 		m, _, decisions := graceRig(t)
 		out, _ := m.Update(tea.KeyPressMsg(tea.Key{Code: rune(stroke[0]), Text: stroke}))
 		m = out.(Model)
-		if m.pendingPermission == nil {
+		if m.openPermission() == nil {
 			t.Errorf("%q decided inside the grace window", stroke)
 		}
 		select {
@@ -138,7 +138,7 @@ func TestPermissionGrace_EscStillDenies(t *testing.T) {
 	out, _ := m.Update(tea.KeyPressMsg(tea.Key{Code: tea.KeyEsc}))
 	m = out.(Model)
 
-	if m.pendingPermission != nil {
+	if m.openPermission() != nil {
 		t.Fatal("Esc did not close the modal")
 	}
 	select {
