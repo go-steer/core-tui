@@ -117,7 +117,12 @@ contract is structural rather than conventional. They cannot —
 subpackage holding them would import `tui` while `tui` imports it, an
 import cycle — and they should not, because none of them is
 implementable from outside the package today, so a package named for
-extension would advertise a seam that does not exist. The reasoning
+extension would advertise a seam that does not exist. That last clause
+is the one that aged into action: the whole set is unexported now
+(#254, #257), so the names above are spelled `dialog`, `listItem`,
+`focusable` and `toolRenderer` in the source. The subpackage answer is
+unchanged either way — the cycle argument never depended on their case.
+The reasoning
 and what it means for #115 is in
 [`api-surface.md`](./api-surface.md) §4. What the flat package needed
 was not a boundary but an enumeration, which §3 now has.
@@ -141,11 +146,14 @@ classified there:
 - **42 host-useful but unpromised** — the render extension points
   (`Dialog`, `Item`, `Focusable`, `ToolRenderer`, `Overlay`, …), the
   theming registry, the transcript reader, `Styles`. Each carries a
-  promote-or-unexport recommendation in `api-surface.md` §3.2. Five of
-  them (`Theme`, `BuiltinTheme`, `BuiltinThemes`, `ThemeByName`,
-  `ThemeChangedMsg`), the seven transcript symbols, and
-  `SystemClipboardWriter` are recommended for promotion into the list
-  above; nothing is promoted until it is.
+  promote-or-unexport recommendation in `api-surface.md` §3.2, and the
+  unexport half of that is now done: the 25 render-extension symbols
+  and the 4 styling symbols came off the surface in #213, #254 and
+  #257, leaving 13 in this bucket. Five of them (`Theme`,
+  `BuiltinTheme`, `BuiltinThemes`, `ThemeByName`, `ThemeChangedMsg`),
+  the seven transcript symbols, and `SystemClipboardWriter` are
+  recommended for promotion into the list above; nothing is promoted
+  until it is.
 - **67 incidental** — the `Glyph*` and `Brand*` vocabularies, the named
   theme constructors, `History`, the queue types, `Model` / `NewModel`.
   Exported without a host-facing purpose; being narrowed before the
@@ -412,7 +420,7 @@ type SessionInfo struct {
     ID, Display, Description string
     Current                  bool
     // Input (issue #56) turns the row into an ACTION row: Enter
-    // opens a single-line text-input Dialog stacked on the picker
+    // opens a single-line text-input dialog stacked on the picker
     // and the row's own Submit closure produces the SwitchTarget,
     // so SwitchToSession never sees a synthetic ID. Backs the
     // "+ Attach to endpoint…" row on multi-daemon hosts.
@@ -424,20 +432,22 @@ type SessionInput struct {
     Submit   func(value string) (SwitchTarget, error)
 }
 
-// The primitive behind it is a general one — any Dialog can stack a
+// The primitive behind it is a general one — any dialog can stack a
 // text prompt on top of itself — but it is package-internal, and so
 // is the optional extension a dialog implements to receive the raw
 // tea.KeyPressMsg instead of the normalized stroke string. Both were
 // exported until #254 and neither was reachable: opening a dialog
-// needs an Overlay, and the only Overlay is an unexported field of
-// Model. A host stacks a text prompt by setting SessionInfo.Input,
-// above, which is the seam that actually exists.
+// needs the overlay stack, and that stack is an unexported field of
+// Model. #257 took the whole render-extension set down on the same
+// ground, the dialog and overlay types themselves included. A host
+// stacks a text prompt by setting SessionInfo.Input, above, which is
+// the seam that actually exists.
 //
 // cursorDialog (also internal, also optional) is how a dialog says
 // where the terminal cursor belongs — a position relative to the
 // dialog's own top-left cell, which View offsets by wherever it
-// composited the dialog (R-CUR-1..3). Folding that into Dialog
-// itself is part of the contract work in #115.
+// composited the dialog (R-CUR-1..3). Folding that into the dialog
+// interface itself is part of the contract work in #115.
 
 // SwitchTarget is also reachable via SlashResult.SwitchTo, so any
 // SlashProvider / AsyncSlashProvider can request an Agent swap

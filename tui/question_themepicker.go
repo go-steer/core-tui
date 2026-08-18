@@ -236,7 +236,7 @@ func previewThemeCmd(name string) tea.Cmd {
 	return func() tea.Msg { return themePreviewMsg{Name: name} }
 }
 
-func (q *themePickerQuestion) Body(width, termHeight int, st Styles) string {
+func (q *themePickerQuestion) Body(width, termHeight int, st styleSet) string {
 	if len(q.themes) == 0 {
 		return st.Muted.Render("(no themes registered)")
 	}

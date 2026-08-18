@@ -25,7 +25,7 @@ import "strings"
 // renderReadPreview returns a one-line muted summary for read-
 // shaped tools. Returns "" when args don't carry enough signal —
 // preview is never required, the tool row stands on its own.
-func renderReadPreview(name string, args map[string]any, styles Styles) string {
+func renderReadPreview(name string, args map[string]any, styles styleSet) string {
 	if args == nil {
 		return ""
 	}
@@ -45,7 +45,7 @@ func renderReadPreview(name string, args map[string]any, styles Styles) string {
 // `full · <lang>`) for a single-file read. Bytes are intentionally
 // omitted in v1 — getting them would mean a filesystem stat per
 // tool call, which is gated to Phase 3 (Options.DiskReadOnPreview).
-func renderReadFilePreview(args map[string]any, styles Styles, indent string) string {
+func renderReadFilePreview(args map[string]any, styles styleSet, indent string) string {
 	path := stringArg(args, "path", "file", "filename")
 	if path == "" {
 		return ""
@@ -92,7 +92,7 @@ func renderReadFilePreview(args map[string]any, styles Styles, indent string) st
 //
 // Paths and pattern are model-written args, so the assembled row
 // goes through sanitizeLine before it is styled.
-func renderReadManyFilesPreview(args map[string]any, styles Styles, indent string) string {
+func renderReadManyFilesPreview(args map[string]any, styles styleSet, indent string) string {
 	if paths := stringSliceArg(args, "paths", "files"); len(paths) > 0 {
 		head := paths
 		if len(head) > 3 {
@@ -116,7 +116,7 @@ func renderReadManyFilesPreview(args map[string]any, styles Styles, indent strin
 //
 // Pattern and path are model-written args, so the assembled row
 // goes through sanitizeLine before it is styled.
-func renderSearchPreview(args map[string]any, styles Styles, indent string) string {
+func renderSearchPreview(args map[string]any, styles styleSet, indent string) string {
 	parts := []string{}
 	if pattern := stringArg(args, "pattern", "query", "regex"); pattern != "" {
 		parts = append(parts, "pattern: \""+pattern+"\"")

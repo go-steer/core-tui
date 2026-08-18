@@ -362,7 +362,7 @@ func (q *elicitQuestion) formKey(stroke string) (answer, tea.Cmd) {
 
 // Body renders the URL blurb or the field list, windowed to whatever
 // rows the terminal can spare after the chrome.
-func (q *elicitQuestion) Body(width, termHeight int, st Styles) string {
+func (q *elicitQuestion) Body(width, termHeight int, st styleSet) string {
 	var (
 		lines []string
 		focus = -1 // -1 = nothing to keep on screen (URL mode)
@@ -393,7 +393,7 @@ func (q *elicitQuestion) Body(width, termHeight int, st Styles) string {
 // row index the focused field starts on. The caller needs both: a
 // field row is two lines when it carries a description, so "field
 // index" and "row index" differ.
-func (q *elicitQuestion) formLines(width int, st Styles) (lines []string, focus int) {
+func (q *elicitQuestion) formLines(width int, st styleSet) (lines []string, focus int) {
 	for i, f := range q.req.Fields {
 		if i == q.idx {
 			focus = len(lines)
@@ -417,7 +417,7 @@ func elicitFieldRow(label, value string) string {
 // accent-bold. Width is reserved for future per-field truncation;
 // unused today but kept on the signature so callers don't have to
 // refactor when it lands.
-func (q *elicitQuestion) renderField(f ElicitField, focused bool, _ int, st Styles) string {
+func (q *elicitQuestion) renderField(f ElicitField, focused bool, _ int, st styleSet) string {
 	label := f.Name
 	if f.Required {
 		label += "*"
@@ -439,7 +439,7 @@ func (q *elicitQuestion) renderField(f ElicitField, focused bool, _ int, st Styl
 // formatValue renders a field's current value — booleans as
 // checkboxes, enums with arrow hints, strings and numbers as the
 // literal value or a placeholder.
-func (q *elicitQuestion) formatValue(f ElicitField, st Styles) string {
+func (q *elicitQuestion) formatValue(f ElicitField, st styleSet) string {
 	switch f.Type {
 	case ElicitFieldBoolean:
 		if on, _ := q.values[f.Name].(bool); on {
@@ -491,9 +491,9 @@ func (q *elicitQuestion) Cursor(width int) *tea.Cursor {
 	// rather than remembered from Body: a field row can be two lines,
 	// so "field index" is not "row index", and re-deriving that rule
 	// here is how the caret and the renderer would drift apart. Zero
-	// Styles because only the row COUNT is read, and no style can
-	// change it — a Styles value cannot introduce a newline.
-	_, focusRow := q.formLines(modalBodyWidth(width), Styles{})
+	// styleSet because only the row COUNT is read, and no style can
+	// change it — a styleSet value cannot introduce a newline.
+	_, focusRow := q.formLines(modalBodyWidth(width), styleSet{})
 
 	// Subtract the offset the render just settled on. Body runs before
 	// Cursor in the same frame (see askedQuestion.Render), so sc holds
@@ -552,7 +552,7 @@ func indexOfEnum(choices []string, v any) int {
 // the footer legend, and the tests that drive a form to completion.
 //
 // Note what it is NOT for: ending the question. That goes through
-// Overlay.resolve, so the exactly-once latch cannot be sidestepped.
+// overlay.resolve, so the exactly-once latch cannot be sidestepped.
 func (m *Model) openElicit() *elicitQuestion {
 	aq := m.overlayStack.asked(elicitDialogID)
 	if aq == nil {

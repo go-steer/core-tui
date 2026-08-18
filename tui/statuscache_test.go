@@ -56,7 +56,7 @@ func TestStatusCache_StaysFresh(t *testing.T) {
 		{"widen", func(m *Model) { *m = resizeModel(*m, 140, 40) }},
 		{"theme swap", func(m *Model) { m.applyNamedTheme(BuiltinThemes()[1].Name) }},
 		{"theme swap back", func(m *Model) { m.applyNamedTheme(BuiltinThemes()[0].Name) }},
-		{"light mode", func(m *Model) { m.styles = NewStylesWithTheme(false, m.styles.Theme) }},
+		{"light mode", func(m *Model) { m.styles = newStylesWithTheme(false, m.styles.Theme) }},
 		{"wordmark", func(m *Model) { m.opts.Branding.Wordmark = "acme" }},
 		{"identity", func(m *Model) { m.opts.Branding.AgentIdentity = "acme-agent" }},
 		{"model name", func(m *Model) { m.currentModel = "a-model" }},

@@ -68,12 +68,12 @@ const (
 	glyphSelectBar = "┊"
 )
 
-// Styles bundles every resolved lipgloss style for the current
-// terminal background. NewStyles picks the variant for light vs dark
+// styleSet bundles every resolved lipgloss style for the current
+// terminal background. newStyles picks the variant for light vs dark
 // from BackgroundColorMsg.IsDark() at startup (R-MD-2). Theme is
 // the semantic-token bundle every per-field style derives from
 // (agentic-tui skill §10).
-type Styles struct {
+type styleSet struct {
 	Dark  bool
 	Theme Theme
 
@@ -106,11 +106,12 @@ type Styles struct {
 	ModalFooter lipgloss.Style
 }
 
-// NewStyles assembles the style bundle for the given background
+// newStyles assembles the style bundle for the given background
 // brightness, applying any Branding overrides on top of the
-// defaultTheme. Hosts that want per-provider tinting should pass
-// a theme via NewStylesWithTheme directly.
-func NewStyles(dark bool, brand Branding) Styles {
+// defaultTheme. Callers that want per-provider tinting pass a theme
+// to newStylesWithTheme directly; the host-facing way in is
+// Options.AutoProviderTheme, which is what drives that path.
+func newStyles(dark bool, brand Branding) styleSet {
 	theme := defaultTheme(dark)
 	if brand.AccentColor != "" {
 		c := lipgloss.Color(brand.AccentColor)
@@ -121,10 +122,10 @@ func NewStyles(dark bool, brand Branding) Styles {
 	if brand.SecondaryColor != "" {
 		theme.Secondary = lipgloss.Color(brand.SecondaryColor)
 	}
-	return NewStylesWithTheme(dark, theme)
+	return newStylesWithTheme(dark, theme)
 }
 
-// NewStylesWithTheme is the per-token construction path: every
+// newStylesWithTheme is the per-token construction path: every
 // component style derives from the Theme so a palette swap is a
 // one-line change (no per-field updates). UserPrefix / UserText
 // keep an explicit blue tone — the user-bubble color is semantic
@@ -134,13 +135,13 @@ func NewStyles(dark bool, brand Branding) Styles {
 // derived tokens a caller may leave zero — OnPrimary,
 // ChromaStyleName — are filled in here rather than in defaultTheme,
 // because this is the ONE funnel every Theme crosses. A bare
-// `Theme{...}` literal handed in by a host never touches
+// `Theme{...}` literal handed in by a caller never touches
 // defaultTheme, and the two Branding override sites mutate Primary
 // and then call this function, so re-derivation after an override
-// costs no extra call site. Styles.Theme carries the normalized
+// costs no extra call site. styleSet.Theme carries the normalized
 // value, so the markdown renderer and the syntax cache read the
 // derived tokens straight off it.
-func NewStylesWithTheme(dark bool, theme Theme) Styles {
+func newStylesWithTheme(dark bool, theme Theme) styleSet {
 	theme = normalizeTheme(theme)
 	var fgUser, border color.Color
 	if dark {
@@ -151,7 +152,7 @@ func NewStylesWithTheme(dark bool, theme Theme) Styles {
 		border = lipgloss.Color("#BCBCBC")
 	}
 	muted := theme.FgMuted
-	return Styles{
+	return styleSet{
 		Dark:          dark,
 		Theme:         theme,
 		UserPrefix:    lipgloss.NewStyle().Foreground(fgUser).Bold(true),
@@ -186,7 +187,7 @@ func NewStylesWithTheme(dark bool, theme Theme) Styles {
 	}
 }
 
-// RenderWordmark paints the brand wordmark. When the active
+// renderWordmark paints the brand wordmark. When the active
 // Theme defines a WordmarkSequence, one color per rune is
 // applied (cycling the sequence over chars longer than the
 // sequence). This is the hook the Google theme uses to mimic
@@ -195,7 +196,7 @@ func NewStylesWithTheme(dark bool, theme Theme) Styles {
 //
 // Bold is preserved in both paths so the wordmark keeps its
 // chrome weight regardless of which path runs.
-func (s Styles) RenderWordmark(text string) string {
+func (s styleSet) renderWordmark(text string) string {
 	if len(s.Theme.WordmarkSequence) == 0 {
 		return s.Wordmark.Render(text)
 	}

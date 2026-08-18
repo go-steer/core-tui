@@ -53,7 +53,7 @@ const (
 // streaming state, modal forms, transcript persistence, etc.
 type Model struct {
 	opts    Options
-	styles  Styles
+	styles  styleSet
 	history History
 
 	// viewport is the transcript's window — its size and its scroll
@@ -209,7 +209,7 @@ type Model struct {
 	sideAnswer *SideAnswer
 
 	// modalScroll is the scroll offset for the one modal that still
-	// lives on the Model rather than on the Overlay stack: the /btw
+	// lives on the Model rather than on the overlay stack: the /btw
 	// side answer. Questions on the stack own their own scrollState
 	// instead; see elicitQuestion.sc and permissionQuestion.sc.
 	//
@@ -518,7 +518,7 @@ type Model struct {
 	// overlays all ride this stack; permission / elicit /
 	// sideAnswer still use their inline pendingX fields because
 	// the channel lifecycle hasn't been decoupled yet.
-	overlayStack Overlay
+	overlayStack overlay
 
 	// caps holds the env-sniffed terminal capability bag
 	// (agentic-tui skill §18). Renderers consult this to gate
@@ -684,7 +684,7 @@ func NewModel(opts Options) Model {
 		opts:            opts,
 		lifeCtx:         lifeCtx,
 		lifeCancel:      lifeCancel,
-		styles:          NewStyles(initialDark, opts.Branding), // overwritten on BackgroundColorMsg unless ForceTheme is set
+		styles:          newStyles(initialDark, opts.Branding), // overwritten on BackgroundColorMsg unless ForceTheme is set
 		input:           newComposer(ta),
 		follow:          true, // start pinned to the tail
 		statusLayout:    opts.StatusLayout,
@@ -912,7 +912,7 @@ func (m Model) displayProvider() string {
 	return m.hostSnap.provider
 }
 
-// refreshTheme re-resolves Styles (picking up the active provider
+// refreshTheme re-resolves styleSet (picking up the active provider
 // when AutoProviderTheme is on), invalidates BOTH Glamour renderers
 // + the list cache so the next render uses the new palette, and
 // rebuilds the textarea styles for the current dark/light mode.
@@ -954,7 +954,7 @@ func (m *Model) applyNamedTheme(name string) {
 	m.refreshViewport()
 }
 
-// resolveStyles builds the Styles bundle for the current dark/
+// resolveStyles builds the styleSet bundle for the current dark/
 // light mode. Precedence is:
 //
 //  1. m.themeName (set by /theme picker or Options.InitialThemeName)
@@ -968,7 +968,7 @@ func (m *Model) applyNamedTheme(name string) {
 // picked. Called from BackgroundColorMsg (first-paint dark/light
 // detect) and any time the active provider could have changed
 // (post-/model swap) or the operator switched themes.
-func (m Model) resolveStyles(dark bool) Styles {
+func (m Model) resolveStyles(dark bool) styleSet {
 	var theme Theme
 	switch {
 	case m.themeName != "":
@@ -987,7 +987,7 @@ func (m Model) resolveStyles(dark bool) Styles {
 	if m.opts.Branding.SecondaryColor != "" {
 		theme.Secondary = lipgloss.Color(m.opts.Branding.SecondaryColor)
 	}
-	return NewStylesWithTheme(dark, theme)
+	return newStylesWithTheme(dark, theme)
 }
 
 // displayModelName picks the best model identifier to surface on the

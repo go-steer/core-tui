@@ -70,7 +70,7 @@ type Theme struct {
 	// that reverses out of a brand color. Primary alone cannot
 	// answer "what is legible on top of this?", so the token has
 	// to exist; but it is DERIVED, not required — a nil OnPrimary
-	// is filled in by NewStylesWithTheme from a luminance check on
+	// is filled in by newStylesWithTheme from a luminance check on
 	// Primary, so no builtin and no host theme has to set it.
 	OnPrimary color.Color
 
@@ -108,7 +108,7 @@ type Theme struct {
 	// theme uses this to mimic the iconic B-R-Y-B-G-R logo
 	// sequence — the single visual signature no palette
 	// distribution alone can produce. Nil falls back to the
-	// single-color Primary render (Styles.Wordmark style), which
+	// single-color Primary render (styleSet.Wordmark style), which
 	// is what every other theme should keep doing.
 	WordmarkSequence []color.Color
 
@@ -118,7 +118,7 @@ type Theme struct {
 	// Empty (zero value) keeps the house default "▎ " — every
 	// theme that doesn't have a glyph identity should leave this
 	// empty. The glyph picks up the active prompt color from
-	// Styles.Focused.Prompt, so foreground color is theme-
+	// styleSet.Focused.Prompt, so foreground color is theme-
 	// controlled regardless.
 	PromptGlyph string
 }
@@ -152,19 +152,23 @@ func chromaFor(dark bool, darkName, lightName string) string {
 
 // normalizeTheme fills in the derived tokens a Theme is allowed to
 // leave zero, and is the single funnel every Theme crosses on its
-// way to a Styles bundle (see NewStylesWithTheme, which calls it).
+// way to a styleSet bundle (see newStylesWithTheme, which calls it).
 //
 // It deliberately does NOT live in defaultTheme. There are four
 // independent ways a Theme value comes into existence and only two
 // of them route through defaultTheme — ThemeByName (via the
 // registry's Build closures) and the provider/brand constructors.
-// The other two do not: a bare `Theme{...}` composite literal from
-// a host calling the exported NewStylesWithTheme, and the same
-// shape in the golden corpus. Normalizing at the Styles boundary
+// The other two do not: a bare `Theme{...}` composite literal handed
+// straight to newStylesWithTheme, and the same shape in the golden
+// corpus. The first of those was a host's until #257 unexported the
+// constructor; it is in-package now, but the hazard is unchanged and
+// so is the argument, because a caller that builds a Theme without
+// crossing defaultTheme skips every derivation either way.
+// Normalizing at the styleSet boundary
 // instead means the twelve builtins need no edits, host themes keep
-// working, and the two Branding override sites (NewStyles and
+// working, and the two Branding override sites (newStyles and
 // Model.resolveStyles) that mutate Primary and then call
-// NewStylesWithTheme re-derive OnPrimary for free.
+// newStylesWithTheme re-derive OnPrimary for free.
 func normalizeTheme(t Theme) Theme {
 	if t.ChromaStyleName == "" {
 		t.ChromaStyleName = defaultChromaStyleName

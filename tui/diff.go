@@ -112,7 +112,7 @@ func computeUnifiedDiff(label, oldText, newText string) string {
 // `maxLines` caps the rendered output; lines beyond the cap are
 // dropped and replaced with a "… +N more" marker. Pass 0 for
 // no cap.
-func renderDiffInline(diff string, styles Styles, maxLines int, lang string) string {
+func renderDiffInline(diff string, styles styleSet, maxLines int, lang string) string {
 	if diff == "" {
 		return ""
 	}
@@ -198,7 +198,7 @@ func renderDiffInline(diff string, styles Styles, maxLines int, lang string) str
 // equivalent bg behavior; only fg differs.
 //
 // chromaName is the active theme's Chroma style — the caller reads
-// it off the Styles it already holds, which is what keeps the
+// it off the styleSet it already holds, which is what keeps the
 // highlighter theme-aware without a package-level variable.
 func highlightOrFlat(body, lang, chromaName string, bg color.Color, fallback lipgloss.Style) string {
 	if lang == "" {

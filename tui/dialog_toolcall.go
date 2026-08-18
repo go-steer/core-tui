@@ -47,7 +47,7 @@ import (
 const toolCallDialogID = "tool-call-detail"
 
 // toolCallDialogChromeRows is the row budget this modal spends on
-// chrome: RenderContext's modalChromeRows (title line, blank, blank,
+// chrome: renderContext's modalChromeRows (title line, blank, blank,
 // footer rule, footer text) plus the two rows this dialog puts
 // INSIDE Body — the header banner and the blank line under it.
 //
@@ -77,7 +77,7 @@ type toolCallDialog struct {
 }
 
 // newToolCallDialog constructs a fresh overlay focused on the
-// most-recent tool call. Callers OPEN via overlay.Open; the Overlay
+// most-recent tool call. Callers OPEN via overlay.open; the overlay
 // container owns lifecycle.
 func newToolCallDialog(toolCount int) *toolCallDialog {
 	last := toolCount - 1
@@ -89,14 +89,14 @@ func newToolCallDialog(toolCount int) *toolCallDialog {
 
 func (d *toolCallDialog) ID() string { return toolCallDialogID }
 
-func (d *toolCallDialog) HandleKey(stroke string, m *Model) DialogAction {
+func (d *toolCallDialog) HandleKey(stroke string, m *Model) dialogAction {
 	tools := collectToolCalls(m.history.Snapshot())
 	n := len(tools)
 	if n == 0 {
 		// Nothing to show — close cleanly. The keybinding shouldn't
 		// have opened us with an empty session, but the guard is
 		// cheap insurance against a /clear racing an open.
-		return DialogAction{Consumed: true, Close: true}
+		return dialogAction{Consumed: true, Close: true}
 	}
 	// Keep idx in range even when tools shrank between renders
 	// (unlikely in practice — history only grows within a session —
@@ -109,42 +109,42 @@ func (d *toolCallDialog) HandleKey(stroke string, m *Model) DialogAction {
 	}
 	switch stroke {
 	case "esc":
-		return DialogAction{Consumed: true, Close: true}
+		return dialogAction{Consumed: true, Close: true}
 	case "left", "ctrl+p", "pgup":
 		if d.idx > 0 {
 			d.idx--
 			d.scroll = 0
 		}
-		return DialogAction{Consumed: true}
+		return dialogAction{Consumed: true}
 	case "right", "ctrl+n", "pgdown", "pgdn":
 		if d.idx < n-1 {
 			d.idx++
 			d.scroll = 0
 		}
-		return DialogAction{Consumed: true}
+		return dialogAction{Consumed: true}
 	case "home", "g":
 		d.idx = 0
 		d.scroll = 0
-		return DialogAction{Consumed: true}
+		return dialogAction{Consumed: true}
 	case "end", "G":
 		d.idx = n - 1
 		d.scroll = 0
-		return DialogAction{Consumed: true}
+		return dialogAction{Consumed: true}
 	case "up", "k":
 		if d.scroll > 0 {
 			d.scroll--
 		}
-		return DialogAction{Consumed: true}
+		return dialogAction{Consumed: true}
 	case "down", "j":
 		d.scroll++
-		return DialogAction{Consumed: true}
+		return dialogAction{Consumed: true}
 	}
 	// Unhandled key — consume so it doesn't leak to the textarea
 	// behind the modal, but don't close.
-	return DialogAction{Consumed: true}
+	return dialogAction{Consumed: true}
 }
 
-// ScrollBy implements ScrollDialog: mouse-wheel ticks move the
+// ScrollBy implements scrollDialog: mouse-wheel ticks move the
 // detail body, clamped against the last render's geometry.
 func (d *toolCallDialog) ScrollBy(delta int, _ *Model) {
 	d.scroll = min(nonNeg(d.scroll+delta), nonNeg(d.lastBody-d.lastView))
@@ -161,14 +161,14 @@ func (d *toolCallDialog) Render(totalWidth int, m *Model) string {
 
 	tools := collectToolCalls(m.history.Snapshot())
 	if len(tools) == 0 {
-		return RenderContext{
+		return renderContext{
 			Title:  "Tool call detail",
 			Body:   m.styles.Muted.Render("(no tool calls in this session yet)"),
 			Footer: "esc close",
 			Width:  width,
 			Height: m.height,
 			Styles: m.styles,
-		}.Render()
+		}.render()
 	}
 
 	if d.idx >= len(tools) {
@@ -201,20 +201,20 @@ func (d *toolCallDialog) Render(totalWidth int, m *Model) string {
 	body := header + "\n\n" + strings.Join(visible, "\n")
 
 	footer := renderToolCallFooter(len(tools), len(bodyLines), viewport)
-	return RenderContext{
+	return renderContext{
 		Title:  "Tool call detail",
 		Body:   body,
 		Footer: footer,
 		Width:  width,
 		Height: m.height,
 		Styles: m.styles,
-	}.Render()
+	}.render()
 }
 
 // renderToolCallHeader builds the top banner: which-of-how-many,
 // tool name, wire-level call ID, and a state hint (pending / failed).
 // Kept compact — the interesting content is the JSON body below.
-func renderToolCallHeader(idx, total int, tool Message, styles Styles) string {
+func renderToolCallHeader(idx, total int, tool Message, styles styleSet) string {
 	name := tool.ToolName
 	if name == "" {
 		name = "(unknown tool)"
@@ -306,6 +306,6 @@ func toolCallBodyHeight(termHeight int) int {
 }
 
 // Bold is a helper style commonly used across renderers; if the
-// underlying Styles struct doesn't expose it as a distinct field,
+// underlying styleSet struct doesn't expose it as a distinct field,
 // the tests below will surface the missing surface immediately.
 var _ = lipgloss.Left

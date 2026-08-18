@@ -13,16 +13,16 @@
 // limitations under the License.
 
 // Text-input dialog — the "type one value" primitive (issue #56).
-// Every Dialog before this one was arrow-nav + Enter; pickers that
+// Every dialog before this one was arrow-nav + Enter; pickers that
 // need an operator-supplied string (the session picker's
 // "+ Attach to endpoint…" row being the motivating case) had no
 // modal to hand off to. huh.Form on Model.pendingForm covers
 // multi-field forms but is a separate lane that doesn't ride the
-// Overlay stack and doesn't wear the RenderContext chrome.
+// overlay stack and doesn't wear the renderContext chrome.
 //
 // This is deliberately single-line: a bubbles/v2 textinput inside
 // standard dialog chrome, Enter validates + submits, Esc cancels.
-// Nesting is the point — a picker Dialog can Open() one of these on
+// Nesting is the point — a picker dialog can Open() one of these on
 // top of itself and close both from the submit closure.
 
 package tui
@@ -35,16 +35,16 @@ import (
 	"charm.land/lipgloss/v2"
 )
 
-// textInputDialogID is the default Dialog ID when textInputConfig
+// textInputDialogID is the default dialog ID when textInputConfig
 // leaves ID empty. Callers that stack several text inputs (or want to
-// Overlay.Close a specific one) supply their own.
+// overlay.close a specific one) supply their own.
 const textInputDialogID = "text-input"
 
 // defaultTextInputWidth matches the model picker so a text input
 // opened from a picker doesn't visibly jump in size.
 const defaultTextInputWidth = 64
 
-// textInputConfig configures a text-input Dialog. Only Submit is
+// textInputConfig configures a text-input dialog. Only Submit is
 // strictly required — everything else has a sane default:
 //
 //	ID     → "text-input"
@@ -56,13 +56,13 @@ const defaultTextInputWidth = 64
 //
 // Unexported in #254, with the NewTextInputDialog constructor that
 // took it. Both were exported for a host that never had a way to reach
-// them: opening one needs an Overlay, and the only Overlay in
+// them: opening one needs an overlay, and the only overlay in
 // existence is an unexported field of Model. Submit's signature is
 // unchanged — it still takes the live Model and returns a
-// DialogAction, because the one caller that wraps this primitive needs
+// dialogAction, because the one caller that wraps this primitive needs
 // exactly that. See the field's own comment.
 type textInputConfig struct {
-	// ID is the Overlay identity (Overlay.Close / HasID). Empty
+	// ID is the overlay identity (overlay.close / hasID). Empty
 	// falls back to textInputDialogID.
 	ID string
 
@@ -95,7 +95,7 @@ type textInputConfig struct {
 
 	// Submit is called on Enter once Validate passes. It receives
 	// the trimmed value and the live Model, and returns the
-	// DialogAction the Overlay applies — so a submit closure can
+	// dialogAction the overlay applies — so a submit closure can
 	// close this dialog (Close: true), leave it open, emit a Cmd,
 	// and/or Open another dialog on the stack. Nil Submit closes
 	// the dialog without doing anything.
@@ -103,12 +103,12 @@ type textInputConfig struct {
 	// #164 §10.1 planned to narrow this to func(value string) error
 	// on the way out of the exported surface, on the assumption that
 	// the text input would become a question and its effects would
-	// move to a resolver. It did not — §13 keeps this a Dialog — and
+	// move to a resolver. It did not — §13 keeps this a dialog — and
 	// the shape does not fit its one caller: the action row's
 	// in-flight commit (dialog_sessioninput.go) has to return a Cmd
 	// and has to stay OPEN while the host's dial is out, and an error
 	// return can say neither.
-	Submit func(value string, m *Model) DialogAction
+	Submit func(value string, m *Model) dialogAction
 
 	// Footer overrides the default "enter submit · esc cancel"
 	// hint line.
@@ -124,7 +124,7 @@ type textInputConfig struct {
 	Footer string
 }
 
-// textInputDialog is the Dialog implementation behind
+// textInputDialog is the dialog implementation behind
 // newTextInputDialog. It implements keyMsgDialog so the embedded
 // textinput sees real tea.KeyPressMsg values (Key.Text, modifiers,
 // synthesized pastes) instead of normalized stroke strings.
@@ -145,8 +145,8 @@ type textInputDialog struct {
 	styled      bool
 }
 
-// newTextInputDialog builds a single-line text-entry Dialog ready
-// for Overlay.Open. Typical use from inside another Dialog's
+// newTextInputDialog builds a single-line text-entry dialog ready
+// for overlay.open. Typical use from inside another dialog's
 // HandleKey — note the submit closure closing BOTH dialogs:
 //
 //	m.overlayStack.Open(newTextInputDialog(textInputConfig{
@@ -156,23 +156,23 @@ type textInputDialog struct {
 //	        if v == "" { return "endpoint is required" }
 //	        return ""
 //	    },
-//	    Submit: func(v string, m *Model) DialogAction {
+//	    Submit: func(v string, m *Model) dialogAction {
 //	        tgt, err := dialTheThing(v)
 //	        if err != nil {
 //	            m.history.Append(Message{Role: RoleError, Text: err.Error()})
 //	            m.refreshViewport()
-//	            return DialogAction{Consumed: true, Close: true}
+//	            return dialogAction{Consumed: true, Close: true}
 //	        }
 //	        m.overlayStack.Close(sessionPickerDialogID) // close the parent
-//	        return DialogAction{Consumed: true, Close: true, Cmd: m.applySwitchTarget(&tgt)}
+//	        return dialogAction{Consumed: true, Close: true, Cmd: m.applySwitchTarget(&tgt)}
 //	    },
 //	}))
 //
-// It returns the concrete type rather than a Dialog because the one
+// It returns the concrete type rather than a dialog because the one
 // caller that WRAPS the primitive rather than merely opening it needs
 // the struct: the session picker's action-row dialog embeds it to add
 // an in-flight state around an async Submit (issue #194), and an
-// interface value would promote only the three Dialog methods and hide
+// interface value would promote only the three dialog methods and hide
 // HandleKeyMsg and DialogCursor — exactly the two optional extensions
 // the wrapper has to keep forwarding for the box to stay typeable and
 // keep its caret. There was an interface-returning NewTextInputDialog
@@ -216,19 +216,19 @@ func (d *textInputDialog) ID() string { return d.cfg.ID }
 // for submit closures that captured the dialog.
 func (d *textInputDialog) Value() string { return d.input.Value() }
 
-// HandleKey satisfies Dialog for callers holding only a normalized
+// HandleKey satisfies dialog for callers holding only a normalized
 // stroke. It synthesizes a KeyPressMsg and delegates so both entry
 // points behave identically.
-func (d *textInputDialog) HandleKey(stroke string, m *Model) DialogAction {
+func (d *textInputDialog) HandleKey(stroke string, m *Model) dialogAction {
 	return d.HandleKeyMsg(keyMsgFromStroke(stroke), m)
 }
 
 // HandleKeyMsg is the real key handler. Enter validates + submits;
 // Esc closes without submitting; everything else feeds the input.
-func (d *textInputDialog) HandleKeyMsg(msg tea.KeyPressMsg, m *Model) DialogAction {
+func (d *textInputDialog) HandleKeyMsg(msg tea.KeyPressMsg, m *Model) dialogAction {
 	switch msg.String() {
 	case "esc":
-		return DialogAction{Consumed: true, Close: true}
+		return dialogAction{Consumed: true, Close: true}
 	case "enter":
 		value := strings.TrimSpace(d.input.Value())
 		if d.cfg.Validate != nil {
@@ -236,12 +236,12 @@ func (d *textInputDialog) HandleKeyMsg(msg tea.KeyPressMsg, m *Model) DialogActi
 				// Stay open — the operator gets the error inline
 				// with their text still in the box.
 				d.errMsg = e
-				return DialogAction{Consumed: true}
+				return dialogAction{Consumed: true}
 			}
 		}
 		d.errMsg = ""
 		if d.cfg.Submit == nil {
-			return DialogAction{Consumed: true, Close: true}
+			return dialogAction{Consumed: true, Close: true}
 		}
 		return d.cfg.Submit(value, m)
 	}
@@ -252,7 +252,7 @@ func (d *textInputDialog) HandleKeyMsg(msg tea.KeyPressMsg, m *Model) DialogActi
 	// Consume unconditionally: an open text input is exclusive, and
 	// letting a stray key fall through would type into the chat
 	// textarea behind the modal.
-	return DialogAction{Consumed: true, Cmd: cmd}
+	return dialogAction{Consumed: true, Cmd: cmd}
 }
 
 // dialogWidth resolves the configured width against the terminal:
@@ -295,22 +295,22 @@ func (d *textInputDialog) Render(totalWidth int, m *Model) string {
 	if footer == "" {
 		footer = keyLegend("enter submit", "esc cancel")
 	}
-	return RenderContext{
+	return renderContext{
 		Title:  d.cfg.Title,
 		Body:   lipgloss.JoinVertical(lipgloss.Left, parts...),
 		Footer: footer,
 		Width:  width,
 		Height: m.height,
 		Styles: m.styles,
-	}.Render()
+	}.render()
 }
 
 // DialogCursor implements cursorDialog: it reports where the caret
 // sits inside the input box, relative to the dialog block's own
-// top-left cell. Overlay.Cursor adds the origin lipgloss.Place
+// top-left cell. overlay.cursor adds the origin lipgloss.Place
 // composited the dialog at (cursor.go).
 //
-// The offsets are RenderContext's chrome, which is fixed: the box
+// The offsets are renderContext's chrome, which is fixed: the box
 // edge plus one column of horizontal padding, and a title line plus a
 // blank row above the body. Inside the body the input is the first
 // part unless a prompt
@@ -337,7 +337,7 @@ func (d *textInputDialog) DialogCursor(_ int, _ *Model) *tea.Cursor {
 // Called per-render (cheap, guarded) because /theme can swap the
 // palette while this dialog is open — the theme picker applies on
 // cursor move, and a host could stack the two.
-func (d *textInputDialog) syncStyles(s Styles) {
+func (d *textInputDialog) syncStyles(s styleSet) {
 	if d.styled && d.styledDark == s.Dark && d.styledTheme == s.Theme.Name {
 		return
 	}
@@ -350,7 +350,7 @@ func (d *textInputDialog) syncStyles(s Styles) {
 // textInputStyles maps the active theme onto a bubbles textinput
 // palette. Shared with the pickers' filter row (dialog_filter.go) so
 // the two typed surfaces cannot drift apart.
-func textInputStyles(s Styles) textinput.Styles {
+func textInputStyles(s styleSet) textinput.Styles {
 	ts := textinput.DefaultStyles(s.Dark)
 	ts.Focused.Prompt = lipgloss.NewStyle().Foreground(s.Theme.BorderActive)
 	ts.Blurred.Prompt = lipgloss.NewStyle().Foreground(s.Theme.FgMuted)
@@ -361,14 +361,14 @@ func textInputStyles(s Styles) textinput.Styles {
 	// Blink is on: the TERMINAL owns the caret now (issue #105), so
 	// blinking costs no plumbing. It used to be forced off because a
 	// blinking VIRTUAL cursor needs cursor.BlinkMsg routed back into
-	// the widget and the Dialog contract is keystrokes-only — no msg
+	// the widget and the dialog contract is keystrokes-only — no msg
 	// pipe. That constraint died with the virtual cursor.
 	ts.Cursor.Blink = true
 	return ts
 }
 
 // keyMsgFromStroke rebuilds a tea.KeyPressMsg from the normalized
-// stroke string that Dialog.HandleKey deals in. Only the keys a
+// stroke string that dialog.HandleKey deals in. Only the keys a
 // single-line input cares about are mapped; anything unrecognized
 // comes back as a zero Key, which the textinput ignores.
 //

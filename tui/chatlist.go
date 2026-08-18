@@ -12,7 +12,7 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-// Item-addressed transcript (issue #161).
+// listItem-addressed transcript (issue #161).
 //
 // The transcript used to be concatenated into one string and handed
 // to a viewport that sliced the visible window out of it. Every
@@ -224,7 +224,7 @@ func (m Model) buildChatRule() string {
 // the cache neither knows nor needs to know that the row is folded.
 func (m Model) chatMessageLines(i, total int, msg Message) []string {
 	width := m.viewport.Width()
-	// Looked up by ID rather than through Item so the hit path does
+	// Looked up by ID rather than through listItem so the hit path does
 	// not build (and heap-allocate) a messageItem it would throw away
 	// — issue #204. The box is deferred to the miss branch, where put
 	// needs the interface and a render is being paid for regardless.

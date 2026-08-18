@@ -47,7 +47,7 @@ func cursorModel(t *testing.T, layout StatusLayout, w, h int) Model {
 		Agent:        &bareAgent{id: "cursor"},
 		StatusLayout: layout,
 	})
-	m.styles = NewStylesWithTheme(true, goldenTheme())
+	m.styles = newStylesWithTheme(true, goldenTheme())
 	out, _ := m.Update(tea.WindowSizeMsg{Width: w, Height: h})
 	return out.(Model)
 }
@@ -191,7 +191,7 @@ func TestCursor_MultibyteAdvancesByCells(t *testing.T) {
 	}
 }
 
-// TestCursor_ModalTakesCursor opens a text-input Dialog and checks
+// TestCursor_ModalTakesCursor opens a text-input dialog and checks
 // the cursor moves into it. The dialog is centered with
 // lipgloss.Place, so its origin is a function of its own rendered
 // size — this fails loudly if that origin is guessed rather than
@@ -203,7 +203,7 @@ func TestCursor_ModalTakesCursor(t *testing.T) {
 		t.Fatal("precondition: the textarea should own the cursor before the modal opens")
 	}
 
-	m.overlayStack.Open(newTextInputDialog(textInputConfig{
+	m.overlayStack.open(newTextInputDialog(textInputConfig{
 		Title:   "Attach to Endpoint",
 		Prompt:  "Daemon URL:",
 		Initial: "https://example.test",
@@ -240,7 +240,7 @@ func TestCursor_ModalCaretCountsCells(t *testing.T) {
 	} {
 		t.Run(initial, func(t *testing.T) {
 			m := cursorModel(t, StatusHeader, 100, 30)
-			m.overlayStack.Open(newTextInputDialog(textInputConfig{
+			m.overlayStack.open(newTextInputDialog(textInputConfig{
 				Title:   "Attach to Endpoint",
 				Prompt:  "Daemon URL:",
 				Initial: initial,
@@ -492,7 +492,7 @@ func TestCursor_NilWhenNothingOwnsIt(t *testing.T) {
 			name: "arrow-nav-dialog",
 			setup: func(t *testing.T) Model {
 				m := cursorModel(t, StatusHeader, 100, 30)
-				m.overlayStack.Open(newToolCallDialog(0))
+				m.overlayStack.open(newToolCallDialog(0))
 				return m
 			},
 		},

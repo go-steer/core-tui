@@ -214,6 +214,14 @@ be spent on this deadline). "n" is the method count.
 
 **Net under this proposal: 20 optional capabilities → 17.**
 
+Every "leave" in the render-extension rows above was a scope call for
+this proposal, not a verdict on the symbols; `docs/api-surface.md` §3.2
+took them up and all seven are off the exported surface as of v0.22
+(#213, #254, #257). One correction the table earned: `RawRenderable`'s
+implementor count of 1 was counting a *method*, not a use. Nothing ever
+type-asserted to the interface, so it was deleted rather than
+unexported.
+
 ---
 
 ## 2. The evidence problem

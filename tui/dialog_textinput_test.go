@@ -12,7 +12,7 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-// Tests for the text-input Dialog primitive (issue #56): typing,
+// Tests for the text-input dialog primitive (issue #56): typing,
 // validation-keeps-open, submit-closure wiring, the keyMsgDialog
 // key path, and bracketed-paste routing.
 
@@ -29,13 +29,13 @@ import (
 // renderPlain renders a dialog and strips styling — the virtual
 // cursor block wraps the character under it in its own escape
 // sequence, which splits substrings apart in the raw output.
-func renderPlain(d Dialog, m *Model) string {
+func renderPlain(d dialog, m *Model) string {
 	return ansi.Strip(d.Render(80, m))
 }
 
 // typeInto feeds each rune of s to the dialog as a separate
 // keystroke, the way a terminal delivers typing.
-func typeInto(t *testing.T, d Dialog, m *Model, s string) {
+func typeInto(t *testing.T, d dialog, m *Model, s string) {
 	t.Helper()
 	for _, r := range s {
 		act := d.HandleKey(string(r), m)
@@ -65,7 +65,7 @@ func TestTextInputDialog_Defaults(t *testing.T) {
 }
 
 // TestTextInputDialog_TypeAndSubmit — typed runes accumulate, Enter
-// hands the TRIMMED value to Submit, and Submit's DialogAction is
+// hands the TRIMMED value to Submit, and Submit's dialogAction is
 // what the dialog returns verbatim.
 func TestTextInputDialog_TypeAndSubmit(t *testing.T) {
 	m := NewModel(Options{Agent: &bareAgent{id: "a"}})
@@ -76,10 +76,10 @@ func TestTextInputDialog_TypeAndSubmit(t *testing.T) {
 	d := newTextInputDialog(textInputConfig{
 		Title:  "Attach",
 		Prompt: "Daemon URL:",
-		Submit: func(v string, mm *Model) DialogAction {
+		Submit: func(v string, mm *Model) dialogAction {
 			got = v
 			sawModel = mm != nil
-			return DialogAction{Consumed: true, Close: true}
+			return dialogAction{Consumed: true, Close: true}
 		},
 	})
 
@@ -105,9 +105,9 @@ func TestTextInputDialog_Editing(t *testing.T) {
 
 	var got string
 	d := newTextInputDialog(textInputConfig{
-		Submit: func(v string, _ *Model) DialogAction {
+		Submit: func(v string, _ *Model) dialogAction {
 			got = v
-			return DialogAction{Consumed: true, Close: true}
+			return dialogAction{Consumed: true, Close: true}
 		},
 	})
 
@@ -136,9 +136,9 @@ func TestTextInputDialog_SpaceIsTyped(t *testing.T) {
 
 	var got string
 	d := newTextInputDialog(textInputConfig{
-		Submit: func(v string, _ *Model) DialogAction {
+		Submit: func(v string, _ *Model) dialogAction {
 			got = v
-			return DialogAction{Consumed: true, Close: true}
+			return dialogAction{Consumed: true, Close: true}
 		},
 	})
 	typeInto(t, d, &m, "a")
@@ -165,9 +165,9 @@ func TestTextInputDialog_ValidateKeepsOpen(t *testing.T) {
 			}
 			return ""
 		},
-		Submit: func(string, *Model) DialogAction {
+		Submit: func(string, *Model) dialogAction {
 			submits++
-			return DialogAction{Consumed: true, Close: true}
+			return dialogAction{Consumed: true, Close: true}
 		},
 	})
 
@@ -209,9 +209,9 @@ func TestTextInputDialog_EscCloses(t *testing.T) {
 
 	submits := 0
 	d := newTextInputDialog(textInputConfig{
-		Submit: func(string, *Model) DialogAction {
+		Submit: func(string, *Model) dialogAction {
 			submits++
-			return DialogAction{Consumed: true, Close: true}
+			return dialogAction{Consumed: true, Close: true}
 		},
 	})
 	typeInto(t, d, &m, "half-typed")
@@ -261,9 +261,9 @@ func TestTextInputDialog_InitialAndPlaceholder(t *testing.T) {
 	}
 	// Cursor lands at the end, so typing appends.
 	var got string
-	pre.cfg.Submit = func(v string, _ *Model) DialogAction {
+	pre.cfg.Submit = func(v string, _ *Model) dialogAction {
 		got = v
-		return DialogAction{Consumed: true, Close: true}
+		return dialogAction{Consumed: true, Close: true}
 	}
 	typeInto(t, pre, &m, "2")
 	pre.HandleKey("enter", &m)
@@ -272,7 +272,7 @@ func TestTextInputDialog_InitialAndPlaceholder(t *testing.T) {
 	}
 }
 
-// TestOverlay_HandleKeyMsg_PrefersKeyMsgDialog — the Overlay routes
+// TestOverlay_HandleKeyMsg_PrefersKeyMsgDialog — the overlay routes
 // the raw KeyPressMsg to a keyMsgDialog and falls back to the
 // stroke-string contract for plain Dialogs.
 func TestOverlay_HandleKeyMsg_PrefersKeyMsgDialog(t *testing.T) {
@@ -281,42 +281,42 @@ func TestOverlay_HandleKeyMsg_PrefersKeyMsgDialog(t *testing.T) {
 
 	var got string
 	d := newTextInputDialog(textInputConfig{
-		Submit: func(v string, _ *Model) DialogAction {
+		Submit: func(v string, _ *Model) dialogAction {
 			got = v
-			return DialogAction{Consumed: true, Close: true}
+			return dialogAction{Consumed: true, Close: true}
 		},
 	})
-	m.overlayStack.Open(d)
+	m.overlayStack.open(d)
 
 	// Key.Text is what a keyMsgDialog inserts — a stroke-string
 	// round trip would lose it for anything exotic.
 	for _, r := range "hé∂" {
 		key := tea.KeyPressMsg(tea.Key{Code: r, Text: string(r)})
-		if consumed, _ := m.overlayStack.HandleKeyMsg(key, &m); !consumed {
+		if consumed, _ := m.overlayStack.handleKeyMsg(key, &m); !consumed {
 			t.Fatalf("KeyPressMsg %q not consumed", string(r))
 		}
 	}
-	consumed, _ := m.overlayStack.HandleKeyMsg(tea.KeyPressMsg(tea.Key{Code: tea.KeyEnter}), &m)
+	consumed, _ := m.overlayStack.handleKeyMsg(tea.KeyPressMsg(tea.Key{Code: tea.KeyEnter}), &m)
 	if !consumed {
 		t.Fatalf("enter not consumed")
 	}
 	if got != "hé∂" {
 		t.Errorf("value = %q, want %q", got, "hé∂")
 	}
-	if m.overlayStack.HasDialogs() {
+	if m.overlayStack.hasDialogs() {
 		t.Errorf("Close: true from Submit should have popped the dialog")
 	}
 
-	// A plain Dialog still works through the same entry point via
+	// A plain dialog still works through the same entry point via
 	// the HandleKey fallback. The model picker used to be the
 	// example here; issue #117 made all three pickers keyMsgDialogs,
 	// so the tool-call detail overlay is what exercises the fallback
 	// now.
-	m.overlayStack.Open(newToolCallDialog(0))
-	if _, ok := m.overlayStack.Front().(keyMsgDialog); ok {
+	m.overlayStack.open(newToolCallDialog(0))
+	if _, ok := m.overlayStack.front().(keyMsgDialog); ok {
 		t.Fatal("the fallback arm needs a dialog that is NOT a keyMsgDialog")
 	}
-	consumed, _ = m.overlayStack.HandleKeyMsg(tea.KeyPressMsg(tea.Key{Code: tea.KeyEnter}), &m)
+	consumed, _ = m.overlayStack.handleKeyMsg(tea.KeyPressMsg(tea.Key{Code: tea.KeyEnter}), &m)
 	if !consumed {
 		t.Errorf("plain Dialog should still consume via the HandleKey fallback")
 	}
@@ -330,12 +330,12 @@ func TestTextInputDialog_PasteRoutesToDialog(t *testing.T) {
 
 	var got string
 	d := newTextInputDialog(textInputConfig{
-		Submit: func(v string, _ *Model) DialogAction {
+		Submit: func(v string, _ *Model) dialogAction {
 			got = v
-			return DialogAction{Consumed: true, Close: true}
+			return dialogAction{Consumed: true, Close: true}
 		},
 	})
-	m.overlayStack.Open(d)
+	m.overlayStack.open(d)
 
 	out, _ := m.Update(tea.PasteMsg{Content: "http://pasted:7778"})
 	m = out.(Model)
@@ -364,7 +364,7 @@ func TestTextInputDialog_PasteFallsThroughWithoutDialog(t *testing.T) {
 }
 
 // TestKeyMsgFromStroke — the stroke→KeyPressMsg shim must round-trip
-// through String() so both Dialog entry points agree.
+// through String() so both dialog entry points agree.
 func TestKeyMsgFromStroke(t *testing.T) {
 	for _, stroke := range []string{
 		"a", "Z", "é", "space", "enter", "esc", "tab", "backspace",

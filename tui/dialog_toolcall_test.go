@@ -28,7 +28,7 @@ import (
 func modelWithTools(t *testing.T) *Model {
 	t.Helper()
 	m := Model{}
-	m.styles = NewStyles(true, Branding{})
+	m.styles = newStyles(true, Branding{})
 	m.width = 120
 	m.height = 40
 	m.history.Append(Message{
@@ -163,7 +163,7 @@ func TestToolCallDialog_RendersFailedBadge(t *testing.T) {
 
 func TestToolCallDialog_EmptyHistoryClosesOnKey(t *testing.T) {
 	m := Model{}
-	m.styles = NewStyles(true, Branding{})
+	m.styles = newStyles(true, Branding{})
 	m.width = 100
 	m.height = 30
 	d := newToolCallDialog(0)
@@ -227,7 +227,7 @@ func interleavedToolModel(t *testing.T) Model {
 func openToolCallOverlay(t *testing.T, m Model) *toolCallDialog {
 	t.Helper()
 	m = press(m, "ctrl+x")
-	d, ok := m.overlayStack.Get(toolCallDialogID).(*toolCallDialog)
+	d, ok := m.overlayStack.get(toolCallDialogID).(*toolCallDialog)
 	if !ok {
 		t.Fatal("ctrl+x did not open the tool-call overlay")
 	}

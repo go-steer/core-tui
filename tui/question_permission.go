@@ -85,7 +85,7 @@ type permissionQuestion struct {
 
 	// md caches the Glamour renderer the DetailDiff path needs, keyed
 	// on exactly what Model.ensureMarkdown keys its own on. A question
-	// cannot reach the app's cached renderer — Body is handed a Styles
+	// cannot reach the app's cached renderer — Body is handed a styleSet
 	// and a width and nothing else — and building one per frame is not
 	// free, so the question keeps its own for as long as it is open.
 	md      *markdownRenderer
@@ -215,7 +215,7 @@ func (q *permissionQuestion) Commits(msg tea.KeyPressMsg) bool {
 // The inline layout never gets here: the block renders inside the chat
 // viewport, so the wheel keeps scrolling the chat — that IS the surface
 // showing the prompt, and taking the tick would freeze the transcript
-// under a block the operator is trying to read past. Overlay.HandleWheel
+// under a block the operator is trying to read past. overlay.handleWheel
 // bounces it on Inline() before this is reached.
 func (q *permissionQuestion) ScrollBy(delta int) { q.sc.by(delta) }
 
@@ -255,7 +255,7 @@ func (q *permissionQuestion) Key(msg tea.KeyPressMsg) (answer, tea.Cmd) {
 
 // Body renders the centered layout's content: the provenance rows, the
 // payload, windowed to whatever the terminal left after the chrome.
-func (q *permissionQuestion) Body(width, termHeight int, st Styles) string {
+func (q *permissionQuestion) Body(width, termHeight int, st styleSet) string {
 	inner := modalInnerWidth(width)
 	bodyWidth := modalBodyWidth(width)
 
@@ -289,7 +289,7 @@ func (q *permissionQuestion) Body(width, termHeight int, st Styles) string {
 //
 // width is the chat column, not a modal width — the block is part of
 // the transcript flow and there is no frame to fit inside.
-func (q *permissionQuestion) InlineBody(width int, st Styles) string {
+func (q *permissionQuestion) InlineBody(width int, st styleSet) string {
 	if width <= 0 {
 		width = 80
 	}
@@ -348,7 +348,7 @@ func (q *permissionQuestion) InlineBody(width int, st Styles) string {
 // 100 columns wide and took the box with it. That is the same defect
 // ensureModalMarkdown was added for on the /btw modal, and the fix is
 // the same one.
-func (q *permissionQuestion) detail(width int, st Styles) string {
+func (q *permissionQuestion) detail(width int, st styleSet) string {
 	if q.req.Detail == "" {
 		return ""
 	}
@@ -371,7 +371,7 @@ func (q *permissionQuestion) detail(width int, st Styles) string {
 // markdown returns a Glamour renderer for width, rebuilding it when
 // the width or the light/dark polarity moves under it — the same three
 // keys Model.ensureMarkdown compares, for the same reason.
-func (q *permissionQuestion) markdown(width int, st Styles) *markdownRenderer {
+func (q *permissionQuestion) markdown(width int, st styleSet) *markdownRenderer {
 	if width <= 0 {
 		width = 80
 	}

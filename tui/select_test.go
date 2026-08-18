@@ -39,7 +39,7 @@ import (
 func selectModel(t *testing.T, turns, w, h int) Model {
 	t.Helper()
 	m := NewModel(Options{Agent: &bareAgent{id: "sel"}})
-	m.styles = NewStylesWithTheme(true, goldenTheme())
+	m.styles = newStylesWithTheme(true, goldenTheme())
 	out, _ := m.Update(tea.WindowSizeMsg{Width: w, Height: h})
 	m = out.(Model)
 	for i := range turns {

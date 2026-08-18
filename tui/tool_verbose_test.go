@@ -33,7 +33,7 @@ import (
 // gating without booting a Model + viewport. Keep the shape in sync
 // with update.go's applyToolResult body — that's the only place
 // verbose is actually threaded.
-func applyToolResultLogic(h *History, verbose bool, name string, args, response map[string]any, errStr string, styles Styles) {
+func applyToolResultLogic(h *History, verbose bool, name string, args, response map[string]any, errStr string, styles styleSet) {
 	idx := h.FindByToolCallID("call")
 	if idx < 0 {
 		return
@@ -50,7 +50,7 @@ func applyToolResultLogic(h *History, verbose bool, name string, args, response 
 }
 
 func TestToolDetailVerbose_AppendsDetailBlock(t *testing.T) {
-	styles := NewStyles(true, Branding{})
+	styles := newStyles(true, Branding{})
 	h := &History{}
 	args := map[string]any{"path": "main.go"}
 	h.Append(Message{
@@ -80,7 +80,7 @@ func TestToolDetailVerbose_AppendsDetailBlock(t *testing.T) {
 }
 
 func TestToolDetailVerbose_CompactDefaultOmitsDetailBlock(t *testing.T) {
-	styles := NewStyles(true, Branding{})
+	styles := newStyles(true, Branding{})
 	h := &History{}
 	args := map[string]any{"path": "main.go"}
 	h.Append(Message{
@@ -104,7 +104,7 @@ func TestToolDetailVerbose_CompactDefaultOmitsDetailBlock(t *testing.T) {
 }
 
 func TestToolDetailVerbose_ErrorRendersErrorSection(t *testing.T) {
-	styles := NewStyles(true, Branding{})
+	styles := newStyles(true, Branding{})
 	h := &History{}
 	args := map[string]any{"path": "missing.txt"}
 	h.Append(Message{

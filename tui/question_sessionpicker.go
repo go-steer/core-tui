@@ -17,7 +17,7 @@
 //
 // Second of the async pickers. The model picker established the shape —
 // Enter starts a host call, the modal stays up showing progress, and the
-// answer arrives from Update when the reply lands (Overlay.resolve,
+// answer arrives from Update when the reply lands (overlay.resolve,
 // design §6.5). This one is where that shape met a list whose rows do
 // not all mean the same thing, and the interesting part of the migration
 // is that Enter here has FOUR outcomes rather than one:
@@ -32,7 +32,7 @@
 //
 // The third is the one that needed the design's "a resolver must not
 // Open a dialog" rule to be written down first. The picker cannot open
-// the input itself either — Key runs inside Overlay.HandleKeyMsg, which
+// the input itself either — Key runs inside overlay.handleKeyMsg, which
 // pops after it — so it names the row in sessionInputRequestedMsg and
 // Update does the Open, the same way the theme picker's live preview is
 // applied.
@@ -92,8 +92,8 @@ type sessionSwitchRequestedMsg struct{ ID string }
 //
 // A message rather than a direct Open because neither of the two places
 // that could do it is allowed to. Key runs inside
-// Overlay.HandleKeyMsg, which pops the front dialog after it returns,
-// and a resolver runs inside Overlay.resolve, which pops after IT
+// overlay.handleKeyMsg, which pops the front dialog after it returns,
+// and a resolver runs inside overlay.resolve, which pops after IT
 // returns — so in both cases the modal just pushed is the one that gets
 // popped. Update is the only frame with no pending pop.
 //
@@ -176,7 +176,7 @@ func newSessionPickerQuestion(wired bool) *sessionPickerQuestion {
 // picker still opens, because "this agent cannot switch sessions" is
 // worth saying on the surface the operator asked for.
 func (m *Model) openSessionPicker() tea.Cmd {
-	if m.overlayStack.HasID(sessionPickerDialogID) {
+	if m.overlayStack.hasID(sessionPickerDialogID) {
 		return nil
 	}
 	_, wired := m.opts.Agent.(SessionSwitcher)
@@ -190,8 +190,8 @@ func (m *Model) openSessionPicker() tea.Cmd {
 // starts with, since a host reply can land against a picker the
 // operator escaped out of or replaced. The model picker's
 // modelPickerOn is the same function over the other type, and for the
-// same reason it is a free function rather than a method on Overlay.
-func sessionPickerOn(o *Overlay) *sessionPickerQuestion {
+// same reason it is a free function rather than a method on overlay.
+func sessionPickerOn(o *overlay) *sessionPickerQuestion {
 	aq := o.asked(sessionPickerDialogID)
 	if aq == nil {
 		return nil
@@ -439,7 +439,7 @@ func sessionSwitchFailure(msg sessionSwitchedMsg) string {
 // summarise. Populating Display is host work (issue #163's
 // "host-side" section); this function's job is to make the empty case
 // survivable rather than to fill it.
-func sessionCell(s SessionInfo, selected bool, filter string, styles Styles) (title, detail string) {
+func sessionCell(s SessionInfo, selected bool, filter string, styles styleSet) (title, detail string) {
 	base := lipgloss.NewStyle()
 	marker, gutter := "  ", "  "
 	if selected {
@@ -508,7 +508,7 @@ func sessionCell(s SessionInfo, selected bool, filter string, styles Styles) (ti
 	return title, detail
 }
 
-func (q *sessionPickerQuestion) Body(width, termHeight int, st Styles) string {
+func (q *sessionPickerQuestion) Body(width, termHeight int, st styleSet) string {
 	switch {
 	case !q.wired:
 		return st.Muted.Render("agent does not implement SessionSwitcher")
@@ -605,6 +605,6 @@ func (q *sessionPickerQuestion) Cursor(_ int) *tea.Cursor {
 // (sessionInputDialogID / newSessionInputDialog) lives in
 // dialog_sessioninput.go — it grew an in-flight state and a reply
 // handler of its own when SessionInput.Submit moved off the Update
-// goroutine (issue #194), and it is still a Dialog rather than a
+// goroutine (issue #194), and it is still a dialog rather than a
 // question: it is the one modal that has to END somebody else's
-// question, which it does through Overlay.resolve.
+// question, which it does through overlay.resolve.

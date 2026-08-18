@@ -282,11 +282,11 @@ func TestView_NeverCallsHost(t *testing.T) {
 
 	askModelPicker(&m, true)
 	mustBeFast(t, "View with a loading model picker", func() { _ = m.View() })
-	m.overlayStack.Close(modelPickerDialogID)
+	m.overlayStack.close(modelPickerDialogID)
 
 	askSessionPicker(&m, true)
 	mustBeFast(t, "View with a loading session picker", func() { _ = m.View() })
-	m.overlayStack.Close(sessionPickerDialogID)
+	m.overlayStack.close(sessionPickerDialogID)
 
 	if got := agent.calls.Load(); got != before {
 		t.Errorf("View() made %d host call(s); the contract is zero", got-before)
@@ -314,7 +314,7 @@ func TestUpdate_ModelPickerOpensWithoutBlocking(t *testing.T) {
 	mustBeFast(t, "ctrl+g", func() {
 		m, cmd = pressKey(m, tea.Key{Code: 'g', Mod: tea.ModCtrl})
 	})
-	if !m.overlayStack.HasID(modelPickerDialogID) {
+	if !m.overlayStack.hasID(modelPickerDialogID) {
 		t.Fatalf("ctrl+g did not open the model picker")
 	}
 	q := modelPickerOn(&m.overlayStack)
@@ -340,7 +340,7 @@ func TestUpdate_ModelPickerOpensWithoutBlocking(t *testing.T) {
 	if !q.loaded || len(q.rows()) != 2 {
 		t.Fatalf("snapshot not installed: loaded=%v rows=%d", q.loaded, len(q.rows()))
 	}
-	if got := ansi.Strip(m.overlayStack.Render(80, &m)); !strings.Contains(got, "m1") {
+	if got := ansi.Strip(m.overlayStack.render(80, &m)); !strings.Contains(got, "m1") {
 		t.Errorf("picker render missing the snapshot rows:\n%s", got)
 	}
 }
@@ -371,7 +371,7 @@ func TestModelPicker_EnterSwitchesOffLoop(t *testing.T) {
 	mustBeFast(t, "enter on the model picker", func() {
 		m, cmd = pressKey(m, tea.Key{Code: tea.KeyEnter})
 	})
-	if !m.overlayStack.HasID(modelPickerDialogID) {
+	if !m.overlayStack.hasID(modelPickerDialogID) {
 		t.Error("enter closed the picker; the switch is still in flight")
 	}
 	if q.switching != "m2" {
@@ -380,7 +380,7 @@ func TestModelPicker_EnterSwitchesOffLoop(t *testing.T) {
 	if m.opts.Agent != Agent(agent) {
 		t.Errorf("Agent swapped before the reply landed")
 	}
-	if got := ansi.Strip(m.overlayStack.Render(80, &m)); !strings.Contains(got, "switching to m2") {
+	if got := ansi.Strip(m.overlayStack.render(80, &m)); !strings.Contains(got, "switching to m2") {
 		t.Errorf("in-flight render missing the progress line:\n%s", got)
 	}
 
@@ -402,7 +402,7 @@ func TestModelPicker_EnterSwitchesOffLoop(t *testing.T) {
 	if m.opts.Agent != Agent(next) {
 		t.Fatalf("Agent not swapped after modelSwitchedMsg: %v", m.opts.Agent)
 	}
-	if m.overlayStack.HasID(modelPickerDialogID) {
+	if m.overlayStack.hasID(modelPickerDialogID) {
 		t.Errorf("picker should close once the switch lands")
 	}
 	if snap := m.history.Snapshot(); !strings.Contains(snap[len(snap)-1].Text, "switched to m2") {
@@ -434,7 +434,7 @@ func TestModelSwitchedMsg_StaleGenDoesNotAttach(t *testing.T) {
 			t.Errorf("stale switch leaked a transcript row: %q", msg.Text)
 		}
 	}
-	if !m.overlayStack.HasID(modelPickerDialogID) {
+	if !m.overlayStack.hasID(modelPickerDialogID) {
 		t.Errorf("stale reply closed a dialog it doesn't own")
 	}
 
@@ -456,7 +456,7 @@ func TestModelsLoadedMsg_RoutesToCoveredDialog(t *testing.T) {
 	m.viewport.SetWidth(80)
 
 	picker := askModelPicker(&m, true)
-	m.overlayStack.Open(newToolCallDialog(1)) // covers the picker
+	m.overlayStack.open(newToolCallDialog(1)) // covers the picker
 
 	out, _ := m.Update(modelsLoadedMsg{gen: m.sessionGen, models: []ModelInfo{{ID: "m1"}}})
 	m = out.(Model)
@@ -511,7 +511,7 @@ func TestSessionPicker_EnterSwitchesOffLoop(t *testing.T) {
 	if got, ok := m.opts.Agent.(*bareAgent); !ok || got.id != "other" {
 		t.Fatalf("session not attached: %v", m.opts.Agent)
 	}
-	if m.overlayStack.HasID(sessionPickerDialogID) {
+	if m.overlayStack.hasID(sessionPickerDialogID) {
 		t.Errorf("picker should close once the switch lands")
 	}
 }
@@ -1175,7 +1175,7 @@ func TestSubagentDetail_ResolvesFromTheSnapshot(t *testing.T) {
 	if got := agent.calls.Load(); got != before {
 		t.Errorf("name resolution made %d host call(s) from Update", got-before)
 	}
-	d, ok := m.overlayStack.Get(subagentDialogID).(*subagentDialog)
+	d, ok := m.overlayStack.get(subagentDialogID).(*subagentDialog)
 	if !ok {
 		t.Fatal("no subagent overlay opened")
 	}
@@ -1399,7 +1399,7 @@ func TestSwitchWithID_ActionRowStillOpensItsDialog(t *testing.T) {
 	if cmd != nil {
 		t.Errorf("an action row produced a stage-two Cmd: %T", cmd)
 	}
-	if !m.overlayStack.HasID(sessionInputDialogID) {
+	if !m.overlayStack.hasID(sessionInputDialogID) {
 		t.Error("action row did not open its text input")
 	}
 	if got := agent.calls.Load(); got != 1 {
@@ -1600,14 +1600,14 @@ var attachRowEntryPoints = []struct {
 		if ans != nil || cmd == nil {
 			t.Fatalf("enter on the action row = (%#v, %v), want a Cmd and no answer", ans, cmd)
 		}
-		// The Open is Update's, not the widget's: Overlay pops the
+		// The Open is Update's, not the widget's: overlay pops the
 		// front dialog after Key returns, so a question that pushed
 		// one would watch it be popped again.
 		for _, msg := range drainBatch(t, cmd) {
 			out, _ := m.Update(msg)
 			*m = out.(Model)
 		}
-		if !m.overlayStack.HasID(sessionInputDialogID) {
+		if !m.overlayStack.hasID(sessionInputDialogID) {
 			t.Fatal("the action row did not open its text input")
 		}
 		a.calls.Store(0)
@@ -1641,7 +1641,7 @@ func openAttachDialog(t *testing.T, open func(*testing.T, *Model, *slowAgent), v
 	m.viewport.SetWidth(80)
 
 	open(t, &m, agent)
-	front := m.overlayStack.Front()
+	front := m.overlayStack.front()
 	if front == nil || front.ID() != sessionInputDialogID {
 		t.Fatalf("entry point did not leave the action row's text input frontmost: %v", front)
 	}
@@ -1689,10 +1689,10 @@ func TestSessionInputSubmit_RunsOffLoop(t *testing.T) {
 			// modal that closed on Enter would leave the operator
 			// watching an unchanged chat screen with an attach
 			// happening invisibly behind it.
-			if !m.overlayStack.HasID(sessionInputDialogID) {
+			if !m.overlayStack.hasID(sessionInputDialogID) {
 				t.Fatal("the dialog closed before its answer arrived")
 			}
-			frame := renderPlain(m.overlayStack.Front(), &m)
+			frame := renderPlain(m.overlayStack.front(), &m)
 			if got := agent.calls.Load(); got != 0 {
 				t.Fatalf("the in-flight render made %d host call(s) — View must never touch the host", got)
 			}
@@ -1714,7 +1714,7 @@ func TestSessionInputSubmit_RunsOffLoop(t *testing.T) {
 			if m.opts.Agent != next {
 				t.Fatalf("the attach never landed: agent = %v", m.opts.Agent)
 			}
-			if m.overlayStack.HasDialogs() {
+			if m.overlayStack.hasDialogs() {
 				t.Error("a completed attach should close the text input and the picker under it")
 			}
 			if last := lastText(m); !strings.Contains(last, "Attached to http://wedged:7778") {
@@ -1741,7 +1741,7 @@ func TestSessionInputSubmit_SecondEnterDoesNotStackADial(t *testing.T) {
 	}
 
 	for _, stroke := range []string{"enter", "x", "backspace"} {
-		consumed, extra := m.overlayStack.HandleKeyMsg(keyMsgFromStroke(stroke), &m)
+		consumed, extra := m.overlayStack.handleKeyMsg(keyMsgFromStroke(stroke), &m)
 		if !consumed {
 			t.Errorf("%q leaked out of an in-flight dialog — it would land in the chat textarea behind it", stroke)
 		}
@@ -1752,15 +1752,15 @@ func TestSessionInputSubmit_SecondEnterDoesNotStackADial(t *testing.T) {
 	if got := agent.calls.Load(); got != 0 {
 		t.Errorf("keys pressed during the dial made %d host call(s), want 0", got)
 	}
-	if !m.overlayStack.HasID(sessionInputDialogID) {
+	if !m.overlayStack.hasID(sessionInputDialogID) {
 		t.Fatal("a swallowed key closed the dialog")
 	}
 
-	consumed, _ := m.overlayStack.HandleKeyMsg(keyMsgFromStroke("esc"), &m)
-	if !consumed || m.overlayStack.HasID(sessionInputDialogID) {
+	consumed, _ := m.overlayStack.handleKeyMsg(keyMsgFromStroke("esc"), &m)
+	if !consumed || m.overlayStack.hasID(sessionInputDialogID) {
 		t.Error("esc must still close an in-flight dialog — a wedged endpoint may not take the keyboard with it")
 	}
-	if !m.overlayStack.HasID(sessionPickerDialogID) {
+	if !m.overlayStack.hasID(sessionPickerDialogID) {
 		t.Error("esc should pop back to the picker, as it does on an idle dialog")
 	}
 }
@@ -1779,8 +1779,8 @@ func TestSessionInputSubmit_ReplyIsDiscardedWhenTheOperatorMovedOn(t *testing.T)
 	}{
 		{"esc dismissed the dialog", func(t *testing.T, m *Model) {
 			t.Helper()
-			m.overlayStack.HandleKeyMsg(keyMsgFromStroke("esc"), m)
-			if m.overlayStack.HasID(sessionInputDialogID) {
+			m.overlayStack.handleKeyMsg(keyMsgFromStroke("esc"), m)
+			if m.overlayStack.hasID(sessionInputDialogID) {
 				t.Fatal("setup: esc did not close the in-flight dialog")
 			}
 		}},
@@ -1839,20 +1839,20 @@ func TestSessionInputSubmit_ReplyDoesNotLandOnAReplacementDialog(t *testing.T) {
 
 	// Give up on that endpoint and type a different one. The picker
 	// is still underneath, with the cursor still on the action row.
-	m.overlayStack.HandleKeyMsg(keyMsgFromStroke("esc"), &m)
+	m.overlayStack.handleKeyMsg(keyMsgFromStroke("esc"), &m)
 	picker := sessionPickerOn(&m.overlayStack)
 	if picker == nil {
-		t.Fatalf("setup: esc left %T frontmost, want the picker", m.overlayStack.Front())
+		t.Fatalf("setup: esc left %T frontmost, want the picker", m.overlayStack.front())
 	}
 	if want := len(picker.rows()) - 1; picker.idx != want {
 		t.Fatalf("setup: cursor is at %d, want it still on the action row %d", picker.idx, want)
 	}
-	_, reopen := m.overlayStack.HandleKeyMsg(keyMsgFromStroke("enter"), &m)
+	_, reopen := m.overlayStack.handleKeyMsg(keyMsgFromStroke("enter"), &m)
 	for _, msg := range drainBatch(t, reopen) {
 		out, _ := m.Update(msg)
 		m = out.(Model)
 	}
-	typeInto(t, m.overlayStack.Front(), &m, "http://elsewhere:7778")
+	typeInto(t, m.overlayStack.front(), &m, "http://elsewhere:7778")
 	agent.calls.Store(0)
 	_, second := pressEnter(&m)
 	if second == nil {
@@ -1867,10 +1867,10 @@ func TestSessionInputSubmit_ReplyDoesNotLandOnAReplacementDialog(t *testing.T) {
 	if m.opts.Agent != before {
 		t.Errorf("the abandoned reply attached %v", m.opts.Agent)
 	}
-	if !m.overlayStack.HasID(sessionInputDialogID) {
+	if !m.overlayStack.hasID(sessionInputDialogID) {
 		t.Fatal("the abandoned reply closed the replacement dialog")
 	}
-	if frame := renderPlain(m.overlayStack.Front(), &m); !strings.Contains(frame, "attaching to http://elsewhere:7778") {
+	if frame := renderPlain(m.overlayStack.front(), &m); !strings.Contains(frame, "attaching to http://elsewhere:7778") {
 		t.Errorf("the replacement dialog stopped waiting for its own answer:\n%s", frame)
 	}
 

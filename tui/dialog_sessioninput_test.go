@@ -85,22 +85,22 @@ func openAttachRow(t *testing.T, m *Model) {
 		t.Fatalf("enter on action row = (%#v, %v), want a Cmd and no answer", ans, cmd)
 	}
 	// The widget only NAMES the row; Update is what opens the input,
-	// because Overlay pops the front dialog after Key returns.
+	// because overlay pops the front dialog after Key returns.
 	for _, msg := range drainBatch(t, cmd) {
 		out, _ := m.Update(msg)
 		*m = out.(Model)
 	}
-	if !m.overlayStack.HasID(sessionInputDialogID) {
+	if !m.overlayStack.hasID(sessionInputDialogID) {
 		t.Fatalf("action row did not open the text-input dialog")
 	}
-	if !m.overlayStack.HasID(sessionPickerDialogID) {
+	if !m.overlayStack.hasID(sessionPickerDialogID) {
 		t.Fatalf("picker should stay open underneath the text input")
 	}
 }
 
-// pressEnter drives Enter through the Overlay the way handleKey does.
+// pressEnter drives Enter through the overlay the way handleKey does.
 func pressEnter(m *Model) (bool, tea.Cmd) {
-	return m.overlayStack.HandleKeyMsg(tea.KeyPressMsg(tea.Key{Code: tea.KeyEnter}), m)
+	return m.overlayStack.handleKeyMsg(tea.KeyPressMsg(tea.Key{Code: tea.KeyEnter}), m)
 }
 
 // commitAttach presses Enter on the text input and drives the commit
@@ -145,7 +145,7 @@ func TestSessionPicker_ActionRowOpensTextInput(t *testing.T) {
 	if len(agent.switchCalls) != 0 {
 		t.Errorf("SwitchToSession called for an action row: %v", agent.switchCalls)
 	}
-	front := m.overlayStack.Front()
+	front := m.overlayStack.front()
 	if front.ID() != sessionInputDialogID {
 		t.Fatalf("front dialog = %q, want %q", front.ID(), sessionInputDialogID)
 	}
@@ -166,7 +166,7 @@ func TestSessionPicker_ActionRowSubmitAttaches(t *testing.T) {
 	m.viewport.SetWidth(80)
 
 	openAttachRow(t, &m)
-	typeInto(t, m.overlayStack.Front(), &m, "http://otherhost:7778")
+	typeInto(t, m.overlayStack.front(), &m, "http://otherhost:7778")
 	cmd := commitAttach(t, &m)
 
 	if cmd == nil {
@@ -178,7 +178,7 @@ func TestSessionPicker_ActionRowSubmitAttaches(t *testing.T) {
 	if m.opts.Agent != agent.attachAgent {
 		t.Errorf("Agent not swapped to the attach target: %v", m.opts.Agent)
 	}
-	if m.overlayStack.HasDialogs() {
+	if m.overlayStack.hasDialogs() {
 		t.Errorf("both dialogs should be closed after a successful attach")
 	}
 }
@@ -193,13 +193,13 @@ func TestSessionPicker_ActionRowSubmitError(t *testing.T) {
 	before := m.opts.Agent
 
 	openAttachRow(t, &m)
-	typeInto(t, m.overlayStack.Front(), &m, "http://dead:1")
+	typeInto(t, m.overlayStack.front(), &m, "http://dead:1")
 	commitAttach(t, &m)
 
 	if m.opts.Agent != before {
 		t.Errorf("Agent must not swap when Submit fails")
 	}
-	if m.overlayStack.HasDialogs() {
+	if m.overlayStack.hasDialogs() {
 		t.Errorf("both dialogs should close on a failed attach")
 	}
 	last := m.history.Snapshot()[m.history.Len()-1]
@@ -217,14 +217,14 @@ func TestSessionPicker_ActionRowNilAgent(t *testing.T) {
 	m.viewport.SetWidth(80)
 
 	openAttachRow(t, &m)
-	typeInto(t, m.overlayStack.Front(), &m, "x")
+	typeInto(t, m.overlayStack.front(), &m, "x")
 	commitAttach(t, &m)
 
 	last := m.history.Snapshot()[m.history.Len()-1]
 	if last.Role != RoleError || !strings.Contains(last.Text, "nil Agent") {
 		t.Errorf("last row = %+v, want a nil-Agent RoleError", last)
 	}
-	if m.overlayStack.HasDialogs() {
+	if m.overlayStack.hasDialogs() {
 		t.Errorf("both dialogs should close on a nil-Agent target")
 	}
 }
@@ -260,16 +260,16 @@ func TestSessionPicker_ActionRowValidate(t *testing.T) {
 	m.viewport.SetWidth(80)
 
 	openAttachRow(t, &m)
-	typeInto(t, m.overlayStack.Front(), &m, "otherhost")
+	typeInto(t, m.overlayStack.front(), &m, "otherhost")
 	pressEnter(&m)
 
 	if len(agent.attachCalls) != 0 {
 		t.Errorf("Submit ran despite validation failure: %v", agent.attachCalls)
 	}
-	if !m.overlayStack.HasID(sessionInputDialogID) {
+	if !m.overlayStack.hasID(sessionInputDialogID) {
 		t.Fatalf("text input should stay open on validation failure")
 	}
-	if out := renderPlain(m.overlayStack.Front(), &m); !strings.Contains(out, "endpoint must be an http(s) URL") {
+	if out := renderPlain(m.overlayStack.front(), &m); !strings.Contains(out, "endpoint must be an http(s) URL") {
 		t.Errorf("validation error not rendered:\n%s", out)
 	}
 }
@@ -283,14 +283,14 @@ func TestSessionPicker_ActionRowEscReturnsToPicker(t *testing.T) {
 	m.viewport.SetWidth(80)
 
 	openAttachRow(t, &m)
-	typeInto(t, m.overlayStack.Front(), &m, "half-typed")
+	typeInto(t, m.overlayStack.front(), &m, "half-typed")
 
 	out, _ := m.Update(tea.KeyPressMsg(tea.Key{Code: tea.KeyEsc}))
 	m = out.(Model)
-	if m.overlayStack.HasID(sessionInputDialogID) {
+	if m.overlayStack.hasID(sessionInputDialogID) {
 		t.Errorf("esc should pop the text input")
 	}
-	if !m.overlayStack.HasID(sessionPickerDialogID) {
+	if !m.overlayStack.hasID(sessionPickerDialogID) {
 		t.Errorf("esc should leave the picker open underneath")
 	}
 	if v := m.input.Value(); v != "" {
@@ -300,7 +300,7 @@ func TestSessionPicker_ActionRowEscReturnsToPicker(t *testing.T) {
 	// A second esc closes the picker itself.
 	out, _ = m.Update(tea.KeyPressMsg(tea.Key{Code: tea.KeyEsc}))
 	m = out.(Model)
-	if m.overlayStack.HasDialogs() {
+	if m.overlayStack.hasDialogs() {
 		t.Errorf("second esc should close the picker")
 	}
 }
@@ -343,7 +343,7 @@ func TestSlashSwitch_ActionRowByID(t *testing.T) {
 
 	m, _ = submitSwitch(t, m, "/switch +attach")
 
-	if !m.overlayStack.HasID(sessionInputDialogID) {
+	if !m.overlayStack.hasID(sessionInputDialogID) {
 		t.Errorf("/switch <action-id> should open the text input")
 	}
 	if len(agent.switchCalls) != 0 {
@@ -360,7 +360,7 @@ func TestSlashSwitch_PlainIDStillDirectJumps(t *testing.T) {
 
 	m, _ = submitSwitch(t, m, "/switch other")
 
-	if m.overlayStack.HasDialogs() {
+	if m.overlayStack.hasDialogs() {
 		t.Errorf("a real session ID should switch directly, not open a dialog")
 	}
 	if got := agent.switchCalls; len(got) != 1 || got[0] != "other" {
@@ -389,7 +389,7 @@ func TestOverlay_ThemePickerEscRestores(t *testing.T) {
 	if m.themeName != original {
 		t.Errorf("esc left theme = %q, want the pre-picker %q", m.themeName, original)
 	}
-	if m.overlayStack.HasDialogs() {
+	if m.overlayStack.hasDialogs() {
 		t.Errorf("esc should still close the picker")
 	}
 }

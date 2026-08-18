@@ -713,7 +713,7 @@ func TestSessionQuestion_EnterOnTheAttachedRowAnswers(t *testing.T) {
 // TestSessionQuestion_EnterOnAnActionRowStartsAnotherQuestion — the
 // second outcome. The row needs an address typed, which this question
 // cannot ask for, so it neither answers nor dismisses: it names the row
-// and leaves the Open to Update, because Overlay pops the front dialog
+// and leaves the Open to Update, because overlay pops the front dialog
 // after Key returns and a question that pushed one would watch it be
 // popped again.
 func TestSessionQuestion_EnterOnAnActionRowStartsAnotherQuestion(t *testing.T) {

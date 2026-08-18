@@ -79,7 +79,7 @@ func openSessionPickerFixture(t *testing.T) (Model, *sessionPickerQuestion) {
 func openSessionPickerSized(t *testing.T, height int, sessions []SessionInfo) (Model, *sessionPickerQuestion) {
 	t.Helper()
 	m := NewModel(Options{Agent: &switchAgent{id: "cur", sessions: sessions}})
-	m.styles = NewStylesWithTheme(true, goldenTheme())
+	m.styles = newStylesWithTheme(true, goldenTheme())
 	out, _ := m.Update(tea.WindowSizeMsg{Width: 100, Height: height})
 	m = out.(Model)
 	q := askSessionPicker(&m, true)
@@ -99,8 +99,8 @@ func sessionIDs(sessions []SessionInfo) []string {
 // public surface answers "is this ID open" and "what is on top", which
 // is all production code needs; a test asserting that a path opened
 // exactly one dialog has to see duplicates, and duplicates are
-// invisible through HasID.
-func overlayIDs(o *Overlay) []string {
+// invisible through hasID.
+func overlayIDs(o *overlay) []string {
 	out := make([]string, len(o.dialogs))
 	for i, d := range o.dialogs {
 		out[i] = d.ID()
@@ -114,7 +114,7 @@ func overlayIDs(o *Overlay) []string {
 // width, and that padding is noise for a "which lines are on screen"
 // assertion, as is the edge glyph now sitting on both ends of it.
 func sessionPickerLines(m *Model) []string {
-	return modalContentLines(m.overlayStack.Render(100, m))
+	return modalContentLines(m.overlayStack.render(100, m))
 }
 
 // lineWith returns the index of the first line containing want, or -1.
@@ -154,24 +154,24 @@ func TestSessionPicker_EnterDoesNotAnswer(t *testing.T) {
 	m, q := openSessionPickerFixture(t)
 	typeIntoPicker(&m, "prod")
 
-	// Straight through the Overlay, and the reply deliberately NOT
+	// Straight through the overlay, and the reply deliberately NOT
 	// pumped: what is being asserted is the state between the keystroke
 	// and the host answering, which is the whole state pressPicker
 	// exists to skip past.
-	consumed, cmd := m.overlayStack.HandleKeyMsg(keyMsgFromStroke("enter"), &m)
+	consumed, cmd := m.overlayStack.handleKeyMsg(keyMsgFromStroke("enter"), &m)
 	if !consumed {
 		t.Error("enter was not consumed")
 	}
 	if cmd == nil {
 		t.Fatal("enter scheduled nothing; the attach would never happen")
 	}
-	if !m.overlayStack.HasID(sessionPickerDialogID) {
+	if !m.overlayStack.hasID(sessionPickerDialogID) {
 		t.Fatal("enter popped the picker; the attach has not landed yet")
 	}
 	if q.switching != "prod-042" {
 		t.Errorf("switching = %q, want the filtered row prod-042", q.switching)
 	}
-	body := ansi.Strip(m.overlayStack.Render(100, &m))
+	body := ansi.Strip(m.overlayStack.render(100, &m))
 	if !strings.Contains(body, "attaching to prod-042") {
 		t.Errorf("the picker is not showing progress:\n%s", body)
 	}
@@ -186,7 +186,7 @@ func TestSessionPicker_RequestReadsTheLiveSwitcherAndGen(t *testing.T) {
 	m, q := openSessionPickerFixture(t)
 	q.idx = 3 // prod-042
 
-	_, cmd := m.overlayStack.HandleKeyMsg(keyMsgFromStroke("enter"), &m)
+	_, cmd := m.overlayStack.handleKeyMsg(keyMsgFromStroke("enter"), &m)
 	id := requestedSession(t, drainBatch(t, cmd))
 
 	// The agent is replaced AFTER Enter and BEFORE the request lands.
@@ -207,7 +207,7 @@ func TestSessionPicker_RequestReadsTheLiveSwitcherAndGen(t *testing.T) {
 func TestSessionPicker_StaleRequestIsDropped(t *testing.T) {
 	m, q := openSessionPickerFixture(t)
 	q.idx = 3
-	_, cmd := m.overlayStack.HandleKeyMsg(keyMsgFromStroke("enter"), &m)
+	_, cmd := m.overlayStack.handleKeyMsg(keyMsgFromStroke("enter"), &m)
 	msgs := drainBatch(t, cmd)
 	pressPicker(t, &m, "esc")
 
@@ -222,7 +222,7 @@ func TestSessionPicker_StaleRequestIsDropped(t *testing.T) {
 
 // TestSessionPicker_AttachLandingAnswersThePicker is the other half of
 // EnterDoesNotAnswer: the reply is what ends the question, through
-// Overlay.resolve rather than a bare Close.
+// overlay.resolve rather than a bare Close.
 func TestSessionPicker_AttachLandingAnswersThePicker(t *testing.T) {
 	m, q := openSessionPickerFixture(t)
 	q.switching = "prod-042"
@@ -237,7 +237,7 @@ func TestSessionPicker_AttachLandingAnswersThePicker(t *testing.T) {
 	})
 	m = out.(Model)
 
-	if m.overlayStack.HasID(sessionPickerDialogID) {
+	if m.overlayStack.hasID(sessionPickerDialogID) {
 		t.Error("the attach landed and the picker is still up")
 	}
 	if a, ok := m.opts.Agent.(*bareAgent); !ok || a.id != "attached" {
@@ -278,7 +278,7 @@ func TestSessionPicker_FailedAttachKeepsTheListUp(t *testing.T) {
 			out, _ := m.Update(msg)
 			m = out.(Model)
 
-			if !m.overlayStack.HasID(sessionPickerDialogID) {
+			if !m.overlayStack.hasID(sessionPickerDialogID) {
 				t.Fatal("a failed attach closed the picker")
 			}
 			if q.switching != "" {
@@ -289,7 +289,7 @@ func TestSessionPicker_FailedAttachKeepsTheListUp(t *testing.T) {
 				t.Errorf("history = %v, want a row mentioning %q", snap, tc.want)
 			}
 			// Back on the list, not stuck on the progress line.
-			body := ansi.Strip(m.overlayStack.Render(100, &m))
+			body := ansi.Strip(m.overlayStack.render(100, &m))
 			if !strings.Contains(body, "prod incident") {
 				t.Errorf("the list did not come back:\n%s", body)
 			}
@@ -393,7 +393,7 @@ func TestSessionPicker_ReplyForSomeoneElsesAttachLeavesThePicker(t *testing.T) {
 	})
 	m = out.(Model)
 
-	if !m.overlayStack.HasID(sessionPickerDialogID) {
+	if !m.overlayStack.hasID(sessionPickerDialogID) {
 		t.Error("a reply for another attach closed this picker")
 	}
 	if q.switching != "sess-002" {
@@ -418,7 +418,7 @@ func TestSessionPicker_CurrentRowAnswersImmediately(t *testing.T) {
 
 	pressPicker(t, &m, "enter")
 
-	if m.overlayStack.HasID(sessionPickerDialogID) {
+	if m.overlayStack.hasID(sessionPickerDialogID) {
 		t.Error("picking the attached row left the picker open")
 	}
 	if q.switching != "" {
@@ -440,7 +440,7 @@ func TestSessionPicker_CurrentRowAnswersImmediately(t *testing.T) {
 // TestSessionPicker_EnterOnAFilteredActionRow: filtering down to the
 // action row and pressing Enter must stack the text-input dialog on top
 // rather than trying to attach to a session ID that names no session —
-// and the Open has to come from Update, because Overlay pops the front
+// and the Open has to come from Update, because overlay pops the front
 // dialog after Key returns.
 func TestSessionPicker_EnterOnAFilteredActionRow(t *testing.T) {
 	m, q := openSessionPickerFixture(t)
@@ -451,10 +451,10 @@ func TestSessionPicker_EnterOnAFilteredActionRow(t *testing.T) {
 
 	pressPicker(t, &m, "enter")
 
-	if !m.overlayStack.HasID(sessionInputDialogID) {
+	if !m.overlayStack.hasID(sessionInputDialogID) {
 		t.Error("enter on the filtered action row did not open its text input")
 	}
-	if !m.overlayStack.HasID(sessionPickerDialogID) {
+	if !m.overlayStack.hasID(sessionPickerDialogID) {
 		t.Error("the picker should stay open underneath so esc returns to the list")
 	}
 	if q.switching != "" {
@@ -484,14 +484,14 @@ func TestSessionPicker_ActionRowDoesNotStackTwoInputs(t *testing.T) {
 }
 
 // TestSessionInput_SuccessAnswersThePickerUnderneath is the reason
-// dialog_sessioninput.go goes through Overlay.resolve instead of
-// Overlay.Close: the picker is a question now, and closing it by ID
+// dialog_sessioninput.go goes through overlay.resolve instead of
+// overlay.close: the picker is a question now, and closing it by ID
 // would pop it with its resolver never run.
 func TestSessionInput_SuccessAnswersThePickerUnderneath(t *testing.T) {
 	m, _ := openSessionPickerFixture(t)
 	row := pickerSessions()[4]
-	m.overlayStack.Open(newSessionInputDialog(row))
-	d := m.overlayStack.Get(sessionInputDialogID).(*sessionInputDialog)
+	m.overlayStack.open(newSessionInputDialog(row))
+	d := m.overlayStack.get(sessionInputDialogID).(*sessionInputDialog)
 	d.inflight, d.value = true, "http://localhost:9000"
 
 	// Cmd dropped, not drained: the attach batches an event listener
@@ -503,7 +503,7 @@ func TestSessionInput_SuccessAnswersThePickerUnderneath(t *testing.T) {
 		target: SwitchTarget{Agent: &bareAgent{id: "remote"}},
 	})
 
-	if m.overlayStack.HasDialogs() {
+	if m.overlayStack.hasDialogs() {
 		t.Errorf("dialogs still open: %v", overlayIDs(&m.overlayStack))
 	}
 	if a, ok := m.opts.Agent.(*bareAgent); !ok || a.id != "remote" {
@@ -520,8 +520,8 @@ func TestSessionInput_SuccessAnswersThePickerUnderneath(t *testing.T) {
 func TestSessionInput_FailureStillEndsThePickersQuestion(t *testing.T) {
 	m, _ := openSessionPickerFixture(t)
 	row := pickerSessions()[4]
-	m.overlayStack.Open(newSessionInputDialog(row))
-	d := m.overlayStack.Get(sessionInputDialogID).(*sessionInputDialog)
+	m.overlayStack.open(newSessionInputDialog(row))
+	d := m.overlayStack.get(sessionInputDialogID).(*sessionInputDialog)
 	d.inflight, d.value = true, "http://nope"
 
 	m.applySessionInputSubmit(sessionInputSubmittedMsg{
@@ -531,7 +531,7 @@ func TestSessionInput_FailureStillEndsThePickersQuestion(t *testing.T) {
 		err:   errors.New("dial tcp: refused"),
 	})
 
-	if m.overlayStack.HasDialogs() {
+	if m.overlayStack.hasDialogs() {
 		t.Errorf("dialogs still open: %v", overlayIDs(&m.overlayStack))
 	}
 	snap := m.history.Snapshot()
@@ -566,7 +566,7 @@ func TestSessionPicker_HostWithNoSessionsSaysSo(t *testing.T) {
 
 	pressPicker(t, &m, "down")
 
-	if m.overlayStack.HasID(sessionPickerDialogID) {
+	if m.overlayStack.hasID(sessionPickerDialogID) {
 		t.Error("an empty host list left the picker open")
 	}
 	snap := m.history.Snapshot()
@@ -588,7 +588,7 @@ func TestSessionPicker_ResolverTellsTheTwoUnrenderableStatesApart(t *testing.T) 
 
 		pressPicker(t, &m, "down")
 
-		if m.overlayStack.HasID(sessionPickerDialogID) {
+		if m.overlayStack.hasID(sessionPickerDialogID) {
 			t.Error("an unwired picker stayed open")
 		}
 		if n := len(m.history.Snapshot()); n != 0 {
@@ -602,7 +602,7 @@ func TestSessionPicker_ResolverTellsTheTwoUnrenderableStatesApart(t *testing.T) 
 
 		pressPicker(t, &m, "down")
 
-		if !m.overlayStack.HasID(sessionPickerDialogID) {
+		if !m.overlayStack.hasID(sessionPickerDialogID) {
 			t.Error("a keystroke before the snapshot landed closed the picker")
 		}
 		if n := len(m.history.Snapshot()); n != 0 {
@@ -619,14 +619,14 @@ func TestSessionPicker_FilterMatchingNothingStaysOpen(t *testing.T) {
 	typeIntoPicker(&m, "zzz")
 	for _, stroke := range []string{"down", "up", "enter"} {
 		pressPicker(t, &m, stroke)
-		if !m.overlayStack.HasID(sessionPickerDialogID) {
+		if !m.overlayStack.hasID(sessionPickerDialogID) {
 			t.Fatalf("%q on an empty filter result closed the picker", stroke)
 		}
 	}
 	if n := len(m.history.Snapshot()); n != 0 {
 		t.Errorf("an empty filter result wrote %d chat messages", n)
 	}
-	body := ansi.Strip(m.overlayStack.Render(100, &m))
+	body := ansi.Strip(m.overlayStack.render(100, &m))
 	if !strings.Contains(body, "no sessions match") {
 		t.Errorf("empty-result body does not say so:\n%s", body)
 	}
@@ -841,9 +841,9 @@ func TestSessionPicker_ShortTerminal(t *testing.T) {
 			// than a cell has to choose which half to keep.
 			for range len(sessions) - 1 {
 				q.Key(keyMsgFromStroke("down"))
-				m.overlayStack.Render(100, &m)
+				m.overlayStack.render(100, &m)
 			}
-			rendered := m.overlayStack.Render(100, &m)
+			rendered := m.overlayStack.render(100, &m)
 			if got := strings.Count(rendered, "\n") + 1; got > h {
 				t.Errorf("picker is %d rows tall in a %d-row terminal:\n%s",
 					got, h, ansi.Strip(rendered))
@@ -895,7 +895,7 @@ func TestSessionPicker_NarrowTerminal(t *testing.T) {
 		t.Run(fmt.Sprint(w), func(t *testing.T) {
 			m, q := openSessionPickerSized(t, 20, sessions)
 			q.Key(keyMsgFromStroke("down"))
-			rendered := ansi.Strip(m.overlayStack.Render(w, &m))
+			rendered := ansi.Strip(m.overlayStack.render(w, &m))
 			lines := strings.Split(rendered, "\n")
 			width := ansi.StringWidth(lines[0])
 			for i, ln := range lines {

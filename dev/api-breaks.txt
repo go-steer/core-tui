@@ -32,8 +32,12 @@
 # Overlay.HandleKey was the stroke-string half of a two-entry-point
 # routing split whose other half, HandleKeyMsg, does everything it did
 # without discarding Key.Text. Its last caller synthesizes a
-# tea.KeyPressMsg instead.
-./tui.(*Overlay).HandleKey: removed
+# tea.KeyPressMsg instead. It had a line of its own here until #257
+# unexported Overlay itself; apidiff stopped printing the method once
+# the receiver went, so the entry stopped matching anything and was
+# dropped rather than left to look like a break that still needs
+# acknowledging. The CHANGELOG still names it under #254.
+#
 # KeyMsgDialog opted a dialog into that full-fidelity half. Every
 # implementor is in this package; it is keyMsgDialog now.
 ./tui.KeyMsgDialog: removed
@@ -47,3 +51,44 @@
 # surface anyway.
 ./tui.NewTextInputDialog: removed
 ./tui.TextInputConfig: removed
+
+# #257: the rest of the sweep the entry above stopped short of. Same
+# argument, larger set — docs/api-surface.md §3.2 makes it once for all
+# 25 render-extension symbols and there is no member of the set the
+# argument fits less well. Dialog.HandleKey and Item.Render take a
+# *Model whose every field is unexported, so an external implementation
+# compiles and can do nothing with its argument; Overlay.Open is the
+# only thing that accepts a Dialog, and the only Overlay in existence is
+# an unexported field of Model. An exported interface with no
+# installation seam is a promise the library cannot keep, and 1.0 would
+# freeze the seam's absence with it.
+#
+# Building the seams instead — Options.ToolRenderers, a dialog
+# registration hook — is a feature rather than a cleanup and wants a
+# host asking for it. Nothing outside the package uses any of these:
+# checked here, in examples/, and against core-agent.
+#
+# Overlay's nine remaining methods and RenderContext.Render do not
+# appear below. apidiff rolls a method up into its receiver's removal,
+# so the type lines cover them.
+./tui.Dialog: removed
+./tui.DialogAction: removed
+./tui.Item: removed
+./tui.Overlay: removed
+./tui.RawRenderable: removed
+./tui.RenderContext: removed
+./tui.ScrollDialog: removed
+./tui.Scrollbar: removed
+# Styles is the styling half, and §3.2 ties its fate to the set above
+# rather than judging it separately: it is load-bearing for
+# ToolRenderer.RenderCall, NewStyles and NewStylesWithTheme are the only
+# ways to obtain one, and the only exported consumers of one were
+# Scrollbar and RenderContext — both directly above. ToolRenderer came
+# down with the §3.3 incidental sweep, so the condition §3.2 set was
+# already met and this is the other half arriving late. Styles.
+# RenderWordmark rolls up into the type. The name is styleSet now, not
+# styles: 63 parameters are already spelled `styles Styles`, and Go
+# resolves a parameter's type in the scope its own name is declared in.
+./tui.NewStyles: removed
+./tui.NewStylesWithTheme: removed
+./tui.Styles: removed

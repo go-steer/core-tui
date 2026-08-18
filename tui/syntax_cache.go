@@ -120,9 +120,9 @@ func detectLangUncached(label string) string {
 // (styleName, lang, bg, line) are a single map lookup.
 //
 // styleName is the active Theme.ChromaStyleName, threaded down from
-// the Styles the caller already holds. Both call sites
+// the styleSet the caller already holds. Both call sites
 // (highlightOrFlat in diff.go, renderCodeInline in
-// tool_preview_result.go) have a Styles in scope, so this stays
+// tool_preview_result.go) have a styleSet in scope, so this stays
 // parameter passing rather than a package-level atomic that the
 // cache would then have to chase.
 func highlightLine(line, lang, styleName string, bg color.Color) string {

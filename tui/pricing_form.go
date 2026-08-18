@@ -19,10 +19,10 @@
 // PricingController.Set; on cancel it closes.
 //
 // The form is held as a top-level Model.pendingForm field rather
-// than going through the Dialog overlay because huh.Form needs
-// every tea.Msg (KeyPressMsg, WindowSizeMsg, ticks). Dialog's
+// than going through the dialog overlay because huh.Form needs
+// every tea.Msg (KeyPressMsg, WindowSizeMsg, ticks). dialog's
 // keystroke-only HandleKey can't carry that. A future PR will
-// extend Dialog with a tea.Msg variant so huh forms ride the
+// extend dialog with a tea.Msg variant so huh forms ride the
 // overlay stack like model picker does today.
 
 package tui

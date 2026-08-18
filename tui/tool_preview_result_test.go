@@ -22,7 +22,7 @@ import (
 func TestRenderToolPreviewWithResult_CallAndResultJoin(t *testing.T) {
 	args := map[string]any{"path": "main.go"}
 	response := map[string]any{"content": "package main\n\nfunc main() {}\n"}
-	got := renderToolPreviewWithResult("read_file", args, response, "", NewStyles(true, Branding{}))
+	got := renderToolPreviewWithResult("read_file", args, response, "", newStyles(true, Branding{}))
 	if !strings.Contains(got, "full") || !strings.Contains(got, "go") {
 		t.Errorf("expected call-scope summary in joined output, got:\n%q", got)
 	}
@@ -39,7 +39,7 @@ func TestRenderToolPreviewWithResult_ErrorOverridesResult(t *testing.T) {
 	args := map[string]any{"path": "main.go"}
 	got := renderToolPreviewWithResult(
 		"read_file", args, nil, "permission denied",
-		NewStyles(true, Branding{}),
+		newStyles(true, Branding{}),
 	)
 	if !strings.Contains(got, "error:") || !strings.Contains(got, "permission denied") {
 		t.Errorf("expected error row in joined output, got:\n%q", got)
@@ -53,7 +53,7 @@ func TestRenderToolPreviewWithResult_ErrorOverridesResult(t *testing.T) {
 func TestRenderToolResult_ReadFileShowsContent(t *testing.T) {
 	args := map[string]any{"path": "foo.go"}
 	response := map[string]any{"content": "package foo\n\nfunc Bar() {}\n"}
-	got := renderToolResult("read_file", args, response, "", NewStyles(true, Branding{}))
+	got := renderToolResult("read_file", args, response, "", newStyles(true, Branding{}))
 	if !strings.Contains(got, "package") || !strings.Contains(got, "Bar") {
 		t.Errorf("expected file content tokens in result, got:\n%q", got)
 	}
@@ -68,7 +68,7 @@ func TestRenderToolResult_ReadFileTruncates(t *testing.T) {
 	}
 	args := map[string]any{"path": "long.go"}
 	response := map[string]any{"content": b.String()}
-	got := renderToolResult("read_file", args, response, "", NewStyles(true, Branding{}))
+	got := renderToolResult("read_file", args, response, "", newStyles(true, Branding{}))
 	if !strings.Contains(got, "more lines") {
 		t.Errorf("expected truncation marker, got:\n%q", got)
 	}
@@ -76,7 +76,7 @@ func TestRenderToolResult_ReadFileTruncates(t *testing.T) {
 
 func TestRenderToolResult_BashStdoutShown(t *testing.T) {
 	response := map[string]any{"stdout": "hello world\nsecond line\n"}
-	got := renderToolResult("bash", nil, response, "", NewStyles(true, Branding{}))
+	got := renderToolResult("bash", nil, response, "", newStyles(true, Branding{}))
 	if !strings.Contains(got, "hello world") {
 		t.Errorf("expected stdout in bash result, got:\n%q", got)
 	}
@@ -87,7 +87,7 @@ func TestRenderToolResult_BashStderrSummarized(t *testing.T) {
 		"stdout": "ok\n",
 		"stderr": "warning: deprecated\nmore detail\n",
 	}
-	got := renderToolResult("bash", nil, response, "", NewStyles(true, Branding{}))
+	got := renderToolResult("bash", nil, response, "", newStyles(true, Branding{}))
 	if !strings.Contains(got, "stderr:") || !strings.Contains(got, "warning: deprecated") {
 		t.Errorf("expected stderr label + first line, got:\n%q", got)
 	}
@@ -102,7 +102,7 @@ func TestRenderToolResult_BashNonZeroExit(t *testing.T) {
 		"stdout":    "",
 		"exit_code": float64(2),
 	}
-	got := renderToolResult("bash", nil, response, "", NewStyles(true, Branding{}))
+	got := renderToolResult("bash", nil, response, "", newStyles(true, Branding{}))
 	if !strings.Contains(got, "exit 2") {
 		t.Errorf("expected 'exit 2' for non-zero exit, got:\n%q", got)
 	}
@@ -112,7 +112,7 @@ func TestRenderToolResult_GrepMatchesShown(t *testing.T) {
 	response := map[string]any{
 		"matches": []any{"file.go:12: TODO", "file.go:34: TODO again"},
 	}
-	got := renderToolResult("grep", nil, response, "", NewStyles(true, Branding{}))
+	got := renderToolResult("grep", nil, response, "", newStyles(true, Branding{}))
 	if !strings.Contains(got, "TODO") || !strings.Contains(got, "TODO again") {
 		t.Errorf("expected matches in grep result, got:\n%q", got)
 	}
@@ -122,7 +122,7 @@ func TestRenderToolResult_GlobPathsShown(t *testing.T) {
 	response := map[string]any{
 		"paths": []any{"src/a.go", "src/b.go", "src/c.go"},
 	}
-	got := renderToolResult("glob", nil, response, "", NewStyles(true, Branding{}))
+	got := renderToolResult("glob", nil, response, "", newStyles(true, Branding{}))
 	if !strings.Contains(got, "src/a.go") {
 		t.Errorf("expected paths in glob result, got:\n%q", got)
 	}
@@ -130,7 +130,7 @@ func TestRenderToolResult_GlobPathsShown(t *testing.T) {
 
 func TestRenderToolResult_WriteFileShowsBytes(t *testing.T) {
 	response := map[string]any{"bytes_written": float64(1536)}
-	got := renderToolResult("write_file", nil, response, "", NewStyles(true, Branding{}))
+	got := renderToolResult("write_file", nil, response, "", newStyles(true, Branding{}))
 	if !strings.Contains(got, "wrote") {
 		t.Errorf("expected 'wrote' in write_file result, got:\n%q", got)
 	}
@@ -149,7 +149,7 @@ func TestRenderToolResult_EditResultIsNoOp(t *testing.T) {
 		"lines_added":   float64(5),
 		"lines_removed": float64(2),
 	}
-	got := renderToolResult("edit_file", nil, response, "", NewStyles(true, Branding{}))
+	got := renderToolResult("edit_file", nil, response, "", newStyles(true, Branding{}))
 	if got != "" {
 		t.Errorf("expected empty result-row for diff tool (eager summary handles it), got:\n%q", got)
 	}
@@ -158,7 +158,7 @@ func TestRenderToolResult_EditResultIsNoOp(t *testing.T) {
 func TestRenderToolResult_ErrorShortCircuits(t *testing.T) {
 	// Even a populated response is ignored when err is non-empty.
 	response := map[string]any{"content": "shouldn't show"}
-	got := renderToolResult("read_file", nil, response, "boom", NewStyles(true, Branding{}))
+	got := renderToolResult("read_file", nil, response, "boom", newStyles(true, Branding{}))
 	if strings.Contains(got, "shouldn't show") {
 		t.Errorf("expected content suppressed on error, got:\n%q", got)
 	}
@@ -168,14 +168,14 @@ func TestRenderToolResult_ErrorShortCircuits(t *testing.T) {
 }
 
 func TestRenderToolResult_UnknownToolEmptyResult(t *testing.T) {
-	got := renderToolResult("custom_mcp_tool", nil, map[string]any{"x": "y"}, "", NewStyles(true, Branding{}))
+	got := renderToolResult("custom_mcp_tool", nil, map[string]any{"x": "y"}, "", newStyles(true, Branding{}))
 	if got != "" {
 		t.Errorf("expected empty result for unknown tool, got:\n%q", got)
 	}
 }
 
 func TestRenderToolResult_NilResponseEmpty(t *testing.T) {
-	got := renderToolResult("read_file", nil, nil, "", NewStyles(true, Branding{}))
+	got := renderToolResult("read_file", nil, nil, "", newStyles(true, Branding{}))
 	if got != "" {
 		t.Errorf("expected empty result for nil response, got:\n%q", got)
 	}
@@ -215,7 +215,7 @@ func TestApplyToolResult_UpdatesPreview(t *testing.T) {
 	}
 	snap := h.Snapshot()
 	response := map[string]any{"content": "package main\n"}
-	preview := renderToolPreviewWithResult("read_file", snap[idx].ToolArgsMap, response, "", NewStyles(true, Branding{}))
+	preview := renderToolPreviewWithResult("read_file", snap[idx].ToolArgsMap, response, "", newStyles(true, Branding{}))
 	h.SetToolPreview(idx, preview)
 
 	final := h.Snapshot()[idx]

@@ -117,7 +117,7 @@ func newSessionInputDialog(row SessionInfo) *sessionInputDialog {
 // rather than when the dialog was opened: the guard's question is
 // "has the operator moved on since they pressed Enter", and the
 // dialog can sit open for as long as it takes to type a URL.
-func (d *sessionInputDialog) submit(value string, m *Model) DialogAction {
+func (d *sessionInputDialog) submit(value string, m *Model) dialogAction {
 	in := d.row.Input
 	if in.Submit == nil {
 		// A malformed row — Input set, Submit nil. This is a nil
@@ -129,24 +129,24 @@ func (d *sessionInputDialog) submit(value string, m *Model) DialogAction {
 		m.refreshViewport()
 		// Close pops the FRONT dialog, which is this one: the picker
 		// underneath went through endSessionPicker, by ID.
-		return DialogAction{Consumed: true, Close: true, Cmd: cmd}
+		return dialogAction{Consumed: true, Close: true, Cmd: cmd}
 	}
 	d.inflight, d.value = true, value
 	// Stay open. The operator gets the in-flight body as their
 	// acknowledgement, and the dialogs close together when the
 	// reply is applied — closing now would leave the attach
 	// happening behind an empty screen with nothing to escape.
-	return DialogAction{
+	return dialogAction{
 		Consumed: true,
 		Cmd:      sessionInputSubmitCmd(in.Submit, m.sessionGen, m.slashSeq, d.row.ID, value),
 	}
 }
 
-// HandleKey satisfies Dialog for callers holding only a normalized
+// HandleKey satisfies dialog for callers holding only a normalized
 // stroke. Restated rather than inherited: the embedded
 // textInputDialog.HandleKey delegates to its OWN HandleKeyMsg, which
 // would route around the in-flight gate below.
-func (d *sessionInputDialog) HandleKey(stroke string, m *Model) DialogAction {
+func (d *sessionInputDialog) HandleKey(stroke string, m *Model) dialogAction {
 	return d.HandleKeyMsg(keyMsgFromStroke(stroke), m)
 }
 
@@ -162,15 +162,15 @@ func (d *sessionInputDialog) HandleKey(stroke string, m *Model) DialogAction {
 // call is out, most of all a second Enter: the picker swallows keys
 // under an in-flight SwitchToSession for the same reason, and here a
 // second Enter would put a second dial on the wire.
-func (d *sessionInputDialog) HandleKeyMsg(msg tea.KeyPressMsg, m *Model) DialogAction {
+func (d *sessionInputDialog) HandleKeyMsg(msg tea.KeyPressMsg, m *Model) dialogAction {
 	if !d.inflight {
 		return d.textInputDialog.HandleKeyMsg(msg, m)
 	}
 	if msg.String() == "esc" {
 		d.inflight = false
-		return DialogAction{Consumed: true, Close: true}
+		return dialogAction{Consumed: true, Close: true}
 	}
-	return DialogAction{Consumed: true}
+	return dialogAction{Consumed: true}
 }
 
 // Render swaps the typed body for a progress line while Submit is
@@ -186,14 +186,14 @@ func (d *sessionInputDialog) Render(totalWidth int, m *Model) string {
 	if d.value != "" {
 		note = "attaching to " + d.value + "…"
 	}
-	return RenderContext{
+	return renderContext{
 		Title:  d.cfg.Title,
 		Body:   m.styles.Muted.Render(note),
 		Footer: "esc cancel",
 		Width:  d.dialogWidth(totalWidth),
 		Height: m.height,
 		Styles: m.styles,
-	}.Render()
+	}.render()
 }
 
 // DialogCursor drops the caret while the call is out — the input box
@@ -225,7 +225,7 @@ func (d *sessionInputDialog) DialogCursor(width int, m *Model) *tea.Cursor {
 // dialog — see the value field's comment for the picker sequence
 // where gen and seq alone are not enough.
 func (m *Model) applySessionInputSubmit(msg sessionInputSubmittedMsg) tea.Cmd {
-	d, ok := m.overlayStack.Get(sessionInputDialogID).(*sessionInputDialog)
+	d, ok := m.overlayStack.get(sessionInputDialogID).(*sessionInputDialog)
 	if !ok || !d.inflight || d.row.ID != msg.rowID || d.value != msg.value {
 		return nil
 	}
@@ -238,7 +238,7 @@ func (m *Model) applySessionInputSubmit(msg sessionInputSubmittedMsg) tea.Cmd {
 	// attach leaves the list up: there the operator is still looking at
 	// somewhere else to go, here they typed an address that did not
 	// work and the report is the point.
-	m.overlayStack.Close(sessionInputDialogID)
+	m.overlayStack.close(sessionInputDialogID)
 	attached := msg.err == nil && msg.target.Agent != nil
 	pickerCmd := m.endSessionPicker(sessionInputAnswer(msg.rowID, attached))
 	if msg.err == nil && msg.target.Agent == nil {
@@ -283,7 +283,7 @@ func sessionInputAnswer(rowID string, ok bool) answer {
 // endSessionPicker answers whatever session picker is open underneath
 // and pops it, returning the Cmd its resolver scheduled.
 //
-// Through Overlay.resolve rather than Overlay.Close because the picker
+// Through overlay.resolve rather than overlay.close because the picker
 // is a question now (#164 stage 3): closing it by ID would pop it with
 // its resolver never run, which is the "torn down and nobody was told"
 // hole the whole design exists to remove. A no-op when the input was

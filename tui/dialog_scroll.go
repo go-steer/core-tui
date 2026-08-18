@@ -29,11 +29,11 @@
 //	              render, so a keystroke can clamp without
 //	              re-rendering the body.
 //	scrollView /  window a []string body to the visible rows and
-//	listWindow    glue on the Scrollbar column.
-//	HandleWheel   the wheel vocabulary, routed to the front-most
+//	listWindow    glue on the scrollbar column.
+//	handleWheel   the wheel vocabulary, routed to the front-most
 //	              dialog (or to Model's inline modals from Update).
 //
-// Dialogs on the Overlay stack keep their offset in their own struct
+// Dialogs on the overlay stack keep their offset in their own struct
 // (they're pointers — mutations from Render persist). The inline
 // modals (permission / elicit / side-answer) share Model.modalScroll
 // because View() has a value receiver and can only write back
@@ -204,7 +204,7 @@ func wrappedRows(s string, width int) int {
 //
 // The inline modals hold one of these behind Model.modalScroll (a
 // pointer, so View()'s value receiver can write the measurement
-// back). Dialogs on the Overlay stack are already pointers and can
+// back). Dialogs on the overlay stack are already pointers and can
 // embed it directly.
 type scrollState struct {
 	// offset is the index of the first visible body row.
@@ -309,7 +309,7 @@ func (m *Model) scroll() *scrollState {
 }
 
 // scrollView windows lines to view rows starting at offset and glues
-// a Scrollbar column onto the right of each visible row. Returns
+// a scrollbar column onto the right of each visible row. Returns
 // lines untouched when everything fits (or when view is 0, the
 // unsized-terminal case), so a short body renders exactly as it did
 // before it was scrollable.
@@ -317,13 +317,13 @@ func (m *Model) scroll() *scrollState {
 // contentWidth is the column the rows are padded to before the bar —
 // callers reserve it out of the dialog width so the body doesn't
 // reflow the moment it starts overflowing.
-func scrollView(styles Styles, lines []string, contentWidth, view, offset int) []string {
+func scrollView(styles styleSet, lines []string, contentWidth, view, offset int) []string {
 	if view <= 0 || len(lines) <= view {
 		return lines
 	}
 	offset = min(nonNeg(offset), len(lines)-view)
 	visible := append([]string(nil), lines[offset:offset+view]...)
-	bar := strings.Split(Scrollbar(styles, view, len(lines), view, offset), "\n")
+	bar := strings.Split(scrollbar(styles, view, len(lines), view, offset), "\n")
 	for i := range visible {
 		if i < len(bar) {
 			visible[i] = fitRow(visible[i], contentWidth) + " " + bar[i]
@@ -475,31 +475,31 @@ func scrollHint(overflows bool) string {
 	return "↑↓ scroll"
 }
 
-// ScrollDialog is the optional extension for a Dialog whose body
-// scrolls by lines rather than by cursor rows. The Overlay routes
+// scrollDialog is the optional extension for a dialog whose body
+// scrolls by lines rather than by cursor rows. The overlay routes
 // mouse-wheel ticks to ScrollBy; dialogs that don't implement it get
 // one cursor step per tick synthesized from their up/down keys
 // instead (the right behavior for the pickers).
-type ScrollDialog interface {
-	Dialog
+type scrollDialog interface {
+	dialog
 
 	// ScrollBy moves the dialog's body by delta rows — negative is
 	// toward the top. Clamping is the dialog's business.
 	ScrollBy(delta int, m *Model)
 }
 
-// HandleWheel routes one wheel gesture to the front-most dialog.
+// handleWheel routes one wheel gesture to the front-most dialog.
 // delta is in body rows, signed. Returns Consumed so Update knows
 // whether to keep the event away from the chat viewport behind the
 // modal — always true when anything is open, since a wheel tick that
 // silently scrolls a surface hidden behind a modal is the bug this
 // whole file exists to fix.
-func (o *Overlay) HandleWheel(delta int, m *Model) (consumed bool, cmd tea.Cmd) {
-	front := o.Front()
+func (o *overlay) handleWheel(delta int, m *Model) (consumed bool, cmd tea.Cmd) {
+	front := o.front()
 	if front == nil {
 		return false, nil
 	}
-	if sd, ok := front.(ScrollDialog); ok {
+	if sd, ok := front.(scrollDialog); ok {
 		sd.ScrollBy(delta, m)
 		return true, nil
 	}
@@ -516,7 +516,7 @@ func (o *Overlay) HandleWheel(delta int, m *Model) (consumed bool, cmd tea.Cmd) 
 		}
 		// Questions declare line scrolling through scrollQuestion.
 		// Asked separately because the adapter wraps every question,
-		// so it cannot answer the ScrollDialog assertion above on
+		// so it cannot answer the scrollDialog assertion above on
 		// only some of them.
 		if aq.scrollBy(delta) {
 			return true, nil
@@ -529,6 +529,6 @@ func (o *Overlay) HandleWheel(delta int, m *Model) (consumed bool, cmd tea.Cmd) 
 	if delta > 0 {
 		stroke = "down"
 	}
-	_, cmd = o.HandleKeyMsg(keyMsgFromStroke(stroke), m)
+	_, cmd = o.handleKeyMsg(keyMsgFromStroke(stroke), m)
 	return true, cmd
 }

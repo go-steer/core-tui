@@ -152,7 +152,7 @@ func TestListWindow_KeepsCursorVisible(t *testing.T) {
 }
 
 func TestScrollView_WindowsAndDrawsScrollbar(t *testing.T) {
-	styles := NewStyles(true, Branding{})
+	styles := newStyles(true, Branding{})
 	lines := make([]string, 30)
 	for i := range lines {
 		lines[i] = "line-" + strconv.Itoa(i)
@@ -190,7 +190,7 @@ func TestScrollView_WindowsAndDrawsScrollbar(t *testing.T) {
 // clipped a tall thumb and made a one-row thumb — the common case on
 // long content — vanish exactly when the operator hit the bottom.
 func TestScrollbar_ThumbStaysInTrackAtEveryOffset(t *testing.T) {
-	styles := NewStyles(true, Branding{})
+	styles := newStyles(true, Branding{})
 	grids := []struct {
 		height, contentSize, viewportSize int
 	}{
@@ -205,7 +205,7 @@ func TestScrollbar_ThumbStaysInTrackAtEveryOffset(t *testing.T) {
 		thumbSize := max(1, g.height*g.viewportSize/g.contentSize)
 		maxOffset := g.contentSize - g.viewportSize
 		for offset := 0; offset <= maxOffset; offset++ {
-			rows := strings.Split(Scrollbar(styles, g.height, g.contentSize, g.viewportSize, offset), "\n")
+			rows := strings.Split(scrollbar(styles, g.height, g.contentSize, g.viewportSize, offset), "\n")
 			if len(rows) != g.height {
 				t.Fatalf("%+v offset=%d: %d rows, want %d", g, offset, len(rows), g.height)
 			}
@@ -220,22 +220,22 @@ func TestScrollbar_ThumbStaysInTrackAtEveryOffset(t *testing.T) {
 					g, offset, thumbs, thumbSize, strings.Join(rows, "\n"))
 			}
 		}
-		bottom := strings.Split(Scrollbar(styles, g.height, g.contentSize, g.viewportSize, maxOffset), "\n")
+		bottom := strings.Split(scrollbar(styles, g.height, g.contentSize, g.viewportSize, maxOffset), "\n")
 		if !strings.Contains(bottom[g.height-1], "█") {
 			t.Errorf("%+v at maxOffset=%d: last row is not a thumb cell\n%s",
 				g, maxOffset, strings.Join(bottom, "\n"))
 		}
-		top := strings.Split(Scrollbar(styles, g.height, g.contentSize, g.viewportSize, 0), "\n")
+		top := strings.Split(scrollbar(styles, g.height, g.contentSize, g.viewportSize, 0), "\n")
 		if !strings.Contains(top[0], "█") {
 			t.Errorf("%+v at offset=0: first row is not a thumb cell\n%s", g, strings.Join(top, "\n"))
 		}
 	}
 
 	// Content that fits (and a zero-height track) draw nothing.
-	if got := Scrollbar(styles, 10, 5, 10, 0); got != "" {
+	if got := scrollbar(styles, 10, 5, 10, 0); got != "" {
 		t.Errorf("content fits: Scrollbar = %q, want \"\"", got)
 	}
-	if got := Scrollbar(styles, 0, 100, 10, 0); got != "" {
+	if got := scrollbar(styles, 0, 100, 10, 0); got != "" {
 		t.Errorf("zero height: Scrollbar = %q, want \"\"", got)
 	}
 }
@@ -402,16 +402,16 @@ func TestHandleWheel_PermissionLayoutDecidesOwner(t *testing.T) {
 	}
 }
 
-// Wheel over a Dialog that scrolls by lines moves its body; over a
+// Wheel over a dialog that scrolls by lines moves its body; over a
 // cursor picker it steps the selection once (not three rows' worth).
 func TestOverlayHandleWheel_ScrollDialogVsPicker(t *testing.T) {
 	m := modelWithTools(t)
 	d := newToolCallDialog(3)
-	m.overlayStack.Open(d)
+	m.overlayStack.open(d)
 	// Prime the geometry the way a render would.
 	d.lastBody, d.lastView = 200, 10
 
-	if consumed, _ := m.overlayStack.HandleWheel(wheelScrollLines, m); !consumed {
+	if consumed, _ := m.overlayStack.handleWheel(wheelScrollLines, m); !consumed {
 		t.Fatal("tool-call dialog did not consume the wheel")
 	}
 	if d.scroll != wheelScrollLines {
@@ -426,7 +426,7 @@ func TestOverlayHandleWheel_ScrollDialogVsPicker(t *testing.T) {
 	pm.applyNamedTheme("default")
 	tp := askThemePicker(&pm)
 	start := tp.idx
-	if consumed, _ := pm.overlayStack.HandleWheel(wheelScrollLines, &pm); !consumed {
+	if consumed, _ := pm.overlayStack.handleWheel(wheelScrollLines, &pm); !consumed {
 		t.Fatal("theme picker did not consume the wheel")
 	}
 	if tp.idx != start+1 {
@@ -450,7 +450,7 @@ func TestToolCallDialog_ScrollByClampsToBody(t *testing.T) {
 // wheeling back to the bottom re-arms it.
 func TestSubagentDialog_ScrollByTogglesPin(t *testing.T) {
 	m := Model{}
-	m.styles = NewStyles(true, Branding{})
+	m.styles = newStyles(true, Branding{})
 	m.height = 40
 	d := newSubagentDialog("worker")
 	d.lastBody = 200
@@ -547,7 +547,7 @@ func TestPermissionOverlay_ScrollsWithKeys(t *testing.T) {
 		DetailKind: DetailShell,
 	}, PermissionOverlay)
 	m.overlayStack.ask(q, askAgent, nil)
-	m.overlayStack.Render(m.width, &m)
+	m.overlayStack.render(m.width, &m)
 	if !q.sc.overflows() {
 		t.Fatal("200-line shell detail in a 30-row terminal should overflow")
 	}
@@ -562,7 +562,7 @@ func TestPermissionOverlay_ScrollsWithKeys(t *testing.T) {
 	}
 
 	// Decision keys still take precedence over scroll keys.
-	rendered := got.overlayStack.Render(got.width, &got)
+	rendered := got.overlayStack.render(got.width, &got)
 	if !strings.Contains(rendered, "↑↓ scroll") {
 		t.Error("overflowing permission overlay does not advertise the scroll keys")
 	}
@@ -582,7 +582,7 @@ func TestElicitModal_FollowsFocusedField(t *testing.T) {
 	}
 	q := newElicitQuestion("srv", ElicitRequest{Title: "big form", Fields: fields})
 	m.overlayStack.ask(q, askAgent, nil)
-	m.overlayStack.Render(m.width, &m)
+	m.overlayStack.render(m.width, &m)
 	if !q.sc.overflows() {
 		t.Fatal("40-field form in a 24-row terminal should overflow")
 	}
@@ -590,7 +590,7 @@ func TestElicitModal_FollowsFocusedField(t *testing.T) {
 	for i := 0; i < 30; i++ {
 		q.Key(keyMsgFromStroke("tab"))
 	}
-	m.overlayStack.Render(m.width, &m)
+	m.overlayStack.render(m.width, &m)
 	if q.idx != 30 {
 		t.Fatalf("field index = %d, want 30", q.idx)
 	}
@@ -615,7 +615,7 @@ func TestElicitModal_FollowsFocusedField(t *testing.T) {
 	// which is what scrollQuestion buys the form and deliberately
 	// does not buy the pickers.
 	before = q.sc.offset
-	consumed, _ := m.overlayStack.HandleWheel(wheelScrollLines, &m)
+	consumed, _ := m.overlayStack.handleWheel(wheelScrollLines, &m)
 	if !consumed {
 		t.Fatal("the form did not consume a wheel tick")
 	}
@@ -631,12 +631,12 @@ func TestElicitModal_FollowsFocusedField(t *testing.T) {
 
 func TestThemePicker_WindowsLongListToTerminal(t *testing.T) {
 	m := Model{}
-	m.styles = NewStyles(true, Branding{})
+	m.styles = newStyles(true, Branding{})
 	m.width, m.height = 100, 14
 	m.themeName = "default"
 	askThemePicker(&m)
 
-	rendered := m.overlayStack.Render(m.width, &m)
+	rendered := m.overlayStack.render(m.width, &m)
 	if h := strings.Count(rendered, "\n") + 1; h > m.height {
 		t.Errorf("theme picker is %d rows tall in a %d-row terminal", h, m.height)
 	}
@@ -644,9 +644,9 @@ func TestThemePicker_WindowsLongListToTerminal(t *testing.T) {
 	// Walking the cursor past the fold pulls the window along.
 	last := len(BuiltinThemes()) - 1
 	for i := 0; i < last; i++ {
-		m.overlayStack.HandleKeyMsg(keyMsgFromStroke("down"), &m)
+		m.overlayStack.handleKeyMsg(keyMsgFromStroke("down"), &m)
 	}
-	rendered = m.overlayStack.Render(m.width, &m)
+	rendered = m.overlayStack.render(m.width, &m)
 	if !strings.Contains(rendered, BuiltinThemes()[last].Name) {
 		t.Errorf("last theme %q not visible after scrolling to it:\n%s", BuiltinThemes()[last].Name, rendered)
 	}
@@ -656,10 +656,10 @@ func TestThemePicker_WindowsLongListToTerminal(t *testing.T) {
 // as it did before windowing existed.
 func TestThemePicker_UnsizedRendersEveryRow(t *testing.T) {
 	m := Model{}
-	m.styles = NewStyles(true, Branding{})
+	m.styles = newStyles(true, Branding{})
 	m.themeName = "default"
 	askThemePicker(&m)
-	rendered := m.overlayStack.Render(80, &m)
+	rendered := m.overlayStack.render(80, &m)
 	for _, bt := range BuiltinThemes() {
 		if !strings.Contains(rendered, bt.Name) {
 			t.Errorf("theme %q missing from an unsized render", bt.Name)
@@ -804,7 +804,7 @@ func TestSGROpen_ClassifiesTheLastSequence(t *testing.T) {
 // returns is exactly contentWidth cells of body, one gutter space
 // and one bar cell — and no row silently becomes two.
 func TestScrollView_RowsAreExactlyContentWidthPlusBar(t *testing.T) {
-	styles := NewStyles(true, Branding{})
+	styles := newStyles(true, Branding{})
 	lines := make([]string, 30)
 	for i := range lines {
 		// Alternate short, exactly-at and overlong rows so every
@@ -837,13 +837,13 @@ func TestScrollView_RowsAreExactlyContentWidthPlusBar(t *testing.T) {
 // A row whose colour is still switched on must not tint the gutter
 // space or the scrollbar glyph glued to its right.
 func TestScrollView_OpenColourDoesNotReachTheScrollbar(t *testing.T) {
-	styles := NewStyles(true, Branding{})
+	styles := newStyles(true, Branding{})
 	lines := make([]string, 30)
 	for i := range lines {
 		lines[i] = "\x1b[41mrow-" + strconv.Itoa(i) // background on, never reset
 	}
 	got := scrollView(styles, lines, 20, 8, 5)
-	bar := strings.Split(Scrollbar(styles, 8, len(lines), 8, 5), "\n")
+	bar := strings.Split(scrollbar(styles, 8, len(lines), 8, 5), "\n")
 	for i, row := range got {
 		// The row must read: body, reset, gutter space, bar cell —
 		// with the reset in front of the gutter, so neither the
@@ -964,7 +964,7 @@ func BenchmarkScrollViewStyleRender(b *testing.B) {
 // scrollbar and all — over a long body, i.e. the per-frame cost an
 // open modal actually pays.
 func BenchmarkScrollViewWindow(b *testing.B) {
-	styles := NewStylesWithTheme(true, goldenTheme())
+	styles := newStylesWithTheme(true, goldenTheme())
 	rows := benchScrollRows(400)
 	b.ReportAllocs()
 	b.ResetTimer()

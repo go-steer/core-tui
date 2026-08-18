@@ -259,7 +259,7 @@ func TestPermissionQuestion_InlinePromptSuppressesTheStackBehindIt(t *testing.T)
 	}
 
 	// Resolve the picker and the inline prompt is front again.
-	m.overlayStack.CloseFront()
+	m.overlayStack.closeFront()
 	if _, ok := m.modalFrame(); ok {
 		t.Error("the inline prompt is front again; nothing should composite over the frame")
 	}
@@ -279,7 +279,7 @@ func TestPermissionQuestion_DiffRendersAtTheModalWidth(t *testing.T) {
 		Detail:     "--- a/config.go\n+++ b/config.go\n@@ -10,4 +10,4 @@\n-    return parse(b)\n+    return parse(b), nil\n",
 	}
 	m := NewModel(Options{Agent: &bareAgent{id: "a"}, PermissionLayout: PermissionOverlay})
-	m.styles = NewStylesWithTheme(true, goldenTheme())
+	m.styles = newStylesWithTheme(true, goldenTheme())
 	out, _ := m.Update(tea.WindowSizeMsg{Width: 160, Height: 40})
 	m = out.(Model)
 	out, _ = m.Update(permissionRequestMsg{req: req})

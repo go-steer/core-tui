@@ -304,7 +304,7 @@ func (m *Model) refreshSubagentTailPreview(callID string, t *subagentTail) {
 // renderSubagentTailBlock is the live block under a running
 // subagent's tool row: a counts line anchored with the same ⎿ glyph
 // every other preview uses, then the last few turn lines.
-func renderSubagentTailBlock(t *subagentTail, styles Styles) string {
+func renderSubagentTailBlock(t *subagentTail, styles styleSet) string {
 	if t == nil || t.turns == 0 {
 		return ""
 	}
@@ -317,7 +317,7 @@ func renderSubagentTailBlock(t *subagentTail, styles Styles) string {
 
 // renderSubagentTailSummary is what the block collapses to once the
 // result lands: one line of counts plus where to read the rest.
-func renderSubagentTailSummary(t *subagentTail, styles Styles) string {
+func renderSubagentTailSummary(t *subagentTail, styles styleSet) string {
 	if t == nil || t.turns == 0 {
 		return ""
 	}
@@ -325,7 +325,7 @@ func renderSubagentTailSummary(t *subagentTail, styles Styles) string {
 		styles.Muted.Render("  "+GlyphSeparator+"  /subagents "+t.name)
 }
 
-func subagentTailCounts(t *subagentTail, styles Styles) string {
+func subagentTailCounts(t *subagentTail, styles styleSet) string {
 	s := fmt.Sprintf("%d turn%s", t.turns, plural(t.turns))
 	if t.tools > 0 {
 		s += fmt.Sprintf(", %d tool call%s", t.tools, plural(t.tools))
@@ -443,8 +443,8 @@ func (m *Model) openSubagentDetail(query string) (string, tea.Cmd) {
 	}
 	// Singleton, like every other overlay — re-issuing the command
 	// retargets it rather than stacking a second copy.
-	m.overlayStack.Close(subagentDialogID)
-	m.overlayStack.Open(newSubagentDialog(name))
+	m.overlayStack.close(subagentDialogID)
+	m.overlayStack.open(newSubagentDialog(name))
 	m.refreshViewport()
 	return "", tea.Batch(
 		subagentEventsCmd(reporter, m.sessionGen, name, 0),
@@ -494,7 +494,7 @@ func countSubagentTools(evs []SubagentEvent) int {
 // tool call and result. Returns lines rather than a block so callers
 // can window it (the inline tail keeps the last few; the overlay
 // scrolls all of them).
-func renderSubagentTurns(evs []SubagentEvent, styles Styles, width int) []string {
+func renderSubagentTurns(evs []SubagentEvent, styles styleSet, width int) []string {
 	var out []string
 	for _, e := range evs {
 		out = append(out, renderSubagentTurn(e, styles, width)...)
@@ -507,7 +507,7 @@ func renderSubagentTurns(evs []SubagentEvent, styles Styles, width int) []string
 // Every truncation happens on plain text *before* styling: measuring
 // a string that already carries SGR escapes counts the escape bytes
 // as content and elides the visible text early (or not at all).
-func renderSubagentTurn(e SubagentEvent, styles Styles, width int) []string {
+func renderSubagentTurn(e SubagentEvent, styles styleSet, width int) []string {
 	gutter := subagentGutter(e, styles)
 	w := subagentTextWidth(width)
 	var out []string
@@ -541,7 +541,7 @@ func renderSubagentTurn(e SubagentEvent, styles Styles, width int) []string {
 
 // subagentGutter is the muted `12:04:07 model ` prefix. Both fields
 // are optional; an event with neither gets no gutter at all.
-func subagentGutter(e SubagentEvent, styles Styles) string {
+func subagentGutter(e SubagentEvent, styles styleSet) string {
 	var parts []string
 	if !e.Timestamp.IsZero() {
 		parts = append(parts, e.Timestamp.Format("15:04:05"))
@@ -559,7 +559,7 @@ func subagentGutter(e SubagentEvent, styles Styles) string {
 // error if it failed, else the most content-shaped field the host
 // sent, else a bare "ok". Returns the text and the style to render
 // it in separately so the caller can truncate before styling.
-func subagentResultSummary(r SubagentToolResult, styles Styles) (string, lipgloss.Style) {
+func subagentResultSummary(r SubagentToolResult, styles styleSet) (string, lipgloss.Style) {
 	if err := collapseWhitespace(r.Error); err != "" {
 		return GlyphToolFail + " " + err, styles.ErrorText
 	}

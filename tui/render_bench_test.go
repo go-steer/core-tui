@@ -55,7 +55,7 @@ var benchTurnCounts = []int{10, 100, 400}
 func benchModel(tb testing.TB, turns, w, h int) Model {
 	tb.Helper()
 	m := NewModel(Options{Agent: &bareAgent{id: "bench"}})
-	m.styles = NewStylesWithTheme(true, goldenTheme())
+	m.styles = newStylesWithTheme(true, goldenTheme())
 	out, _ := m.Update(tea.WindowSizeMsg{Width: w, Height: h})
 	m = out.(Model)
 	for i := 0; i < turns; i++ {

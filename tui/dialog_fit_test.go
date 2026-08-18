@@ -107,7 +107,7 @@ func modalFitCases() []modalFitCase {
 				askThemePicker(&m)
 				return m
 			},
-			render:        func(m *Model) string { return m.overlayStack.Render(m.width, m) },
+			render:        func(m *Model) string { return m.overlayStack.render(m.width, m) },
 			footer:        "esc cancel",
 			footerPairs:   []string{"type to filter", "↑↓ preview", "enter accept", "esc cancel"},
 			title:         "Choose a Theme",
@@ -120,7 +120,7 @@ func modalFitCases() []modalFitCase {
 				m, _ := openModelPickerFixture(t)
 				return resizeModel(m, w, h)
 			},
-			render:        func(m *Model) string { return m.overlayStack.Render(m.width, m) },
+			render:        func(m *Model) string { return m.overlayStack.render(m.width, m) },
 			footer:        "esc cancel",
 			footerPairs:   []string{"type to filter", "↑↓ choose", "enter accept", "esc cancel"},
 			title:         "Choose a Model",
@@ -133,7 +133,7 @@ func modalFitCases() []modalFitCase {
 				m, _ := openSessionPickerFixture(t)
 				return resizeModel(m, w, h)
 			},
-			render:        func(m *Model) string { return m.overlayStack.Render(m.width, m) },
+			render:        func(m *Model) string { return m.overlayStack.render(m.width, m) },
 			footer:        "esc cancel",
 			footerPairs:   []string{"type to filter", "↑↓ choose", "enter attach", "esc cancel"},
 			title:         "Choose a Session",
@@ -156,7 +156,7 @@ func modalFitCases() []modalFitCase {
 				}})
 				return out.(Model)
 			},
-			render: func(m *Model) string { return m.overlayStack.Render(m.width, m) },
+			render: func(m *Model) string { return m.overlayStack.render(m.width, m) },
 			// keyLegend glues each key to its action with a
 			// non-breaking space so the pair never wraps apart.
 			footer: "esc deny",
@@ -184,7 +184,7 @@ func modalFitCases() []modalFitCase {
 				})
 				return out.(Model)
 			},
-			render:        func(m *Model) string { return m.overlayStack.Render(m.width, m) },
+			render:        func(m *Model) string { return m.overlayStack.render(m.width, m) },
 			footer:        "esc cancel",
 			footerPairs:   []string{"tab next field", "enter submit", "ctrl+d decline", "esc cancel"},
 			title:         "an-mcp-server-with-a-long-name",
@@ -194,7 +194,7 @@ func modalFitCases() []modalFitCase {
 			// Issue #149. This overlay and the subagent one below
 			// were the two the #142 table never named, which is how
 			// they kept a body allowance that predated the height
-			// regime and a RenderContext that never told
+			// regime and a renderContext that never told
 			// fitModalContent how tall the terminal was.
 			name: "tool-call",
 			open: func(_ *testing.T, w, h int) Model {
@@ -213,10 +213,10 @@ func modalFitCases() []modalFitCase {
 					ToolArgsMap: map[string]any{"pattern": "TODO"},
 					ToolError:   "regex compile failed",
 				})
-				m.overlayStack.Open(newToolCallDialog(2))
+				m.overlayStack.open(newToolCallDialog(2))
 				return m
 			},
-			render:      func(m *Model) string { return m.overlayStack.Render(m.width, m) },
+			render:      func(m *Model) string { return m.overlayStack.render(m.width, m) },
 			footer:      "esc close",
 			footerPairs: []string{"← → walk", "↑↓ scroll", "esc close"},
 			title:       "Tool call detail",
@@ -250,10 +250,10 @@ func modalFitCases() []modalFitCase {
 				// assertion below measure the scroll pin rather than
 				// the shedding order.
 				d.pinned = false
-				m.overlayStack.Open(d)
+				m.overlayStack.open(d)
 				return m
 			},
-			render:      func(m *Model) string { return m.overlayStack.Render(m.width, m) },
+			render:      func(m *Model) string { return m.overlayStack.render(m.width, m) },
 			footer:      "esc close",
 			footerPairs: []string{"↑↓ scroll", "G follow", "esc close"},
 			title:       "Subagent",
@@ -266,13 +266,13 @@ func modalFitCases() []modalFitCase {
 			name: "text-input",
 			open: func(_ *testing.T, w, h int) Model {
 				m := newFrameModel(StatusHeader, w, h)
-				m.overlayStack.Open(newTextInputDialog(textInputConfig{
+				m.overlayStack.open(newTextInputDialog(textInputConfig{
 					Title:  "Attach to Endpoint",
 					Prompt: "URL:",
 				}))
 				return m
 			},
-			render:        func(m *Model) string { return m.overlayStack.Render(m.width, m) },
+			render:        func(m *Model) string { return m.overlayStack.render(m.width, m) },
 			footer:        "esc cancel",
 			footerPairs:   []string{"enter submit", "esc cancel"},
 			title:         "Attach to Endpoint",
@@ -391,7 +391,7 @@ func TestModalFit_BelowTheChromeFloor(t *testing.T) {
 			t.Run(strconv.Itoa(w)+"x"+strconv.Itoa(h), func(t *testing.T) {
 				m := newFrameModel(StatusHeader, w, h)
 				askThemePicker(&m)
-				block := m.overlayStack.Render(m.width, &m)
+				block := m.overlayStack.render(m.width, &m)
 				plain := unbindLegend(ansi.Strip(block))
 				if !strings.Contains(plain, "esc cancel") {
 					t.Errorf("the last row spent is not the close key\n%s", plain)
@@ -550,7 +550,7 @@ func TestModalFit_OverflowingModalTakesItsWholeAllowance(t *testing.T) {
 					ToolArgsMap:     map[string]any{"path": "/etc/hosts"},
 					ToolResponseMap: manyKeys(60),
 				})
-				m.overlayStack.Open(newToolCallDialog(1))
+				m.overlayStack.open(newToolCallDialog(1))
 				return m
 			},
 		},
@@ -572,7 +572,7 @@ func TestModalFit_OverflowingModalTakesItsWholeAllowance(t *testing.T) {
 					hasInfo: true,
 					page:    SubagentEventPage{Events: events},
 				})
-				m.overlayStack.Open(d)
+				m.overlayStack.open(d)
 				return m
 			},
 		},
@@ -587,7 +587,7 @@ func TestModalFit_OverflowingModalTakesItsWholeAllowance(t *testing.T) {
 			}
 			t.Run(tc.name+"/"+strconv.Itoa(h), func(t *testing.T) {
 				m := tc.open(100, h)
-				block := m.overlayStack.Render(m.width, &m)
+				block := m.overlayStack.render(m.width, &m)
 				want := h - modalMarginRows
 				if got := modalRows(block); got != want {
 					t.Errorf("overflowing modal is %d rows in a %d-row terminal, want exactly %d "+

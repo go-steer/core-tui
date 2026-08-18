@@ -52,7 +52,7 @@ const copySrc = "Two things. " + "The first is that the loader resolves every pa
 func copyModel(t *testing.T, sel int) Model {
 	t.Helper()
 	m := NewModel(Options{Agent: &bareAgent{id: "copy"}})
-	m.styles = NewStylesWithTheme(true, goldenTheme())
+	m.styles = newStylesWithTheme(true, goldenTheme())
 	out, _ := m.Update(tea.WindowSizeMsg{Width: 80, Height: 24})
 	m = out.(Model)
 

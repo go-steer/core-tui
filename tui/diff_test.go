@@ -49,7 +49,7 @@ func TestComputeUnifiedDiff_ProducesUnifiedFormat(t *testing.T) {
 
 func TestRenderDiffInline_StripsFileHeaders(t *testing.T) {
 	diff := "--- foo.go\n+++ foo.go\n@@ -1 +1 @@\n-old\n+new\n"
-	styles := NewStyles(true, Branding{})
+	styles := newStyles(true, Branding{})
 	got := renderDiffInline(diff, styles, 0, "")
 	if strings.Contains(got, "--- foo.go") || strings.Contains(got, "+++ foo.go") {
 		t.Errorf("expected file headers stripped, got: %q", got)
@@ -70,7 +70,7 @@ func TestRenderDiffInline_TruncatesAtMaxLines(t *testing.T) {
 		b.WriteString("-old line\n")
 		b.WriteString("+new line\n")
 	}
-	styles := NewStyles(true, Branding{})
+	styles := newStyles(true, Branding{})
 	got := renderDiffInline(b.String(), styles, 5, "")
 	lines := strings.Split(got, "\n")
 	if len(lines) > 6 { // 5 rendered + 1 truncation marker
@@ -93,7 +93,7 @@ func TestRenderToolPreview_ApplyPatch(t *testing.T) {
 	args := map[string]any{
 		"patch": "--- a\n+++ a\n@@ -1 +1 @@\n-foo\n+bar\n",
 	}
-	styles := NewStyles(true, Branding{})
+	styles := newStyles(true, Branding{})
 	got := renderToolPreview("apply_patch", args, styles)
 	if got == "" {
 		t.Fatal("expected non-empty preview")
@@ -109,7 +109,7 @@ func TestRenderToolPreview_EditFile(t *testing.T) {
 		"old_text": "hello\nworld\n",
 		"new_text": "hello\nWORLD\n",
 	}
-	styles := NewStyles(true, Branding{})
+	styles := newStyles(true, Branding{})
 	got := renderToolPreview("edit_file", args, styles)
 	if got == "" {
 		t.Fatal("expected non-empty preview")
@@ -123,14 +123,14 @@ func TestRenderToolPreview_EditFile(t *testing.T) {
 }
 
 func TestRenderToolPreview_UnknownTool(t *testing.T) {
-	got := renderToolPreview("unknown_tool", map[string]any{"key": "value"}, NewStyles(true, Branding{}))
+	got := renderToolPreview("unknown_tool", map[string]any{"key": "value"}, newStyles(true, Branding{}))
 	if got != "" {
 		t.Errorf("expected empty preview for unknown tool, got: %q", got)
 	}
 }
 
 func TestRenderToolPreview_NilArgs(t *testing.T) {
-	got := renderToolPreview("apply_patch", nil, NewStyles(true, Branding{}))
+	got := renderToolPreview("apply_patch", nil, newStyles(true, Branding{}))
 	if got != "" {
 		t.Errorf("expected empty preview for nil args, got: %q", got)
 	}
@@ -293,12 +293,12 @@ func TestHighlightLine_ChromaStyleInCacheKey(t *testing.T) {
 
 // TestRenderCodeInline_FollowsThemeChromaStyle / the diff twin below
 // pin the plumbing: both inline highlight call sites already hold a
-// Styles, so the active theme's Chroma style reaches the highlighter
+// styleSet, so the active theme's Chroma style reaches the highlighter
 // as a parameter rather than through a package-level variable.
 func TestRenderCodeInline_FollowsThemeChromaStyle(t *testing.T) {
 	const code = "func main() {}"
-	a := renderCodeInline(code, NewStylesWithTheme(true, matrixTheme(true)), 0, "Go")
-	b := renderCodeInline(code, NewStylesWithTheme(true, christmasTheme(true)), 0, "Go")
+	a := renderCodeInline(code, newStylesWithTheme(true, matrixTheme(true)), 0, "Go")
+	b := renderCodeInline(code, newStylesWithTheme(true, christmasTheme(true)), 0, "Go")
 	if a == b {
 		t.Errorf("renderCodeInline ignored the theme's chroma style:\n%q", a)
 	}
@@ -306,8 +306,8 @@ func TestRenderCodeInline_FollowsThemeChromaStyle(t *testing.T) {
 
 func TestRenderDiffInline_FollowsThemeChromaStyle(t *testing.T) {
 	const diff = "@@ -1,1 +1,1 @@\n-func main() {}\n+func run() {}\n"
-	a := renderDiffInline(diff, NewStylesWithTheme(true, matrixTheme(true)), 0, "Go")
-	b := renderDiffInline(diff, NewStylesWithTheme(true, christmasTheme(true)), 0, "Go")
+	a := renderDiffInline(diff, newStylesWithTheme(true, matrixTheme(true)), 0, "Go")
+	b := renderDiffInline(diff, newStylesWithTheme(true, christmasTheme(true)), 0, "Go")
 	if a == b {
 		t.Errorf("renderDiffInline ignored the theme's chroma style:\n%q", a)
 	}
@@ -319,7 +319,7 @@ func TestRenderReadPreview_ReadFile_LineRange(t *testing.T) {
 		"start_line": float64(10),
 		"end_line":   float64(42),
 	}
-	styles := NewStyles(true, Branding{})
+	styles := newStyles(true, Branding{})
 	got := renderReadPreview("read_file", args, styles)
 	if !strings.Contains(got, "L10-L42") {
 		t.Errorf("expected line range L10-L42 in preview, got %q", got)
@@ -331,7 +331,7 @@ func TestRenderReadPreview_ReadFile_LineRange(t *testing.T) {
 
 func TestRenderReadPreview_ReadFile_Full(t *testing.T) {
 	args := map[string]any{"path": "README.md"}
-	styles := NewStyles(true, Branding{})
+	styles := newStyles(true, Branding{})
 	got := renderReadPreview("read_file", args, styles)
 	if !strings.Contains(got, "full") {
 		t.Errorf("expected 'full' in preview when no range given, got %q", got)
@@ -348,7 +348,7 @@ func TestRenderReadPreview_ReadFile_ZeroBoundsTreatedAsFull(t *testing.T) {
 		{"path": "main.go", "start_line": float64(0), "end_line": float64(0)},
 	}
 	for _, args := range cases {
-		got := renderReadPreview("read_file", args, NewStyles(true, Branding{}))
+		got := renderReadPreview("read_file", args, newStyles(true, Branding{}))
 		if strings.Contains(got, "L0") {
 			t.Errorf("zero-bounds args should not render 'L0…', got: %q (args=%v)", got, args)
 		}
@@ -364,7 +364,7 @@ func TestRenderReadPreview_ReadFile_OffsetLimit(t *testing.T) {
 		"offset": float64(5),
 		"limit":  float64(10),
 	}
-	styles := NewStyles(true, Branding{})
+	styles := newStyles(true, Branding{})
 	got := renderReadPreview("read_file", args, styles)
 	if !strings.Contains(got, "L5-L14") {
 		t.Errorf("expected L5-L14 (offset=5, limit=10), got %q", got)
@@ -372,7 +372,7 @@ func TestRenderReadPreview_ReadFile_OffsetLimit(t *testing.T) {
 }
 
 func TestRenderReadPreview_ReadFile_NoPath(t *testing.T) {
-	got := renderReadPreview("read_file", map[string]any{}, NewStyles(true, Branding{}))
+	got := renderReadPreview("read_file", map[string]any{}, newStyles(true, Branding{}))
 	if got != "" {
 		t.Errorf("expected empty preview when path missing, got %q", got)
 	}
@@ -382,7 +382,7 @@ func TestRenderReadPreview_ReadManyFiles_Paths(t *testing.T) {
 	args := map[string]any{
 		"paths": []any{"a.go", "b.go", "c.go", "d.go", "e.go"},
 	}
-	styles := NewStyles(true, Branding{})
+	styles := newStyles(true, Branding{})
 	got := renderReadPreview("read_many_files", args, styles)
 	if !strings.Contains(got, "5 files") {
 		t.Errorf("expected '5 files' count, got %q", got)
@@ -397,7 +397,7 @@ func TestRenderReadPreview_ReadManyFiles_Paths(t *testing.T) {
 
 func TestRenderReadPreview_ReadManyFiles_Pattern(t *testing.T) {
 	args := map[string]any{"pattern": "*.go"}
-	styles := NewStyles(true, Branding{})
+	styles := newStyles(true, Branding{})
 	got := renderReadPreview("read_many_files", args, styles)
 	if !strings.Contains(got, "*.go") {
 		t.Errorf("expected pattern in preview, got %q", got)
@@ -409,7 +409,7 @@ func TestRenderReadPreview_Grep(t *testing.T) {
 		"pattern": "TODO",
 		"path":    "lib/",
 	}
-	styles := NewStyles(true, Branding{})
+	styles := newStyles(true, Branding{})
 	got := renderReadPreview("grep", args, styles)
 	if !strings.Contains(got, "TODO") {
 		t.Errorf("expected pattern 'TODO' in preview, got %q", got)
@@ -421,7 +421,7 @@ func TestRenderReadPreview_Grep(t *testing.T) {
 
 func TestRenderReadPreview_Glob_PatternOnly(t *testing.T) {
 	args := map[string]any{"pattern": "**/*.ts"}
-	styles := NewStyles(true, Branding{})
+	styles := newStyles(true, Branding{})
 	got := renderReadPreview("glob", args, styles)
 	if !strings.Contains(got, "**/*.ts") {
 		t.Errorf("expected pattern in preview, got %q", got)
@@ -429,7 +429,7 @@ func TestRenderReadPreview_Glob_PatternOnly(t *testing.T) {
 }
 
 func TestRenderReadPreview_Grep_EmptyArgs(t *testing.T) {
-	got := renderReadPreview("grep", map[string]any{}, NewStyles(true, Branding{}))
+	got := renderReadPreview("grep", map[string]any{}, newStyles(true, Branding{}))
 	if got != "" {
 		t.Errorf("expected empty preview when no pattern/path, got %q", got)
 	}
@@ -441,7 +441,7 @@ func TestRenderToolPreview_ReadFile_Routes(t *testing.T) {
 		"start_line": float64(1),
 		"end_line":   float64(20),
 	}
-	got := renderToolPreview("read_file", args, NewStyles(true, Branding{}))
+	got := renderToolPreview("read_file", args, newStyles(true, Branding{}))
 	if !strings.Contains(got, "L1-L20") {
 		t.Errorf("expected dispatcher to route read_file → renderReadPreview, got %q", got)
 	}
@@ -449,7 +449,7 @@ func TestRenderToolPreview_ReadFile_Routes(t *testing.T) {
 
 func TestRenderToolPreview_Grep_Routes(t *testing.T) {
 	args := map[string]any{"pattern": "FIXME", "path": "src/"}
-	got := renderToolPreview("grep", args, NewStyles(true, Branding{}))
+	got := renderToolPreview("grep", args, newStyles(true, Branding{}))
 	if !strings.Contains(got, "FIXME") {
 		t.Errorf("expected dispatcher to route grep → renderReadPreview, got %q", got)
 	}
@@ -460,7 +460,7 @@ func TestRenderDiffInline_WithLang_HighlightsBody(t *testing.T) {
 	// the no-lang version — syntax highlighting injects ANSI codes
 	// into the body of +/- lines.
 	diff := "@@ -1 +1 @@\n-old := 1\n+new := 2\n"
-	styles := NewStyles(true, Branding{})
+	styles := newStyles(true, Branding{})
 	plain := renderDiffInline(diff, styles, 0, "")
 	highlighted := renderDiffInline(diff, styles, 0, "Go")
 	if plain == highlighted {
@@ -472,7 +472,7 @@ func TestRenderDiffInline_HasLineNumbers(t *testing.T) {
 	// Hunk header @@ -42,1 +84,1 @@ should seed the gutter counters
 	// so the - line shows 42 and the + line shows 84.
 	diff := "@@ -42,1 +84,1 @@\n-old\n+new\n"
-	styles := NewStyles(true, Branding{})
+	styles := newStyles(true, Branding{})
 	got := renderDiffInline(diff, styles, 0, "")
 	if !strings.Contains(got, "42 │") {
 		t.Errorf("expected '-' line gutter '42 │', got:\n%q", got)
@@ -486,7 +486,7 @@ func TestRenderDiffInline_ContextLineAdvancesBothCounters(t *testing.T) {
 	// Context lines bump both old and new counters; the next
 	// changed line should start at +1 from the hunk anchor.
 	diff := "@@ -10,2 +10,2 @@\n unchanged\n-old\n+new\n"
-	styles := NewStyles(true, Branding{})
+	styles := newStyles(true, Branding{})
 	got := renderDiffInline(diff, styles, 0, "")
 	// context line is 10; -old should be 11; +new should be 11
 	if !strings.Contains(got, "10 │") {
@@ -503,7 +503,7 @@ func TestRenderDiffInline_AppliesBackgroundColor(t *testing.T) {
 	// into one escape (e.g. "\x1b[1;38;2;...;48;2;...m"), so we
 	// look for the bg parameter substring anywhere in output.
 	diff := "@@ -1 +1 @@\n-old\n+new\n"
-	styles := NewStyles(true, Branding{})
+	styles := newStyles(true, Branding{})
 	got := renderDiffInline(diff, styles, 0, "")
 	if !strings.Contains(got, ";48;2;") {
 		t.Errorf("expected background SGR (;48;2;...) in output, got:\n%q", got)
@@ -516,7 +516,7 @@ func TestRenderDiffInline_TruncatesLongLine(t *testing.T) {
 	// the preview area.
 	longBody := strings.Repeat("x", perLineByteCap*2)
 	diff := "@@ -1 +1 @@\n-" + longBody + "\n+short\n"
-	styles := NewStyles(true, Branding{})
+	styles := newStyles(true, Branding{})
 	got := renderDiffInline(diff, styles, 0, "")
 	if !strings.Contains(got, "…") {
 		t.Errorf("expected truncation marker '…' on long body, got len=%d", len(got))
@@ -555,7 +555,7 @@ func TestRenderDiffInline_GutterTintedDifferentlyOnChangedLines(t *testing.T) {
 	// gutter MUST differ from the bg colors used for the body —
 	// otherwise the gutter is invisible.
 	diff := "@@ -1 +1 @@\n-old\n+new\n"
-	styles := NewStyles(true, Branding{})
+	styles := newStyles(true, Branding{})
 	got := renderDiffInline(diff, styles, 0, "")
 	// Body bg colors: DiffAddBg #1B2D1B = 27,45,27; DiffDelBg #3A1E1E = 58,30,30.
 	if !strings.Contains(got, "27;45;27") {
@@ -602,7 +602,7 @@ func TestDiffPreviewWithSummary_PrependsTotalsAnchor(t *testing.T) {
 		"old_text": "hello\nworld\n",
 		"new_text": "hello\nWORLD\nextra\n",
 	}
-	styles := NewStyles(true, Branding{})
+	styles := newStyles(true, Branding{})
 	got := renderToolPreview("edit_file", args, styles)
 	if !strings.Contains(got, "⎿") {
 		t.Errorf("expected '⎿' summary anchor glyph, got:\n%q", got)
@@ -626,7 +626,7 @@ func TestDiffPreviewWithSummary_NoChangeReturnsEmpty(t *testing.T) {
 		"old_text": "same\n",
 		"new_text": "same\n",
 	}
-	got := renderToolPreview("edit_file", args, NewStyles(true, Branding{}))
+	got := renderToolPreview("edit_file", args, newStyles(true, Branding{}))
 	if got != "" {
 		t.Errorf("no-op edit: expected empty preview, got:\n%q", got)
 	}
@@ -640,7 +640,7 @@ func TestRenderReadPreview_UsesTreeGlyph(t *testing.T) {
 		"start_line": float64(10),
 		"end_line":   float64(42),
 	}
-	got := renderReadPreview("read_file", args, NewStyles(true, Branding{}))
+	got := renderReadPreview("read_file", args, newStyles(true, Branding{}))
 	if !strings.Contains(got, "⎿") {
 		t.Errorf("expected '⎿' on read summary, got:\n%q", got)
 	}

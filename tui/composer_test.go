@@ -114,7 +114,7 @@ func TestComposer_StaysFresh(t *testing.T) {
 // is the path a bare Model actually takes.
 func TestComposer_ZeroValueDoesNotRender(t *testing.T) {
 	var m Model
-	m.styles = NewStyles(true, Branding{})
+	m.styles = newStyles(true, Branding{})
 	m.input.SetPrompt("> ")
 	m.input.Blur()
 	m.refreshTheme()

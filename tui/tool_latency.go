@@ -99,7 +99,7 @@ func formatLatency(ms int64) string {
 // append to a tool-result line. Two leading spaces so it doesn't
 // crowd the tool name; brackets so it reads as metadata, not
 // content. Empty string when ms is 0.
-func renderLatencyBadge(ms int64, styles Styles) string {
+func renderLatencyBadge(ms int64, styles styleSet) string {
 	txt := formatLatency(ms)
 	if txt == "" {
 		return ""

@@ -16,7 +16,7 @@ package tui
 
 import "testing"
 
-// fakeItem implements Item for cache exercising.
+// fakeItem implements listItem for cache exercising.
 type fakeItem struct {
 	id       uint64
 	version  uint64

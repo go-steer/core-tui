@@ -200,7 +200,7 @@ func TestFormatSavingsCompact(t *testing.T) {
 }
 
 func TestRenderSavingsBadge(t *testing.T) {
-	styles := NewStyles(true, Branding{})
+	styles := newStyles(true, Branding{})
 	// Non-passthrough with token counts renders.
 	got := renderSavingsBadge(&ToolSavings{
 		Path:              SavingsPathStructural,
@@ -237,7 +237,7 @@ func TestSavedTokens_ClampsNegative(t *testing.T) {
 // latency badge test — drive the History helpers directly to
 // verify the badge lands in the preview alongside any latency badge.
 func TestApplyToolResult_SavingsBadgeAppendedToPreview(t *testing.T) {
-	styles := NewStyles(true, Branding{})
+	styles := newStyles(true, Branding{})
 	h := &History{}
 	args := map[string]any{"cluster": "prod-a"}
 	h.Append(Message{
@@ -294,7 +294,7 @@ func TestApplyToolResult_SavingsBadgeAppendedToPreview(t *testing.T) {
 // savings chip alongside the latency chip. Regression signal if a
 // future refactor drops the chip from the header rendering path.
 func TestToolCallDialog_HeaderShowsSavingsChip(t *testing.T) {
-	styles := NewStyles(true, Branding{})
+	styles := newStyles(true, Branding{})
 	m := Model{}
 	m.styles = styles
 	m.width = 120

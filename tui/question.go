@@ -15,7 +15,7 @@
 // Typed answers for modal questions (issue #164, stage 1 of the plan
 // in docs/design-question-dialogs.md §12).
 //
-// The problem this replaces. A Dialog today expresses ROUTING — was
+// The problem this replaces. A dialog today expresses ROUTING — was
 // the key consumed, should the stack pop, here is a Cmd — and never
 // the DECISION the operator made. So the decision has to be acted on
 // where it is discovered, inside the widget, against a *Model the
@@ -32,8 +32,8 @@
 // place that already knows what the answer means.
 //
 // Stage 1 introduces the vocabulary and converts exactly one caller,
-// the theme picker (question_themepicker.go). Dialog and every dialog
-// on it are untouched; the two live side by side on the same Overlay
+// the theme picker (question_themepicker.go). dialog and every dialog
+// on it are untouched; the two live side by side on the same overlay
 // until the migrations in stage 3.
 
 package tui
@@ -150,7 +150,7 @@ func (decision) isAnswer()  {}
 // which is what lets one be driven to completion from
 // package tui_test with no NewModel and no tea.NewProgram.
 type question interface {
-	// ID is the overlay identity, as Dialog.ID today.
+	// ID is the overlay identity, as dialog.ID today.
 	ID() string
 
 	// Key advances the question by one keystroke.
@@ -184,7 +184,7 @@ type question interface {
 	// Body renders the question's content to exactly width columns.
 	//
 	// termHeight is the terminal's height, carrying the same
-	// contract as RenderContext.Height: zero means the geometry is
+	// contract as renderContext.Height: zero means the geometry is
 	// unknown and no windowing should happen. It is a parameter
 	// rather than overlay-owned state — which is the one place this
 	// seam departs from design-question-dialogs.md §6.1 — because a
@@ -192,10 +192,10 @@ type question interface {
 	// it, and the row budget depends on how many chrome rows the
 	// question itself spends inside Body.
 	//
-	// Styles is passed by value: a question never reaches back for
-	// the app's theme, and the zero Styles renders unstyled, which
+	// styleSet is passed by value: a question never reaches back for
+	// the app's theme, and the zero styleSet renders unstyled, which
 	// is what makes the external test possible.
-	Body(width, termHeight int, st Styles) string
+	Body(width, termHeight int, st styleSet) string
 }
 
 // gracedQuestion is a question that can say which of its keystrokes
@@ -227,7 +227,7 @@ type gracedQuestion interface {
 
 // scrollQuestion is a question whose body scrolls by LINES rather
 // than by cursor rows — the elicit form, whose fields can outrun the
-// terminal. It is the question-side counterpart of ScrollDialog, and
+// terminal. It is the question-side counterpart of scrollDialog, and
 // it exists now rather than in stage 1 because the elicit form is its
 // first implementor: an interface with no implementor is not a seam,
 // it is a guess.
@@ -242,7 +242,7 @@ type scrollQuestion interface {
 	//
 	// Only ever called on a question that is currently drawing itself
 	// in the modal frame: an inlineQuestion is not a wheel surface at
-	// all, and Overlay.HandleWheel bounces the tick to the transcript
+	// all, and overlay.handleWheel bounces the tick to the transcript
 	// before reaching here.
 	ScrollBy(delta int)
 }
@@ -278,7 +278,7 @@ type inlineQuestion interface {
 	// InlineBody renders the block at width columns — the chat column,
 	// not a modal width. There is no frame to fit inside, so the
 	// question owns all of its own chrome here.
-	InlineBody(width int, st Styles) string
+	InlineBody(width int, st styleSet) string
 }
 
 // cursorQuestion is a question with a text caret — anything with a
@@ -311,9 +311,9 @@ type cursorQuestion interface {
 type resolver func(a answer, m *Model) tea.Cmd
 
 // askedQuestion is the adapter that lets a question ride the existing
-// Overlay. It is the whole of the compatibility story for stage 1:
+// overlay. It is the whole of the compatibility story for stage 1:
 // routing, z-order, the esc cascade, the wheel and the caret all keep
-// working against Dialog, and questions get there by being wrapped
+// working against dialog, and questions get there by being wrapped
 // rather than by the stack learning a second shape.
 type askedQuestion struct {
 	q question
@@ -355,20 +355,23 @@ const (
 )
 
 // ask pushes a question onto the overlay stack together with the
-// resolver that will receive its answer. It is Open for questions;
-// Open stays for viewers (the tool-call and subagent overlays, which
+// resolver that will receive its answer. It is open for questions;
+// open stays for viewers (the tool-call and subagent overlays, which
 // answer nothing).
 //
-// Unexported, unlike the rest of Overlay's methods, because its
-// parameters are: an exported Ask a host cannot name the arguments of
-// would be API surface with no caller. Exporting the family is
-// posture B in the design, and it is not stage 1's to decide.
-func (o *Overlay) ask(q question, origin askOrigin, r resolver) {
+// This was the one unexported method on the stack when it was written,
+// because its parameters are unexported and an exported Ask whose
+// arguments a host cannot name would be API surface with no caller.
+// #257 unexported the other ten and the distinction stopped meaning
+// anything, but the reason it was drawn is still the reason the
+// question family is not exported: that is posture B in the design,
+// and it is not stage 1's to decide.
+func (o *overlay) ask(q question, origin askOrigin, r resolver) {
 	aq := &askedQuestion{q: q, r: r}
 	if origin == askAgent {
 		aq.shownAt = time.Now()
 	}
-	o.Open(aq)
+	o.open(aq)
 }
 
 // resolveAll answers every outstanding question with reason and
@@ -379,7 +382,7 @@ func (o *Overlay) ask(q question, origin askOrigin, r resolver) {
 // modal and the flow waiting on it was never told anything at all.
 // Stage 2 wires it to applySwitchTarget and to the quit path; stage 1
 // ships the mechanism and its test.
-func (o *Overlay) resolveAll(reason dismissReason, m *Model) tea.Cmd {
+func (o *overlay) resolveAll(reason dismissReason, m *Model) tea.Cmd {
 	var cmds []tea.Cmd
 	for _, d := range o.dialogs {
 		aq, ok := d.(*askedQuestion)
@@ -407,8 +410,8 @@ func (o *Overlay) resolveAll(reason dismissReason, m *Model) tea.Cmd {
 // wanting the widget itself take .q and type-assert; the wrapper is
 // what knows whether it has already been answered, and a caller that
 // only ever saw the widget could not.
-func (o *Overlay) asked(id string) *askedQuestion {
-	aq, _ := o.Get(id).(*askedQuestion)
+func (o *overlay) asked(id string) *askedQuestion {
+	aq, _ := o.get(id).(*askedQuestion)
 	return aq
 }
 
@@ -422,7 +425,7 @@ func (o *Overlay) asked(id string) *askedQuestion {
 // drawing the frontmost FRAMED question in the box while an inline
 // question owns the keyboard, is the pixels-and-keys disagreement the
 // elicit form was moved to get out of.
-func (o *Overlay) inlineFront() (inlineQuestion, bool) {
+func (o *overlay) inlineFront() (inlineQuestion, bool) {
 	if len(o.dialogs) == 0 {
 		return nil, false
 	}
@@ -441,23 +444,23 @@ func (o *Overlay) inlineFront() (inlineQuestion, bool) {
 // The model picker's is the first: Enter starts a host call rather than
 // ending the question, and what closes the picker is the reply landing
 // in Update several hundred milliseconds later. Without this the
-// Update-side handler would have to Overlay.Close the question, which
+// Update-side handler would have to overlay.close the question, which
 // pops it with its resolver never run — the exact "torn down and
 // nobody was told" shape §1.4 of the design is about, reintroduced by
 // the code meant to remove it.
 //
 // It is also why a resolver must not Open a dialog: resolve pops
-// AFTER the resolver returns, and Overlay.HandleKeyMsg pops after it
+// AFTER the resolver returns, and overlay.handleKeyMsg pops after it
 // too, so anything a resolver pushed would be what got popped. A
 // resolver that needs another modal returns a Cmd and lets Update open
 // it, the way the theme picker's live preview is applied.
-func (o *Overlay) resolve(id string, ans answer, m *Model) tea.Cmd {
+func (o *overlay) resolve(id string, ans answer, m *Model) tea.Cmd {
 	aq := o.asked(id)
 	if aq == nil {
 		return nil
 	}
 	cmd := aq.resolve(ans, m)
-	o.Close(id)
+	o.close(id)
 	return cmd
 }
 
@@ -476,12 +479,13 @@ func (a *askedQuestion) resolve(ans answer, m *Model) tea.Cmd {
 
 func (a *askedQuestion) ID() string { return a.q.ID() }
 
-// HandleKey satisfies Dialog for callers holding only a normalized
+// HandleKey satisfies dialog for callers holding only a normalized
 // stroke. Nothing in the package reaches a question this way any more
-// — Overlay.HandleKey went in #254 and the wheel synthesizer builds a
-// real KeyPressMsg — but Dialog still declares it, and an adapter that
+// — the stack's stroke-string entry point went in #254 and the wheel
+// synthesizer builds a real KeyPressMsg — but dialog still declares
+// it, and an adapter that
 // panicked on the one method it is asked for least would be a trap.
-func (a *askedQuestion) HandleKey(stroke string, m *Model) DialogAction {
+func (a *askedQuestion) HandleKey(stroke string, m *Model) dialogAction {
 	return a.HandleKeyMsg(keyMsgFromStroke(stroke), m)
 }
 
@@ -489,7 +493,7 @@ func (a *askedQuestion) HandleKey(stroke string, m *Model) DialogAction {
 // full-fidelity keystroke, because Key.Text and bracketed pastes are
 // exactly what a filter row or an input box needs and a stroke string
 // drops both.
-func (a *askedQuestion) HandleKeyMsg(msg tea.KeyPressMsg, m *Model) DialogAction {
+func (a *askedQuestion) HandleKeyMsg(msg tea.KeyPressMsg, m *Model) dialogAction {
 	if a.held(msg) {
 		// A held stroke that would have TYPED a character is not
 		// swallowed — it is declined, so it falls through to the
@@ -505,15 +509,15 @@ func (a *askedQuestion) HandleKeyMsg(msg tea.KeyPressMsg, m *Model) DialogAction
 		// submit. Forwarding one would send the operator's half-written
 		// prompt to the agent because a modal appeared.
 		if msg.Text != "" {
-			return DialogAction{}
+			return dialogAction{}
 		}
-		return DialogAction{Consumed: true}
+		return dialogAction{Consumed: true}
 	}
 	ans, cmd := a.q.Key(msg)
 	if ans == nil {
-		return DialogAction{Consumed: true, Cmd: cmd}
+		return dialogAction{Consumed: true, Cmd: cmd}
 	}
-	return DialogAction{Consumed: true, Close: true, Cmd: tea.Batch(cmd, a.resolve(ans, m))}
+	return dialogAction{Consumed: true, Close: true, Cmd: tea.Batch(cmd, a.resolve(ans, m))}
 }
 
 // held reports whether the grace window should swallow msg — the one
@@ -540,8 +544,8 @@ func (a *askedQuestion) held(msg tea.KeyPressMsg) bool {
 }
 
 // scrollBy hands a wheel tick to a scrollQuestion, reporting whether
-// the question wanted it. Overlay.HandleWheel asks here rather than
-// type-asserting the adapter to ScrollDialog, because the adapter
+// the question wanted it. overlay.handleWheel asks here rather than
+// type-asserting the adapter to scrollDialog, because the adapter
 // wraps every question and an unconditional implementation would give
 // the pickers line scrolling — see the comment at the foot of this
 // file for why that is wrong for them.
@@ -575,20 +579,20 @@ func (a *askedQuestion) inline() (inlineQuestion, bool) {
 // would report last frame's answer.
 func (a *askedQuestion) Render(totalWidth int, m *Model) string {
 	width := a.q.Width(totalWidth)
-	return RenderContext{
+	return renderContext{
 		Title:  a.q.Title(),
 		Body:   a.q.Body(width, m.height, m.styles),
 		Footer: a.q.Footer(),
 		Width:  width,
 		Height: m.height,
 		Styles: m.styles,
-	}.Render()
+	}.render()
 }
 
 // DialogCursor implements cursorDialog. The adapter always has the
 // method — Go cannot conditionally implement an interface — so a
 // question with no caret answers nil here, which is the same answer
-// Overlay.cursor's type assertion produced for a dialog that did not
+// overlay.cursor's type assertion produced for a dialog that did not
 // implement it at all.
 func (a *askedQuestion) DialogCursor(width int, _ *Model) *tea.Cursor {
 	cq, ok := a.q.(cursorQuestion)
@@ -598,15 +602,15 @@ func (a *askedQuestion) DialogCursor(width int, _ *Model) *tea.Cursor {
 	return cq.Cursor(a.q.Width(width))
 }
 
-// The adapter deliberately does NOT implement ScrollDialog. Overlay
+// The adapter deliberately does NOT implement scrollDialog. overlay
 // routes a wheel tick to ScrollBy when the front dialog has it and
 // otherwise synthesizes one up/down keystroke, and the second is the
 // right behaviour for a list: a wheel nudge that jumps three rows
 // past the one you wanted is worse than no wheel at all. Since the
 // adapter wraps every question, implementing the interface here would
-// take that away from the pickers wholesale — so HandleWheel asks
+// take that away from the pickers wholesale — so handleWheel asks
 // scrollBy instead, and only a question that opted into
 // scrollQuestion gets lines.
-var _ Dialog = (*askedQuestion)(nil)
+var _ dialog = (*askedQuestion)(nil)
 var _ keyMsgDialog = (*askedQuestion)(nil)
 var _ cursorDialog = (*askedQuestion)(nil)

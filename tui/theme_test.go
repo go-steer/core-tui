@@ -140,14 +140,14 @@ func TestWordmarkSequencePresence(t *testing.T) {
 }
 
 // TestRenderWordmark_NoSequenceFallsBackToWordmarkStyle — when
-// the theme has no WordmarkSequence, RenderWordmark must produce
+// the theme has no WordmarkSequence, renderWordmark must produce
 // the same output as the existing Wordmark style. Guards against
 // a regression where the new path overtakes themes that opted
 // out.
 func TestRenderWordmark_NoSequenceFallsBackToWordmarkStyle(t *testing.T) {
-	s := NewStylesWithTheme(true, defaultTheme(true))
+	s := newStylesWithTheme(true, defaultTheme(true))
 	want := s.Wordmark.Render("core-tui")
-	got := s.RenderWordmark("core-tui")
+	got := s.renderWordmark("core-tui")
 	if got != want {
 		t.Errorf("RenderWordmark without sequence: want single-color path output\n  want %q\n  got  %q", want, got)
 	}
@@ -158,8 +158,8 @@ func TestRenderWordmark_NoSequenceFallsBackToWordmarkStyle(t *testing.T) {
 // fallback. Doesn't assert on exact bytes (ANSI sequences are
 // brittle); just that the two paths diverge.
 func TestRenderWordmark_SequenceProducesDifferentOutput(t *testing.T) {
-	s := NewStylesWithTheme(true, googleTheme(true))
-	multi := s.RenderWordmark("core-tui")
+	s := newStylesWithTheme(true, googleTheme(true))
+	multi := s.renderWordmark("core-tui")
 	single := s.Wordmark.Render("core-tui")
 	if multi == single {
 		t.Error("RenderWordmark with sequence produced same output as Wordmark.Render — multicolor path didn't activate")
@@ -220,12 +220,12 @@ func TestBuiltinThemes_IncludesNewThemes(t *testing.T) {
 // --- theme derivation (issue #116) -----------------------------
 
 // TestNewStylesWithTheme_NormalizesBareThemeLiteral is the reason
-// the normalizer sits in NewStylesWithTheme rather than in
+// the normalizer sits in newStylesWithTheme rather than in
 // defaultTheme.
 //
 // Two of the four ways a Theme comes into existence never touch
 // defaultTheme: a host handing a composite literal to the exported
-// NewStylesWithTheme, and the golden corpus's goldenTheme(). Put
+// newStylesWithTheme, and the golden corpus's goldenTheme(). Put
 // the derivation in defaultTheme and both of those get a zero
 // ChromaStyleName, styles.Get("") silently falls back, and OnPrimary
 // stays nil for the one surface that paints on top of Primary.
@@ -234,7 +234,7 @@ func TestNewStylesWithTheme_NormalizesBareThemeLiteral(t *testing.T) {
 	if bare.OnPrimary != nil || bare.ChromaStyleName != "" {
 		t.Fatal("test setup: the literal must start with both derived tokens unset")
 	}
-	got := NewStylesWithTheme(true, bare).Theme
+	got := newStylesWithTheme(true, bare).Theme
 	if got.ChromaStyleName != defaultChromaStyleName {
 		t.Errorf("ChromaStyleName = %q, want %q", got.ChromaStyleName, defaultChromaStyleName)
 	}
@@ -251,8 +251,8 @@ func TestNewStylesWithTheme_NormalizesBareThemeLiteral(t *testing.T) {
 // foreground has to flip with the brightness of Primary, or the H1
 // banner is unreadable for half the palettes.
 func TestNormalizeTheme_OnPrimaryFollowsLuminance(t *testing.T) {
-	onDark := NewStylesWithTheme(true, Theme{Primary: lipgloss.Color("#101010")}).Theme.OnPrimary
-	onLight := NewStylesWithTheme(true, Theme{Primary: lipgloss.Color("#F5F5DC")}).Theme.OnPrimary
+	onDark := newStylesWithTheme(true, Theme{Primary: lipgloss.Color("#101010")}).Theme.OnPrimary
+	onLight := newStylesWithTheme(true, Theme{Primary: lipgloss.Color("#F5F5DC")}).Theme.OnPrimary
 	if onDark == onLight {
 		t.Fatalf("OnPrimary did not flip between a near-black and a near-white Primary (both %v)", onDark)
 	}
@@ -269,7 +269,7 @@ func TestNormalizeTheme_OnPrimaryFollowsLuminance(t *testing.T) {
 // spells either token out keeps it.
 func TestNormalizeTheme_KeepsExplicitValues(t *testing.T) {
 	want := lipgloss.Color("#123456")
-	got := NewStylesWithTheme(true, Theme{
+	got := newStylesWithTheme(true, Theme{
 		Primary:         lipgloss.Color("#101010"),
 		OnPrimary:       want,
 		ChromaStyleName: "monokai",
@@ -283,15 +283,15 @@ func TestNormalizeTheme_KeepsExplicitValues(t *testing.T) {
 }
 
 // TestBranding_RederivesOnPrimary — both Branding override sites
-// mutate Primary and then call NewStylesWithTheme, so the derived
+// mutate Primary and then call newStylesWithTheme, so the derived
 // foreground must follow the override rather than the base theme's
 // Primary. This is the property that let the normalizer live at the
-// Styles boundary with no extra call site.
+// styleSet boundary with no extra call site.
 func TestBranding_RederivesOnPrimary(t *testing.T) {
-	base := NewStyles(true, Branding{}).Theme.OnPrimary
+	base := newStyles(true, Branding{}).Theme.OnPrimary
 	// A near-white brand accent has to flip the derived foreground
 	// dark; the house violet does not.
-	over := NewStyles(true, Branding{AccentColor: "#FAFAFA"}).Theme.OnPrimary
+	over := newStyles(true, Branding{AccentColor: "#FAFAFA"}).Theme.OnPrimary
 	if base == over {
 		t.Fatalf("OnPrimary was not re-derived after a Branding override (both %v)", base)
 	}
@@ -308,7 +308,7 @@ func TestBranding_RederivesOnPrimary(t *testing.T) {
 func TestBuiltinThemes_ChromaStyleNamesResolve(t *testing.T) {
 	for _, bt := range BuiltinThemes() {
 		for _, dark := range []bool{true, false} {
-			name := NewStylesWithTheme(dark, bt.Build(dark)).Theme.ChromaStyleName
+			name := newStylesWithTheme(dark, bt.Build(dark)).Theme.ChromaStyleName
 			if name == "" {
 				t.Errorf("%s (dark=%v): ChromaStyleName empty after normalization", bt.Name, dark)
 				continue

@@ -12,15 +12,15 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-// Dialog overlay stack (agentic-tui skill §9). Replaces the ad-hoc
-// modal precedence cascade with a Dialog interface + Overlay
-// container so adding a new modal is one type + one Open() call
+// dialog overlay stack (agentic-tui skill §9). Replaces the ad-hoc
+// modal precedence cascade with a dialog interface + overlay
+// container so adding a new modal is one type + one open() call
 // instead of two new fields + a new case in the Esc cascade + a
 // new case in renderTUI's z-order switch.
 //
 // Every agent-opened modal is here now. The elicit form and the
 // permission prompt were the last two holding inline state in Model,
-// and both left in #164 stage 3 to ride the Overlay as questions
+// and both left in #164 stage 3 to ride the overlay as questions
 // (question_elicit.go, question_permission.go) — which is where the
 // channel-based Prompter / Elicitor lifecycle turned out to fit after
 // all: the dispatch happens in the question's resolver rather than in
@@ -36,58 +36,59 @@ import (
 	"charm.land/lipgloss/v2"
 )
 
-// Dialog is the contract for any modal that wants to ride the
-// Overlay stack. Each method is keystroke-driven; the front-most
-// dialog gets every key until it returns DialogActionClose.
-type Dialog interface {
+// dialog is the contract for any modal that wants to ride the
+// overlay stack. Each method is keystroke-driven; the front-most
+// dialog gets every key until it returns dialogAction{Close: true}.
+type dialog interface {
 	// ID is a stable identifier (e.g. "model-picker", "settings")
-	// so Overlay.Close(id) can target a specific dialog regardless
+	// so overlay.close(id) can target a specific dialog regardless
 	// of z-order.
 	ID() string
 
 	// HandleKey is invoked for every keystroke the front-most
-	// dialog receives. Returns the action the Overlay should
+	// dialog receives. Returns the action the overlay should
 	// take (consume + render; close + pop; etc.).
-	HandleKey(stroke string, m *Model) DialogAction
+	HandleKey(stroke string, m *Model) dialogAction
 
 	// Render returns the styled string for the dialog body at
-	// the given total terminal width. The Overlay wraps the
-	// result in chrome via RenderContext.
+	// the given total terminal width. The overlay wraps the
+	// result in chrome via renderContext.
 	Render(width int, m *Model) string
 }
 
-// keyMsgDialog is an optional extension of Dialog for modals whose
+// keyMsgDialog is an optional extension of dialog for modals whose
 // body owns a real text-editing widget (issue #56's text-input dialog
-// is the first). Dialog.HandleKey receives a NORMALIZED stroke
+// is the first). dialog.HandleKey receives a NORMALIZED stroke
 // ("ctrl+u", "shift+enter") which is lossy for an input widget: it
 // drops Key.Text — the grapheme(s) the terminal actually delivered,
 // which is exactly what a textinput wants to insert — and it can't
 // carry a bracketed paste.
 //
 // Dialogs that implement this interface get the raw
-// tea.KeyPressMsg from Overlay.HandleKeyMsg; every other Dialog
+// tea.KeyPressMsg from overlay.handleKeyMsg; every other dialog
 // keeps the stroke-string contract untouched. Implementations must
-// still provide HandleKey (Dialog is embedded) — the convention is
+// still provide HandleKey (dialog is embedded) — the convention is
 // to synthesize a KeyPressMsg from the stroke and delegate, so both
 // entry points stay behaviorally identical.
 //
 // Unexported in #254. It was exported for a host that might implement
-// a text-editing modal, and no host can: Overlay is an unexported
-// field of Model, so there is nothing outside the package to install
-// an implementation into. Every implementor is in this package.
+// a text-editing modal, and no host can: the overlay stack is an
+// unexported field of Model, so there is nothing outside the package
+// to install an implementation into. Every implementor is in this
+// package. #257 took the rest of the set down on the same ground.
 type keyMsgDialog interface {
-	Dialog
+	dialog
 
 	// HandleKeyMsg is the full-fidelity twin of HandleKey.
-	HandleKeyMsg(msg tea.KeyPressMsg, m *Model) DialogAction
+	HandleKeyMsg(msg tea.KeyPressMsg, m *Model) dialogAction
 }
 
-// DialogAction is the return shape of HandleKey. Composite so
+// dialogAction is the return shape of HandleKey. Composite so
 // dialogs can signal "consume key" + "close me" + "emit a Cmd"
 // (e.g. ThemeChangedMsg from the theme picker) in one go.
-type DialogAction struct {
+type dialogAction struct {
 	// Consumed reports whether the dialog handled the key. When
-	// false, the Overlay lets the key fall through to the rest of
+	// false, the overlay lets the key fall through to the rest of
 	// the handleKey switch (e.g. for Ctrl+C which always quits).
 	Consumed bool
 	// Close pops THIS dialog off the stack after the current
@@ -101,23 +102,23 @@ type DialogAction struct {
 	Cmd tea.Cmd
 }
 
-// Overlay is the modal z-order stack. Open() pushes onto the top;
-// HandleKeyMsg routes only to the front; Render iterates in stack
+// overlay is the modal z-order stack. open() pushes onto the top;
+// handleKeyMsg routes only to the front; render iterates in stack
 // order so later opens render on top. Empty stack = no modal.
-type Overlay struct {
-	dialogs []Dialog
+type overlay struct {
+	dialogs []dialog
 }
 
-// Open pushes a new dialog onto the top of the stack. No
+// open pushes a new dialog onto the top of the stack. No
 // dedup — opening "model-picker" twice stacks twice; callers
-// that want singletons check HasID() first.
-func (o *Overlay) Open(d Dialog) {
+// that want singletons check hasID() first.
+func (o *overlay) open(d dialog) {
 	o.dialogs = append(o.dialogs, d)
 }
 
-// Close removes the dialog with id from the stack (any
+// close removes the dialog with id from the stack (any
 // position). No-op when not present.
-func (o *Overlay) Close(id string) {
+func (o *overlay) close(id string) {
 	out := o.dialogs[:0]
 	for _, d := range o.dialogs {
 		if d.ID() == id {
@@ -128,21 +129,21 @@ func (o *Overlay) Close(id string) {
 	o.dialogs = out
 }
 
-// CloseFront pops the front-most dialog. No-op on empty stack.
-func (o *Overlay) CloseFront() {
+// closeFront pops the front-most dialog. No-op on empty stack.
+func (o *overlay) closeFront() {
 	if len(o.dialogs) == 0 {
 		return
 	}
 	o.dialogs = o.dialogs[:len(o.dialogs)-1]
 }
 
-// HasDialogs reports whether anything is open.
-func (o *Overlay) HasDialogs() bool { return len(o.dialogs) > 0 }
+// hasDialogs reports whether anything is open.
+func (o *overlay) hasDialogs() bool { return len(o.dialogs) > 0 }
 
-// Get returns the dialog with id from anywhere in the stack, or nil.
+// get returns the dialog with id from anywhere in the stack, or nil.
 // Unlike Front it doesn't care what's on top: an async reply for a
 // dialog that another modal has since covered still belongs to it.
-func (o *Overlay) Get(id string) Dialog {
+func (o *overlay) get(id string) dialog {
 	for _, d := range o.dialogs {
 		if d.ID() == id {
 			return d
@@ -151,9 +152,9 @@ func (o *Overlay) Get(id string) Dialog {
 	return nil
 }
 
-// HasID reports whether a dialog with id is on the stack
+// hasID reports whether a dialog with id is on the stack
 // (useful for singleton checks before Open).
-func (o *Overlay) HasID(id string) bool {
+func (o *overlay) hasID(id string) bool {
 	for _, d := range o.dialogs {
 		if d.ID() == id {
 			return true
@@ -162,15 +163,15 @@ func (o *Overlay) HasID(id string) bool {
 	return false
 }
 
-// Front returns the front-most dialog, or nil on empty stack.
-func (o *Overlay) Front() Dialog {
+// front returns the front-most dialog, or nil on empty stack.
+func (o *overlay) front() dialog {
 	if len(o.dialogs) == 0 {
 		return nil
 	}
 	return o.dialogs[len(o.dialogs)-1]
 }
 
-// HandleKeyMsg routes the keystroke to the front-most dialog and
+// handleKeyMsg routes the keystroke to the front-most dialog and
 // applies the returned action. Returns Consumed so the caller
 // (handleKey) can decide whether to fall through, plus an optional
 // Cmd for dialogs that need to emit a msg (e.g. the theme picker
@@ -180,45 +181,46 @@ func (o *Overlay) Front() Dialog {
 // tea.KeyPressMsg; otherwise we fall back to the normalized-stroke
 // contract.
 //
-// There used to be a stroke-string twin of this, Overlay.HandleKey,
-// removed in #254. It was the older of the two entry points and by the
-// end its only caller was HandleWheel's synthesized up/down, which
+// There used to be a stroke-string twin of this — Overlay.HandleKey,
+// as both were spelled then — removed in #254. It was the older of the
+// two entry points and by the
+// end its only caller was handleWheel's synthesized up/down, which
 // builds a tea.KeyPressMsg with keyMsgFromStroke instead. Two entry
 // points into the same routing is one place for the two to drift.
-func (o *Overlay) HandleKeyMsg(msg tea.KeyPressMsg, m *Model) (consumed bool, cmd tea.Cmd) {
-	front := o.Front()
+func (o *overlay) handleKeyMsg(msg tea.KeyPressMsg, m *Model) (consumed bool, cmd tea.Cmd) {
+	front := o.front()
 	if front == nil {
 		return false, nil
 	}
-	var act DialogAction
+	var act dialogAction
 	if kd, ok := front.(keyMsgDialog); ok {
 		act = kd.HandleKeyMsg(msg, m)
 	} else {
 		act = front.HandleKey(msg.String(), m)
 	}
 	if act.Close {
-		o.CloseFront()
+		o.closeFront()
 	}
 	return act.Consumed, act.Cmd
 }
 
-// Render iterates the stack and returns the front-most dialog's
+// render iterates the stack and returns the front-most dialog's
 // styled string wrapped in modal chrome. Empty stack returns "".
 // Today we only render the FRONT (no layered painting); future
 // translucent overlays would draw deeper dialogs first.
-func (o *Overlay) Render(width int, m *Model) string {
-	front := o.Front()
+func (o *overlay) render(width int, m *Model) string {
+	front := o.front()
 	if front == nil {
 		return ""
 	}
 	return front.Render(width, m)
 }
 
-// RenderContext assembles a dialog body with consistent chrome:
+// renderContext assembles a dialog body with consistent chrome:
 // title bar, body, footer. Mirrors agentic-tui skill §9.C —
 // every dialog inherits identical border / title styling without
 // duplicating the lipgloss boilerplate.
-type RenderContext struct {
+type renderContext struct {
 	Title  string
 	Body   string
 	Footer string
@@ -232,7 +234,7 @@ type RenderContext struct {
 	// content and the footer key hint is the last thing sacrificed.
 	Height int
 
-	Styles Styles
+	Styles styleSet
 }
 
 // A modal wears a box edge on all four sides (issue #199).
@@ -262,7 +264,7 @@ const (
 	// modalEdgeCols / modalEdgeRows are what the box itself spends.
 	modalEdgeCols = 2
 	modalEdgeRows = 2
-	// modalPadCols is RenderContext's one column of padding inside
+	// modalPadCols is renderContext's one column of padding inside
 	// the edge, on each side.
 	modalPadCols = 2
 	// modalScrollbarCols is the gutter plus the bar column scrollView
@@ -298,13 +300,13 @@ func modalBodyWidth(w int) int { return nonNeg(modalInnerWidth(w) - modalScrollb
 // modalSurface draws the outer edge every modal surface wears, and is
 // the single place it is drawn. The permission overlay, the elicit
 // form, the embedded huh form, the side answer and everything on the
-// Overlay stack all pass through here — a treatment applied to four
+// overlay stack all pass through here — a treatment applied to four
 // of the five would read as a rendering bug rather than as a style.
 //
 // width is the TOTAL column count, edge included; a non-positive
 // width leaves the block to size itself, which is what the huh form
 // needs since it brings its own layout. padY is the vertical padding:
-// zero for the RenderContext surfaces, whose chrome supplies its own
+// zero for the renderContext surfaces, whose chrome supplies its own
 // spacer rows, and one for the huh form, which supplies none.
 //
 // termHeight is the terminal's height, and it buys the one case where
@@ -324,7 +326,7 @@ func modalBodyWidth(w int) int { return nonNeg(modalInnerWidth(w) - modalScrollb
 // rather than from a literal, so a palette swap moves all three
 // together. lipgloss does not inherit a style's Foreground into its
 // border, hence the explicit BorderForeground.
-func modalSurface(s Styles, content string, width, termHeight, padY int) string {
+func modalSurface(s styleSet, content string, width, termHeight, padY int) string {
 	st := s.ModalBorder.Padding(padY, modalPadCols/2)
 	if width > 0 {
 		st = st.Width(width)
@@ -355,12 +357,12 @@ func modalEdgeFits(content string, width, termHeight, padY int) bool {
 	return rows+2*padY+modalEdgeRows <= termHeight
 }
 
-// Render returns the framed dialog as a styled string. Title
+// render returns the framed dialog as a styled string. Title
 // renders bold-accent with a horizontal rule continuing to the
 // right edge; body sits in the middle with a single blank line
 // above and below; footer renders muted at the bottom with its
 // own rule; the whole block sits inside the box edge.
-func (rc RenderContext) Render() string {
+func (rc renderContext) render() string {
 	width := rc.Width
 	if width < 30 {
 		width = 30
@@ -489,13 +491,13 @@ func wrappedContentRows(line string, width int) int {
 	return max(1, lipgloss.Height(lipgloss.NewStyle().Width(width).Render(line)))
 }
 
-// Scrollbar renders a vertical scrollbar character column of
+// scrollbar renders a vertical scrollbar character column of
 // `height` rows showing thumb position relative to (contentSize,
 // viewportSize, offset). Returns "" when content fits in viewport
 // or when height <= 0. Lifted from agentic-tui skill §9.F so
 // any dialog with overflowing content can frame a consistent
 // scroll indicator without writing the math twice.
-func Scrollbar(s Styles, height, contentSize, viewportSize, offset int) string {
+func scrollbar(s styleSet, height, contentSize, viewportSize, offset int) string {
 	if height <= 0 || contentSize <= viewportSize {
 		return ""
 	}

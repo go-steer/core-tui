@@ -104,7 +104,7 @@ func (f *pickerFailure) rows() int {
 // styled one could slice a colour on and never off, and unlike a
 // windowed row nothing downstream closes it — scrollView's closeSGR
 // never sees this row.
-func (f *pickerFailure) appendTo(lines []string, width int, st Styles) string {
+func (f *pickerFailure) appendTo(lines []string, width int, st styleSet) string {
 	if f.msg != "" {
 		row := ansi.Truncate(GlyphWarn+" "+f.msg, modalInnerWidth(width), GlyphTruncate)
 		lines = append(lines, st.ErrorText.Render(row))

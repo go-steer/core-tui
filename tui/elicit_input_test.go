@@ -362,7 +362,7 @@ func TestElicitModal_AdvertisesTheKeysItHonors(t *testing.T) {
 			plain := func(s string) string {
 				return unbindLegend(ansi.Strip(s))
 			}
-			if got := plain(m.overlayStack.Render(m.width, &m)); !strings.Contains(got, tc.key) {
+			if got := plain(m.overlayStack.render(m.width, &m)); !strings.Contains(got, tc.key) {
 				t.Errorf("the modal footer does not offer %q:\n%s", tc.key, got)
 			}
 			if got := plain(m.footerHint()); !strings.Contains(got, tc.key) {

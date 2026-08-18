@@ -30,7 +30,7 @@
 //
 //   - The input is a real bubbles textinput fed real
 //     tea.KeyPressMsg values through keyMsgDialog, not
-//     Dialog.HandleKey. HandleKey receives a NORMALIZED stroke
+//     dialog.HandleKey. HandleKey receives a NORMALIZED stroke
 //     ("ctrl+u", "shift+enter"), which drops Key.Text — the grapheme
 //     the terminal actually delivered, which is the one thing a text
 //     input needs — and cannot carry a bracketed paste.
@@ -127,7 +127,7 @@ func pickerNavStroke(stroke string) bool {
 // paints prompt + Width() + 1 cells (the trailing cell is the caret's
 // own), so the count's column is reserved out of the width handed to
 // SetWidth rather than trimmed off afterwards.
-func (f *pickerFilter) render(width, matched, total int, s Styles) string {
+func (f *pickerFilter) render(width, matched, total int, s styleSet) string {
 	f.syncStyles(s)
 
 	inner := modalInnerWidth(width)
@@ -166,7 +166,7 @@ func (f *pickerFilter) cursor() *tea.Cursor {
 }
 
 // filterRowCursor lifts a filter caret into dialog-relative
-// coordinates. RenderContext's chrome is fixed — the box edge, one
+// coordinates. renderContext's chrome is fixed — the box edge, one
 // column of horizontal padding, a title line and a blank row above
 // the body — and the filter row is always the FIRST row of the body,
 // so modalContentX / modalBodyTop are the whole offset, for all three
@@ -181,7 +181,7 @@ func filterRowCursor(c *tea.Cursor) *tea.Cursor {
 }
 
 // syncStyles rebuilds the input's palette from the active theme.
-func (f *pickerFilter) syncStyles(s Styles) {
+func (f *pickerFilter) syncStyles(s styleSet) {
 	if f.styled && f.styledDark == s.Dark && f.styledTheme == s.Theme.Name {
 		return
 	}

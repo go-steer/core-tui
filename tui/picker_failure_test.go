@@ -50,7 +50,7 @@ func TestPickerFailure_IsAlwaysExactlyOneRow(t *testing.T) {
 			if f.rows() != 1 {
 				t.Fatalf("rows() = %d, want 1", f.rows())
 			}
-			row := f.appendTo(nil, 64, Styles{})
+			row := f.appendTo(nil, 64, styleSet{})
 			if n := strings.Count(row, "\n"); n != 0 {
 				t.Errorf("the reason rendered %d rows:\n%s", n+1, row)
 			}
@@ -67,7 +67,7 @@ func TestPickerFailure_StripsTerminalEscapes(t *testing.T) {
 	var f pickerFailure
 	f.set("boom \x1b[2J\x1b]0;pwned\x07 and \x07done")
 
-	row := f.appendTo(nil, 64, Styles{})
+	row := f.appendTo(nil, 64, styleSet{})
 	if strings.ContainsRune(row, 0x1b) {
 		t.Errorf("an escape reached the frame: %q", row)
 	}
@@ -84,7 +84,7 @@ func TestPickerFailure_FitsTheModalWidth(t *testing.T) {
 	var f pickerFailure
 	f.set(strings.Repeat("unreachable ", 30))
 
-	row := f.appendTo(nil, width, Styles{})
+	row := f.appendTo(nil, width, styleSet{})
 	if got, want := ansi.StringWidth(row), modalInnerWidth(width); got > want {
 		t.Errorf("the reason row is %d cells wide, over the modal's %d:\n%s", got, want, row)
 	}
@@ -101,7 +101,7 @@ func TestPickerFailure_ZeroValueAddsNothing(t *testing.T) {
 	if f.rows() != 0 {
 		t.Errorf("rows() = %d on the zero value, want 0", f.rows())
 	}
-	if got := f.appendTo([]string{"a", "b"}, 64, Styles{}); got != "a\nb" {
+	if got := f.appendTo([]string{"a", "b"}, 64, styleSet{}); got != "a\nb" {
 		t.Errorf("appendTo = %q, want the lines it was handed", got)
 	}
 
