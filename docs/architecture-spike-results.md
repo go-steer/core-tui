@@ -17,7 +17,7 @@
 >
 > **Step 0 has already landed.** F1, F2 and F3 were each re-verified
 > against `main` before the move and all three are fixed — see
-> [`decisions.md` D29](./decisions.md#d29-what-the-rendering-rewrite-targets)
+> [`decisions.md` D29](./decisions.md#d29-what-the-rendering-rewrite-actually-targets)
 > for which issue did which. The spike measured a snapshot taken
 > before that work; the verdicts and Steps 1–3 are live, the "do it
 > now" in Step 0 is history.
