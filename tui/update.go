@@ -628,12 +628,19 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			return m, cmd
 		}
 		q.switching = ""
-		if msg.err != nil || msg.agent == nil {
+		if reason := modelSwitchFailure(msg); reason != "" {
 			// The switch failed. The question was never answered, so
 			// leave the picker open on its list rather than closing it:
 			// the operator's next move is almost always the next model
 			// down, and closing would make them re-run /model to get
 			// back to a list they were already looking at.
+			//
+			// Say why ON the picker (issue #245). applyModelSwitch has
+			// already put the reason in the transcript, but the
+			// transcript is behind this modal, so on its own it leaves
+			// the operator looking at an unchanged list with no account
+			// of what their Enter did.
+			q.fail.set(reason)
 			return m, cmd
 		}
 		return m, tea.Batch(cmd, m.overlayStack.resolve(modelPickerDialogID, chosen{ID: msg.id}, &m))
@@ -687,12 +694,15 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			return m, cmd
 		}
 		q.switching = ""
-		if msg.err != nil || msg.target.Agent == nil {
+		if reason := sessionSwitchFailure(msg); reason != "" {
 			// The attach failed. The question was never answered, so
 			// leave the picker open on its list — the same call the
 			// model picker makes, and for the same reason: the next
 			// move after "endpoint unreachable" is almost always the
-			// next session down.
+			// next session down. And the same inline reason under it
+			// (issue #245), since the transcript row applySessionSwitch
+			// wrote is behind this modal.
+			q.fail.set(reason)
 			return m, cmd
 		}
 		return m, tea.Batch(cmd, m.overlayStack.resolve(sessionPickerDialogID, chosen{ID: msg.id}, &m))

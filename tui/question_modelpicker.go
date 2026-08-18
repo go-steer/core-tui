@@ -39,8 +39,6 @@
 package tui
 
 import (
-	"strings"
-
 	tea "charm.land/bubbletea/v2"
 	"charm.land/lipgloss/v2"
 )
@@ -114,6 +112,12 @@ type modelPickerQuestion struct {
 	// queue a second switch against a list that is about to be
 	// replaced.
 	switching string
+
+	// fail is why the last SwitchModel came back unusable, shown under
+	// the list (issue #245). Set by the Update-side reply handler, which
+	// is the only place that knows; the transcript row it pairs with is
+	// written by applyModelSwitch and says the same thing.
+	fail pickerFailure
 }
 
 func newModelPickerQuestion(wired bool) *modelPickerQuestion {
@@ -313,6 +317,10 @@ func (q *modelPickerQuestion) Key(msg tea.KeyPressMsg) (answer, tea.Cmd) {
 			// best match rather than trying to keep hold of a row that
 			// may not be in the new list at all.
 			q.idx, q.off = 0, 0
+			// The failure named a model that may not even be in the
+			// narrowed list — drop it rather than leave it pointing at
+			// nothing on screen.
+			q.fail.clear()
 		}
 		return nil, cmd
 	}
@@ -324,6 +332,10 @@ func (q *modelPickerQuestion) Key(msg tea.KeyPressMsg) (answer, tea.Cmd) {
 		return nil, nil
 	}
 	q.idx = clampIndex(q.idx, len(rows))
+	// Every stroke from here moves the cursor or commits a new switch,
+	// so whatever the last one failed at is no longer what the operator
+	// is looking at.
+	q.fail.clear()
 	switch stroke {
 	case "up", "ctrl+p":
 		q.idx = stepIndex(q.idx, -1, len(rows))
@@ -370,11 +382,12 @@ func (q *modelPickerQuestion) Body(width, termHeight int, st Styles) string {
 	filter := q.filter.value()
 	// The filter row is the FIRST body row, always — including when it
 	// matched nothing, since it is the thing the operator has to edit to
-	// get back. Its row is paid for with modalChromeRows+1 below.
+	// get back. Its row is paid for with modalChromeRows+1 below, and
+	// the failure row, which is always the LAST, adds its own.
 	lines := []string{q.filter.render(width, len(models), len(q.models), st)}
 	if len(models) == 0 {
 		lines = append(lines, st.Muted.Render("no models match "+quoteFilter(filter)))
-		return strings.Join(lines, "\n")
+		return q.fail.appendTo(lines, width, st)
 	}
 	q.idx = clampIndex(q.idx, len(models))
 	rows := make([]string, 0, len(models))
@@ -402,10 +415,10 @@ func (q *modelPickerQuestion) Body(width, termHeight int, st Styles) string {
 		}
 		rows = append(rows, row)
 	}
-	view := modalBodyHeight(termHeight, modalChromeRows+1)
+	view := modalBodyHeight(termHeight, modalChromeRows+1+q.fail.rows())
 	q.off = listWindow(q.off, q.idx, len(rows), view)
 	lines = append(lines, scrollView(st, rows, modalBodyWidth(width), view, q.off)...)
-	return strings.Join(lines, "\n")
+	return q.fail.appendTo(lines, width, st)
 }
 
 // Cursor implements cursorQuestion. Without it the picker would take
@@ -428,13 +441,8 @@ func (q *modelPickerQuestion) Cursor(_ int) *tea.Cursor {
 // Update goroutine either (issue #137). Nil when unwired; the failure
 // row arrives later as persistDoneMsg.
 func (m *Model) applyModelSwitch(msg modelSwitchedMsg) tea.Cmd {
-	if msg.err != nil {
-		m.history.Append(Message{Role: RoleError, Text: "/model: switch failed: " + msg.err.Error()})
-		m.refreshViewport()
-		return nil
-	}
-	if msg.agent == nil {
-		m.history.Append(Message{Role: RoleError, Text: "/model: ModelSwapper returned nil Agent"})
+	if reason := modelSwitchFailure(msg); reason != "" {
+		m.history.Append(Message{Role: RoleError, Text: "/model: " + reason})
 		m.refreshViewport()
 		return nil
 	}
@@ -447,4 +455,25 @@ func (m *Model) applyModelSwitch(msg modelSwitchedMsg) tea.Cmd {
 	m.refreshTheme()
 	m.refreshViewport()
 	return persistChoiceCmd(m.sessionGen, "/model", m.opts.PersistModelChoice, msg.id)
+}
+
+// modelSwitchFailure is why a SwitchModel reply is unusable, or "" when
+// it is fine.
+//
+// One function rather than a condition spelled out at each site,
+// because the reason now has two readers that must not drift: the
+// transcript row applyModelSwitch appends — which is all `/model <id>`
+// gets, and all it needs, since that path has no modal in the way — and
+// the inline row the picker shows over the top of it (issue #245). The
+// operator on the picker path reads both, so the two saying different
+// things about the same failure would be worse than the silence this
+// replaced.
+func modelSwitchFailure(msg modelSwitchedMsg) string {
+	switch {
+	case msg.err != nil:
+		return "switch failed: " + msg.err.Error()
+	case msg.agent == nil:
+		return "ModelSwapper returned nil Agent"
+	}
+	return ""
 }

@@ -297,6 +297,87 @@ func TestSessionPicker_FailedAttachKeepsTheListUp(t *testing.T) {
 	}
 }
 
+// TestSessionPicker_FailedAttachSaysWhyOnThePicker is the model
+// picker's twin, and issue #245. Keeping the list up is only the right
+// call if the operator can tell that something happened: the reason
+// applySessionSwitch writes lands in the transcript, which is BEHIND
+// this modal, so without a row on the picker itself a failed attach is
+// Enter, a pause, and the same list.
+func TestSessionPicker_FailedAttachSaysWhyOnThePicker(t *testing.T) {
+	cases := []struct {
+		name string
+		msg  sessionSwitchedMsg
+		want string
+	}{
+		{
+			name: "host error",
+			msg:  sessionSwitchedMsg{id: "prod-042", err: errors.New("endpoint unreachable")},
+			want: "endpoint unreachable",
+		},
+		{
+			name: "nil agent",
+			msg:  sessionSwitchedMsg{id: "prod-042", target: SwitchTarget{}},
+			want: "SessionSwitcher returned nil Agent",
+		},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			m, q := openSessionPickerFixture(t)
+			q.switching = "prod-042"
+			msg := tc.msg
+			msg.gen = m.sessionGen
+
+			out, _ := m.Update(msg)
+			m = out.(Model)
+
+			lines := sessionPickerLines(&m)
+			at := lineWith(lines, tc.want)
+			if at < 0 {
+				t.Fatalf("the frame does not say why the attach failed:\n%s",
+					strings.Join(lines, "\n"))
+			}
+			if !strings.Contains(lines[at], GlyphWarn) {
+				t.Errorf("the reason row is missing its warn glyph: %q", lines[at])
+			}
+			if last := lineWith(lines, "prod incident"); last < 0 || last > at {
+				t.Errorf("the reason is not under the list:\n%s", strings.Join(lines, "\n"))
+			}
+		})
+	}
+}
+
+// TestSessionPicker_FailureRowComesOutOfTheList. The row has to be paid
+// for. A modal composed one row taller than the height it was budgeted
+// against does not overflow visibly — clipFrame takes the bottom off,
+// which on this modal is the footer telling the operator how to close
+// it. So the row comes out of the list window, and the composed body is
+// the same height with the reason as without.
+func TestSessionPicker_FailureRowComesOutOfTheList(t *testing.T) {
+	const height = 24
+	m, q := openSessionPickerSized(t, height, manySessions(40))
+	before := sessionPickerLines(&m)
+
+	q.fail.set("endpoint unreachable")
+	after := sessionPickerLines(&m)
+
+	if len(after) != len(before) {
+		t.Errorf("the modal grew from %d rows to %d; the failure row was not "+
+			"charged to the list window:\n%s", len(before), len(after), strings.Join(after, "\n"))
+	}
+	if lineWith(after, "endpoint unreachable") < 0 {
+		t.Fatalf("the reason is not on screen at all:\n%s", strings.Join(after, "\n"))
+	}
+	// It came out of the LIST, not out of the chrome: the footer sits on
+	// the row it always did.
+	if got, want := lineWith(after, "esc cancel"), lineWith(before, "esc cancel"); got != want {
+		t.Errorf("the footer moved from row %d to row %d:\n%s", want, got, strings.Join(after, "\n"))
+	}
+	// And it is the LAST list row that gave way, not one in the middle.
+	if lineWith(after, "sess-005") >= 0 {
+		t.Errorf("the list did not give up its bottom row:\n%s", strings.Join(after, "\n"))
+	}
+}
+
 // TestSessionPicker_ReplyForSomeoneElsesAttachLeavesThePicker: a reply
 // the current picker did not issue must not close it. Esc pops the
 // picker mid-flight, and the operator can re-open a fresh one before

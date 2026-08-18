@@ -91,6 +91,16 @@ const minModalBodyRows = 3
 // at the same terminal height — an operator resizing past the
 // threshold should not see the theme picker go fullscreen while the
 // permission modal keeps its margin.
+//
+// The two async pickers spend one row MORE than this while a failure
+// row is up (issue #245), and that is deliberately not reflected here.
+// The thresholds below decide when the modal's margin has stopped
+// being real, which is a property of the terminal's height and must
+// stay a constant: deriving them from a budget that moves would make
+// a modal change regime because a host call failed. The extra row is
+// charged to the list window at the picker's own call site instead, so
+// the composed modal is the same height either way and it is a list
+// row that gives way.
 const modalPickerChromeRows = modalChromeRows + 1
 
 // modalFullscreenBelow is the terminal height under which a modal

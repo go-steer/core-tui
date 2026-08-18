@@ -155,6 +155,12 @@ type sessionPickerQuestion struct {
 	// operator cannot stack a second attach against a list that is
 	// about to be replaced.
 	switching string
+
+	// fail is why the last SwitchToSession came back unusable, shown
+	// under the list (issue #245). Set by the Update-side reply handler,
+	// which is the only place that knows; the transcript row it pairs
+	// with is written by applySessionSwitch and says the same thing.
+	fail pickerFailure
 }
 
 // newSessionPickerQuestion constructs the picker with no snapshot yet.
@@ -325,6 +331,10 @@ func (q *sessionPickerQuestion) Key(msg tea.KeyPressMsg) (answer, tea.Cmd) {
 			// best match rather than trying to keep hold of a row that
 			// may not be in the new list at all.
 			q.idx, q.off = 0, 0
+			// The failure named a session that may not even be in the
+			// narrowed list — drop it rather than leave it pointing at
+			// nothing on screen.
+			q.fail.clear()
 		}
 		return nil, cmd
 	}
@@ -336,6 +346,10 @@ func (q *sessionPickerQuestion) Key(msg tea.KeyPressMsg) (answer, tea.Cmd) {
 		return nil, nil
 	}
 	q.idx = clampIndex(q.idx, len(sessions))
+	// Every stroke from here moves the cursor or commits a new attach,
+	// so whatever the last one failed at is no longer what the operator
+	// is looking at.
+	q.fail.clear()
 	switch stroke {
 	case "up", "ctrl+p":
 		q.idx = stepIndex(q.idx, -1, len(sessions))
@@ -384,18 +398,28 @@ func requestSessionInputCmd(row SessionInfo) tea.Cmd {
 // reply. Returns the listener-batch Cmd applySwitchTarget produces, or
 // nil on failure. Called only after the sessionGen guard has passed.
 func (m *Model) applySessionSwitch(msg sessionSwitchedMsg) tea.Cmd {
-	if msg.err != nil {
-		m.history.Append(Message{Role: RoleError, Text: "/switch: " + msg.err.Error()})
-		m.refreshViewport()
-		return nil
-	}
-	if msg.target.Agent == nil {
-		m.history.Append(Message{Role: RoleError, Text: "/switch: SessionSwitcher returned nil Agent"})
+	if reason := sessionSwitchFailure(msg); reason != "" {
+		m.history.Append(Message{Role: RoleError, Text: "/switch: " + reason})
 		m.refreshViewport()
 		return nil
 	}
 	tgt := msg.target
 	return m.applySwitchTarget(&tgt)
+}
+
+// sessionSwitchFailure is why a SwitchToSession reply is unusable, or ""
+// when it is fine — the session picker's twin of modelSwitchFailure,
+// and it exists for the same reason: the transcript row and the
+// picker's inline row (issue #245) are two readings of one failure and
+// must not drift.
+func sessionSwitchFailure(msg sessionSwitchedMsg) string {
+	switch {
+	case msg.err != nil:
+		return msg.err.Error()
+	case msg.target.Agent == nil:
+		return "SessionSwitcher returned nil Agent"
+	}
+	return ""
 }
 
 // sessionCell renders one session as its two lines: a title line the
@@ -500,11 +524,12 @@ func (q *sessionPickerQuestion) Body(width, termHeight int, st Styles) string {
 	filter := q.filter.value()
 	// The filter row is the FIRST body row, always — including when it
 	// matched nothing, since it is the thing the operator has to edit
-	// to get back. Its row is paid for with modalChromeRows+1 below.
+	// to get back. Its row is paid for with modalChromeRows+1 below, and
+	// the failure row, which is always the LAST, adds its own.
 	lines := []string{q.filter.render(width, len(sessions), len(q.sessions), st)}
 	if len(sessions) == 0 {
 		lines = append(lines, st.Muted.Render("no sessions match "+quoteFilter(filter)))
-		return strings.Join(lines, "\n")
+		return q.fail.appendTo(lines, width, st)
 	}
 	// Clamp the cursor into range in case Sessions() shrank between
 	// opens, or the filter shrank the list under it.
@@ -521,7 +546,7 @@ func (q *sessionPickerQuestion) Body(width, termHeight int, st Styles) string {
 		title, detail := sessionCell(s, i == q.idx, filter, st)
 		rows = append(rows, title, detail)
 	}
-	view := modalBodyHeight(termHeight, modalChromeRows+1)
+	view := modalBodyHeight(termHeight, modalChromeRows+1+q.fail.rows())
 	// Line units from here down: q.idx stays item-indexed (so Key,
 	// clampIndex, stepIndex, the filter and the ranker are all
 	// untouched) and only the window arithmetic is scaled.
@@ -555,7 +580,7 @@ func (q *sessionPickerQuestion) Body(width, termHeight int, st Styles) string {
 	// symmetrically. A half cell peeking in at an edge is the cheaper
 	// cosmetic defect.
 	lines = append(lines, scrollView(st, rows, modalBodyWidth(width), view, q.off)...)
-	return strings.Join(lines, "\n")
+	return q.fail.appendTo(lines, width, st)
 }
 
 // filtering reports whether the filter row is on screen — the same
