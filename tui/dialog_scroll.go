@@ -503,11 +503,24 @@ func (o *Overlay) HandleWheel(delta int, m *Model) (consumed bool, cmd tea.Cmd) 
 		sd.ScrollBy(delta, m)
 		return true, nil
 	}
-	// Questions declare the same capability through scrollQuestion.
-	// Asked separately because the adapter wraps every question, so it
-	// cannot answer the type assertion above on only some of them.
-	if aq, ok := front.(*askedQuestion); ok && aq.scrollBy(delta) {
-		return true, nil
+	if aq, ok := front.(*askedQuestion); ok {
+		// An inline question isn't a modal surface — it is drawn in
+		// the transcript, so the surface showing it IS the chat
+		// viewport and the tick belongs there. Answering "not
+		// consumed" is the whole of the inline permission prompt's
+		// wheel behaviour, and it has to be decided here rather than
+		// in the question, or the fall-through below would synthesize
+		// an arrow key and eat the tick anyway.
+		if _, inline := aq.inline(); inline {
+			return false, nil
+		}
+		// Questions declare line scrolling through scrollQuestion.
+		// Asked separately because the adapter wraps every question,
+		// so it cannot answer the ScrollDialog assertion above on
+		// only some of them.
+		if aq.scrollBy(delta) {
+			return true, nil
+		}
 	}
 	// Cursor dialogs (the pickers): one selection step per tick,
 	// not wheelScrollLines of them — a wheel nudge that jumps three

@@ -726,12 +726,13 @@ func (m *Model) renderInProgress() string {
 			m.inProgressStableRender = newRender
 			parts = append(parts, m.styles.AssistantText.Render(body))
 		}
-		// Inline permission prompt (default layout): renders right
-		// under the streaming assistant text so the operator sees
-		// what's being approved in context. Suppresses the spinner
-		// because we're waiting on operator, not on model.
-		if m.pendingPermission != nil && m.opts.PermissionLayout == PermissionInline {
-			parts = append(parts, m.renderPermissionInline())
+		// An inline question — today only the permission prompt in its
+		// default layout — renders right under the streaming assistant
+		// text so the operator sees what's being approved in context.
+		// Suppresses the spinner because we're waiting on operator, not
+		// on model.
+		if iq, ok := m.overlayStack.inlineFront(); ok {
+			parts = append(parts, iq.InlineBody(m.viewport.Width(), m.styles))
 		} else {
 			parts = append(parts, m.renderSpinnerLine())
 		}
@@ -1255,13 +1256,6 @@ func (m Model) renderFooter(width int) string {
 func (m Model) footerHint() string {
 	sep := " " + GlyphSeparator + " "
 	switch {
-	case m.pendingPermission != nil:
-		keys := []string{"y allow once", "n deny", "s allow session"}
-		if m.pendingPermission.Verb != "" {
-			keys = append(keys, "v allow verb")
-		}
-		keys = append(keys, "t allow tool", "a allow always", "esc deny")
-		return "Permission required" + sep + keyLegend(keys...)
 	case m.confirmingClear:
 		return "Confirm clear?" + sep + "type y / yes to wipe" + sep + "anything else cancels"
 	case m.sideAnswer != nil:
@@ -1269,11 +1263,19 @@ func (m Model) footerHint() string {
 			return "Side answer" + sep + "↑↓ scroll" + sep + "enter/space/esc dismiss"
 		}
 		return "Side answer" + sep + "enter/space/esc dismiss"
-	case m.openElicit() != nil:
+	case m.openPermission() != nil:
 		// Below the side answer, matching the z-order it moved to when
-		// the form became a question (#164 stage 3): the overlay stack
+		// the prompt became a question (#164 stage 3): the overlay stack
 		// is the bottom-most modal layer, and the legend has to name
-		// the surface the operator can actually see.
+		// the surface the operator can actually see. Above the elicit
+		// form only because a prompt that arrives while a form is open
+		// is pushed on top of it, so it is the front one.
+		//
+		// legend() rather than a second list of the same keys: the
+		// question builds it from the options its key switch reads, so
+		// the footer cannot promise a key the prompt does not take.
+		return "Permission required" + sep + m.openPermission().legend()
+	case m.openElicit() != nil:
 		if m.openElicit().req.Mode == ElicitURLMode {
 			return "MCP elicitation" + sep + keyLegend("a/enter accept", "n decline", "esc cancel")
 		}
@@ -1358,21 +1360,19 @@ func (m Model) renderTurnFooter(msg Message) string {
 }
 
 // modalFrame returns the block View composites over the frame, and
-// whether there is one at all. The cascade is the modal z-order:
-// permission overlay, the embedded huh form, the side answer, then
-// whatever is on the Overlay stack — which since #164 stage 3
-// includes the elicit form.
+// whether there is one at all. The cascade is the modal z-order: the
+// embedded huh form, the side answer, then whatever is on the Overlay
+// stack — which since #164 stage 3 includes both the elicit form and
+// the permission prompt.
 //
-// It is a method rather than four arms inline in View because every
+// It is a method rather than three arms inline in View because every
 // modal surface has to wear the same edge (issue #199), and this is
-// the one place all four are named. Anything that has to reason about
+// the one place all three are named. Anything that has to reason about
 // "the modal, whichever one is up" — the caret path, the frame
-// invariants — asks here instead of restating the cascade, so a fifth
+// invariants — asks here instead of restating the cascade, so a fourth
 // surface cannot be added to View and quietly miss the treatment.
 func (m *Model) modalFrame() (string, bool) {
 	switch {
-	case m.pendingPermission != nil && m.opts.PermissionLayout == PermissionOverlay:
-		return m.renderPermissionModal(), true
 	case m.pendingForm != nil:
 		// Embedded huh.Form (e.g. /pricing set) takes priority
 		// over all other overlays — its keystrokes are routed
@@ -1387,6 +1387,16 @@ func (m *Model) modalFrame() (string, bool) {
 	case m.sideAnswer != nil:
 		return m.renderSideAnswer(), true
 	case m.overlayStack.HasDialogs():
+		// An inline question draws itself in the transcript instead
+		// (renderInProgress), so there is no frame block to composite
+		// and no modal on screen. Reported as "none" rather than as an
+		// empty block: the difference is what the caret path and the
+		// frame invariants read, and a surface that says it covers the
+		// frame while occupying none of it is the disagreement between
+		// pixels and keys that #164 exists to remove.
+		if _, inline := m.overlayStack.inlineFront(); inline {
+			return "", false
+		}
 		return m.overlayStack.Render(m.width, m), true
 	}
 	return "", false
@@ -1501,165 +1511,6 @@ func keyLegend(pairs ...string) string {
 		bound[i] = strings.ReplaceAll(p, " ", nbsp)
 	}
 	return strings.Join(bound, " "+GlyphSeparator+" ")
-}
-
-// permissionKeyHint builds the key legend for both permission
-// renderers.
-func permissionKeyHint(verb string) string {
-	keys := []string{"y allow once", "n deny", "s allow session"}
-	if verb != "" {
-		keys = append(keys, "v allow verb")
-	}
-	keys = append(keys, "t allow tool", "a allow always", "esc deny")
-	return keyLegend(keys...)
-}
-
-// renderPermissionInline renders the permission prompt as a
-// block inside the chat viewport flow (PermissionInline layout).
-// Uses a left rule (│) gutter to set it apart visually from the
-// surrounding chat while keeping the prompt in the natural scroll
-// position right under the tool call that triggered it.
-//
-// Same content as renderPermissionModal — header + detail + key
-// hints — but without the centered frame / dimmed surroundings.
-// Keystroke dispatch (y/n/s/v/t/a/esc) is shared; this is purely
-// the visual path.
-func (m *Model) renderPermissionInline() string {
-	req := m.pendingPermission
-	if req == nil {
-		return ""
-	}
-	width := m.viewport.Width()
-	if width <= 0 {
-		width = 80
-	}
-	const gutter = "│ "
-	bodyWidth := width - lipgloss.Width(gutter) - 1
-	if bodyWidth < 20 {
-		bodyWidth = 20
-	}
-
-	var lines []string
-	header := m.styles.Accent.Render("⚠ Permission required: " + req.ToolName)
-	lines = append(lines, header)
-	if req.Source != "" {
-		lines = append(lines, m.styles.Muted.Render("from sub-agent: "+req.Source))
-	}
-	if req.Verb != "" {
-		lines = append(lines, m.styles.Muted.Render("verb: "+req.Verb))
-	}
-	if req.Detail != "" {
-		lines = append(lines, "", m.renderPermissionDetail(req, bodyWidth))
-	}
-	lines = append(lines, "", m.styles.Muted.Render(permissionKeyHint(req.Verb)))
-
-	// Prefix each line with the left-rule gutter (in accent so the
-	// block reads as a focused affordance, not a quiet quote).
-	rule := m.styles.Accent.Render("│ ")
-	var b strings.Builder
-	for i, line := range lines {
-		if i > 0 {
-			b.WriteByte('\n')
-		}
-		// Wrap each source line at bodyWidth so long shell commands
-		// fold cleanly under the gutter.
-		wrapped := strings.Split(wordWrap(line, bodyWidth), "\n")
-		for j, wl := range wrapped {
-			if j > 0 {
-				b.WriteByte('\n')
-			}
-			b.WriteString(rule)
-			b.WriteString(wl)
-		}
-	}
-	return b.String()
-}
-
-// renderPermissionModal renders the permission-approval prompt
-// (R-PERM-1 / R-PERM-2). Six decision keys spelled out in the
-// footer; the per-tool payload (diff / shell / http / args)
-// renders in the body styled per req.DetailKind.
-func (m *Model) renderPermissionModal() string {
-	req := m.pendingPermission
-	if req == nil {
-		return ""
-	}
-	width := 80
-	if m.width > 0 && width > m.width-4 {
-		width = m.width - 4
-	}
-	if width < 30 {
-		width = 30
-	}
-
-	inner := modalInnerWidth(width)
-	bodyWidth := modalBodyWidth(width)
-
-	titleBar := m.styles.ModalTitle.Render("Permission required: " + req.ToolName)
-	titleRule := m.styles.ModalBorder.Render(strings.Repeat(GlyphRule, nonNeg(inner-lipgloss.Width(titleBar)-1)))
-	titleLine := titleBar + " " + titleRule
-
-	var lines []string
-	if req.Source != "" {
-		lines = append(lines, m.styles.Muted.Render("from sub-agent: "+req.Source))
-	}
-	if req.Verb != "" {
-		lines = append(lines, m.styles.Muted.Render("verb: "+req.Verb))
-	}
-	if req.Detail != "" {
-		lines = append(lines, m.renderPermissionDetail(req, bodyWidth))
-	}
-
-	hint := permissionKeyHint(req.Verb)
-	footerRule := m.styles.ModalBorder.Render(strings.Repeat(GlyphRule, inner))
-
-	// Window the body. A large diff or a long shell script used to
-	// run off the bottom of the screen with no way to reach the
-	// rest — and this is the one modal where reading all of it
-	// before answering actually matters. The key hint wraps on
-	// narrow terminals, so measure it rather than assuming one row.
-	body := strings.Join(lines, "\n")
-	bodyLines := strings.Split(body, "\n")
-	chrome := modalChromeRows - 1 + wrappedRows(hint, inner)
-	view := modalBodyHeight(m.height, chrome)
-	sc := m.scroll()
-	sc.measure(len(bodyLines), view)
-	body = strings.Join(scrollView(m.styles, bodyLines, bodyWidth, view, sc.offset), "\n")
-	if sc.overflows() {
-		hint = scrollHint(true) + " " + GlyphSeparator + " " + hint
-	}
-	footerLine := m.styles.ModalFooter.Render(hint)
-
-	content := fitModalContent(width, m.height, titleLine, body, footerRule, footerLine)
-	return modalSurface(m.styles, content, width, m.height, 0)
-}
-
-// renderPermissionDetail renders the payload styled per
-// DetailKind. Shell + JSON go through a plain bordered block
-// (Glamour adds document margins + code-fence frames that don't
-// compose cleanly inside the modal frame — the closing bar ends
-// up indented and pushed off the right). Diff still rides
-// Glamour because unified-diff syntax highlighting is the whole
-// point of the diff fence.
-func (m *Model) renderPermissionDetail(req *PermissionRequest, width int) string {
-	if req.Detail == "" {
-		return ""
-	}
-	switch req.DetailKind {
-	case DetailDiff:
-		mr := m.ensureMarkdown()
-		return strings.TrimSpace(mr.renderMarkdown("```diff\n" + req.Detail + "\n```"))
-	case DetailShell:
-		return renderShellDetail(req.Detail, width, m.styles)
-	case DetailHTTP:
-		return renderShellDetail(req.Detail, width, m.styles)
-	case DetailArgs:
-		return renderArgsDetail(req.Detail, width, m.styles)
-	case DetailPlain:
-	}
-	// DetailPlain, and any kind outside the declared set, is wrapped
-	// verbatim.
-	return wordWrap(req.Detail, width)
 }
 
 // renderShellDetail formats a bash / HTTP command as `$ <cmd>`

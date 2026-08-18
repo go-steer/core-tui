@@ -258,8 +258,8 @@ func (m Model) textareaCursor(origin inputOrigin) *tea.Cursor {
 //
 // The switch mirrors View's z-order cascade and has to stay in
 // lockstep with it — same ordering rationale as handleEsc's cascade
-// (update.go). Read-only modals (a permission prompt answered with
-// y/n/s/v/t/a, the /btw side answer, the read-only detail overlays)
+// (update.go). Read-only modals (the /btw side answer, the read-only
+// detail overlays, a permission prompt answered with y/n/s/v/t/a)
 // return no cursor deliberately: there is nothing to type into them,
 // so the terminal should hide the caret rather than park it on a
 // border. The pickers left that set in #117 — their filter row
@@ -267,8 +267,6 @@ func (m Model) textareaCursor(origin inputOrigin) *tea.Cursor {
 // (nil, true) for a surface the operator is typing CJK into.
 func (m Model) modalCursor(modal string) (c *tea.Cursor, covered bool) {
 	switch {
-	case m.pendingPermission != nil && m.opts.PermissionLayout == PermissionOverlay:
-		return nil, true // decision keys only
 	case m.pendingForm != nil:
 		// huh renders its own caret and exposes no tea.Cursor in the
 		// pinned huh/v2 v2.0.3, so there is nothing to forward. Left
@@ -278,6 +276,14 @@ func (m Model) modalCursor(modal string) (c *tea.Cursor, covered bool) {
 	case m.sideAnswer != nil:
 		return nil, true // read-only viewer
 	case m.overlayStack.HasDialogs():
+		// An inline question covers nothing: it is drawn in the
+		// transcript, not over the frame, so the caret belongs to the
+		// composer exactly as it would with no modal open. Answering
+		// covered=true here would hide the caret while the operator
+		// can still see and use their own input box.
+		if _, inline := m.overlayStack.inlineFront(); inline {
+			return nil, false
+		}
 		c = m.overlayStack.cursor(m.width, &m)
 	default:
 		return nil, false

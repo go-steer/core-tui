@@ -1470,8 +1470,44 @@ behaviour changes came with it, both deliberate and both in the
 CHANGELOG: the form now sits **below** the `/btw` side answer in the
 z-order, which is what the key routing already believed, and `space`
 types a space into a text field, which it never did through the real
-key path. The permission prompt is the last one left, and it goes last
-on purpose (§14 Q4).
+key path.
+
+*The permission prompt landed 2026-08-18* (`tui/question_permission.go`),
+last and on purpose (§14 Q4), behind a golden corpus of both its layouts
+captured from the pre-migration renderers
+(`tui/golden_permission_test.go`). It deletes the two remaining `Model`
+fields, the 50-line arm of `handleKey`, `isPermissionDecisionKey`, and
+four renderers in `view.go`. R-PERM-2's six keys were three lists that
+had to agree by inspection — a key switch, a legend builder and the
+grace window's predicate, each spelling out the verb key's conditional
+presence separately. They are one `[]permissionOption`: the switch is a
+lookup, the legend is a `Join`, and `Commits` is "is this stroke one of
+my options".
+
+It brought one extension, `inlineQuestion` — a third alongside
+`cursorQuestion` and `scrollQuestion` (§6.1) — because the prompt's
+DEFAULT layout is not a modal at all — it is a gutter block in the
+transcript flow, drawn where the spinner would be. A question that
+answers `Inline()` true is not on the modal frame: `modalFrame` reports
+no modal, `modalCursor` falls through to the composer, and
+`Overlay.HandleWheel` bounces the tick to the transcript behind it,
+which is the surface actually showing the prompt. Anything behind it on
+the stack waits rather than drawing — better than what the inline prompt
+had before, where a modal opened over it hid the block while the keys
+still went to the block.
+
+Three behaviour changes, all in the CHANGELOG. The prompt sits **below**
+the `/btw` side answer and the huh form in the z-order, which is what
+every key other than esc already believed — esc checked the prompt
+first, the rest checked `sideAnswer` first, so the two disagreed. A
+queued modal no longer draws over an inline prompt. And the centered
+overlay no longer blows its box out to the full terminal width on a diff
+payload: `renderPermissionDetail` ignored the width it was handed and
+rendered through the model's chat-column Glamour renderer, so a diff
+inside an 80-column modal arrived 100 columns wide and expanded the
+lipgloss surface with it. Every arm renders at the width it is handed
+now, with the renderer cached per width and polarity exactly as
+`Model.ensureMarkdown` caches its own.
 
 **Stage 3 is the stage that must land before the freeze**, because it
 is the one that removes `*Model` from the widget signatures and
@@ -1612,6 +1648,27 @@ frame is already covered by `tui/golden_test.go` and
 catchable, and a regression in *decision routing* is catchable by the
 existing prompter tests, which do not know how the modal is drawn.
 
+**Resolved 2026-08-18: yes, and bespoke rather than a `selectQuestion`.**
+The keys became data — one `[]permissionOption` that the switch, the
+legend and the grace window all read — which is the whole of what
+becoming a select was for. The widget itself would have been the wrong
+shape: a select's answer is `chosen{ID}`, and §5.2 already decided the
+prompt answers `decision{PermissionDecision}` so the mapping from a
+string back to a grant cannot go wrong inside the component whose job is
+to be right about permissions. It also has no list to navigate — the six
+keys are accelerators, not rows — and two renderers, one of which is not
+a modal at all.
+
+The golden-frame precondition was met first, in its own commit:
+`tui/golden_permission_test.go` captures both layouts across three
+widths and three detail kinds from the pre-migration renderers, so the
+20 files it wrote are the BEFORE. Eight churned in the migration and all
+eight are the diff cells; the twelve non-diff captures are byte-
+identical. Of the eight, five are unchanged as drawn text and differ
+only in redundant SGR runs; the three that changed visibly are the
+centered-overlay diff frames, whose box was blown out to the full
+terminal width and is now `permissionModalWidth`.
+
 **Q5. Amend D26's mapping table?**
 D26 maps the permission modal and the `/permissions` picker to
 `huh.NewSelect` / `huh.NewMultiSelect`. §7.7 argues the selects should
@@ -1698,3 +1755,22 @@ that does not exist.
   `Cmd`, because `applySwitchTarget`'s step 8 already re-arms every
   listener and a second armed elicit listener is a second consumer of
   one channel.
+- 2026-08-18 — the permission prompt migrated, closing stage 3 and
+  answering Q4: yes, but bespoke rather than a `selectQuestion`, for the
+  reasons recorded there. The golden corpus it was gated on landed first
+  as its own commit so the captures are provably the pre-migration
+  frames. Every agent-opened modal is now a question; what is left on
+  `Model` is the `/btw` side answer and the embedded huh form, neither
+  of which the agent opens.
+- 2026-08-18 — `inlineQuestion` is the third optional extension, and it
+  says where a question draws rather than what it can do. It exists
+  because the permission prompt's default layout is a transcript block,
+  not a modal, and the alternative — leaving that layout as `Model`
+  state while the keys went through the seam — is the pixels-and-keys
+  disagreement the whole issue is about. Inlineness is decided in ONE
+  place per consumer: `modalFrame` and `modalCursor` report "no modal",
+  and `Overlay.HandleWheel` returns not-consumed before the pickers'
+  synthesize-an-arrow-key fallback can eat the tick. `scrollQuestion`
+  was briefly given a `bool` return to carry the same fact and it was
+  reverted — two mechanisms for one rule, and the wheel path needed the
+  inline check regardless.

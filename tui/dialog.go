@@ -18,13 +18,14 @@
 // instead of two new fields + a new case in the Esc cascade + a
 // new case in renderTUI's z-order switch.
 //
-// The permission prompt is the last modal still using inline state
-// in Model (pendingPermission), and it goes next — the elicit form
-// left in #164 stage 3 and rides the Overlay as a question
-// (question_elicit.go), which is where the channel-based
-// Prompter / Elicitor lifecycle turned out to fit after all: the
-// dispatch happens in the question's resolver rather than in the
-// widget. Everything else is here already.
+// Every agent-opened modal is here now. The elicit form and the
+// permission prompt were the last two holding inline state in Model,
+// and both left in #164 stage 3 to ride the Overlay as questions
+// (question_elicit.go, question_permission.go) — which is where the
+// channel-based Prompter / Elicitor lifecycle turned out to fit after
+// all: the dispatch happens in the question's resolver rather than in
+// the widget. What remains on Model is the /btw side answer and the
+// embedded huh form, neither of which the agent opens.
 
 package tui
 
