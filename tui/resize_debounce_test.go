@@ -49,6 +49,7 @@ func maxRenderedWidth(s string) int {
 // minus the wall-clock waits.
 func settleResizeReflow(t *testing.T, m Model) Model {
 	t.Helper()
+	m = deliverResizeVisibleTick(m)
 	for i := 0; m.reflowPending; i++ {
 		if i > 10000 {
 			t.Fatal("resize reflow never retired")
@@ -395,10 +396,16 @@ func TestResizeSettle_WarmsTheBacklogTheDragSkipped(t *testing.T) {
 // into cold backlog before the warm pass has reached it. The rows
 // that scroll into view must be exact in that same frame, not
 // carried-over.
+//
+// Mid-WARM, not mid-drag: the visible tick is delivered first, which
+// is what ends the drag and lifts the #247 suppression. During the
+// drag itself a scroll deliberately gets the stale-width render cut
+// to the window instead — see TestResizeDrag_ScrolledRowsStayInside.
 func TestResizeMidWarm_ScrollExposesExactRows(t *testing.T) {
 	m := newBenchDragModel(40)
 	out, _ := m.Update(tea.WindowSizeMsg{Width: 72, Height: 40})
 	m = out.(Model)
+	m = deliverResizeVisibleTick(m)
 	if !m.reflowPending {
 		t.Fatal("setup: expected a pending reflow")
 	}
@@ -423,6 +430,142 @@ func TestResizeMidWarm_ScrollExposesExactRows(t *testing.T) {
 			t.Fatalf("row %d scrolled into view without being reflowed (renderedWidth=%d want %d)", i, snap[i].renderedWidth, width)
 		}
 	}
+}
+
+// --- Leading-edge suppression (issue #247) ---------------------
+//
+// #104 bounded the per-event reflow by the viewport. #247 removes it
+// from all but one event of a drag, because the bound was not
+// enough: two Glamour renders is what a 40-row window costs, and two
+// Glamour renders is ~10ms. The four tests below are the contract
+// that replaces "every event reflows what is on screen".
+
+// TestResizeDrag_OnlyTheLeadingEventRuns — the shape of the
+// suppression. The first event of a drag re-renders the visible
+// window; every event behind it re-renders nothing at all.
+func TestResizeDrag_OnlyTheLeadingEventRuns(t *testing.T) {
+	m := newBenchDragModel(40)
+
+	before := assistantVersions(m)
+	out, _ := m.Update(tea.WindowSizeMsg{Width: dragWidthAt(0), Height: 40})
+	m = out.(Model)
+	leading := assistantVersions(m)
+	if bumpedBetween(before, leading) == 0 {
+		t.Fatal("the leading event of a drag must re-render the visible window")
+	}
+
+	for i := 1; i < dragBurst; i++ {
+		prev := assistantVersions(m)
+		out, _ := m.Update(tea.WindowSizeMsg{Width: dragWidthAt(i), Height: 40})
+		m = out.(Model)
+		if n := bumpedBetween(prev, assistantVersions(m)); n != 0 {
+			t.Fatalf("event %d of the drag re-rendered %d message(s) through Glamour; "+
+				"only the leading event is allowed to", i, n)
+		}
+	}
+}
+
+// TestResizeDrag_VisibleTickReflowsTheScreen — the other half: the
+// suppression is a deferral, not a drop. One tick after the drag
+// stops, nothing on screen is left at a stale wrap width.
+func TestResizeDrag_VisibleTickReflowsTheScreen(t *testing.T) {
+	m := newBenchDragModel(40)
+	for i := range dragBurst {
+		out, _ := m.Update(tea.WindowSizeMsg{Width: dragWidthAt(i), Height: 40})
+		m = out.(Model)
+	}
+	width := m.viewport.Width()
+
+	stale := staleVisibleRows(&m, width)
+	if stale == 0 {
+		t.Fatal("setup: expected the drag to leave the screen at a stale width")
+	}
+
+	m = deliverResizeVisibleTick(m)
+	if got := staleVisibleRows(&m, width); got != 0 {
+		t.Errorf("%d on-screen row(s) still at a stale wrap width one tick after the drag ended", got)
+	}
+}
+
+// TestResizeDrag_LeadingEdgeRearms — the leading edge is per drag,
+// not per session. Once the visible tick has ended one drag, the
+// first event of the next one pays for its own re-wrap.
+func TestResizeDrag_LeadingEdgeRearms(t *testing.T) {
+	m := newBenchDragModel(40)
+	for i := range dragBurst {
+		out, _ := m.Update(tea.WindowSizeMsg{Width: dragWidthAt(i), Height: 40})
+		m = out.(Model)
+	}
+	m = deliverResizeVisibleTick(m)
+
+	before := assistantVersions(m)
+	out, _ := m.Update(tea.WindowSizeMsg{Width: 64, Height: 40})
+	m = out.(Model)
+	if bumpedBetween(before, assistantVersions(m)) == 0 {
+		t.Error("the first event of a second drag was treated as a continuation of the first")
+	}
+}
+
+// TestResizeDrag_ScrolledRowsStayInside — what the suppression gives
+// up, and what it must not.
+//
+// Mid-drag the operator scrolls into cold backlog. Those rows are
+// wrapped for a width the terminal no longer has, and #247 accepts
+// that: the alternative is the Glamour pass this whole path exists
+// to avoid. What it does NOT accept is a line escaping the frame.
+// chatCutLine cuts at the draw site, per drawn line, so a row
+// wrapped 30 columns too wide is clipped rather than wrapped — the
+// right edge is lost for a frame, the layout is not.
+func TestResizeDrag_ScrolledRowsStayInside(t *testing.T) {
+	m := newBenchDragModel(40)
+	for i := range dragBurst {
+		out, _ := m.Update(tea.WindowSizeMsg{Width: dragWidthAt(i), Height: 40})
+		m = out.(Model)
+	}
+	if !m.reflowHot {
+		t.Fatal("setup: expected the drag to still be hot")
+	}
+
+	m.chatGotoTop()
+	m.syncFollow()
+	m.refreshViewport()
+
+	if stale := staleVisibleRows(&m, m.viewport.Width()); stale == 0 {
+		t.Fatal("setup: expected the scroll to expose rows at a stale width")
+	}
+	assertFrameFits(t, m.View().Content, m.width, m.height)
+}
+
+// bumpedBetween counts the assistant rows whose Version changed.
+func bumpedBetween(before, after map[int]uint64) int {
+	n := 0
+	for i, v := range after {
+		if v != before[i] {
+			n++
+		}
+	}
+	return n
+}
+
+// staleVisibleRows counts the assistant rows inside the current
+// window whose Glamour render is pinned to some width other than
+// want.
+func staleVisibleRows(m *Model, want int) int {
+	n := 0
+	total := m.history.Len()
+	m.chatVisitWindow(func(i int) {
+		if i >= total {
+			return
+		}
+		msg, ok := m.history.at(i)
+		if !ok || msg.Role != RoleAssistant || msg.Text == "" {
+			return
+		}
+		if msg.renderedWidth != want {
+			n++
+		}
+	})
+	return n
 }
 
 // TestResize_HeightOnlyDoesNotScheduleReflow — height changes leave

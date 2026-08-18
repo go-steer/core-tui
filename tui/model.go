@@ -465,8 +465,15 @@ type Model struct {
 	// reflowMaxID is the highest Message.ID that existed when the
 	// width changed — rows appended after it are committed at the
 	// current width and must not be re-rendered.
+	// reflowHot says a drag is in flight, which suppresses the visible
+	// re-wrap outright (issue #247); the visible tick clears it once
+	// the drag has been quiet for resizeVisibleWindow. Read before it
+	// is written, it is also the leading-edge test — the one event
+	// per drag that does pay for the re-wrap is the one that found it
+	// clear.
 	resizeGen     uint64
 	reflowPending bool
+	reflowHot     bool
 	reflowCursor  int
 	reflowMaxID   uint64
 
