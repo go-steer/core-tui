@@ -110,6 +110,39 @@ func (v *chatViewport) SetHeight(h int) {
 // nothing outside this file writes it.
 func (v chatViewport) Offset() (int, int) { return v.offsetIdx, v.offsetLine }
 
+// chatTailOffScreen reports whether the live tail — the in-progress
+// assistant block, its spinner line and the queue panel — is outside
+// the window the operator is looking at. It is what pauses the spinner
+// animation while nobody can see it (issue #248).
+//
+// Asked through chatVisitWindow rather than from the offset directly,
+// so "visible" means exactly what it means to the renderer. A second
+// opinion about which rows are on screen is a second thing to keep in
+// step with the scroll, the fold and the tail pin, and the failure it
+// produces — an animation that stops while it is still on screen —
+// looks like a hang.
+//
+// Two deliberate negatives. A tail that has not been built yet is not
+// off screen: buildChatTail runs inside refreshViewport, so a paint is
+// the thing that would populate it, and answering "hidden" here would
+// suppress the paint that makes the spinner appear at all. And a
+// following window is never off screen, because follow means the window
+// is pinned to the end of the transcript, which is where the tail is —
+// the same rule chatVisitWindow itself follows (issue #93).
+func (m *Model) chatTailOffScreen() bool {
+	if len(m.chatTail) == 0 || m.follow {
+		return false
+	}
+	tail := m.history.Len()
+	onScreen := false
+	m.chatVisitWindow(func(i int) {
+		if i == tail {
+			onScreen = true
+		}
+	})
+	return !onScreen
+}
+
 // ---------------------------------------------------------------
 // Rows
 // ---------------------------------------------------------------

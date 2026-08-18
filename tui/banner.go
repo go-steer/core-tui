@@ -86,8 +86,15 @@ const (
 // argument about what a tick actually costs — a chat-tail rebuild and
 // a repaint, not a timer — was already made and does not need making
 // twice.
+//
+// Which is why the frame count moved with the cadence when issue #248
+// took the spinner to 20 fps: 24 frames of 50 ms is the same 1.2 s the
+// wipe has always taken, at twice the resolution. Leaving it at 12
+// would have halved the entrance rather than smoothing it, and the
+// duration is the part that was chosen — the frame count is how it is
+// spelled.
 const (
-	bannerFrames  = 12
+	bannerFrames  = 24
 	bannerCadence = spinnerFrameCadence
 )
 
