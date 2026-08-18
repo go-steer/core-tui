@@ -24,7 +24,7 @@
 // stays on screen showing "switching to <id>…" until the reply lands,
 // because a list that freezes for as long as the host takes reads as a
 // hang. The answer therefore arrives from Update, not from Key, and
-// Overlay.resolve is the seam that lets it.
+// overlay.resolve is the seam that lets it.
 //
 // What moved off the widget. It no longer type-asserts m.opts.Agent to
 // ModelSwapper, no longer reads m.displayModelName() while rendering,
@@ -130,7 +130,7 @@ func newModelPickerQuestion(wired bool) *modelPickerQuestion {
 // picker still opens, because "this agent cannot swap models" is worth
 // saying on the surface the operator asked for.
 func (m *Model) openModelPicker() tea.Cmd {
-	if m.overlayStack.HasID(modelPickerDialogID) {
+	if m.overlayStack.hasID(modelPickerDialogID) {
 		return nil
 	}
 	_, wired := m.opts.Agent.(ModelSwapper)
@@ -147,11 +147,11 @@ func (m *Model) openModelPicker() tea.Cmd {
 // starts with, since a host reply can land against a picker the
 // operator escaped out of or replaced.
 //
-// A free function over *Overlay rather than a method on it: which
+// A free function over *overlay rather than a method on it: which
 // questions exist is the pickers' business, and a general
 // questionAt(id) with one caller would be a seam invented for a
 // second caller that does not exist yet.
-func modelPickerOn(o *Overlay) *modelPickerQuestion {
+func modelPickerOn(o *overlay) *modelPickerQuestion {
 	aq := o.asked(modelPickerDialogID)
 	if aq == nil {
 		return nil
@@ -366,7 +366,7 @@ func (q *modelPickerQuestion) filtering() bool {
 	return q.wired && q.loaded && q.switching == "" && len(q.models) > 0
 }
 
-func (q *modelPickerQuestion) Body(width, termHeight int, st Styles) string {
+func (q *modelPickerQuestion) Body(width, termHeight int, st styleSet) string {
 	switch {
 	case !q.wired:
 		return st.Muted.Render("agent does not implement ModelSwapper")

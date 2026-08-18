@@ -114,7 +114,7 @@ func TestModalFooters_LegendsBreakOnASeparator(t *testing.T) {
 
 	m := newFrameModel(StatusHeader, 40, 24)
 	askThemePicker(&m)
-	block := ansi.Strip(m.overlayStack.Render(m.width, &m))
+	block := ansi.Strip(m.overlayStack.render(m.width, &m))
 
 	// Footer rows are the boxed rows carrying a bound pair. The
 	// placeholder row says "type to filter" as well, with ordinary

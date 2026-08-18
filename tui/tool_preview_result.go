@@ -46,7 +46,7 @@ const resultLineCap = 8
 // `err` non-empty short-circuits to a red error row under the
 // existing call scope info; the structured response is ignored on
 // failures.
-func renderToolPreviewWithResult(name string, args, response map[string]any, err string, styles Styles) string {
+func renderToolPreviewWithResult(name string, args, response map[string]any, err string, styles styleSet) string {
 	call := renderToolPreview(name, args, styles)
 	result := renderToolResult(name, args, response, err, styles)
 	switch {
@@ -69,7 +69,7 @@ func renderToolPreviewWithResult(name string, args, response map[string]any, err
 // Errors short-circuit to a uniform red one-line summary so any
 // failed tool — known or not — still surfaces the failure under
 // its row.
-func renderToolResult(name string, args, response map[string]any, err string, styles Styles) string {
+func renderToolResult(name string, args, response map[string]any, err string, styles styleSet) string {
 	if err != "" {
 		return renderResultError(err, styles)
 	}
@@ -110,7 +110,7 @@ func renderToolResult(name string, args, response map[string]any, err string, st
 // number perLineByteCap already held, maintained twice and escaping
 // nothing. Error text is as untrusted as any other tool output: it
 // carries filenames, shell output and remote payloads verbatim.
-func renderResultError(err string, styles Styles) string {
+func renderResultError(err string, styles styleSet) string {
 	errStyle := lipgloss.NewStyle().Foreground(styles.Theme.Error).Bold(true)
 	text := strings.TrimSpace(err)
 	if text == "" {
@@ -124,7 +124,7 @@ func renderResultError(err string, styles Styles) string {
 // per-line cache the diff renderer uses. Language is detected
 // from the call-time `path` arg so the preview reads as code, not
 // just text.
-func renderReadFileResult(args, response map[string]any, styles Styles) string {
+func renderReadFileResult(args, response map[string]any, styles styleSet) string {
 	content := stringArg(response, "content", "output", "text", "result")
 	if content == "" {
 		return ""
@@ -141,7 +141,7 @@ func renderReadFileResult(args, response map[string]any, styles Styles) string {
 // explicit count, then fall back to a comma-joined `files` slice
 // when present, then to "n bytes" when the result only includes a
 // total size.
-func renderReadManyFilesResult(response map[string]any, styles Styles) string {
+func renderReadManyFilesResult(response map[string]any, styles styleSet) string {
 	const indent = "    "
 	if count, ok := intArg(response, "count", "n"); ok && count > 0 {
 		return indent + styles.Muted.Render(fmt.Sprintf("read %d file%s", count, plural(count)))
@@ -166,7 +166,7 @@ func renderReadManyFilesResult(response map[string]any, styles Styles) string {
 // renderGrepResult prefers the first few matches when the host
 // returns them structured (`matches` slice). Falls back to a
 // match-count one-liner otherwise.
-func renderGrepResult(response map[string]any, styles Styles) string {
+func renderGrepResult(response map[string]any, styles styleSet) string {
 	const indent = "    "
 	if matches := stringSliceArg(response, "matches", "lines", "results"); len(matches) > 0 {
 		var b strings.Builder
@@ -193,7 +193,7 @@ func renderGrepResult(response map[string]any, styles Styles) string {
 
 // renderGlobResult shows the first few paths matched, or a
 // "no matches" muted line when the result indicates none.
-func renderGlobResult(response map[string]any, styles Styles) string {
+func renderGlobResult(response map[string]any, styles styleSet) string {
 	const indent = "    "
 	paths := stringSliceArg(response, "paths", "files", "matches", "results")
 	if len(paths) == 0 {
@@ -223,7 +223,7 @@ func renderGlobResult(response map[string]any, styles Styles) string {
 // empty, a single muted summary line for stderr). Exit code lands
 // in a footer when non-zero — successful shells typically don't
 // need to surface "exit 0" inline.
-func renderBashResult(response map[string]any, styles Styles) string {
+func renderBashResult(response map[string]any, styles styleSet) string {
 	const indent = "    "
 	var b strings.Builder
 	stdout := stringArg(response, "stdout", "output", "result")
@@ -253,7 +253,7 @@ func renderBashResult(response map[string]any, styles Styles) string {
 // write reported. The TUI never reads the actual file content
 // back from disk for this preview — we trust what the agent's
 // tool reported.
-func renderWriteFileResult(response map[string]any, styles Styles) string {
+func renderWriteFileResult(response map[string]any, styles styleSet) string {
 	const indent = "    "
 	parts := []string{}
 	if bytes, ok := intArg(response, "bytes_written", "bytes", "size"); ok && bytes > 0 {
@@ -279,7 +279,7 @@ func renderWriteFileResult(response map[string]any, styles Styles) string {
 // `content` is raw file bytes or raw bash stdout, so it gets the
 // same treatment renderDiffInline gives a diff: CRLF collapsed at
 // the split, then every line through sanitizeLine.
-func renderCodeInline(content string, styles Styles, maxLines int, lang string) string {
+func renderCodeInline(content string, styles styleSet, maxLines int, lang string) string {
 	if content == "" {
 		return ""
 	}

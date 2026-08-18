@@ -31,7 +31,9 @@ These are established elsewhere and this document takes them as given.
    `RenderContext`, `Scrollbar`, `NewTextInputDialog`,
    `TextInputConfig` — on the grounds that not one of them is usable
    from outside the package. This proposal has to be compatible with
-   that recommendation or argue it down. It does the former (§10).
+   that recommendation or argue it down. It does the former (§10) —
+   and the recommendation has since been carried out in full, across
+   #254 and #257, so the constraint is now a fact rather than a plan.
 4. **huh v2 is the form primitive where a form is what is wanted.**
    `docs/decisions.md` D26. This document does not re-open
    hand-rolled-vs-huh; it explains where each belongs (§7.7).
@@ -993,6 +995,13 @@ Two caveats stated rather than papered over.
    `Styles` (every field is a zero `lipgloss.Style`, which renders
    unstyled), so this costs nothing.
 
+   It did not stay exported: #257 made it `styleSet`, and the criterion
+   survives on the same bridge the family already uses — `export_test.go`
+   aliases it back to `Styles` for the external test, so the wording
+   above still describes what that file does, line for line. The
+   substance was never the case of the letter; it was that a question
+   renders without an app to ask one for a theme.
+
 ---
 
 ## 9. The keystroke grace period
@@ -1162,6 +1171,17 @@ cannot be unexported without also unexporting `Model` (it names
 question signatures and the question family is unexportable-by-
 construction from day one; the remaining `Dialog` (viewers only) is a
 smaller, later problem.
+
+> **Wrong, and worth leaving in place.** #257 unexported `Dialog`,
+> `Overlay`, `Item` and twenty more with `Model` still exported and the
+> linter silent: an unexported interface may name an exported type in a
+> method signature, so there was never a coupling to break. The
+> recommendation this paragraph supports is unaffected — §10.1's other
+> three arguments carry it — but the sweep was not blocked on stage 3
+> and it is better to say so than to let a false dependency be cited
+> again. What stage 3 did buy is narrower: a question that reaches into
+> `*Model` cannot be tested without one, which is why
+> `question_external_test.go` exists.
 
 ### 10.2 Posture B — export the question family as an extension seam
 
@@ -1518,7 +1538,10 @@ now, with the renderer cached per width and polarity exactly as
 **Stage 3 is the stage that must land before the freeze**, because it
 is the one that removes `*Model` from the widget signatures and
 therefore the one that unblocks `docs/api-surface.md` §3.2's unexport
-sweep. Everything after it is additive.
+sweep. Everything after it is additive. (The "unblocks" half of that
+turned out to be false — see the note under §10.1 — but the stage
+still had to land before the freeze, because it is the one that spends
+the break.)
 
 **Model picker: done, 2026-08-17.** `tui/dialog_modelpicker.go` is
 gone; `tui/question_modelpicker.go` replaces it. It is the first
@@ -1809,6 +1832,17 @@ that does not exist.
   which §3.2 wanted anyway and which spends ONE break on that corner
   instead of one now and another at the sweep. The break is spent; from
   here a revert of the question seam costs a second one.
+- 2026-08-18 — the §3.2 sweep this document kept pointing at landed as
+  #257, and it falsified §10.1's second-order claim. That claim was
+  that `Dialog` "cannot be unexported without also unexporting `Model`
+  (it names `*Model`)". It can: an unexported interface may name an
+  exported type in a method signature, and the sweep took `dialog`,
+  `overlay`, `listItem` and twenty more down with `Model` exported and
+  the linter at zero. What stage 3 actually bought was smaller and
+  still real — a question that reaches into `*Model` is one nobody can
+  test without a `Model`, and that was worth removing on its own terms.
+  §10.1's conclusion (land the family unexported) was right for its
+  other three reasons; only this leg of it was wrong.
 - 2026-08-18 — `inlineQuestion` is the third optional extension, and it
   says where a question draws rather than what it can do. It exists
   because the permission prompt's default layout is a transcript block,

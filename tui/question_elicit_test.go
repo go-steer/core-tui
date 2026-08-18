@@ -133,7 +133,7 @@ func TestElicitForm_ScrollHintReachesTheFooter(t *testing.T) {
 	m.overlayStack.ask(q, askAgent, nil)
 
 	// First frame, before anything has measured anything.
-	got := ansi.Strip(m.overlayStack.Render(m.width, &m))
+	got := ansi.Strip(m.overlayStack.render(m.width, &m))
 	if !strings.Contains(got, scrollHint(true)) {
 		t.Errorf("a 40-field form in 24 rows renders no scroll hint:\n%s", got)
 	}
@@ -144,9 +144,9 @@ func TestElicitForm_ScrollHintReachesTheFooter(t *testing.T) {
 		Fields: []ElicitField{{Name: "who", Type: ElicitFieldString}},
 	})
 	var m2 Model
-	m2.styles, m2.width, m2.height = NewStyles(true, Branding{}), 100, 24
+	m2.styles, m2.width, m2.height = newStyles(true, Branding{}), 100, 24
 	m2.overlayStack.ask(short, askAgent, nil)
-	if got := ansi.Strip(m2.overlayStack.Render(m2.width, &m2)); strings.Contains(got, scrollHint(true)) {
+	if got := ansi.Strip(m2.overlayStack.render(m2.width, &m2)); strings.Contains(got, scrollHint(true)) {
 		t.Errorf("a one-field form claims to scroll:\n%s", got)
 	}
 }
@@ -178,8 +178,8 @@ func TestElicitQuestion_DrivesToAnAnswerWithoutAModel(t *testing.T) {
 	q.Key(keyMsgFromStroke("tab"))
 	q.Key(keyMsgFromStroke("space"))
 
-	// It renders against the zero Styles, unstyled and unassisted.
-	body := q.Body(q.Width(100), 24, Styles{})
+	// It renders against the zero styleSet, unstyled and unassisted.
+	body := q.Body(q.Width(100), 24, styleSet{})
 	for _, want := range []string{"user*:", "ada", "save:", "[✓]"} {
 		if !strings.Contains(body, want) {
 			t.Errorf("the body does not show %q:\n%s", want, body)

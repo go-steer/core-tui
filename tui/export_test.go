@@ -52,6 +52,14 @@ type (
 
 	ThemePreviewMsg = themePreviewMsg
 
+	// Styles keeps the name §8 uses for the zero value the external
+	// test hands to Body. The type itself is styleSet now (#257);
+	// the alias is spelled for the caller rather than for the
+	// declaration, because a question taking a style bundle it did
+	// not fill in is the property under test and "the zero Styles"
+	// is how the design states it.
+	Styles = styleSet
+
 	ModelPickerQuestion     = modelPickerQuestion
 	ModelSwitchRequestedMsg = modelSwitchRequestedMsg
 

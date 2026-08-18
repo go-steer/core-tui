@@ -89,7 +89,7 @@ func turn(seq int64, author, text string) SubagentEvent {
 func subagentModel(t *testing.T, a Agent) *Model {
 	t.Helper()
 	m := Model{}
-	m.styles = NewStyles(true, Branding{})
+	m.styles = newStyles(true, Branding{})
 	m.width, m.height = 120, 40
 	m.opts.Agent = a
 	m.seenToolIDs = make(map[string]bool)
@@ -180,7 +180,7 @@ func TestMergeSubagentEvents_DropsSeqDuplicates(t *testing.T) {
 }
 
 func TestRenderSubagentTurns_ShowsToolTraffic(t *testing.T) {
-	styles := NewStyles(true, Branding{})
+	styles := newStyles(true, Branding{})
 	evs := []SubagentEvent{{
 		Seq:       7,
 		Timestamp: time.Date(2026, 8, 13, 12, 4, 7, 0, time.UTC),
@@ -202,7 +202,7 @@ func TestRenderSubagentTurns_ShowsToolTraffic(t *testing.T) {
 }
 
 func TestRenderSubagentTurns_FailedToolReadsAsError(t *testing.T) {
-	styles := NewStyles(true, Branding{})
+	styles := newStyles(true, Branding{})
 	evs := []SubagentEvent{{
 		Seq:         1,
 		ToolResults: []SubagentToolResult{{Name: "bash", Error: "exit status 1"}},
@@ -214,7 +214,7 @@ func TestRenderSubagentTurns_FailedToolReadsAsError(t *testing.T) {
 }
 
 func TestRenderSubagentTurns_TruncatesToWidth(t *testing.T) {
-	styles := NewStyles(true, Branding{})
+	styles := newStyles(true, Branding{})
 	long := strings.Repeat("x", 500)
 	lines := renderSubagentTurns([]SubagentEvent{turn(1, "model", long)}, styles, 80)
 	if len(lines) != 1 {
@@ -340,7 +340,7 @@ func TestOpenSubagentDetail_AmbiguousAsksRatherThanGuessing(t *testing.T) {
 	if !strings.Contains(text, "cluster-1") || !strings.Contains(text, "cluster-2") {
 		t.Errorf("expected both candidates offered, got %q", text)
 	}
-	if m.overlayStack.HasID(subagentDialogID) {
+	if m.overlayStack.hasID(subagentDialogID) {
 		t.Error("expected no overlay opened for an ambiguous name")
 	}
 }
@@ -358,14 +358,14 @@ func TestOpenSubagentDetail_OpensAndFetches(t *testing.T) {
 	if cmd == nil {
 		t.Fatal("expected a fetch + tick batch")
 	}
-	if !m.overlayStack.HasID(subagentDialogID) {
+	if !m.overlayStack.hasID(subagentDialogID) {
 		t.Fatal("expected the overlay on the stack")
 	}
 	// Re-issuing retargets rather than stacking a second copy.
 	m.openSubagentDetail("auditor")
 	n := 0
-	for m.overlayStack.HasID(subagentDialogID) {
-		m.overlayStack.Close(subagentDialogID)
+	for m.overlayStack.hasID(subagentDialogID) {
+		m.overlayStack.close(subagentDialogID)
 		n++
 		if n > 3 {
 			break
@@ -579,11 +579,11 @@ func TestSubagentUpdate_DropsStaleGeneration(t *testing.T) {
 	a := &subagentAgent{turns: map[string][]SubagentEvent{"auditor": {turn(1, "model", "hi")}}}
 	m := subagentModel(t, a)
 	m.sessionGen = 2
-	m.overlayStack.Open(newSubagentDialog("auditor"))
+	m.overlayStack.open(newSubagentDialog("auditor"))
 	next, _ := m.Update(subagentEventsMsg{gen: 1, name: "auditor",
 		page: SubagentEventPage{Events: []SubagentEvent{turn(1, "model", "stale")}}})
 	got := next.(Model)
-	d := got.overlayStack.Get(subagentDialogID).(*subagentDialog)
+	d := got.overlayStack.get(subagentDialogID).(*subagentDialog)
 	if len(d.events) != 0 {
 		t.Errorf("a retired generation's page must not paint, got %d events", len(d.events))
 	}

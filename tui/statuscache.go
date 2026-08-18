@@ -39,7 +39,7 @@ package tui
 type statusKey struct {
 	width int
 
-	// The palette. Styles is rebuilt by resolveStyles from exactly
+	// The palette. styleSet is rebuilt by resolveStyles from exactly
 	// these two plus Branding, and Branding is fixed for the life of
 	// a Model, so naming the theme and the mode pins the styling.
 	theme string

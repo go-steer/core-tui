@@ -42,7 +42,7 @@ func (p *probeQuestion) Key(tea.KeyPressMsg) (answer, tea.Cmd) { return p.ans, n
 func (p *probeQuestion) Title() string                         { return "probe" }
 func (p *probeQuestion) Footer() string                        { return "esc cancel" }
 func (p *probeQuestion) Width(int) int                         { return 40 }
-func (p *probeQuestion) Body(int, int, Styles) string          { return "probe body" }
+func (p *probeQuestion) Body(int, int, styleSet) string        { return "probe body" }
 
 // recordAnswers returns a resolver that appends every answer it is
 // handed, so a test can count runs as well as inspect them.
@@ -60,11 +60,11 @@ func TestOverlayAsk_KeystrokeAnswersAndPops(t *testing.T) {
 	m := Model{}
 	m.overlayStack.ask(&probeQuestion{id: "probe", ans: chosen{ID: "x", Index: 3}}, askOperator, recordAnswers(&got))
 
-	consumed, _ := m.overlayStack.HandleKeyMsg(keyMsgFromStroke("enter"), &m)
+	consumed, _ := m.overlayStack.handleKeyMsg(keyMsgFromStroke("enter"), &m)
 	if !consumed {
 		t.Error("an open question did not consume the keystroke")
 	}
-	if m.overlayStack.HasDialogs() {
+	if m.overlayStack.hasDialogs() {
 		t.Error("an answered question stayed on the stack")
 	}
 	if len(got) != 1 {
@@ -83,11 +83,11 @@ func TestOverlayAsk_StillAskingKeepsTheQuestion(t *testing.T) {
 	m := Model{}
 	m.overlayStack.ask(&probeQuestion{id: "probe"}, askOperator, recordAnswers(&got))
 
-	consumed, _ := m.overlayStack.HandleKeyMsg(keyMsgFromStroke("x"), &m)
+	consumed, _ := m.overlayStack.handleKeyMsg(keyMsgFromStroke("x"), &m)
 	if !consumed {
 		t.Error("an open question did not consume the keystroke")
 	}
-	if !m.overlayStack.HasID("probe") {
+	if !m.overlayStack.hasID("probe") {
 		t.Error("an unanswered question was popped")
 	}
 	if len(got) != 0 {
@@ -108,12 +108,12 @@ func TestOverlayResolveAll_TellsEveryQuestionWhy(t *testing.T) {
 		m.overlayStack.ask(&probeQuestion{id: "one"}, askOperator, recordAnswers(&first))
 		// A viewer with nothing to answer, in the middle of the
 		// stack, to prove it is dropped rather than skipped over.
-		m.overlayStack.Open(newToolCallDialog(0))
+		m.overlayStack.open(newToolCallDialog(0))
 		m.overlayStack.ask(&probeQuestion{id: "two"}, askOperator, recordAnswers(&second))
 
 		m.overlayStack.resolveAll(reason, &m)
 
-		if m.overlayStack.HasDialogs() {
+		if m.overlayStack.hasDialogs() {
 			t.Errorf("reason %d: resolveAll left the stack populated", reason)
 		}
 		for name, got := range map[string][]answer{"one": first, "two": second} {
@@ -188,9 +188,9 @@ func TestOverlayResolveAll_NeverResolvesTwice(t *testing.T) {
 
 	// Answer it, but put it back on the stack as if a teardown were
 	// racing the pop.
-	front := m.overlayStack.Front().(*askedQuestion)
-	m.overlayStack.HandleKeyMsg(keyMsgFromStroke("enter"), &m)
-	m.overlayStack.Open(front)
+	front := m.overlayStack.front().(*askedQuestion)
+	m.overlayStack.handleKeyMsg(keyMsgFromStroke("enter"), &m)
+	m.overlayStack.open(front)
 
 	m.overlayStack.resolveAll(dismissSuperseded, &m)
 	if len(got) != 1 {
@@ -208,14 +208,14 @@ func TestOverlayResolveAll_NeverResolvesTwice(t *testing.T) {
 // all used to produce.
 func TestAskedQuestion_CaretOnlyWhenTheQuestionHasOne(t *testing.T) {
 	m := Model{}
-	m.styles = NewStyles(true, Branding{})
+	m.styles = newStyles(true, Branding{})
 
 	m.overlayStack.ask(&probeQuestion{id: "probe"}, askOperator, nil)
 	if c := m.overlayStack.cursor(100, &m); c != nil {
 		t.Errorf("a question with no text surface reported a caret at %+v", c)
 	}
 
-	m.overlayStack.Close("probe")
+	m.overlayStack.close("probe")
 	m.themeName = "default"
 	askThemePicker(&m)
 	if c := m.overlayStack.cursor(100, &m); c == nil {
@@ -224,17 +224,17 @@ func TestAskedQuestion_CaretOnlyWhenTheQuestionHasOne(t *testing.T) {
 }
 
 // TestAskedQuestion_WheelStepsTheListByOne. The adapter deliberately
-// does not implement ScrollDialog, so Overlay.HandleWheel falls
+// does not implement scrollDialog, so overlay.handleWheel falls
 // through to synthesizing one up/down keystroke — which is what a
 // list wants and what a scrolling body does not.
 func TestAskedQuestion_WheelStepsTheListByOne(t *testing.T) {
 	m := Model{}
-	m.styles = NewStyles(true, Branding{})
+	m.styles = newStyles(true, Branding{})
 	m.themeName = "default"
 	q := askThemePicker(&m)
 	start := q.idx
 
-	if consumed, _ := m.overlayStack.HandleWheel(wheelScrollLines, &m); !consumed {
+	if consumed, _ := m.overlayStack.handleWheel(wheelScrollLines, &m); !consumed {
 		t.Fatal("the question did not consume the wheel")
 	}
 	if q.idx != start+1 {

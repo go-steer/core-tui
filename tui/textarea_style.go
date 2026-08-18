@@ -18,7 +18,7 @@
 // terminals that color is "0" (black), which reads as a screaming
 // horizontal black block under the cursor row — broken UX.
 //
-// textareaStyles returns a Styles bundle derived from the
+// textareaStyles returns a styleSet bundle derived from the
 // bubbles default for the correct dark/light variant AND zeroes
 // out the CursorLine + CursorLineNumber backgrounds + line-number
 // styling that don't fit a chat prompter. Operators want a clean
@@ -44,7 +44,7 @@ import (
 //     input by default.
 //
 // Caller is responsible for setting `ta.Prompt` itself (the glyph
-// string lives on the textarea, not the Styles bundle).
+// string lives on the textarea, not the styleSet bundle).
 func textareaStyles(isDark bool, theme Theme) textarea.Styles {
 	s := textarea.DefaultStyles(isDark)
 	// Both Focused and Blurred states: drop the cursor-line tint

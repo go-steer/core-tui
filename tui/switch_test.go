@@ -14,7 +14,7 @@
 
 // Tests for mid-session Agent switch (issues #48 / #53):
 // SlashResult.SwitchTo, applySwitchTarget, /switch built-in, and the
-// session picker Dialog.
+// session picker dialog.
 
 package tui
 
@@ -346,7 +346,7 @@ func TestSwitchBuiltin_OpensPicker(t *testing.T) {
 		t.Fatalf("expected /switch to be handled by builtin dispatcher")
 	}
 	got := out.(Model)
-	if !got.overlayStack.HasID(sessionPickerDialogID) {
+	if !got.overlayStack.hasID(sessionPickerDialogID) {
 		t.Errorf("expected session picker dialog opened")
 	}
 	if len(agent.switchCalls) != 0 {
@@ -436,7 +436,7 @@ func TestSwitchBuiltin_SessAlias(t *testing.T) {
 		t.Fatalf("expected /sess (alias) to be handled")
 	}
 	got := out.(Model)
-	if !got.overlayStack.HasID(sessionPickerDialogID) {
+	if !got.overlayStack.hasID(sessionPickerDialogID) {
 		t.Errorf("expected session picker opened via /sess alias")
 	}
 }
@@ -487,7 +487,7 @@ func TestSessionPickerQuestion_EnterCommits(t *testing.T) {
 	if len(agent.switchCalls) != 1 || agent.switchCalls[0] != "other" {
 		t.Errorf("switchCalls = %v, want [other]", agent.switchCalls)
 	}
-	if m.overlayStack.HasID(sessionPickerDialogID) {
+	if m.overlayStack.hasID(sessionPickerDialogID) {
 		t.Errorf("picker should close once the switch lands")
 	}
 }

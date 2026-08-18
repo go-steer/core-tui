@@ -24,7 +24,7 @@ import (
 )
 
 // typeIntoFilter feeds text to a filter row one grapheme at a time,
-// the way Overlay.HandleKeyMsg does.
+// the way overlay.handleKeyMsg does.
 func typeIntoFilter(f *pickerFilter, text string) {
 	for _, r := range text {
 		f.handleKeyMsg(tea.KeyPressMsg(tea.Key{Code: r, Text: string(r)}))
@@ -100,7 +100,7 @@ func TestPickerFilter_HandleKeyMsgReportsChange(t *testing.T) {
 // overflows the dialog's inner width — including when the match
 // count is beside it and when the value carries wide runes.
 func TestPickerFilter_RenderFitsTheDialog(t *testing.T) {
-	s := NewStylesWithTheme(true, goldenTheme())
+	s := newStylesWithTheme(true, goldenTheme())
 	for _, width := range []int{30, 36, 64, 72, 120} {
 		for _, value := range []string{"", "gpt", "日本語のモデル", strings.Repeat("x", 200)} {
 			f := newPickerFilter()
@@ -123,7 +123,7 @@ func TestPickerFilter_RenderFitsTheDialog(t *testing.T) {
 // had it. Only once a filter is active — "40/40" on an untouched
 // picker is noise.
 func TestPickerFilter_RenderShowsTheMatchCount(t *testing.T) {
-	s := NewStylesWithTheme(true, goldenTheme())
+	s := newStylesWithTheme(true, goldenTheme())
 
 	idle := newPickerFilter()
 	if got := ansi.Strip(idle.render(64, 40, 40, s)); strings.Contains(got, "40/40") {
@@ -145,7 +145,7 @@ func TestPickerFilter_RenderShowsTheMatchCount(t *testing.T) {
 }
 
 // TestFilterRowCursor pins the chrome offsets, which are the same for
-// all three pickers: the box edge plus one column of RenderContext
+// all three pickers: the box edge plus one column of renderContext
 // padding across, and the box edge plus a title line plus a blank row
 // above the body the filter heads.
 //

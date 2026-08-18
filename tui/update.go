@@ -192,7 +192,7 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 
 	case tea.PasteMsg:
 		// Bracketed paste never goes through handleKey, so without
-		// this a paste while a text-input Dialog is open would land
+		// this a paste while a text-input dialog is open would land
 		// in the chat textarea BEHIND the modal — the single most
 		// likely operator move at an "Attach to endpoint (URL):"
 		// prompt. Route it to the front dialog as a synthetic
@@ -203,9 +203,9 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		// dialogs that still don't implement it (the tool-call and
 		// subagent overlays) never see it and the paste falls
 		// through as before.
-		if _, ok := m.overlayStack.Front().(keyMsgDialog); ok {
+		if _, ok := m.overlayStack.front().(keyMsgDialog); ok {
 			if key, ok := pasteKeyMsg(msg.Content); ok {
-				if consumed, cmd := m.overlayStack.HandleKeyMsg(key, &m); consumed {
+				if consumed, cmd := m.overlayStack.handleKeyMsg(key, &m); consumed {
 					m.refreshViewport()
 					return m, cmd
 				}
@@ -524,7 +524,7 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		if msg.gen != m.sessionGen {
 			return m, nil
 		}
-		if d, ok := m.overlayStack.Get(subagentDialogID).(*subagentDialog); ok && d.apply(msg) {
+		if d, ok := m.overlayStack.get(subagentDialogID).(*subagentDialog); ok && d.apply(msg) {
 			m.refreshViewport()
 		}
 		return m, nil
@@ -535,7 +535,7 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		if msg.gen != m.sessionGen {
 			return m, nil
 		}
-		d, ok := m.overlayStack.Get(subagentDialogID).(*subagentDialog)
+		d, ok := m.overlayStack.get(subagentDialogID).(*subagentDialog)
 		if !ok || d.name != msg.name {
 			return m, nil
 		}
@@ -654,13 +654,13 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		return m, nil
 	case sessionInputRequestedMsg:
 		// Enter on an action row (issue #56). Opened from here rather
-		// than from the picker because Overlay pops the front dialog
+		// than from the picker because overlay pops the front dialog
 		// after Key returns, so a modal pushed from inside Key is the
 		// one that gets popped. Guarded the same way applySwitchLookup
 		// guards its Open: two Enters in flight must not stack two
 		// inputs.
-		if !m.overlayStack.HasID(sessionInputDialogID) {
-			m.overlayStack.Open(newSessionInputDialog(msg.Row))
+		if !m.overlayStack.hasID(sessionInputDialogID) {
+			m.overlayStack.open(newSessionInputDialog(msg.Row))
 		}
 		return m, nil
 	case sessionSwitchRequestedMsg:
@@ -777,7 +777,7 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		// is asynchronous, so an operator who arrows and immediately
 		// escapes can have it land after the resolver already put the
 		// original theme back.
-		if m.overlayStack.HasID(themePickerDialogID) {
+		if m.overlayStack.hasID(themePickerDialogID) {
 			m.applyNamedTheme(msg.Name)
 		}
 		return m, nil
@@ -1221,10 +1221,10 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 // is on screen. Returns handled=false when the event belongs to the
 // chat viewport instead — no modal open, an inline permission prompt
 // (which lives IN the chat flow and scrolls with it, and declines the
-// tick in Overlay.HandleWheel), or a horizontal wheel, which no modal
+// tick in overlay.handleWheel), or a horizontal wheel, which no modal
 // consumes.
 //
-// Mirrors View's z-order cascade: side answer → Dialog stack. The
+// Mirrors View's z-order cascade: side answer → dialog stack. The
 // embedded huh form never reaches here; Update hands it every msg
 // before the switch.
 func (m *Model) handleWheel(msg tea.MouseWheelMsg) (tea.Cmd, bool) {
@@ -1242,8 +1242,8 @@ func (m *Model) handleWheel(msg tea.MouseWheelMsg) (tea.Cmd, bool) {
 	case m.sideAnswer != nil:
 		m.scroll().by(delta)
 		return nil, true
-	case m.overlayStack.HasDialogs():
-		consumed, cmd := m.overlayStack.HandleWheel(delta, m)
+	case m.overlayStack.hasDialogs():
+		consumed, cmd := m.overlayStack.handleWheel(delta, m)
 		if consumed {
 			// Same repaint the key path does: a wheel tick on the
 			// theme picker moves the selection, which live-previews
@@ -1299,18 +1299,18 @@ func (m Model) handleKey(msg tea.KeyPressMsg) (tea.Model, tea.Cmd) {
 			m.refreshViewport()
 			return m, nil
 		}
-		// Esc goes to the front-most Dialog first so it can do
+		// Esc goes to the front-most dialog first so it can do
 		// cancel-time work (the theme picker restores the palette
 		// it previewed; a nested text input pops back to its
 		// parent picker). Dialogs all return Consumed+Close for
-		// esc; the CloseFront below is the fallback for one that
+		// esc; the closeFront below is the fallback for one that
 		// declines to handle it.
-		if m.overlayStack.HasDialogs() {
-			if consumed, cmd := m.overlayStack.HandleKeyMsg(msg, &m); consumed {
+		if m.overlayStack.hasDialogs() {
+			if consumed, cmd := m.overlayStack.handleKeyMsg(msg, &m); consumed {
 				m.refreshViewport()
 				return m, cmd
 			}
-			m.overlayStack.CloseFront()
+			m.overlayStack.closeFront()
 			m.refreshViewport()
 			return m, nil
 		}
@@ -1378,14 +1378,14 @@ func (m Model) handleKey(msg tea.KeyPressMsg) (tea.Model, tea.Cmd) {
 		return m, nil
 	}
 
-	// Dialog overlay — front-most dialog gets every keystroke
+	// dialog overlay — front-most dialog gets every keystroke
 	// before the rest of the modal cascade. Returns Consumed=true
 	// when the dialog handled it; we then return early so the key
 	// doesn't double-fire on textarea / viewport. The optional
 	// Cmd is dialogs' channel for emitting outbound msgs (e.g.
 	// theme picker fires ThemeChangedMsg here on commit).
-	if m.overlayStack.HasDialogs() {
-		if consumed, cmd := m.overlayStack.HandleKeyMsg(msg, &m); consumed {
+	if m.overlayStack.hasDialogs() {
+		if consumed, cmd := m.overlayStack.handleKeyMsg(msg, &m); consumed {
 			m.refreshViewport()
 			return m, cmd
 		}
@@ -1562,7 +1562,7 @@ func (m Model) handleKey(msg tea.KeyPressMsg) (tea.Model, tea.Cmd) {
 
 	case "ctrl+g":
 		// Open the model picker dialog. Singleton — re-press
-		// while open is a no-op (HasID check). The dialog paints
+		// while open is a no-op (hasID check). The dialog paints
 		// a loading body immediately; AvailableModels() runs in
 		// the returned Cmd so a slow host can't stall the
 		// keystroke (issue #114).
@@ -1578,8 +1578,8 @@ func (m Model) handleKey(msg tea.KeyPressMsg) (tea.Model, tea.Cmd) {
 		// Open the expand-single tool-call detail dialog (core-tui
 		// #52 tier 1). No-op when there are no tool calls in the
 		// session yet — nothing useful to show. Singleton via
-		// HasID so re-press while open doesn't stack duplicates.
-		if !m.overlayStack.HasID(toolCallDialogID) {
+		// hasID so re-press while open doesn't stack duplicates.
+		if !m.overlayStack.hasID(toolCallDialogID) {
 			tools := collectToolCalls(m.history.Snapshot())
 			if len(tools) > 0 {
 				d := newToolCallDialog(len(tools))
@@ -1605,7 +1605,7 @@ func (m Model) handleKey(msg tea.KeyPressMsg) (tea.Model, tea.Cmd) {
 						}
 					}
 				}
-				m.overlayStack.Open(d)
+				m.overlayStack.open(d)
 				m.refreshViewport()
 			}
 		}
@@ -2820,7 +2820,7 @@ func sliceContains(xs []string, target string) bool {
 // req is a parameter rather than Model state: the prompt is a question
 // on the overlay stack (question_permission.go), which owns the request
 // for as long as it is open and hands it here through its resolver. It
-// is still on the stack while this runs — Overlay.resolve pops after
+// is still on the stack while this runs — overlay.resolve pops after
 // the resolver returns — so the pop is not this function's to do, and
 // there is no field left to clear.
 //

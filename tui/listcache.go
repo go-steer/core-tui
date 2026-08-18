@@ -43,12 +43,12 @@ package tui
 
 import "strings"
 
-// Item is the contract for any history entry that can be cached
+// listItem is the contract for any history entry that can be cached
 // by the renderItem cache. The current implementation has only
 // one concrete impl (messageItem wrapping a Message), but the
 // interface is exposed so future surfaces (search results, code-
 // review rows) can opt into the same caching path.
-type Item interface {
+type listItem interface {
 	// Identity returns the stable opaque key the cache uses to
 	// look up the item across refreshes. Two items with the same
 	// Identity are considered the same logical entry.
@@ -69,17 +69,21 @@ type Item interface {
 	Render(m *Model, width int) string
 }
 
-// Optional capability interface — type-assert at use site for
-// graceful degradation. Items don't need to implement it to
-// participate in the cache; it is a hook for richer behavior
-// the list can layer on (per skill §4.D).
-
-// RawRenderable lets clipboard / transcript paths grab unstyled
-// text without ANSI escapes. Falls back to ansi.Strip(Render(...))
-// when not implemented.
-type RawRenderable interface {
-	RawRender(width int) string
-}
+// There was an optional capability interface here, RawRenderable, for
+// items that could hand back unstyled text: "type-assert at the use
+// site for graceful degradation, falls back to ansi.Strip(Render(...))
+// when not implemented". #257 deleted it, along with the RawRender
+// method messageItem carried for it, because unexporting the two made
+// the compiler say what a grep should have said years earlier —
+// nothing ever type-asserted to it and nothing ever called the method.
+// The copy path (copy.go, issue #153) reaches rawMessageText directly
+// from the Message, which is what it has in hand; neither the
+// assertion site nor the ansi.Strip fallback was ever written.
+//
+// A future non-Message row that wants out-of-band text should bring
+// the interface back WITH its use site in the same change. An
+// extension point with no consumer degrades to a comment, and this one
+// spent two releases proving it.
 
 // listCacheEntry holds one memoized render. width pins the entry
 // to a specific viewport width; version pins it to a specific
@@ -119,7 +123,7 @@ type listCacheKey struct {
 // swept through — which is what a jittery drag actually revisits.
 const retainedWidths = 3
 
-// listCache is the per-Model render memo, keyed by (Item.Identity(),
+// listCache is the per-Model render memo, keyed by (listItem.Identity(),
 // width). Per-entry invalidation happens on version mismatch;
 // widths beyond retainedWidths are evicted least-recently-used.
 type listCache struct {
@@ -144,7 +148,7 @@ func newListCache() *listCache {
 // on miss / version mismatch. A width the cache has no entries for
 // is simply a miss — it does NOT evict the other widths. On miss,
 // the caller is expected to Render and store via put.
-func (c *listCache) get(item Item, width int) (string, bool) {
+func (c *listCache) get(item listItem, width int) (string, bool) {
 	entry, ok := c.entries[listCacheKey{id: item.Identity(), width: width}]
 	if !ok {
 		return "", false
@@ -171,27 +175,27 @@ func (c *listCache) get(item Item, width int) (string, bool) {
 // sort of stale reassurance that makes a reader trust a bound that
 // is not there. The clamp is chatView's, applied per drawn line
 // (chatCutLine).
-func (c *listCache) getLines(item Item, width int) ([]string, bool) {
+func (c *listCache) getLines(item listItem, width int) ([]string, bool) {
 	return c.getLinesByID(item.Identity(), item.Version(), width)
 }
 
 // getLinesByID is getLines addressed by the two scalars a lookup
 // actually consults — the identity that selects the entry and the
 // version that decides whether it is still current. Everything else
-// Item carries (Finished, Render) is miss-path machinery, and a
+// listItem carries (Finished, Render) is miss-path machinery, and a
 // lookup that never misses never needs it.
 //
 // It exists because the interface was costing an allocation on the
 // hit path (issue #204). getLines calls Identity and Version through
-// Item, which escape analysis cannot see past, so every caller that
+// listItem, which escape analysis cannot see past, so every caller that
 // built a messageItem to ask "is this row cached?" heap-allocated the
 // box first — once per visible row per frame, on the one path in the
 // renderer whose whole purpose is to not allocate. Passing the two
 // numbers leaves the boxing to put, where a render is about to be
 // paid for anyway and one more allocation is noise.
 //
-// This is deliberately not the start of a de-interfacing of Item.
-// Item is the seam the item-addressed transcript is built on and put
+// This is deliberately not the start of a de-interfacing of listItem.
+// listItem is the seam the item-addressed transcript is built on and put
 // still takes it; what moved is the lookup, which never used the seam
 // for anything but two accessor calls.
 func (c *listCache) getLinesByID(id, version uint64, width int) ([]string, bool) {
@@ -207,7 +211,7 @@ func (c *listCache) getLinesByID(id, version uint64, width int) ([]string, bool)
 // look the entry straight back up. Marks frozen when the item reports
 // Finished — subsequent gets for that entry skip straight to the
 // content (until version bumps).
-func (c *listCache) put(item Item, width int, content string) []string {
+func (c *listCache) put(item listItem, width int, content string) []string {
 	c.touchWidth(width)
 	lines := strings.Split(content, "\n")
 	c.entries[listCacheKey{id: item.Identity(), width: width}] = listCacheEntry{
@@ -296,10 +300,3 @@ func (mi messageItem) Finished() bool   { return true }
 func (mi messageItem) Render(m *Model, width int) string {
 	return m.renderMessage(mi.msg)
 }
-
-// RawRender returns the unstyled source text for clipboard /
-// transcript paths (copy.go, issue #153). RoleAssistant comes back as
-// markdown rather than as the Glamour render, and a tool row — which
-// has no Text at all — is reassembled from the structured fields the
-// renderer was given.
-func (mi messageItem) RawRender(_ int) string { return rawMessageText(mi.msg) }

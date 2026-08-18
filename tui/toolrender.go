@@ -56,7 +56,7 @@ import (
 // host asks for one. Removing the interface after the freeze
 // could not.
 type toolRenderer interface {
-	RenderCall(msg Message, head string, width int, styles Styles) string
+	RenderCall(msg Message, head string, width int, styles styleSet) string
 }
 
 // withPreview appends msg.ToolPreview under the call line when
@@ -75,7 +75,7 @@ func withPreview(call string, msg Message) string {
 // `⚙ name · arg-hint` on a single wrapped line.
 type genericToolRenderer struct{}
 
-func (genericToolRenderer) RenderCall(msg Message, head string, width int, styles Styles) string {
+func (genericToolRenderer) RenderCall(msg Message, head string, width int, styles styleSet) string {
 	if msg.ToolArgs == "" {
 		return withPreview(head, msg)
 	}
@@ -90,7 +90,7 @@ func (genericToolRenderer) RenderCall(msg Message, head string, width int, style
 // brighter than generic tool calls helps).
 type bashToolRenderer struct{}
 
-func (bashToolRenderer) RenderCall(msg Message, head string, width int, styles Styles) string {
+func (bashToolRenderer) RenderCall(msg Message, head string, width int, styles styleSet) string {
 	if msg.ToolArgs == "" {
 		return withPreview(head, msg)
 	}
@@ -104,7 +104,7 @@ func (bashToolRenderer) RenderCall(msg Message, head string, width int, styles S
 // path for these tools.
 type fileToolRenderer struct{}
 
-func (fileToolRenderer) RenderCall(msg Message, head string, width int, styles Styles) string {
+func (fileToolRenderer) RenderCall(msg Message, head string, width int, styles styleSet) string {
 	if msg.ToolArgs == "" {
 		return withPreview(head, msg)
 	}

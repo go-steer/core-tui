@@ -41,7 +41,7 @@ var modalEdgeWidths = []int{24, 34, 40, 60, 76, 100, 160}
 // TestModalEdge_EverySurfaceCarriesIt is the "all five or none" half of
 // #199. Four surfaces out of five reads as a rendering bug rather than
 // as a style, so the assertion runs over the whole modal corpus — every
-// dialog on the Overlay stack, the permission overlay, the elicitation,
+// dialog on the overlay stack, the permission overlay, the elicitation,
 // the side answer and the embedded huh form — at every width.
 //
 // It asserts on the block each surface returns, which is the block
@@ -63,7 +63,7 @@ func TestModalEdge_EverySurfaceCarriesIt(t *testing.T) {
 	}
 
 	// The huh form is the fifth surface and the only one that is not
-	// a RenderContext: it brings its own layout, sizes its own block
+	// a renderContext: it brings its own layout, sizes its own block
 	// and asks modalSurface for a row of vertical padding. It has no
 	// entry in modalFitCases because there is no chrome for the fit
 	// pass to shed, which is exactly how a surface goes unnoticed.
@@ -104,7 +104,7 @@ func TestModalEdge_BodyFitsTheReducedColumn(t *testing.T) {
 		t.Run(strconv.Itoa(w), func(t *testing.T) {
 			m := newFrameModel(StatusHeader, w, h)
 			askThemePicker(&m)
-			block := m.overlayStack.Render(m.width, &m)
+			block := m.overlayStack.render(m.width, &m)
 
 			bw := lipgloss.Width(block)
 			inner := modalInnerWidth(bw)

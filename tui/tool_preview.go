@@ -44,7 +44,7 @@ const previewLineCap = 8
 // the tool isn't recognized as preview-worthy or args don't
 // carry the data we'd render. Never returns an error — preview
 // is a nice-to-have, NEVER blocks tool-row rendering.
-func renderToolPreview(name string, args map[string]any, styles Styles) string {
+func renderToolPreview(name string, args map[string]any, styles styleSet) string {
 	if args == nil {
 		return ""
 	}
@@ -82,7 +82,7 @@ func renderToolPreview(name string, args map[string]any, styles Styles) string {
 // Returns "" when the diff carries no add/remove lines (e.g. a
 // no-op apply_patch); the body would also be empty, so no preview
 // row makes sense.
-func diffPreviewWithSummary(diff string, styles Styles, lang string) string {
+func diffPreviewWithSummary(diff string, styles styleSet, lang string) string {
 	if diff == "" {
 		return ""
 	}
@@ -101,7 +101,7 @@ func diffPreviewWithSummary(diff string, styles Styles, lang string) string {
 // formatDiffSummary builds the "⎿  +N -M" line for the diff
 // totals. + count in Success / bold, - count in Error / bold,
 // muted "⎿" tree-branch glyph as the visual anchor.
-func formatDiffSummary(added, removed int, styles Styles) string {
+func formatDiffSummary(added, removed int, styles styleSet) string {
 	addStyle := lipgloss.NewStyle().Foreground(styles.Theme.Success).Bold(true)
 	delStyle := lipgloss.NewStyle().Foreground(styles.Theme.Error).Bold(true)
 	parts := []string{}

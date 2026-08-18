@@ -251,7 +251,7 @@ func (m Model) dispatchBuiltinSlash(name, args string) (bool, tea.Model, tea.Cmd
 			// No-arg form opens the interactive picker dialog.
 			// Singleton — re-opening while already showing is
 			// a no-op.
-			if !m.overlayStack.HasID(themePickerDialogID) {
+			if !m.overlayStack.hasID(themePickerDialogID) {
 				m.overlayStack.ask(
 					newThemePickerQuestion(BuiltinThemes(), m.themeName),
 					askOperator,
@@ -1016,8 +1016,8 @@ func truncate(s string, n int) string {
 // now — or nobody, if the replacement dropped the capability.
 func (m *Model) applySwitchLookup(msg switchLookupMsg) tea.Cmd {
 	if msg.row != nil {
-		if !m.overlayStack.HasID(sessionInputDialogID) {
-			m.overlayStack.Open(newSessionInputDialog(*msg.row))
+		if !m.overlayStack.hasID(sessionInputDialogID) {
+			m.overlayStack.open(newSessionInputDialog(*msg.row))
 		}
 		return nil
 	}

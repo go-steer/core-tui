@@ -99,7 +99,7 @@ func TestModelsLoadedMsg_CursorLandsOnTheCurrentRow(t *testing.T) {
 	// that is the whole point, and asserting the index alone would
 	// not catch the two drifting apart.
 	var tagged bool
-	for _, line := range strings.Split(ansi.Strip(m.overlayStack.Render(100, &m)), "\n") {
+	for _, line := range strings.Split(ansi.Strip(m.overlayStack.render(100, &m)), "\n") {
 		if !strings.Contains(line, "(current)") {
 			continue
 		}

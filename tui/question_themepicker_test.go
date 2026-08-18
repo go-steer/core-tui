@@ -41,7 +41,7 @@ func askThemePicker(m *Model) *themePickerQuestion {
 func openThemePickerFixture(t *testing.T) (Model, *themePickerQuestion) {
 	t.Helper()
 	m := NewModel(Options{Agent: &bareAgent{id: "theme"}})
-	m.styles = NewStylesWithTheme(true, goldenTheme())
+	m.styles = newStylesWithTheme(true, goldenTheme())
 	out, _ := m.Update(tea.WindowSizeMsg{Width: 100, Height: 30})
 	m = out.(Model)
 	m.applyNamedTheme("default")
@@ -60,7 +60,7 @@ func openThemePickerFixture(t *testing.T) (Model, *themePickerQuestion) {
 // happen synchronously, inside the resolver.
 func pressPicker(t *testing.T, m *Model, stroke string) (consumed bool) {
 	t.Helper()
-	consumed, cmd := m.overlayStack.HandleKeyMsg(keyMsgFromStroke(stroke), m)
+	consumed, cmd := m.overlayStack.handleKeyMsg(keyMsgFromStroke(stroke), m)
 	for _, msg := range drainBatch(t, cmd) {
 		out, follow := m.Update(msg)
 		*m = out.(Model)
@@ -146,7 +146,7 @@ func TestThemePicker_PreviewDiesWithThePicker(t *testing.T) {
 	m, _ := openThemePickerFixture(t)
 	original := m.themeName
 
-	_, cmd := m.overlayStack.HandleKeyMsg(keyMsgFromStroke("down"), &m)
+	_, cmd := m.overlayStack.handleKeyMsg(keyMsgFromStroke("down"), &m)
 	stale := drainBatch(t, cmd)
 	if len(stale) != 1 {
 		t.Fatalf("down scheduled %d messages, want just the preview", len(stale))
@@ -185,11 +185,11 @@ func TestThemePicker_EnterCommitsTheFilteredRow(t *testing.T) {
 	if got := themeNames(q.rows()); len(got) != 1 || got[0] != "cyberpunk" {
 		t.Fatalf("filter matched %v, want just cyberpunk", got)
 	}
-	consumed, cmd := m.overlayStack.HandleKeyMsg(keyMsgFromStroke("enter"), &m)
+	consumed, cmd := m.overlayStack.handleKeyMsg(keyMsgFromStroke("enter"), &m)
 	if !consumed {
 		t.Error("enter was not consumed")
 	}
-	if m.overlayStack.HasDialogs() {
+	if m.overlayStack.hasDialogs() {
 		t.Error("enter left the picker open")
 	}
 	if m.themeName != "cyberpunk" {
@@ -237,7 +237,7 @@ func TestThemePicker_EscRestoresAfterFiltering(t *testing.T) {
 	if !pressPicker(t, &m, "esc") {
 		t.Error("esc was not consumed")
 	}
-	if m.overlayStack.HasDialogs() {
+	if m.overlayStack.hasDialogs() {
 		t.Error("esc left the picker open")
 	}
 	if m.themeName != original {
@@ -259,14 +259,14 @@ func TestThemePicker_FilterMatchingNothingStaysOpen(t *testing.T) {
 		if consumed := pressPicker(t, &m, stroke); !consumed {
 			t.Errorf("%q on an empty filter result was not consumed", stroke)
 		}
-		if !m.overlayStack.HasDialogs() {
+		if !m.overlayStack.hasDialogs() {
 			t.Fatalf("%q on an empty filter result closed the picker", stroke)
 		}
 	}
 	if m.themeName != before {
 		t.Errorf("an empty filter result changed the theme to %q", m.themeName)
 	}
-	body := ansi.Strip(m.overlayStack.Render(100, &m))
+	body := ansi.Strip(m.overlayStack.render(100, &m))
 	if !strings.Contains(body, "no themes match") {
 		t.Errorf("empty-result body does not say so:\n%s", body)
 	}
@@ -278,14 +278,14 @@ func TestThemePicker_FilterMatchingNothingStaysOpen(t *testing.T) {
 func TestThemePicker_ShrinkingListNeverPanics(t *testing.T) {
 	m, q := openThemePickerFixture(t)
 	for _, r := range "gemzz" {
-		if !m.overlayStack.HasDialogs() {
+		if !m.overlayStack.hasDialogs() {
 			// An enter on a non-empty result commits and closes;
 			// re-open and keep narrowing.
 			q = askThemePicker(&m)
 		}
 		typeIntoPicker(&m, string(r))
 		for _, stroke := range []string{"down", "down", "up", "enter"} {
-			if m.overlayStack.HasDialogs() {
+			if m.overlayStack.hasDialogs() {
 				pressPicker(t, &m, stroke)
 			}
 		}
@@ -315,10 +315,10 @@ func TestThemePicker_CursorSitsInTheFilterRow(t *testing.T) {
 // true of the filtered list too.
 func TestThemePicker_UnsizedRendersEveryFilteredRow(t *testing.T) {
 	m := Model{}
-	m.styles = NewStyles(true, Branding{})
+	m.styles = newStyles(true, Branding{})
 	q := askThemePicker(&m)
 	typeIntoFilter(&q.filter, "e")
-	rendered := ansi.Strip(m.overlayStack.Render(80, &m))
+	rendered := ansi.Strip(m.overlayStack.render(80, &m))
 	rows := q.rows()
 	if len(rows) < 2 {
 		t.Fatalf("filter %q matched %d rows; the test needs several", "e", len(rows))

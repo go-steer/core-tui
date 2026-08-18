@@ -281,7 +281,7 @@ func frameStates() []frameState {
 				// tail and the section rules and the report — the
 				// widest rows this dialog composes — are never in it.
 				d.pinned = false
-				m.overlayStack.Open(d)
+				m.overlayStack.open(d)
 				return m
 			},
 		},
@@ -290,7 +290,7 @@ func frameStates() []frameState {
 			setup: func(_ *testing.T, m Model, _, _ int) Model {
 				m = withHostileTranscript(m)
 				m = withToolCalls(m)
-				m.overlayStack.Open(newToolCallDialog(len(collectToolCalls(m.history.Snapshot()))))
+				m.overlayStack.open(newToolCallDialog(len(collectToolCalls(m.history.Snapshot()))))
 				return m
 			},
 		},
@@ -338,7 +338,7 @@ func frameModels() []ModelInfo {
 // tag is appended AFTER the id, which is the position where an
 // unbounded row grows rather than the position where it gets cut.
 //
-// The filter is typed through Overlay.HandleKeyMsg rather than poked
+// The filter is typed through overlay.handleKeyMsg rather than poked
 // into the widget, so the state the grid measures is the one a
 // keystroke actually produces.
 func withModelPicker(m Model, filter string) Model {
@@ -571,7 +571,7 @@ func TestFrameStates_DialogSeedsOverrun(t *testing.T) {
 		fm := withModelPicker(newFrameModel(StatusHeader, 200, 50), "gateway")
 		q := modelPickerOn(&fm.overlayStack)
 		if q == nil {
-			t.Fatalf("front dialog is %T, want the model picker", fm.overlayStack.Front())
+			t.Fatalf("front dialog is %T, want the model picker", fm.overlayStack.front())
 		}
 		if q.filter.value() != "gateway" {
 			t.Fatalf("filter row holds %q — the keystrokes did not reach it", q.filter.value())
@@ -609,7 +609,7 @@ func newFrameModel(layout StatusLayout, w, h int) Model {
 		StatusLayout:     layout,
 		PermissionLayout: PermissionOverlay,
 	})
-	m.styles = NewStylesWithTheme(true, goldenTheme())
+	m.styles = newStylesWithTheme(true, goldenTheme())
 	out, _ := m.Update(tea.WindowSizeMsg{Width: w, Height: h})
 	return out.(Model)
 }

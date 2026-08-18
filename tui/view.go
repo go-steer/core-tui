@@ -315,7 +315,7 @@ func (m Model) View() tea.View {
 		body = lipgloss.JoinVertical(lipgloss.Left, parts...)
 	}
 
-	// Overlay any active modal centered over the body. Permission
+	// overlay any active modal centered over the body. Permission
 	// prompts render INLINE inside renderInProgress (chat flow)
 	// by default — preserves the assistant text + tool-call
 	// context the operator is approving. Hosts that prefer the
@@ -1056,7 +1056,7 @@ func (m Model) renderStatusLine() string {
 	// the wordmark, the identity sits between the wordmark and
 	// the model so the operator can tell which agent deployment
 	// they're talking to in multi-window setups.
-	parts := []string{m.styles.RenderWordmark(m.wordmark())}
+	parts := []string{m.styles.renderWordmark(m.wordmark())}
 	if id := m.opts.Branding.AgentIdentity; id != "" && id != m.wordmark() {
 		parts = append(parts,
 			m.sep(),
@@ -1361,7 +1361,7 @@ func (m Model) renderTurnFooter(msg Message) string {
 
 // modalFrame returns the block View composites over the frame, and
 // whether there is one at all. The cascade is the modal z-order: the
-// embedded huh form, the side answer, then whatever is on the Overlay
+// embedded huh form, the side answer, then whatever is on the overlay
 // stack — which since #164 stage 3 includes both the elicit form and
 // the permission prompt.
 //
@@ -1386,7 +1386,7 @@ func (m *Model) modalFrame() (string, bool) {
 		return modalSurface(m.styles, m.pendingForm.View(), 0, m.height, 1), true
 	case m.sideAnswer != nil:
 		return m.renderSideAnswer(), true
-	case m.overlayStack.HasDialogs():
+	case m.overlayStack.hasDialogs():
 		// An inline question draws itself in the transcript instead
 		// (renderInProgress), so there is no frame block to composite
 		// and no modal on screen. Reported as "none" rather than as an
@@ -1397,7 +1397,7 @@ func (m *Model) modalFrame() (string, bool) {
 		if _, inline := m.overlayStack.inlineFront(); inline {
 			return "", false
 		}
-		return m.overlayStack.Render(m.width, m), true
+		return m.overlayStack.render(m.width, m), true
 	}
 	return "", false
 }
@@ -1518,7 +1518,7 @@ func keyLegend(pairs ...string) string {
 // indent so multi-line commands stay aligned under the `$`.
 // Avoids Glamour's code-fence pipeline so the modal frame stays
 // composed cleanly.
-func renderShellDetail(text string, width int, styles Styles) string {
+func renderShellDetail(text string, width int, styles styleSet) string {
 	text = strings.TrimSpace(text)
 	if text == "" {
 		return ""
@@ -1534,7 +1534,7 @@ func renderShellDetail(text string, width int, styles Styles) string {
 // renderArgsDetail formats a JSON / key=value args blob plainly,
 // muted, word-wrapped. Same rationale as renderShellDetail —
 // keep the modal frame composition clean.
-func renderArgsDetail(text string, width int, styles Styles) string {
+func renderArgsDetail(text string, width int, styles styleSet) string {
 	text = strings.TrimSpace(text)
 	if text == "" {
 		return ""

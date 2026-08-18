@@ -21,7 +21,7 @@ import (
 )
 
 func TestRenderToolDetail_ArgsAndResponse(t *testing.T) {
-	styles := NewStyles(true, Branding{})
+	styles := newStyles(true, Branding{})
 	args := map[string]any{"path": "main.go", "range": []any{1, 20}}
 	response := map[string]any{"content": "package main\nfunc main() {}\n"}
 	got := renderToolDetail(args, response, "", styles)
@@ -40,7 +40,7 @@ func TestRenderToolDetail_ArgsAndResponse(t *testing.T) {
 }
 
 func TestRenderToolDetail_ErrorSuppressesResponse(t *testing.T) {
-	styles := NewStyles(true, Branding{})
+	styles := newStyles(true, Branding{})
 	args := map[string]any{"path": "missing.txt"}
 	// Response would show if the error weren't there; the error
 	// section takes precedence.
@@ -65,7 +65,7 @@ func TestRenderToolDetail_ErrorSuppressesResponse(t *testing.T) {
 func TestRenderToolDetail_ArgsOnly_CallPending(t *testing.T) {
 	// Tool call in flight — args populated, response not yet
 	// arrived. Detail block should render just the args section.
-	styles := NewStyles(true, Branding{})
+	styles := newStyles(true, Branding{})
 	args := map[string]any{"pattern": "*.go"}
 	got := renderToolDetail(args, nil, "", styles)
 	if !strings.Contains(got, "args:") {
@@ -80,7 +80,7 @@ func TestRenderToolDetail_ArgsOnly_CallPending(t *testing.T) {
 }
 
 func TestRenderToolDetail_Empty(t *testing.T) {
-	styles := NewStyles(true, Branding{})
+	styles := newStyles(true, Branding{})
 	got := renderToolDetail(nil, nil, "", styles)
 	if got != "" {
 		t.Errorf("expected empty string when there's nothing to render, got:\n%q", got)
@@ -88,7 +88,7 @@ func TestRenderToolDetail_Empty(t *testing.T) {
 }
 
 func TestRenderToolDetail_LongValueGetsPerLineCap(t *testing.T) {
-	styles := NewStyles(true, Branding{})
+	styles := newStyles(true, Branding{})
 	// One giant scalar — should truncate at detailValueByteCap with
 	// an ellipsis, not blow the line width.
 	huge := strings.Repeat("x", detailValueByteCap*2)
@@ -103,7 +103,7 @@ func TestRenderToolDetail_LongValueGetsPerLineCap(t *testing.T) {
 }
 
 func TestRenderToolDetail_ManyLinesGetsPerSectionCap(t *testing.T) {
-	styles := NewStyles(true, Branding{})
+	styles := newStyles(true, Branding{})
 	// Many keys — force > detailMaxLines JSON lines in the pretty
 	// output.
 	response := make(map[string]any, detailMaxLines*2)

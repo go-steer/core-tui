@@ -22,7 +22,7 @@ import (
 	"github.com/charmbracelet/x/ansi"
 )
 
-// Item-addressed transcript (issue #161). The contract under test:
+// listItem-addressed transcript (issue #161). The contract under test:
 //
 //   - a frame costs what is on screen, not what is in scrollback;
 //   - the window it draws is the same window a flat offset names;

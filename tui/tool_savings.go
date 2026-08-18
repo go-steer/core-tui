@@ -201,7 +201,7 @@ func formatSavingsCompact(s *ToolSavings) string {
 // Two leading spaces so it doesn't crowd the latency badge (both
 // badges may fire on the same row; the latency badge lands first
 // so the row reads `read_file  [2.4s]  [12k→2k tok · struct]`).
-func renderSavingsBadge(s *ToolSavings, styles Styles) string {
+func renderSavingsBadge(s *ToolSavings, styles styleSet) string {
 	txt := formatSavingsCompact(s)
 	if txt == "" {
 		return ""

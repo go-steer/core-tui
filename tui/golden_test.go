@@ -104,12 +104,12 @@ func goldenTheme() Theme {
 	}
 }
 
-// goldenStyles is the Styles bundle every golden renders through.
+// goldenStyles is the styleSet bundle every golden renders through.
 // Dark is pinned true; the light variant is a different corpus and
 // is deliberately not captured (it would double the file count for
 // the same layout arithmetic).
-func goldenStyles() Styles {
-	return NewStylesWithTheme(true, goldenTheme())
+func goldenStyles() styleSet {
+	return newStylesWithTheme(true, goldenTheme())
 }
 
 // pinChromaStyle asserts the corpus theme still names the pinned
@@ -419,7 +419,7 @@ func goldenModel(t *testing.T, w, h int) Model {
 
 // --- Model-free renderer goldens -------------------------------
 //
-// These seven take a Styles, not a *Model, which is what makes
+// These seven take a styleSet, not a *Model, which is what makes
 // them cheap to golden. Note that most are NOT width-parameterized
 // — renderToolPreview, renderToolPreviewWithResult, renderDiffInline,
 // renderCodeInline, renderLatencyBadge and renderReadPreview all

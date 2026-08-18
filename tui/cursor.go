@@ -51,7 +51,7 @@ import (
 	"github.com/charmbracelet/x/ansi"
 )
 
-// cursorDialog is the optional extension for a Dialog whose body
+// cursorDialog is the optional extension for a dialog whose body
 // owns a text-editing surface and can therefore say where the
 // terminal cursor belongs. Dialogs that don't implement it get no
 // cursor, which is correct for the tool-call and subagent detail
@@ -61,18 +61,18 @@ import (
 //
 // This is deliberately shaped as an optional extension, exactly like
 // keyMsgDialog, because "where does the cursor go" is slated to
-// become part of the Dialog contract itself (issue #105's closing
+// become part of the dialog contract itself (issue #105's closing
 // note, tracked under #115). When that lands, the change is to move
-// DialogCursor into Dialog and delete the type assertion in
-// Overlay.cursor — the callers and the coordinate arithmetic below
+// DialogCursor into dialog and delete the type assertion in
+// overlay.cursor — the callers and the coordinate arithmetic below
 // do not move.
 type cursorDialog interface {
-	Dialog
+	dialog
 
 	// DialogCursor returns the cursor position RELATIVE to the
 	// dialog block's own top-left cell, or nil when the dialog has
 	// no meaningful cursor right now. The caller adds the origin
-	// the dialog was composited at; a Dialog never needs to know
+	// the dialog was composited at; a dialog never needs to know
 	// where on screen it was placed.
 	DialogCursor(width int, m *Model) *tea.Cursor
 }
@@ -81,8 +81,8 @@ type cursorDialog interface {
 // nil when the stack is empty or the front-most dialog has no text
 // surface. Mirrors Render: only the FRONT dialog is consulted,
 // because only the front dialog receives keystrokes.
-func (o *Overlay) cursor(width int, m *Model) *tea.Cursor {
-	front := o.Front()
+func (o *overlay) cursor(width int, m *Model) *tea.Cursor {
+	front := o.front()
 	if front == nil {
 		return nil
 	}
@@ -275,7 +275,7 @@ func (m Model) modalCursor(modal string) (c *tea.Cursor, covered bool) {
 		return nil, true
 	case m.sideAnswer != nil:
 		return nil, true // read-only viewer
-	case m.overlayStack.HasDialogs():
+	case m.overlayStack.hasDialogs():
 		// An inline question covers nothing: it is drawn in the
 		// transcript, not over the frame, so the caret belongs to the
 		// composer exactly as it would with no modal open. Answering

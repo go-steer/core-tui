@@ -301,6 +301,16 @@ library without these. Frozen at 1.0.
 
 #### Render extension points (25)
 
+> **Carried out.** All 25 are unexported as of v0.22 — `Focusable` (deleted
+> outright) and `ToolRenderer` in
+> [#213](https://github.com/go-steer/core-tui/issues/213), four in
+> [#254](https://github.com/go-steer/core-tui/issues/254), the remaining
+> nineteen in [#257](https://github.com/go-steer/core-tui/issues/257).
+> `RawRenderable` was deleted rather than unexported: taking it off the
+> surface made the compiler report what the table below could not, which is
+> that nothing had ever type-asserted to it. The table is left as the
+> snapshot it was — this note is the status, the rows are the audit.
+
 `Dialog`, `Item`, `Focusable`, `RawRenderable`, `ToolRenderer`, `Overlay`,
 `RenderContext`, `Scrollbar` and the text-input dialog helpers are a coherent,
 well-documented extension surface — `ToolRenderer`'s own comment calls itself
@@ -358,6 +368,12 @@ the subpackage question (§4); the two are independent.
 | `ToolRenderer` | type | `toolrender.go:47` | **unexport** |
 
 #### Styling (4)
+
+> **Carried out**, in [#257](https://github.com/go-steer/core-tui/issues/257),
+> on the conditional this section states: `ToolRenderer` was unexported, so
+> these four followed. `Styles` is `styleSet` rather than `styles`, because 63
+> parameters were already spelled `styles Styles` and Go resolves a
+> parameter's type in the scope its own name is declared in.
 
 `Styles` is load-bearing for `ToolRenderer.RenderCall`, and `NewStyles` /
 `NewStylesWithTheme` are the only ways to obtain one. Their fate is therefore

@@ -184,12 +184,12 @@ type bannerLayout struct {
 // any rune is missing from the face, which is the signal to fall back
 // to the plain wordmark line.
 //
-// Colours come from the same place Styles.RenderWordmark takes them,
+// Colours come from the same place styleSet.renderWordmark takes them,
 // and for the same reason: a theme that defines a WordmarkSequence has
 // said something specific about how its brand is coloured, and the
 // banner is the largest possible place to honour it. The Google theme
 // gets its logo sequence at five rows tall rather than one.
-func layoutBanner(text string, styles Styles) (bannerLayout, bool) {
+func layoutBanner(text string, styles styleSet) (bannerLayout, bool) {
 	runes := []rune(strings.ToUpper(text))
 	if len(runes) == 0 {
 		return bannerLayout{}, false
@@ -252,8 +252,8 @@ func bannerZoneAt(x, width, frame int) bannerZone {
 // bannerStyle resolves a cell's zone to the style it paints in.
 // settled is the glyph's own colour — the wordmark sequence entry or
 // the theme Primary — so the state the banner ends in is exactly the
-// state Styles.RenderWordmark would have produced at one row tall.
-func bannerStyle(styles Styles, settled color.Color, zone bannerZone) lipgloss.Style {
+// state styleSet.renderWordmark would have produced at one row tall.
+func bannerStyle(styles styleSet, settled color.Color, zone bannerZone) lipgloss.Style {
 	switch zone {
 	case bannerEdge:
 		return lipgloss.NewStyle().Foreground(styles.Theme.Accent).Bold(true)
@@ -275,7 +275,7 @@ func bannerStyle(styles Styles, settled color.Color, zone bannerZone) lipgloss.S
 // Runs are keyed on (lit, zone) rather than on the resolved style,
 // because two lipgloss.Style values cannot be compared for equality —
 // and the pair is what the style is derived from anyway.
-func renderBannerBlock(layout bannerLayout, styles Styles, frame int, plain bool) string {
+func renderBannerBlock(layout bannerLayout, styles styleSet, frame int, plain bool) string {
 	var b strings.Builder
 	for row := 0; row < bannerGlyphRows; row++ {
 		if row > 0 {

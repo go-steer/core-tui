@@ -78,7 +78,7 @@ const detailMaxLines = 400
 // Never returns an error — detail is a nice-to-have, NEVER blocks
 // tool-row rendering or dialog display. Malformed args/response
 // get a "(unrenderable: …)" muted line instead of panicking.
-func renderToolDetail(args, response map[string]any, errStr string, styles Styles) string {
+func renderToolDetail(args, response map[string]any, errStr string, styles styleSet) string {
 	sections := make([]string, 0, 3)
 
 	if len(args) > 0 {
@@ -121,7 +121,7 @@ func renderToolDetail(args, response map[string]any, errStr string, styles Style
 //
 // The error banner needs the same pass for its own reason — see
 // renderDetailError.
-func renderDetailSection(label string, payload map[string]any, styles Styles) string {
+func renderDetailSection(label string, payload map[string]any, styles styleSet) string {
 	head := styles.Muted.Render(detailIndent + label + ":")
 	body := sanitizeContent(marshalPretty(payload))
 	body = capBytesPerLine(body, detailValueByteCap)
@@ -144,7 +144,7 @@ func renderDetailSection(label string, payload map[string]any, styles Styles) st
 // rendered as prose, not as a JSON value. So it takes
 // sanitizeContent explicitly: strip and escape, but no length cap,
 // because "show me everything" is the whole point of the overlay.
-func renderDetailError(errStr string, styles Styles) string {
+func renderDetailError(errStr string, styles styleSet) string {
 	text := strings.TrimSpace(errStr)
 	if text == "" {
 		text = "(failed)"

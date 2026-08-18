@@ -45,7 +45,7 @@ const subagentDialogPreferredWidth = 96
 
 // subagentBodyHeight is how many log rows fit at the current terminal
 // height. Unlike the tool-call overlay this dialog puts nothing extra
-// inside Body, so its chrome is exactly RenderContext's own.
+// inside Body, so its chrome is exactly renderContext's own.
 //
 // Shared with the tool-call overlay until issue #149; the two have
 // different chrome, and the helper they shared knew neither of them.
@@ -90,47 +90,47 @@ func newSubagentDialog(name string) *subagentDialog {
 
 func (d *subagentDialog) ID() string { return subagentDialogID }
 
-func (d *subagentDialog) HandleKey(stroke string, m *Model) DialogAction {
+func (d *subagentDialog) HandleKey(stroke string, m *Model) dialogAction {
 	viewport := subagentBodyHeight(m.height)
 	maxScroll := nonNeg(d.lastBody - viewport)
 	switch stroke {
 	case "esc":
-		return DialogAction{Consumed: true, Close: true}
+		return dialogAction{Consumed: true, Close: true}
 	case "up", "k":
 		if d.scroll > 0 {
 			d.scroll--
 		}
 		d.pinned = false
-		return DialogAction{Consumed: true}
+		return dialogAction{Consumed: true}
 	case "down", "j":
 		if d.scroll < maxScroll {
 			d.scroll++
 		}
 		d.pinned = d.scroll >= maxScroll
-		return DialogAction{Consumed: true}
+		return dialogAction{Consumed: true}
 	case "pgup":
 		d.scroll = nonNeg(d.scroll - viewport)
 		d.pinned = false
-		return DialogAction{Consumed: true}
+		return dialogAction{Consumed: true}
 	case "pgdown", "pgdn":
 		d.scroll = min(maxScroll, d.scroll+viewport)
 		d.pinned = d.scroll >= maxScroll
-		return DialogAction{Consumed: true}
+		return dialogAction{Consumed: true}
 	case "home", "g":
 		d.scroll = 0
 		d.pinned = false
-		return DialogAction{Consumed: true}
+		return dialogAction{Consumed: true}
 	case "end", "G":
 		d.scroll = maxScroll
 		d.pinned = true
-		return DialogAction{Consumed: true}
+		return dialogAction{Consumed: true}
 	}
 	// Unhandled key — consume so it doesn't leak to the composer
 	// behind the modal, but don't close.
-	return DialogAction{Consumed: true}
+	return dialogAction{Consumed: true}
 }
 
-// ScrollBy implements ScrollDialog: mouse-wheel ticks move the log,
+// ScrollBy implements scrollDialog: mouse-wheel ticks move the log,
 // and scrolling up off the bottom releases the follow-the-tail pin
 // exactly as the arrow keys do.
 func (d *subagentDialog) ScrollBy(delta int, m *Model) {
@@ -201,19 +201,19 @@ func (d *subagentDialog) Render(totalWidth int, m *Model) string {
 
 	visible := scrollView(m.styles, bodyLines, content, viewport, d.scroll)
 
-	return RenderContext{
+	return renderContext{
 		Title:  "Subagent " + GlyphSeparator + " " + d.name,
 		Body:   strings.Join(visible, "\n"),
 		Footer: subagentDialogFooter(len(bodyLines), viewport, d.pinned),
 		Width:  width,
 		Height: m.height,
 		Styles: m.styles,
-	}.Render()
+	}.render()
 }
 
 // bodyLines builds the whole scrollable body: status header, the
 // untruncated report, then the turn log.
-func (d *subagentDialog) bodyLines(styles Styles, width int) []string {
+func (d *subagentDialog) bodyLines(styles styleSet, width int) []string {
 	var out []string
 	out = append(out, d.headerLine(styles))
 
@@ -255,7 +255,7 @@ func (d *subagentDialog) bodyLines(styles Styles, width int) []string {
 
 // headerLine is the status banner: state, uptime, and what the tail
 // has counted so far.
-func (d *subagentDialog) headerLine(styles Styles) string {
+func (d *subagentDialog) headerLine(styles styleSet) string {
 	var parts []string
 	if d.hasInfo && d.info.Status != "" {
 		parts = append(parts, subagentStatusChip(d.info.Status, styles))
@@ -277,7 +277,7 @@ func (d *subagentDialog) headerLine(styles Styles) string {
 
 // subagentStatusChip colors the state word: running reads as active,
 // failed as an error, everything else stays muted.
-func subagentStatusChip(status string, styles Styles) string {
+func subagentStatusChip(status string, styles styleSet) string {
 	switch strings.ToLower(status) {
 	case "running":
 		return styles.Accent.Render(GlyphToolActive + " running")
@@ -290,7 +290,7 @@ func subagentStatusChip(status string, styles Styles) string {
 }
 
 // sectionRule renders a `── report ──────` divider.
-func sectionRule(label string, styles Styles, width int) string {
+func sectionRule(label string, styles styleSet, width int) string {
 	head := GlyphRule + GlyphRule + " " + label + " "
 	return styles.Muted.Render(head + strings.Repeat(GlyphRule, nonNeg(width-lipgloss.Width(head))))
 }

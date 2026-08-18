@@ -626,17 +626,23 @@ The capability map and adapter sketches generalize. Replace
 "cogo" / "core-agent" with your own agent types and follow the same
 four-step adapter contract from §1.
 
-**v0.22 removed `Dialog`-adjacent symbols I can see in my editor —
-`KeyMsgDialog`, `Overlay.HandleKey`, `NewTextInputDialog`,
-`TextInputConfig`. What is the migration?**
+**v0.22 removed the whole render-extension surface I can see in my
+editor — `Dialog`, `DialogAction`, `Overlay` and its methods, `Item`,
+`RawRenderable`, `RenderContext`, `ScrollDialog`, `Scrollbar`,
+`KeyMsgDialog`, `NewTextInputDialog`, `TextInputConfig`, and the
+`Styles` / `NewStyles` / `NewStylesWithTheme` trio. What is the
+migration?**
 There isn't one, and that is the point of the removal
-([#254](https://github.com/go-steer/core-tui/issues/254)). Building a
-dialog is only half of opening one: the other half is an `Overlay`, and
-the only `Overlay` in existence is an unexported field of `Model`. So
-an implementation of `KeyMsgDialog`, or a `TextInputConfig` you filled
-in outside this module, compiled and then had nowhere to go. If your
-adapter names one of these it is in dead code, and deleting it is the
-whole recipe.
+([#254](https://github.com/go-steer/core-tui/issues/254) for the first
+four, [#257](https://github.com/go-steer/core-tui/issues/257) for the
+rest). Building a dialog is only half of opening one: the other half is
+an `Overlay`, and the only `Overlay` in existence is an unexported
+field of `Model`. `Dialog.HandleKey` and `Item.Render` are handed a
+`*Model` whose every field is unexported, so an implementation of
+either compiled and could then do nothing with its argument. A `Styles`
+you built had no exported consumer left once `ToolRenderer` went. If
+your adapter names any of these it is in dead code, and deleting it is
+the whole recipe.
 
 The dialogs an operator actually sees are opened by core-tui itself in
 response to your capability interfaces — `PermissionPrompter`,
@@ -645,8 +651,16 @@ those changed. `SessionInput` in particular is untouched: an action row
 still opens a text input, and `SessionInput.Submit` still has the
 signature it always had.
 
-`docs/api-surface.md` §3.2 recommends the same treatment for the rest
-of the render-extension set, for the same reason. If you are relying on
-one of those and would be hurt by its removal, that is worth an issue —
-a seam somebody is really using is a different argument from a seam
-nobody can reach.
+Theming did not go with them, and the distinction matters if you skim
+the list: `Theme`, `BuiltinThemes`, `ThemeByName` and `ThemeChangedMsg`
+are exported and supported, because `Options.InitialThemeName` and
+`Options.ForceTheme` are documented in terms of them. What you can no
+longer do is *construct a style bundle yourself*; what you could never
+do is hand one to core-tui.
+
+That completes `docs/api-surface.md` §3.2's unexport recommendations.
+If you were relying on one of these and are hurt by its removal, that
+is worth an issue — a seam somebody is really using is a different
+argument from a seam nobody can reach, and the seams are addable
+compatibly, which is precisely why removing them first was the safe
+order.
