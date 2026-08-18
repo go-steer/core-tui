@@ -745,25 +745,60 @@ The order, with where each step now stands:
   [#247](https://github.com/go-steer/core-tui/issues/247). They are not
   separable: H3's win *is* the width-keyed per-item cache, which is
   H1's list. Sequencing them apart would build the drag mode on top of
-  the thing it depends on. F4 — the width contract belongs to the
-  producer, so truncate on the cache-miss path — belongs to this item
-  too.
+  the thing it depends on. **Both halves have landed**: H1's list as
+  [#161](https://github.com/go-steer/core-tui/issues/161), H3's drag
+  behaviour as #247, which stops re-wrapping the visible rows on every
+  event of a drag and does it once, on the leading event and again
+  40 ms after the pointer stops.
+  - **F4 — "the width contract belongs to the producer, so truncate on
+    the cache-miss path" — is closed as already-done, and its
+    prescription is wrong for this codebase.** The contract is
+    enforced, but at the *draw* site (`chatCutLine`, `tui/chatlist.go`)
+    rather than on the way into the render cache, and it is sited there
+    because cutting on the cache-miss path is exactly what
+    [#154](https://github.com/go-steer/core-tui/issues/154) had to
+    undo: a cached row already cut to the window has no columns left to
+    pan to. Drawing is strictly stronger — every line the frame
+    contains passes through it, including the live tail and the fold
+    summary, which the cache-side version had to be applied to
+    separately — and it costs one cut per drawn line per frame, which
+    the window bounds like everything else on that path. Recorded
+    because the spike's phrasing reads as an instruction, and following
+    it would re-break panning.
 - **Step 3 — H4 falls out for free** once items are individually
   invalidatable. [#248](https://github.com/go-steer/core-tui/issues/248).
   Nothing beyond a prerendered frame table, which `tui/spinner.go`
   already has, and pausing off-screen animation. The 3000 ms verb hold
   can go.
 
-**Tradeoff acknowledged:** H3's fourth clause was **not answered**. A
-suppression-only arm — the Glamour pass suppressed *without* the lazy
-list — was never built, so the criterion that would have demoted H1 was
-never run on its own terms. What is known is that the library already
-ships a debounce, which is a suppression mechanism, and the drag
-numbers above *are* that debounce measured under a real drag, missing
-the gate by 4–15×. That is evidence against suppression-alone in its
-current form, not proof that no stronger suppression would do. #247
-carries building that arm as its first task. Separately, the spike
-never exercised the mouse, selection, search or copy paths, never grew
-a corpus during a run (so cache eviction was never designed), wrote
-every probe to `io.Discard`, and ran on one Linux box — the ratios are
-the trustworthy part, not the absolutes.
+**H3's fourth clause is now answered, and it does not demote H1.** The
+spike never built the suppression-only arm — the Glamour pass
+suppressed *without* the lazy list — so the criterion that would have
+demoted H1 was never run on its own terms. #247 built it and measured
+both sides against a real `tea.Program`, with events enqueued from
+outside the loop and every frame charged with the oldest event not yet
+on screen (`tui/dragprobe_test.go`):
+
+| turns | baseline p95 | leading-edge suppression p95 |
+|---|---|---|
+| 0 | 3.4 ms | 3.2 ms |
+| 10 | 17.1 ms | 7.5 ms |
+| 100 | 15.4 ms | 6.6 ms |
+| 400 | 15.1 ms | 6.9 ms |
+| 1000 | 16.5 ms | 7.8 ms |
+
+The reading is that neither mechanism is sufficient alone and both are
+cheap. The baseline column already has the lazy list under it, which is
+why it is 15 ms rather than the spike's 143 ms — the list is what makes
+the per-event cost flat in transcript length, and suppression is what
+takes the last ~10 ms of Glamour off the event, because a 40-row window
+is still two assistant turns and a Glamour render of one is ~5 ms.
+There was nothing left to *bound*; the only thing left was to not do
+the work. The price is convergence after the last event, ~8 ms to
+~22 ms, paid once per drag after the pointer has already stopped.
+
+**Tradeoff acknowledged:** the spike never exercised the mouse,
+selection, search or copy paths, never grew a corpus during a run (so
+cache eviction was never designed), wrote every probe to `io.Discard`,
+and ran on one Linux box — the ratios are the trustworthy part, not the
+absolutes.

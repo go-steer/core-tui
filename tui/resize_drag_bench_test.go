@@ -104,12 +104,26 @@ func newBenchDragModel(turns int) Model {
 	m.refreshViewport()
 	// Retire the reflow the startup WindowSizeMsg armed (0 → base
 	// width is a width change) so the drag starts from a settled
-	// model, the way a real session does.
+	// model, the way a real session does. The visible tick first:
+	// it is what clears reflowHot, and a model that still thinks a
+	// drag is in flight would treat the first event of the NEXT one
+	// as a continuation rather than a leading edge (issue #247).
+	m = deliverResizeVisibleTick(m)
 	for m.reflowPending {
 		out, _ = m.Update(resizeReflowMsg{gen: m.resizeGen})
 		m = out.(Model)
 	}
 	return m
+}
+
+// deliverResizeVisibleTick hands the model the visible tick a real
+// runtime would deliver resizeVisibleWindow after the last event of
+// a drag (issue #247). Delivering the msg directly rather than
+// running the returned tea.Tick Cmd keeps the debounce interval out
+// of tests and benchmarks that are measuring the work, not the wait.
+func deliverResizeVisibleTick(m Model) Model {
+	out, _ := m.Update(resizeReflowMsg{gen: m.resizeGen, visible: true})
+	return out.(Model)
 }
 
 // benchmarkResizeDrag measures a whole drag: dragBurst consecutive
@@ -154,6 +168,7 @@ func BenchmarkResizeEvent400(b *testing.B) { benchmarkResizeEvent(b, 400) }
 // keeps the sleeps out of the measurement — what's being measured is
 // the work the ticks do, not the debounce interval itself.
 func drainResizeSettle(b *testing.B, m Model) Model {
+	m = deliverResizeVisibleTick(m)
 	for i := 0; m.reflowPending; i++ {
 		if i > 100000 {
 			b.Fatal("resize reflow never retired")

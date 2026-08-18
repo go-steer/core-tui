@@ -137,10 +137,10 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		// Issue #104: this used to re-render EVERY assistant message
 		// through Glamour right here, inline — 91.5ms per event at
 		// 100 turns, paid once per event for the whole stream of
-		// them a pane drag emits. beginResizeReflow instead reflows
-		// only what is on screen (bounded by viewport height) and
-		// returns a settle tick that warms the rest incrementally
-		// once the drag stops. See resize.go.
+		// them a pane drag emits. Issue #247 took the rest: the event
+		// now runs no Glamour at all, and beginResizeReflow returns
+		// the tick that re-wraps the screen once the drag pauses. See
+		// resize.go.
 		var cmd tea.Cmd
 		if widthChanged {
 			cmd = m.beginResizeReflow()
@@ -149,13 +149,16 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		return m, cmd
 
 	case resizeReflowMsg:
-		// Settle / warm tick for a width change (issue #104). The
-		// generation guard is the same shape as the sessionGen
-		// checks below: multiple drags can have ticks in flight, and
-		// a tick from a superseded drag must not resume a walk whose
-		// target width is no longer current.
+		// Visible / settle / warm tick for a width change (issues
+		// #104, #247). The generation guard is the same shape as the
+		// sessionGen checks below: multiple drags can have ticks in
+		// flight, and a tick from a superseded drag must not resume a
+		// walk whose target width is no longer current.
 		if msg.gen != m.resizeGen {
 			return m, nil
+		}
+		if msg.visible {
+			return m, m.finishResizeDrag()
 		}
 		return m, m.continueResizeReflow()
 

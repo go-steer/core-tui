@@ -24,31 +24,60 @@
 //
 // The shape here is three-phase:
 //
-//  1. **Per event** — reflow only the messages the operator can
-//     actually see (chatVisitWindow), then schedule a settle tick.
-//     Bounded by viewport height, not by transcript length, so the
-//     cost per event no longer grows with session age.
-//  2. **On settle** — resizeSettleWindow after the LAST event, warm
-//     the rest of the transcript.
-//  3. **Warming** — in resizeWarmChunk-sized slices separated by
-//     resizeWarmTick, never as one synchronous burst, so no single
-//     frame blocks for a perceptible time.
+//  1. **Per event** — re-wrap only the messages the operator can
+//     actually see (chatVisitWindow), and only on the LEADING event
+//     of a drag; every event behind it does nothing but the geometry
+//     (issue #247, and see below). Bounded by viewport height, not
+//     by transcript length.
+//  2. **On visible settle** — resizeVisibleWindow after the last
+//     event, re-wrap the visible window again, this time at the
+//     width the drag came to rest at.
+//  3. **On backlog settle** — resizeSettleWindow after that, warm
+//     the rest of the transcript in resizeWarmChunk-sized slices
+//     separated by resizeWarmTick, never as one synchronous burst,
+//     so no single frame blocks for a perceptible time.
 //
 // Every tick carries the resizeGen stamp taken when it was
 // scheduled (same guard style as the sessionGen checks in
-// update.go). A settle or warm tick whose stamp is stale belongs to
-// a superseded drag and is dropped, so a slow callback can never
-// clobber the state of a newer resize.
+// update.go). A visible, settle or warm tick whose stamp is stale
+// belongs to a superseded drag and is dropped, so a slow callback
+// can never clobber the state of a newer resize.
 //
-// The invariant this preserves: anything ON SCREEN is rendered at
-// the current width — reflowVisible runs from refreshViewport too,
-// so a scroll into cold backlog mid-warm reflows the rows it exposes
-// in that same frame. Off-screen backlog is left at the previous
-// width until the warm sequence reaches it, and since #161 that is
-// harmless by construction rather than by timing: an item-addressed
-// transcript never draws a row it has not rendered at the current
-// width, so a row that has not been reflowed yet is a row nothing has
-// asked for.
+// Why the events behind the leading one do no work at all (issue
+// #247). The per-event visible reflow was already bounded — at a
+// 40-row viewport it re-Glamoured about two assistant messages per
+// event, flat in transcript length, which is what #104 and #161 were
+// for. It was still 79% of the event's cost, because a single
+// Glamour render of a 500-byte assistant turn measures ~5ms and that
+// is a property of Glamour, not of anything this package can shrink:
+// rendering the string "hello world" through Glamour's own bundled
+// dark style measures ~0.3ms. Two of those per event put a drag's
+// p95 at 15-17ms — on the wrong side of a 16ms frame, with a window
+// already bounded by the viewport and nothing left to bound. So the
+// events in the middle of a drag draw the rows they already have,
+// cut to the new width at the draw site (chatCutLine), and the
+// re-wrap is paid once the mouse stops. Measured over a real
+// tea.Program at 30 events 30ms apart: enqueue-to-frame p95 falls
+// from 15.1-17.1ms to 6.6-7.8ms and stays flat from 10 to 1000
+// turns, at the cost of taking convergence after the last event from
+// ~8ms to ~22ms.
+//
+// The invariant that gives up: for up to resizeVisibleWindow after a
+// width change mid-drag, an on-screen row may be wrapped for a
+// PREVIOUS width. Narrowing, it is cut and the operator sees a
+// clipped right edge; widening, it is short of the new margin. Both
+// resolve in one frame once the drag pauses. What does NOT give is
+// the line count the lazy walk budgets against — chatCutLine cuts
+// per drawn line precisely so the row's height is unchanged — so the
+// window stays exact and the scroll geometry never lurches, and
+// nothing is ever drawn WIDER than the terminal.
+//
+// Off-screen backlog is left at the previous width until the warm
+// sequence reaches it, and since #161 that is harmless by
+// construction rather than by timing: an item-addressed transcript
+// never draws a row it has not rendered at the current width, so a
+// row that has not been reflowed yet is a row nothing has asked
+// for.
 
 package tui
 
@@ -59,12 +88,23 @@ import (
 )
 
 const (
-	// resizeSettleWindow is how long the drag must be quiet before
-	// the transcript-wide reflow starts. Long enough to swallow a
-	// whole drag (terminals emit resize events every few ms while
-	// the mouse moves), short enough that the operator does not
-	// perceive the settle as a separate event: releasing the mouse
-	// and seeing the backlog reflow reads as one action.
+	// resizeVisibleWindow is how long the drag must be quiet before
+	// the ON-SCREEN rows are re-wrapped. This is the one the operator
+	// feels, so it is the short one: long enough to swallow the gap
+	// between two events of a continuous drag (terminals emit them
+	// every few ms while the mouse moves, and a stuttering drag over
+	// a loaded SSH link is still well inside this), short enough that
+	// a pause mid-drag reads as the text catching up rather than as a
+	// delay. Deliberately far below the ~100ms at which a pointer
+	// gesture stops feeling direct.
+	resizeVisibleWindow = 40 * time.Millisecond
+
+	// resizeSettleWindow is how much longer the drag must stay quiet,
+	// after the visible re-wrap, before the transcript-wide reflow
+	// starts. The backlog is off screen by definition, so this one is
+	// not perceived at all — it only has to be long enough that a
+	// drag which resumes after a brief pause doesn't start warming
+	// 400 turns at a width it is about to leave.
 	resizeSettleWindow = 120 * time.Millisecond
 
 	// resizeWarmWindow is the gap between warm slices. It exists to
@@ -80,16 +120,31 @@ const (
 	resizeWarmChunk = 8
 )
 
-// resizeReflowMsg drives both phases of the debounced reflow: the
-// settle tick scheduled by the WindowSizeMsg handler, and each
+// resizeReflowMsg drives every phase of the debounced reflow after
+// the event itself: the visible tick scheduled by the WindowSizeMsg
+// handler, the backlog settle tick that follows it, and each
 // follow-on warm tick. gen is the resizeGen stamp captured when the
 // tick was scheduled — the Update handler drops the msg when it no
 // longer matches, which is what makes a superseded drag's callbacks
-// harmless.
-type resizeReflowMsg struct{ gen uint64 }
+// harmless. visible distinguishes the first tick from the rest;
+// without it a stale-width row would have to be told apart from a
+// cold backlog row by inspecting the transcript, and the two are the
+// same row in different states.
+type resizeReflowMsg struct {
+	gen     uint64
+	visible bool
+}
 
-// resizeSettleTick fires resizeReflowMsg once the drag has been
-// quiet for resizeSettleWindow.
+// resizeVisibleTick fires the on-screen re-wrap once the drag has
+// been quiet for resizeVisibleWindow.
+func resizeVisibleTick(gen uint64) tea.Cmd {
+	return tea.Tick(resizeVisibleWindow, func(time.Time) tea.Msg {
+		return resizeReflowMsg{gen: gen, visible: true}
+	})
+}
+
+// resizeSettleTick fires the first backlog slice once the drag has
+// been quiet for a further resizeSettleWindow.
 func resizeSettleTick(gen uint64) tea.Cmd {
 	return tea.Tick(resizeSettleWindow, func(time.Time) tea.Msg {
 		return resizeReflowMsg{gen: gen}
@@ -104,12 +159,29 @@ func resizeWarmTick(gen uint64) tea.Cmd {
 }
 
 // beginResizeReflow is the width-change half of the WindowSizeMsg
-// handler. It stamps a fresh generation, reflows what the operator
-// can see right now, and returns the settle tick that will warm the
-// rest once the drag stops. Runs in Update (never in a Cmd) — it
+// handler. It stamps a fresh generation, re-wraps the screen if this
+// is the leading edge, and returns the visible tick that will re-wrap
+// it once the drag pauses. Runs in Update (never in a Cmd) — it
 // mutates history.
+//
+// Leading-edge, not purely trailing: the FIRST width change after a
+// quiet period pays the re-wrap synchronously, and only the events
+// behind it are suppressed. Three reasons. A lone resize — a tmux
+// pane bound to a key, a tiling WM snapping the window, the very
+// first sizing of the program, where there is no previous width to
+// fall back on and the rows have never been wrapped at all — is one
+// event, and it should land in the frame it arrived in rather than
+// 40ms later. A drag pays the cost once at the top and then runs
+// free, which is the shape the operator feels as "it kept up". And
+// the leading frame is the one the eye is least able to time, because
+// it is simultaneous with the mouse-down.
 func (m *Model) beginResizeReflow() tea.Cmd {
 	m.resizeGen++
+	// reflowHot doubles as "a drag is already in flight": it is set
+	// at the bottom of this function and cleared by the visible tick,
+	// so reading it here — before the write — is exactly the
+	// leading-edge test.
+	leading := !m.reflowHot
 	m.reflowPending = true
 	m.reflowCursor = 0
 	// Only messages that already existed at the moment of the width
@@ -118,8 +190,42 @@ func (m *Model) beginResizeReflow() tea.Cmd {
 	// width by the commit path, so the reflow must leave it alone —
 	// otherwise every repaint during a long-lived pending reflow
 	// would re-Glamour fresh rows for nothing.
+	//
+	// Taken per event rather than only on the first event of a drag:
+	// each event is its own width change, and a turn that finalized
+	// between two of them is current at the width it committed to,
+	// not at this one.
 	m.reflowMaxID = m.history.LastID()
-	m.reflowVisible()
+	if leading {
+		m.reflowVisible()
+	}
+	m.reflowHot = true
+	return resizeVisibleTick(m.resizeGen)
+}
+
+// finishResizeDrag is the visible tick's handler: the drag has
+// stopped moving, so the rows on screen can be re-wrapped and the
+// backlog settle can be scheduled behind them. Returns the repaint
+// plus that tick.
+func (m *Model) finishResizeDrag() tea.Cmd {
+	// Cleared before the pending check: reflowHot is what tells the
+	// next width change it is a leading edge, and a drag that ended
+	// with nothing left to reflow still ended.
+	m.reflowHot = false
+	if !m.reflowPending {
+		return nil
+	}
+	// refreshViewport runs reflowVisible itself, in the middle: after
+	// the tail is rebuilt (which decides where a following operator's
+	// window starts) and before the offset clamp (which needs the
+	// line counts the re-wrap just changed). Calling it directly here
+	// as well would only walk the window twice.
+	//
+	// Direct, not the coalescing path: this frame is the one the
+	// operator has been waiting on since they stopped dragging, and
+	// the 1ms coalescing window exists to merge paints nobody is
+	// waiting on.
+	m.refreshViewport()
 	return resizeSettleTick(m.resizeGen)
 }
 
@@ -158,9 +264,18 @@ func (m *Model) continueResizeReflow() tea.Cmd {
 
 // reflowVisible re-renders the assistant messages inside the current
 // viewport window at the current width. Bounded by viewport height
-// rather than transcript length — this is the work a resize event is
-// allowed to do synchronously. No-op unless a reflow is pending, so
-// the common repaint path pays one bool check.
+// rather than transcript length. No-op unless a reflow is pending, so
+// the common repaint path pays one bool check — and no-op while the
+// drag is hot, which is the whole of #247: this is the pass that
+// costs ~5ms per on-screen assistant turn, and a drag cannot afford
+// it at any window size.
+//
+// The hot check lives here rather than at the call sites because
+// refreshViewport is one of them: a repaint that lands mid-drag —
+// a stream chunk, a spinner frame — must not quietly do the work the
+// resize handler just declined to do. beginResizeReflow's leading
+// edge calls this BEFORE setting the flag, which is how one event of
+// a drag gets the re-wrap and the rest do not.
 //
 // The walk is chatVisitWindow's, which re-wraps a row and then
 // measures it to decide whether to continue. Ordering the two that way
@@ -172,7 +287,7 @@ func (m *Model) continueResizeReflow() tea.Cmd {
 // a reflow is pending, and copying the whole transcript to look at a
 // screenful of it costs ~220KB per repaint at 400 turns.
 func (m *Model) reflowVisible() {
-	if !m.reflowPending {
+	if !m.reflowPending || m.reflowHot {
 		return
 	}
 	mr := m.ensureMarkdown()
