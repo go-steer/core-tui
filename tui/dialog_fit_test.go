@@ -181,7 +181,7 @@ func modalFitCases() []modalFitCase {
 				})
 				return out.(Model)
 			},
-			render:        func(m *Model) string { return m.renderElicitModal() },
+			render:        func(m *Model) string { return m.overlayStack.Render(m.width, m) },
 			footer:        "esc cancel",
 			footerPairs:   []string{"tab next field", "enter submit", "ctrl+d decline", "esc cancel"},
 			title:         "an-mcp-server-with-a-long-name",

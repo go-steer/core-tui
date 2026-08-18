@@ -76,7 +76,7 @@ func pickerModels() []ModelInfo {
 // open site makes was wrong.
 func askModelPicker(m *Model, wired bool) *modelPickerQuestion {
 	q := newModelPickerQuestion(wired)
-	m.overlayStack.ask(q, modelPickerResolver(q))
+	m.overlayStack.ask(q, askOperator, modelPickerResolver(q))
 	return q
 }
 

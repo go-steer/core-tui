@@ -176,14 +176,14 @@ func TestElicitGrace_HoldsCommitKeysOnly(t *testing.T) {
 	m = out.(Model)
 	out, _ = m.Update(elicitRequestMsg{serverName: "srv", req: req})
 	m = out.(Model)
-	if m.elicitShownAt.IsZero() {
-		t.Fatal("setup: elicitRequestMsg did not stamp elicitShownAt")
+	if m.overlayStack.asked(elicitDialogID).shownAt.IsZero() {
+		t.Fatal("setup: elicitRequestMsg did not stamp the grace window")
 	}
 
 	// Enter inside the window must not submit.
 	out, _ = m.Update(tea.KeyPressMsg(tea.Key{Code: tea.KeyEnter}))
 	m = out.(Model)
-	if m.pendingElicit == nil {
+	if m.openElicit() == nil {
 		t.Fatal("Enter submitted the form inside the grace window")
 	}
 	select {
@@ -195,20 +195,20 @@ func TestElicitGrace_HoldsCommitKeysOnly(t *testing.T) {
 	// Editing and navigation are unaffected — they're visible and
 	// reversible, and nothing leaves the TUI until a commit.
 	m = typeWord(m, "ada")
-	if got, _ := m.elicitValues["user"].(string); got != "ada" {
+	if got, _ := m.openElicit().values["user"].(string); got != "ada" {
 		t.Errorf("field edits blocked during the grace window: user = %q", got)
 	}
 	out, _ = m.Update(tea.KeyPressMsg(tea.Key{Code: tea.KeyTab}))
 	m = out.(Model)
-	if m.elicitFieldIdx != 1 {
-		t.Errorf("Tab nav blocked during the grace window: fieldIdx = %d", m.elicitFieldIdx)
+	if idx := m.openElicit().idx; idx != 1 {
+		t.Errorf("Tab nav blocked during the grace window: fieldIdx = %d", idx)
 	}
 
 	// Past the window, Enter submits and the values reach the host.
-	m.elicitShownAt = time.Now().Add(-modalInputGrace - time.Millisecond)
+	m = pastGrace(m)
 	out, _ = m.Update(tea.KeyPressMsg(tea.Key{Code: tea.KeyEnter}))
 	m = out.(Model)
-	if m.pendingElicit != nil {
+	if m.openElicit() != nil {
 		t.Fatal("Enter after the grace window did not submit")
 	}
 	select {
@@ -224,17 +224,83 @@ func TestElicitGrace_HoldsCommitKeysOnly(t *testing.T) {
 	}
 }
 
-// A Model whose modal state was set directly (tests, hosts poking at
-// fields) has a zero stamp and must behave as it always did.
+// A modal whose state was set directly (tests, hosts poking at
+// fields) has a zero stamp and must behave as it always did. It is
+// also what an OPERATOR-opened question carries, so the same three
+// lines pin both readings.
 func TestModalGrace_ZeroStampIsExpired(t *testing.T) {
-	var m Model
-	if m.withinGrace(time.Time{}) {
+	if withinGrace(time.Time{}) {
 		t.Error("a zero stamp must read as expired, not as a fresh modal")
 	}
-	if !m.withinGrace(time.Now()) {
+	if !withinGrace(time.Now()) {
 		t.Error("a stamp from now must be inside the window")
 	}
-	if m.withinGrace(time.Now().Add(-modalInputGrace - time.Millisecond)) {
+	if withinGrace(time.Now().Add(-modalInputGrace - time.Millisecond)) {
 		t.Error("a stamp older than the window must read as expired")
+	}
+}
+
+// A question the operator opened carries no stamp at all, so nothing
+// it does is ever held — typing "/theme", pressing enter and typing
+// again is one continuous act, and there is no buffered input to
+// protect against. The elicit form is the control: same overlay, same
+// gate, opened by the agent.
+func TestModalGrace_OperatorOpenedQuestionsAreNeverHeld(t *testing.T) {
+	var m Model
+	q := newThemePickerQuestion(BuiltinThemes(), "default")
+	m.overlayStack.ask(q, askOperator, nil)
+	aq := m.overlayStack.asked(themePickerDialogID)
+	if !aq.shownAt.IsZero() {
+		t.Fatal("an operator-opened question was stamped")
+	}
+	if aq.held(keyMsgFromStroke("enter")) {
+		t.Error("enter was held on a picker the operator opened themselves")
+	}
+}
+
+// Esc is exempt from the window at the seam, for every question that
+// will ever have one: it dismisses, which is the fail-safe direction,
+// and a buffered esc costs at most a re-ask — while a HELD esc leaves
+// the operator pressing the one key that visibly does nothing on a
+// modal they are trying to get out of.
+func TestModalGrace_EscIsExemptForAgentOpenedQuestions(t *testing.T) {
+	var m Model
+	m.overlayStack.ask(
+		newElicitQuestion("srv", ElicitRequest{
+			Fields: []ElicitField{{Name: "user", Type: ElicitFieldString}},
+		}),
+		askAgent, nil)
+	aq := m.overlayStack.asked(elicitDialogID)
+	if aq.shownAt.IsZero() {
+		t.Fatal("setup: an agent-opened question was not stamped")
+	}
+	if aq.held(keyMsgFromStroke("esc")) {
+		t.Error("esc was held during the grace window")
+	}
+	if !aq.held(keyMsgFromStroke("enter")) {
+		t.Error("enter was not held during the grace window")
+	}
+}
+
+// The fail-safe default for a question that does not implement
+// gracedQuestion is to hold EVERYTHING. A widget whose author has not
+// said which of its keys are irreversible is a widget we cannot
+// assume any of them are not; the cost of the default is a third of a
+// second of inertness, and the cost of guessing wrong is an answer
+// the operator never gave.
+func TestModalGrace_UndeclaredQuestionsHoldEveryKey(t *testing.T) {
+	var m Model
+	m.overlayStack.ask(&probeQuestion{id: "probe"}, askAgent, nil)
+	aq := m.overlayStack.asked("probe")
+	if _, ok := aq.q.(gracedQuestion); ok {
+		t.Fatal("setup: probeQuestion declares Commits, so it proves nothing here")
+	}
+	for _, stroke := range []string{"enter", "y", "tab", "ctrl+d"} {
+		if !aq.held(keyMsgFromStroke(stroke)) {
+			t.Errorf("%q was not held on a question that never said which keys commit", stroke)
+		}
+	}
+	if aq.held(keyMsgFromStroke("esc")) {
+		t.Error("esc was held; the exemption is not conditional on the extension")
 	}
 }

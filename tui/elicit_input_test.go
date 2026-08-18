@@ -27,30 +27,43 @@ import (
 	"github.com/charmbracelet/x/ansi"
 )
 
-// elicitStringForm returns a model parked on a one-field string form,
-// ready for handleElicitKey.
-func elicitStringForm(t *testing.T) *Model {
+// elicitStringForm returns a one-field string form, ready for Key.
+//
+// No Model, no NewModel, no resize. Driving a question to completion
+// without an app model is the property #164 was for, and these four
+// tests are the first to spend it — the predecessor needed a
+// fully-built Model because the form's state lived on one.
+//
+// Keystrokes go through keyMsgFromStroke rather than being handed to
+// the widget as raw strings, because a question reads tea.KeyPressMsg
+// and the normalization is part of what is under test: " " arrives as
+// "space", which is exactly the stroke the old handler mishandled.
+func elicitStringForm(t *testing.T) *elicitQuestion {
 	t.Helper()
-	m := NewModel(Options{Agent: &bareAgent{id: "a"}})
-	m.width, m.height = 100, 24
-	m.resize()
-	m.pendingElicit = &ElicitRequest{
+	return newElicitQuestion("srv", ElicitRequest{
 		Title:  "form",
 		Fields: []ElicitField{{Name: "who", Type: ElicitFieldString}},
+	})
+}
+
+// typeIntoForm feeds word to the form one rune at a time and fails if any
+// of it ended the question.
+func typeIntoForm(t *testing.T, q *elicitQuestion, word string) {
+	t.Helper()
+	for _, r := range word {
+		if ans, _ := q.Key(keyMsgFromStroke(string(r))); ans != nil {
+			t.Fatalf("typing %q answered the question with %T", string(r), ans)
+		}
 	}
-	m.elicitValues = map[string]any{}
-	return &m
 }
 
 // Issue #91: the append guard counted bytes, so every printable rune
 // outside ASCII (2-4 bytes) was silently dropped.
 func TestElicitKey_AppendsNonASCIIRunes(t *testing.T) {
 	for _, word := range []string{"abc", "café", "über", "日本語", "😀🙂", "naïve 中"} {
-		m := elicitStringForm(t)
-		for _, r := range word {
-			m.handleElicitKey(string(r))
-		}
-		got, _ := m.elicitValues["who"].(string)
+		q := elicitStringForm(t)
+		typeIntoForm(t, q, word)
+		got, _ := q.values["who"].(string)
 		if got != word {
 			t.Errorf("typed %q, field holds %q", word, got)
 		}
@@ -61,38 +74,44 @@ func TestElicitKey_AppendsNonASCIIRunes(t *testing.T) {
 // and left invalid UTF-8 in the value handed to the host.
 func TestElicitKey_BackspaceRemovesWholeRunes(t *testing.T) {
 	for _, word := range []string{"abc", "café", "日本語", "😀🙂"} {
-		m := elicitStringForm(t)
-		for _, r := range word {
-			m.handleElicitKey(string(r))
-		}
+		q := elicitStringForm(t)
+		typeIntoForm(t, q, word)
 		runes := []rune(word)
 		for i := len(runes); i > 0; i-- {
-			got, _ := m.elicitValues["who"].(string)
+			got, _ := q.values["who"].(string)
 			if want := string(runes[:i]); got != want {
 				t.Fatalf("%q: after %d backspaces field = %q, want %q", word, len(runes)-i, got, want)
 			}
 			if !utf8.ValidString(got) {
 				t.Fatalf("%q: field holds invalid UTF-8 %q (% x)", word, got, got)
 			}
-			m.handleElicitKey("backspace")
+			q.Key(keyMsgFromStroke("backspace"))
 		}
-		if got, _ := m.elicitValues["who"].(string); got != "" {
+		if got, _ := q.values["who"].(string); got != "" {
 			t.Errorf("%q: after backspacing every rune, field = %q, want empty", word, got)
 		}
 		// One more on an empty field is a no-op, not a panic.
-		m.handleElicitKey("backspace")
+		q.Key(keyMsgFromStroke("backspace"))
 	}
 }
 
 // The rune count must still reject the named multi-rune strokes, and
 // IsPrint must keep a bare control rune out of the value.
 func TestElicitKey_IgnoresNamedAndControlStrokes(t *testing.T) {
-	m := elicitStringForm(t)
-	m.handleElicitKey("h")
-	for _, stroke := range []string{"ctrl+b", "shift+f1", "delete", "\x00", "\x1b"} {
-		m.handleElicitKey(stroke)
+	q := elicitStringForm(t)
+	typeIntoForm(t, q, "h")
+	// A raw \x1b is deliberately not in this list any more. The
+	// predecessor took stroke STRINGS, where "\x1b" was one unnamed
+	// control rune to drop on the floor; a question takes keystrokes,
+	// and the key whose code is 0x1b is Escape, which dismisses. That
+	// answer is asserted in
+	// TestElicitForm_DeclineAndCancelAreDifferentAnswers.
+	for _, stroke := range []string{"ctrl+b", "shift+f1", "delete", "\x00"} {
+		if ans, _ := q.Key(keyMsgFromStroke(stroke)); ans != nil {
+			t.Fatalf("%q answered the question with %T", stroke, ans)
+		}
 	}
-	if got, _ := m.elicitValues["who"].(string); got != "h" {
+	if got, _ := q.values["who"].(string); got != "h" {
 		t.Errorf("named / control strokes leaked into the field: %q, want \"h\"", got)
 	}
 }
@@ -100,16 +119,14 @@ func TestElicitKey_IgnoresNamedAndControlStrokes(t *testing.T) {
 // A host-seeded default containing multi-byte runes survives editing:
 // the value dispatched back is the same string the operator sees.
 func TestElicitKey_SeededDefaultRoundTrips(t *testing.T) {
-	m := elicitStringForm(t)
-	m.elicitValues["who"] = "Zoë"
-	m.handleElicitKey("backspace")
-	if got, _ := m.elicitValues["who"].(string); got != "Zo" {
+	q := elicitStringForm(t)
+	q.values["who"] = "Zoë"
+	q.Key(keyMsgFromStroke("backspace"))
+	if got, _ := q.values["who"].(string); got != "Zo" {
 		t.Fatalf("backspace over ë left %q (% x), want \"Zo\"", got, got)
 	}
-	for _, r := range "ë 😀" {
-		m.handleElicitKey(string(r))
-	}
-	got, _ := m.elicitValues["who"].(string)
+	typeIntoForm(t, q, "ë 😀")
+	got, _ := q.values["who"].(string)
 	if got != "Zoë 😀" {
 		t.Errorf("round-trip left %q, want %q", got, "Zoë 😀")
 	}
@@ -142,7 +159,7 @@ func elicitFlowFor(t *testing.T, req ElicitRequest) (Model, chan ElicitResult) {
 	m = out.(Model)
 	out, _ = m.Update(elicitRequestMsg{serverName: "srv", req: req})
 	m = out.(Model)
-	if m.pendingElicit == nil {
+	if m.openElicit() == nil {
 		t.Fatal("setup: elicitRequestMsg did not open the modal")
 	}
 	return m, results
@@ -150,8 +167,15 @@ func elicitFlowFor(t *testing.T, req ElicitRequest) (Model, chan ElicitResult) {
 
 // pastGrace backdates the modal's arrival so the keys that commit a
 // result are live. modal_grace_test.go owns the window itself.
+//
+// It reaches for the askedQuestion rather than for the question: the
+// stamp belongs to the seam, not to the widget, which is what lets
+// every future agent-opened question inherit the window without
+// writing any of it.
 func pastGrace(m Model) Model {
-	m.elicitShownAt = time.Now().Add(-modalInputGrace - time.Millisecond)
+	if aq := m.overlayStack.asked(elicitDialogID); aq != nil {
+		aq.shownAt = time.Now().Add(-modalInputGrace - time.Millisecond)
+	}
 	return m
 }
 
@@ -181,7 +205,7 @@ func TestElicitForm_DeclinesOnCtrlD(t *testing.T) {
 
 	out, cmd := m.Update(keyPress("ctrl+d"))
 	m = out.(Model)
-	if m.pendingElicit != nil {
+	if m.openElicit() != nil {
 		t.Fatal("ctrl+d left the modal open — the form still has no reachable decline")
 	}
 	if cmd == nil {
@@ -221,7 +245,7 @@ func TestElicitForm_DeclineAndCancelAreDifferentAnswers(t *testing.T) {
 
 			out, _ := m.Update(keyPress(tc.stroke))
 			m = out.(Model)
-			if m.pendingElicit != nil {
+			if m.openElicit() != nil {
 				t.Fatalf("%s left the modal open", tc.stroke)
 			}
 			if got := awaitElicit(t, results).Action; got != tc.want {
@@ -247,17 +271,16 @@ func TestElicitForm_DeclineSkipsRequiredFieldValidation(t *testing.T) {
 	m = pastGrace(m)
 	out, _ := m.Update(keyPress("enter"))
 	m = out.(Model)
-	if m.pendingElicit == nil {
+	if m.openElicit() == nil {
 		t.Fatal("precondition: Enter submitted with the required field empty")
 	}
-	if m.elicitFieldIdx != 1 {
-		t.Fatalf("precondition: Enter left the cursor on field %d, want the missing one (1)",
-			m.elicitFieldIdx)
+	if idx := m.openElicit().idx; idx != 1 {
+		t.Fatalf("precondition: Enter left the cursor on field %d, want the missing one (1)", idx)
 	}
 
 	out, _ = m.Update(keyPress("ctrl+d"))
 	m = out.(Model)
-	if m.pendingElicit != nil {
+	if m.openElicit() != nil {
 		t.Fatal("ctrl+d was refused on a form with an empty required field — " +
 			"validation gates submission, not declining")
 	}
@@ -275,13 +298,13 @@ func TestElicitForm_DeclineIsHeldDuringTheGraceWindow(t *testing.T) {
 		Title:  "creds",
 		Fields: []ElicitField{{Name: "user", Type: ElicitFieldString}},
 	})
-	if m.elicitShownAt.IsZero() {
-		t.Fatal("setup: elicitRequestMsg did not stamp elicitShownAt")
+	if m.overlayStack.asked(elicitDialogID).shownAt.IsZero() {
+		t.Fatal("setup: elicitRequestMsg did not stamp the grace window")
 	}
 
 	out, _ := m.Update(keyPress("ctrl+d"))
 	m = out.(Model)
-	if m.pendingElicit == nil {
+	if m.openElicit() == nil {
 		t.Fatal("ctrl+d declined inside the grace window")
 	}
 	select {
@@ -293,7 +316,7 @@ func TestElicitForm_DeclineIsHeldDuringTheGraceWindow(t *testing.T) {
 	m = pastGrace(m)
 	out, _ = m.Update(keyPress("ctrl+d"))
 	m = out.(Model)
-	if m.pendingElicit != nil {
+	if m.openElicit() != nil {
 		t.Fatal("ctrl+d after the grace window did not decline")
 	}
 	if got := awaitElicit(t, results).Action; got != ElicitActionDecline {
@@ -339,7 +362,7 @@ func TestElicitModal_AdvertisesTheKeysItHonors(t *testing.T) {
 			plain := func(s string) string {
 				return unbindLegend(ansi.Strip(s))
 			}
-			if got := plain(m.renderElicitModal()); !strings.Contains(got, tc.key) {
+			if got := plain(m.overlayStack.Render(m.width, &m)); !strings.Contains(got, tc.key) {
 				t.Errorf("the modal footer does not offer %q:\n%s", tc.key, got)
 			}
 			if got := plain(m.footerHint()); !strings.Contains(got, tc.key) {
@@ -377,7 +400,7 @@ func TestElicitURLMode_ActionRow(t *testing.T) {
 
 			out, _ := m.Update(keyPress(tc.stroke))
 			m = out.(Model)
-			if m.pendingElicit != nil {
+			if m.openElicit() != nil {
 				t.Fatalf("%s left the modal open", tc.stroke)
 			}
 			if got := awaitElicit(t, results).Action; got != tc.want {
@@ -490,7 +513,7 @@ func TestElicit_UnsupportedSchemaIsRefusedAndRecorded(t *testing.T) {
 		t.Run(tc.name, func(t *testing.T) {
 			m, replies, cmd := unsupportedElicitFlow(t, tc.req, tc.server)
 
-			if m.pendingElicit != nil {
+			if m.openElicit() != nil {
 				t.Error("a modal opened for a schema the modal cannot draw")
 			}
 			assertRefusedNotDeclined(t, awaitElicitReply(t, replies), tc.reason)

@@ -269,8 +269,6 @@ func (m Model) modalCursor(modal string) (c *tea.Cursor, covered bool) {
 	switch {
 	case m.pendingPermission != nil && m.opts.PermissionLayout == PermissionOverlay:
 		return nil, true // decision keys only
-	case m.pendingElicit != nil:
-		c = m.elicitCursor()
 	case m.pendingForm != nil:
 		// huh renders its own caret and exposes no tea.Cursor in the
 		// pinned huh/v2 v2.0.3, so there is nothing to forward. Left
@@ -297,69 +295,6 @@ func (m Model) modalCursor(modal string) (c *tea.Cursor, covered bool) {
 	c.X += placeCenterOffset(m.width, lipgloss.Width(modal))
 	c.Y += placeCenterOffset(m.height, lipgloss.Height(modal))
 	return c, true
-}
-
-// elicitCursor returns the caret for the elicit form's focused
-// field, relative to the modal block's top-left cell.
-//
-// The elicit form is not a bubbles widget — renderElicitField prints
-// "label: value" rows and handleElicitKey appends runes to the end of
-// the focused field's value — so the caret is derived from the same
-// row format the renderer uses, and always sits at the end of the
-// typed value.
-func (m Model) elicitCursor() *tea.Cursor {
-	req := m.pendingElicit
-	if req == nil || req.Mode == ElicitURLMode || len(req.Fields) == 0 {
-		return nil
-	}
-	idx := m.elicitFieldIdx
-	if idx < 0 || idx >= len(req.Fields) {
-		return nil
-	}
-	f := req.Fields[idx]
-	switch f.Type {
-	case ElicitFieldString, ElicitFieldNumber, ElicitFieldInteger:
-	case ElicitFieldBoolean, ElicitFieldEnum:
-		// Booleans toggle with space and enums cycle with ←/→ —
-		// neither accepts typed text, so neither owns a caret.
-		return nil
-	default:
-		return nil
-	}
-
-	// Which body row the focused field starts on. elicitFormLines is
-	// re-run rather than threaded out of renderElicitModal: a field
-	// row can be two lines (description), so "field index" is not
-	// "row index", and the walk is a handful of Sprintf calls.
-	_, focusRow := m.elicitFormLines(modalBodyWidth(m.elicitModalWidth()))
-
-	// Subtract the scroll offset the render just settled on. View
-	// calls renderElicitModal before this, and modalScroll is a
-	// pointer field, so sc holds the post-render geometry. A focused
-	// field scrolled out of the window has no on-screen caret.
-	sc := m.modalScroll
-	if sc != nil && sc.view > 0 && sc.total > sc.view {
-		focusRow -= sc.offset
-		if focusRow < 0 || focusRow >= sc.view {
-			return nil
-		}
-	}
-
-	// Column: the focused row is rendered as the "> " marker, the
-	// padded label, a space, then the value — see renderElicitField.
-	// Measured with ansi.StringWidth so a label or value carrying
-	// wide runes counts terminal CELLS, not bytes or runes.
-	label := f.Name
-	if f.Required {
-		label += "*"
-	}
-	typed, _ := m.elicitValues[f.Name].(string)
-	x := ansi.StringWidth(elicitFieldRow(label+":", "")) + ansi.StringWidth(typed)
-
-	// Modal-local: the box edge and Padding(0, 1) put content two
-	// columns in, and the chrome spends three rows (box edge, title
-	// line, blank) above the body.
-	return tea.NewCursor(x+modalContentX, focusRow+modalBodyTop)
 }
 
 // placeCenterOffset is the leading padding lipgloss.Place adds when

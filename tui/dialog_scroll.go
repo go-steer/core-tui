@@ -503,6 +503,12 @@ func (o *Overlay) HandleWheel(delta int, m *Model) (consumed bool, cmd tea.Cmd) 
 		sd.ScrollBy(delta, m)
 		return true, nil
 	}
+	// Questions declare the same capability through scrollQuestion.
+	// Asked separately because the adapter wraps every question, so it
+	// cannot answer the type assertion above on only some of them.
+	if aq, ok := front.(*askedQuestion); ok && aq.scrollBy(delta) {
+		return true, nil
+	}
 	// Cursor dialogs (the pickers): one selection step per tick,
 	// not wheelScrollLines of them — a wheel nudge that jumps three
 	// models past the one you wanted is worse than no wheel at all.
