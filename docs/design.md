@@ -457,6 +457,7 @@ type SwitchTarget struct {
     UsageTracker UsageTracker        // nil = keep existing
     Prompter     PermissionPrompter  // nil = keep
     Elicitor     Elicitor            // nil = keep
+    Asker        Asker               // nil = keep
     Notifier     *Notifier           // nil = keep
     Memory       []MemoryFile        // nil = keep; non-nil replaces
     Skills       []SkillInfo         // nil = keep; non-nil replaces
@@ -821,7 +822,7 @@ const (
 (provider configs, MCP transport, allow patterns) is the host's own
 struct and never crosses into the TUI.
 
-### 3.5 The two prompter / elicitor interfaces
+### 3.5 The three prompter / elicitor / asker interfaces
 
 These are slightly different from the capability interfaces: the TUI
 *implements* them and the host wires them into its gate / MCP servers.
@@ -883,37 +884,64 @@ type Elicitor interface {
     Elicit(ctx context.Context, serverName string, req ElicitRequest) (ElicitResult, error)
 }
 
-// UserPrompter — SPECIFIED, NOT SHIPPED as of v0.21.0. Neither the
-// interface nor NewUserPrompter() exists in package tui; whether to
-// build it or drop R-PROMPT-1 is stage 5 of issue #164, which is
-// gated on §14 Q1 of docs/design-question-dialogs.md. Hosts needing
-// agent-initiated questions today route them through Elicitor.
+// Asker is the agent's own question to the operator (R-PROMPT-1),
+// shipped in v0.23.0 as stage 5 of issue #164. Hosts pass the value
+// returned by tui.NewAsker() into their ask-the-user tool; the call
+// blocks on the modal until the operator answers, declines, or ctx
+// cancels. Distinct from Elicitor (MCP-server-initiated, form-shaped)
+// — this is the agent itself asking one discrete question.
 //
-// As specified: implemented by the TUI, with hosts passing the value
-// returned by tui.NewUserPrompter() into their agent so the agent
-// can call AskUser mid-turn for structured multiple-choice input
-// (R-PROMPT-1). Distinct from Elicitor (MCP-server-initiated, form-
-// shaped) — this is the agent itself asking a discrete question.
-type UserPrompter interface {
-    AskUser(ctx context.Context, req UserPromptRequest) (UserPromptResponse, error)
+// It was specified as UserPrompter / AskUser and shipped under the
+// Asker name: the surface grew from one multiple-choice shape to five
+// (§10.3 of docs/design-question-dialogs.md), and "prompter" was
+// already spoken for by the permission path.
+type Asker interface {
+    Ask(ctx context.Context, req AskRequest) (AskResult, error)
 }
 
-type UserPromptRequest struct {
-    Question     string       // shown bold at the top of the modal
-    Description  string       // optional dim subtitle below the question
-    Choices      []UserChoice // ≥ 2 entries; renders as a huh.Select
-    DefaultIndex int          // index of the initially highlighted choice
+// AskKind picks the modal shape: single-select, multi-select, yes/no,
+// one-line text, or long text edited in $VISUAL / $EDITOR. A kind the
+// TUI cannot draw is refused with ErrAskUnsupported before any modal
+// opens — never as a decline, which is an operator's word (issue
+// #209).
+type AskKind int
+
+const (
+    AskChoice AskKind = iota
+    AskMultiChoice
+    AskConfirm
+    AskText
+    AskLongText
+)
+
+type AskRequest struct {
+    Kind        AskKind
+    Title       string      // modal header; defaults when empty
+    Prompt      string      // the question, above the answer widget
+    Choices     []AskOption // rows for AskChoice / AskMultiChoice
+    Placeholder string      // AskText / AskLongText hint
+    Initial     string      // starting buffer; the agent's draft
+    Source      string      // subagent name, empty for the parent
 }
 
-type UserChoice struct {
-    Label       string // primary text on the row
-    Description string // optional dim subtitle for the row
-    Value       string // round-tripped back as Response.Selected on confirm
+type AskOption struct {
+    ID          string
+    Label       string
+    Description string
 }
 
-type UserPromptResponse struct {
-    Selected  string // the chosen UserChoice.Value
-    Cancelled bool   // true when the operator pressed Esc
+type AskAction int
+
+const (
+    AskAnswered AskAction = iota
+    AskDeclined
+    AskCancelled
+)
+
+type AskResult struct {
+    Action    AskAction
+    ChoiceIDs []string // picked IDs; "yes" / "no" for AskConfirm
+    Text      string   // AskText / AskLongText value, trimmed
 }
 ```
 

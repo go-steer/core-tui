@@ -347,7 +347,8 @@ type declined struct{}
 //
 // Callers: the model picker, the session picker, the theme picker,
 // enum fields inside an elicit form, URL-mode accept, and R-PROMPT-1's
-// unbuilt AskUser. ID is the stable option identity supplied by
+// AskChoice (unbuilt when this was written; shipped in v0.23.0 as the
+// agent's own question). ID is the stable option identity supplied by
 // whoever built the option list; Index is its position in the list
 // AS FILTERED, and is provided because three of those callers already
 // track an index and one (the theme picker's live preview) is
@@ -1229,11 +1230,11 @@ question path today that **cannot be answered by the operator when the
 TUI is running** — the one arrangement in which an operator is
 demonstrably sitting there.
 
-That is exactly `requirements.md` §3.19 R-PROMPT-1, which is marked
-"⚠️ specified, not shipped as of v0.21.0 — neither `UserPrompter` nor
-`NewUserPrompter()` exists in `package tui`. Whether to build it or
-drop this requirement is stage 5 of issue #164, gated on §14 Q1
-below." Stage 5 of this design is what would build it.
+That is exactly `requirements.md` §3.19 R-PROMPT-1, which carried
+"⚠️ specified, not shipped" from v0.19.0 to v0.22.0 — neither
+`UserPrompter` nor `NewUserPrompter()` existed in `package tui`.
+Stage 5 of this design is what built it, in v0.23.0 (issue #255); the
+⚠️ is off.
 
 The minimal shape, mirroring D5/D6 exactly:
 
@@ -1258,7 +1259,13 @@ const (
 	AskLongText                   // editor-backed free text
 )
 
-type AskChoice struct {
+// Shipped as AskOption. This block as first written does not
+// compile: AskChoice is also the name of the first AskKind constant
+// above, and Go has one package scope for both. The kind constants
+// keep their names — they are the vocabulary the rest of this section
+// speaks in — and the struct takes the name §7.2 already gives its
+// in-package equivalent (`option`).
+type AskOption struct {
 	ID          string
 	Label       string
 	Description string
@@ -1268,7 +1275,7 @@ type AskRequest struct {
 	Kind        AskKind
 	Title       string
 	Prompt      string
-	Choices     []AskChoice // AskChoice / AskMultiChoice
+	Choices     []AskOption // AskChoice / AskMultiChoice
 	Placeholder string      // AskText / AskLongText
 	Initial     string      // AskText / AskLongText
 	// Source is the originating sub-agent name, empty for the
@@ -1299,10 +1306,20 @@ func NewAsker() Asker
 Plus `Options.Asker Asker` — a field addition, non-breaking by
 Go-module rules and by `docs/design.md` §8's own statement.
 
-**Exported symbols added: 17** (`Asker`, `AskKind` + 5 constants,
-`AskChoice`, `AskRequest`, `AskAction` + 3 constants, `AskResult`,
-`NewAsker`, `Options.Asker`). All additions → `verify-apidiff`
-reports **compatible**, no `api-breaks.txt` entry.
+**Exported symbols added: 16** (`Asker`, `AskKind` + 5 constants,
+`AskOption`, `AskRequest`, `AskAction` + 3 constants, `AskResult`,
+`NewAsker`, `Options.Asker`). The count said 17 as first written,
+which only reached 17 by counting `AskChoice` twice — once as a kind
+constant and once as the struct now named `AskOption`. All additions →
+`verify-apidiff` reports **compatible**, no `api-breaks.txt` entry.
+
+**Shipped as 18**, the two extras decided at implementation time and
+both compatible: `ErrAskUnsupported`, because an undrawable request is
+an error and not the operator's decline — the bug issue #209 had just
+finished removing from the elicit path, and shipping a new surface
+with it would not have been a saving; and `SwitchTarget.Asker`, for
+symmetry with `Prompter` / `Elicitor`, without which
+`applySwitchTarget` has a hole a host cannot reach past.
 
 Note what this is *not*: it is not `Answer`. The host boundary keeps
 the enum-plus-payload idiom that `ElicitResult` and
@@ -1621,16 +1638,19 @@ entry is correspondingly not a recipe: with no way for a host to have
 reached any of the four, the upgrade action is to delete the
 reference.
 
-**Stage 5 (optional, gated on §14 Q1) — `Asker`. Issue #255,
-scheduled for v0.23.** The 17 exported additions from §10.3,
-`Options.Asker`, the `AskLongText` / `editorQuestion` member, and a
-`examples/local` demonstration. Purely additive; Q1's precondition
-("only after stage 3 has landed and proved the internal contract") was
-met on 2026-08-18, so the slip is a sequencing call and not a design
-one — v0.22 carries the break and this is the item that can move
-without blocking anything else. The cost is that R-PROMPT-1 keeps its
-⚠️ for another release and core-agent's `ask_user` stays unanswerable
-under the TUI.
+**Stage 5 — `Asker`. Issue #255, shipped in v0.23.0.** The §10.3
+additions (16 as designed, 18 as shipped), `Options.Asker`, the
+`AskLongText` editor round trip, and an `examples/local`
+demonstration. Purely additive, so a host that sets no `Options.Asker`
+sees nothing change. Three surfaces cover the five kinds — a list
+(single-select, multi-select and the yes/no row), a one-line input,
+and the editor-backed long form — and all three are questions on the
+seam stage 3 built, which is what kept the stage to widgets plus
+wiring. The long form suspends the Program with `tea.ExecProcess`, a
+first for this package: the editor's exit lands as a message and
+resolves the question through `overlay.resolve`, the async-answer seam
+the model picker established. R-PROMPT-1's ⚠️ is off and
+core-agent's `ask_user` is answerable under the TUI.
 
 **Stage 6 — `multiSelectQuestion` + R-PERM-4.** Gated on Q3.
 
@@ -1674,7 +1694,11 @@ requirement cannot stay in that state through a 1.0.
 **Recommendation: yes, and before the freeze, as stage 5 —
 but only after stage 3 has landed and proved the internal contract.**
 If stage 3 slips, drop R-PROMPT-1 from `requirements.md` rather than
-shipping `Asker` on an unproven base.
+shipping `Asker` on an unproven base. **Resolved 2026-08-18: yes.**
+Stage 3 landed, the condition held, and stage 5 shipped in v0.23.0
+(issue #255). Not 17 additions either way: 16 as designed once the
+name counted twice is removed, 18 as shipped. Both corrections are
+recorded at the foot of §10.3.
 
 **Q2. Sealed interface, or enum-plus-payload struct, inside the
 package?**

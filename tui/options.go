@@ -155,6 +155,15 @@ type Options struct {
 	// (R-ELIC-1). Construct via tui.NewElicitor().
 	Elicitor Elicitor
 
+	// Asker is the TUI-provided Asker that the host wires into its
+	// agent's ask-the-user tool (R-PROMPT-1). Construct via
+	// tui.NewAsker(). The TUI drains the request channel and opens a
+	// modal per question; nil leaves the tool to whatever the host did
+	// before, which for a stdin-reading implementation means it should
+	// disable the tool under the TUI rather than contend for the
+	// terminal.
+	Asker Asker
+
 	// Notifier is the host-facing side channel for chat rows
 	// that don't belong to the agent event stream (issue #30):
 	// reconnect notices, host-shutdown warnings, multi-attach

@@ -76,6 +76,7 @@ import (
 	"flag"
 	"fmt"
 	"os"
+	"strconv"
 	"strings"
 	"time"
 
@@ -163,6 +164,78 @@ func demoElicitAfter(e tui.Elicitor, delay time.Duration) {
 			{Name: "visibility", Type: tui.ElicitFieldEnum, EnumChoices: []string{"public", "private", "internal"}, Default: "private"},
 		},
 	})
+}
+
+// demoAskAfter walks the five AskKinds, one after another, so the
+// visual preview demos every shape the agent's own question can take
+// (R-PROMPT-1). Each call blocks until the operator answers, so the
+// questions queue up behind each other exactly as an agent's would;
+// what came back is echoed into the transcript through the Notifier,
+// which is the only way a demo can show the operator what the AGENT
+// received rather than what they clicked.
+//
+// A real host calls Ask from its ask-the-user tool and hands the
+// result to the model.
+func demoAskAfter(a tui.Asker, n *tui.Notifier, delay time.Duration) {
+	time.Sleep(delay)
+	for _, req := range []tui.AskRequest{
+		{
+			Kind:   tui.AskConfirm,
+			Title:  "before I continue",
+			Prompt: "The migration touches 41 files. Run it?",
+		},
+		{
+			Kind:   tui.AskChoice,
+			Prompt: "Which strategy should I use for the rename?",
+			Choices: []tui.AskOption{
+				{ID: "gopls", Label: "gopls rename", Description: "type-aware, misses prose"},
+				{ID: "sed", Label: "regex sweep", Description: "fast, catches comments, no type check"},
+				{ID: "both", Label: "gopls then hand-edit the prose", Description: "what #257 did"},
+			},
+		},
+		{
+			Kind:   tui.AskMultiChoice,
+			Prompt: "Which presubmits should I run before pushing?",
+			Choices: []tui.AskOption{
+				{ID: "lint", Label: "lint-go"},
+				{ID: "test", Label: "test-unit", Description: "~4 minutes"},
+				{ID: "apidiff", Label: "verify-apidiff"},
+				{ID: "cover", Label: "verify-coverage", Description: "needs a fresh coverage.out"},
+			},
+		},
+		{
+			Kind:        tui.AskText,
+			Prompt:      "What should the branch be called?",
+			Placeholder: "feat/…",
+			Initial:     "feat/asker",
+		},
+		{
+			// Suspends the whole Program into $VISUAL / $EDITOR and
+			// takes the saved buffer back as the answer. Refused
+			// before it opens when neither variable is set — the
+			// operator gets a transcript row saying so, and the
+			// agent gets ErrAskUnsupported rather than a decline
+			// nobody made.
+			Kind:    tui.AskLongText,
+			Title:   "release note",
+			Prompt:  "Write the changelog entry. Saving sends it; quitting without saving does not.",
+			Initial: "**Ship the agent's own question.** …\n",
+		},
+	} {
+		res, err := a.Ask(context.Background(), req)
+		switch {
+		case err != nil:
+			n.Notify("ask: " + err.Error())
+		case res.Action == tui.AskDeclined:
+			n.Notify("ask: the operator declined")
+		case res.Action == tui.AskCancelled:
+			n.Notify("ask: cancelled")
+		case res.Text != "":
+			n.Notify("ask: the agent received " + strconv.Quote(res.Text))
+		default:
+			n.Notify("ask: the agent received " + fmt.Sprint(res.ChoiceIDs))
+		}
+	}
 }
 
 // demoModels is the /model catalog. The entries are deliberately
@@ -321,6 +394,8 @@ func main() {
 
 	prompter := tui.NewPrompter()
 	elicitor := tui.NewElicitor()
+	asker := tui.NewAsker()
+	notifier := tui.NewNotifier()
 
 	// Fire a fake permission prompt + elicit request a few seconds
 	// after launch so the visual preview demos both modals end-to-
@@ -328,6 +403,10 @@ func main() {
 	// MCP servers.
 	go demoPermissionAfter(prompter, 8*time.Second)
 	go demoElicitAfter(elicitor, 18*time.Second)
+	// And the agent's own question (R-PROMPT-1), last, because it
+	// walks all five kinds and each one waits for the previous
+	// answer.
+	go demoAskAfter(asker, notifier, 28*time.Second)
 
 	opts := tui.Options{
 		// Scripted agent plays a believable coding-task turn on every
@@ -339,6 +418,8 @@ func main() {
 		Agent:        demoAgent{Agent: testagent.NewScripted(testagent.CodingDemo()), model: "anthropic/claude-sonnet-5"},
 		Prompter:     prompter,
 		Elicitor:     elicitor,
+		Asker:        asker,
+		Notifier:     notifier,
 		StatusLayout: tui.StatusHeader,
 		// QueueForNext (default) demos R-CHAT-10 — type-ahead entries
 		// buffer as ○ queued and drain on turn-end. Flip to

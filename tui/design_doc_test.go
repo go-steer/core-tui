@@ -59,12 +59,11 @@ var docNotShipped = map[string]string{
 	// Options.MentionProviders field either.
 	"MentionProvider": "R-AT-4",
 	"MentionMatch":    "R-AT-4",
-	// R-PROMPT-1, agent-initiated multiple-choice questions. §3.5
-	// has carried the "SPECIFIED, NOT SHIPPED" note since v0.19.0.
-	"UserPrompter":       "R-PROMPT-1",
-	"UserPromptRequest":  "R-PROMPT-1",
-	"UserChoice":         "R-PROMPT-1",
-	"UserPromptResponse": "R-PROMPT-1",
+	// R-PROMPT-1 came off this list in v0.23.0 (issue #255): §3.5
+	// quoted UserPrompter / UserPromptRequest / UserChoice /
+	// UserPromptResponse, and what shipped is Asker / AskRequest /
+	// AskOption / AskResult, which the section now declares and this
+	// test checks against source like every other entry.
 }
 
 // TestDesignDocDeclarationsMatchSource compares every type quoted in

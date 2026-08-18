@@ -566,22 +566,33 @@ listed in `/help`:
 
 ### 3.19 Agent-driven prompts (should)
 
-- **R-PROMPT-1** (⚠️ specified, not shipped as of v0.21.0 — neither
-  `UserPrompter` nor `NewUserPrompter()` exists in `package tui`.
-  Whether to build it or drop this requirement is stage 5 of issue
-  #164, gated on §14 Q1 of `docs/design-question-dialogs.md`.)
-  When the host wires the TUI-supplied `UserPrompter`
-  into its agent, the agent may call `AskUser` mid-turn to elicit a
-  structured multiple-choice answer from the operator. The TUI
-  renders a blocking modal listing the choices (label + optional
-  dim description per row); ↑↓ to navigate, Enter to confirm, Esc to
-  cancel. On confirm, the agent receives the selected choice's
-  `Value`; on cancel, the agent receives a cancellation sentinel and
-  decides whether to retry or abort the turn. Distinct from MCP
-  elicitation (R-ELIC-1) which is server-initiated and form-shaped —
-  this is the **agent itself** asking a discrete question of the
-  user. Borrowed from the Antigravity CLI's `ask_question` tool; see
-  [`ui-references.md`](./ui-references.md).
+- **R-PROMPT-1** When the host wires the TUI-supplied `Asker`
+  (`tui.NewAsker()`, into `Options.Asker` and into its agent's
+  ask-the-user tool) the agent may call `Ask` mid-turn to put one
+  discrete question to the operator. `AskRequest.Kind` picks the
+  shape: `AskChoice` (single-select), `AskMultiChoice`,
+  `AskConfirm` (yes/no), `AskText` (one line) or `AskLongText`
+  (edited in `$VISUAL` / `$EDITOR`). The TUI opens a blocking modal;
+  ↑↓ navigates, space ticks on a multi-select, Enter answers,
+  Ctrl+D declines, Esc cancels. The three outcomes are distinct in
+  `AskResult.Action` — `AskAnswered` carries `ChoiceIDs` / `Text`,
+  `AskDeclined` is the operator saying no, `AskCancelled` is a
+  dismissal, a session switch or shutdown — and the agent decides
+  whether to retry or abort the turn. A request this TUI cannot draw
+  (a chooser with no choices, `AskLongText` with no editor
+  configured) is refused before any modal opens: the agent gets an
+  error matching `ErrAskUnsupported` and the operator gets a
+  transcript row saying so. It is never refused as a decline, which
+  would put a word in the operator's mouth (R-ELIC-3, issue #209).
+  Distinct from MCP elicitation (R-ELIC-1) which is
+  server-initiated and form-shaped — this is the **agent itself**
+  asking a discrete question of the user. Borrowed from the
+  Antigravity CLI's `ask_question` tool; see
+  [`ui-references.md`](./ui-references.md). Shipped in v0.23.0
+  (issue #255) as stage 5 of issue #164; specified as `UserPrompter`
+  / `AskUser`, shipped as `Asker` / `Ask` because the surface grew
+  from one multiple-choice shape to five and "prompter" was already
+  the permission path's word.
 
 ### 3.20 Wake signals (should)
 

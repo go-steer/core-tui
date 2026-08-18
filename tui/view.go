@@ -1281,6 +1281,13 @@ func (m Model) footerHint() string {
 		}
 		return "MCP elicitation" + sep + keyLegend(
 			"tab next field", "enter submit", "ctrl+d decline", "esc cancel")
+	case m.openAsk() != nil:
+		// The agent's own question. Below both of the above for the same
+		// z-order reason, and the legend comes off the surface rather
+		// than being restated here — the five kinds take five different
+		// key sets, and a footer that guessed which one is open would be
+		// wrong four times out of five.
+		return "Agent question" + sep + m.openAsk().legend()
 	case m.focus == focusTranscript && m.copyNotice != "":
 		// A copy leaves the frame exactly as it found it, so the only
 		// evidence it happened is this line (issue #153). It takes the
