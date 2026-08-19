@@ -23,6 +23,7 @@ import (
 	"time"
 
 	tea "charm.land/bubbletea/v2"
+	"charm.land/lipgloss/v2"
 )
 
 // pausableAgent implements Agent + Pauser. Records every call so the
@@ -487,5 +488,83 @@ func TestPauseSuccess_StaysQuiet(t *testing.T) {
 	after := out.(model)
 	if got := len(after.history.Snapshot()); got != before {
 		t.Errorf("history grew by %d on a successful hold", got-before)
+	}
+}
+
+// TestPauseBanner_IsBudgetedWhenTheGateMoves is the regression test
+// for the banner eating the bottom of the screen. The banner's rows
+// are charged in allocateChrome, which only runs from resize(), and
+// the two paths that close the gate at runtime — the push event and
+// the poll — did not call it. The frame then composed two rows over
+// m.height and clipFrame took the footer and the lower half of the
+// input box off the bottom, which reads as the banner covering the
+// prompt.
+//
+// Driven entirely through Update, with no resize() of its own: the
+// exact-grid cases in resize_budget_test.go call resize() in their
+// setup, which is exactly the step that was missing in the live path.
+func TestPauseBanner_IsBudgetedWhenTheGateMoves(t *testing.T) {
+	const w, h = 100, 24
+
+	for _, tc := range []struct {
+		name string
+		hold func(model) model
+	}{
+		{
+			name: "push event",
+			hold: func(m model) model {
+				out, _ := m.Update(pauseEventMsg{gen: m.sessionGen, event: PauseEvent{
+					State:       PauseStatePaused,
+					Reason:      "operator interrupt",
+					Interrupted: true,
+				}})
+				return out.(model)
+			},
+		},
+		{
+			name: "poll",
+			hold: func(m model) model {
+				out, _ := m.Update(hostSnapshotMsg{gen: m.sessionGen, snap: hostSnapshot{
+					hasPause: true,
+					pause: PauseInfo{
+						Paused:      true,
+						Reason:      "operator interrupt",
+						Interrupted: true,
+					},
+				}})
+				return out.(model)
+			},
+		},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			m := newModel(Options{Agent: &pausableAgent{}})
+			out, _ := m.Update(tea.WindowSizeMsg{Width: w, Height: h})
+			sized := out.(model)
+			assertBudgetExact(t, sized)
+
+			held := tc.hold(sized)
+			if !held.pause.paused() {
+				t.Fatal("the gate did not close")
+			}
+			banner := lipgloss.Height(held.renderPauseBanner(w))
+			if banner == 0 {
+				t.Fatal("no banner to budget")
+			}
+			if held.chrome.banner != banner {
+				t.Errorf("chrome.banner = %d, want %d — allocateChrome did not re-run",
+					held.chrome.banner, banner)
+			}
+			// composedRows is the height BEFORE clipFrame, which is
+			// the only place the overflow is still visible — View()'s
+			// output is clamped to h either way.
+			assertBudgetExact(t, held)
+			// And the consequence, stated in the terms the operator
+			// reported it in: the footer is the last thing View
+			// stacks, so it is the first thing an over-tall frame
+			// loses, with the bottom of the input box behind it.
+			if !strings.Contains(held.View().Content, "enter steers") {
+				t.Error("the held footer is missing — the frame overflowed and clipFrame took it")
+			}
+		})
 	}
 }

@@ -519,6 +519,11 @@ func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		if msg.snap.hasPause {
 			if next, changed := m.pause.applyPoll(msg.snap.pause, m.nowFn()); changed {
 				m.pause = next
+				// The banner is budgeted chrome, so a gate that moves
+				// has to re-run the allocation before anything is
+				// rendered against the old one (same reason as
+				// pauseEventMsg below).
+				m.resize()
 				m.refreshViewport()
 			}
 		}
@@ -1112,6 +1117,15 @@ func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		}
 		wasPaused := m.pause.Paused
 		m.pause = next
+		// Re-budget before rendering: the banner's rows are charged in
+		// allocateChrome, which only runs from resize(), and nothing
+		// else on this path calls it — refreshAndScroll resizes only
+		// when the textarea's line count changed. Without this the
+		// viewport keeps the rows the banner is now also using, the
+		// composed frame is two or three rows over m.height, and
+		// clipFrame takes the difference off the bottom: the footer
+		// and the lower half of the input box.
+		m.resize()
 		switch {
 		case next.Paused:
 			m.history.Append(Message{Role: RoleSystem, Text: pausedSystemText(next.PauseInfo)})
