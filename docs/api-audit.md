@@ -449,8 +449,10 @@ a time rather than absorbing one large breaking bump.
   bumps.) Filed as go-steer/core-agent#803.
 - Both of the above are instances of one class: capabilities are feature-detected
   by type assertion, so a near-miss is indistinguishable from a host declining
-  the capability. core-agent carries two valid `var _ coretui.X` guards across
-  roughly 27 implemented surfaces. Filed as go-steer/core-agent#804, tracked
+  the capability. core-agent carries four `var _ coretui.X` guards across
+  roughly 27 implemented surfaces, all four added by the v0.21.0 migration —
+  so the gap sits where nothing has broken yet, which is where both of the
+  above live. Filed as go-steer/core-agent#804, tracked
   together in go-steer/core-agent#805.
 - Nine stale worktrees under `.claude/worktrees/` (§1).
 
