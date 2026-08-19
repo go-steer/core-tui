@@ -300,6 +300,30 @@ type turnErrorMsg struct {
 	turnError TurnError
 }
 
+// pauseEventMsg carries the spec §2.8 pause payload (v1.5.0) — the
+// session's pause gate closing or opening. Handler folds it into
+// m.pause; the banner and footer read from there.
+type pauseEventMsg struct {
+	gen   uint64
+	event PauseEvent
+}
+
+// pauseDoneMsg carries the outcome of a Pauser.Pause call — from the
+// ESC cascade or the /pause slash. Non-nil err means the hold did not
+// land, which the operator has to know: they are about to assume an
+// agent is parked when it isn't.
+type pauseDoneMsg struct{ err error }
+
+// resumeDoneMsg carries the outcome of a Pauser.Resume call. mode
+// echoes the disposition so the follow-up system row can say what was
+// attempted when err is non-nil. On success the model waits for the
+// host's resumed PauseEvent (or the next PauseState poll) rather than
+// clearing the gate locally — the host owns the state.
+type resumeDoneMsg struct {
+	mode string
+	err  error
+}
+
 // noticeMsg carries one host-initiated notice from the
 // Options.Notifier channel through to the Update loop. Internal
 // type — hosts push via Notifier.Notify(text), they don't

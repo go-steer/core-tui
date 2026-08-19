@@ -124,14 +124,17 @@ func builtinSlashItems() []paletteItem {
 	}
 	rest := []paletteItem{
 		{Name: "allow", Description: "add allow pattern (e.g. /allow bash:git *)", Available: true},
+		{Name: "abandon", Description: "resume from a hold and drop the interrupted work", Available: true},
 		{Name: "allow bundle:", Display: "/allow bundle:<name>", Insert: "/allow bundle:", Description: "enable a built-in allow bundle (e.g. dev_tools)", Available: true, NoAutoSubmit: true},
+		{Name: "continue", Display: "/continue, /cont", Description: "resume from a hold and carry on", Available: true},
 		{Name: "deny", Description: "add deny pattern", Available: true},
-		{Name: "interrupt", Display: "/interrupt, /int", Description: "cancel the in-flight turn", Available: true},
+		{Name: "interrupt", Display: "/interrupt, /int", Description: "cancel the in-flight turn and hold the agent", Available: true},
 		{Name: "keys", Description: "show terminal + newline-keystroke diagnostic", Available: true},
 		{Name: "mcp", Description: "configured MCP servers and tools", Available: true},
 		{Name: "memory", Description: "display loaded memory files", Available: true},
 		{Name: "model", Description: "open model picker / switch model", Available: true},
 		{Name: "mouse", Description: "toggle mouse capture (placeholder)", Available: true},
+		{Name: "pause", Description: "hold the agent — no new turn starts until you resume", Available: true},
 		{Name: "permissions", Description: "review session approvals", Available: true},
 		{Name: "pricing", Description: "manage pricing (refresh / set)", Available: true},
 		{Name: "pricing refresh", Display: "/pricing refresh", Insert: "/pricing refresh", Description: "re-pull the upstream price table", Available: true},

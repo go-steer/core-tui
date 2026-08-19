@@ -88,6 +88,13 @@ type Event struct {
 	Inbox        *InboxEvent
 	TurnComplete *TurnSummary
 	TurnError    *TurnError
+
+	// Pause carries the spec §2.8 pause payload (v1.5.0) — the
+	// session's pause gate closing or opening. Hosts that also
+	// implement Pauser should populate both: the event is what makes
+	// a transition render immediately, PauseState is what makes a
+	// TUI attaching to an already-paused session render at all.
+	Pause *PauseEvent
 }
 
 // ToolCall describes a single tool invocation.

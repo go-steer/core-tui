@@ -274,6 +274,12 @@ func (m model) View() tea.View {
 		if pal != "" {
 			leftParts = append(leftParts, pal)
 		}
+		// Above the input, not below it with the toast: the banner
+		// changes what typing does (R-HOLD-4), so it has to be read
+		// before the operator's eye reaches the box.
+		if b := m.renderPauseBanner(chatWidth); b != "" {
+			leftParts = append(leftParts, b)
+		}
 		// The left column starts at column 0 of the frame, so the
 		// input box's x origin is 0 — but it is only chatWidth wide,
 		// not m.width. Row origin is the stacked height of everything
@@ -303,6 +309,9 @@ func (m model) View() tea.View {
 		}
 		if pal != "" {
 			parts = append(parts, pal)
+		}
+		if b := m.renderPauseBanner(m.width); b != "" {
+			parts = append(parts, b)
 		}
 		// Header layout: the input box spans the full width at column
 		// 0, one row below the header + chat + any open panels.
@@ -1319,6 +1328,12 @@ func (m model) footerHint() string {
 		// pgdn do here exactly what they do everywhere else.
 		return "Transcript" + sep + "↑↓ select" + sep + "space fold" + sep +
 			"g/G top/bottom" + sep + "tab/esc composer"
+	case m.pause.paused():
+		// Above the streaming arm: /pause lets a running turn finish,
+		// so both can be true, and "held" is the fact that changes
+		// what enter does. Rendered even when the banner is dismissed
+		// — dismissing hides the explanation, not the state.
+		return "Held" + sep + "enter steers" + sep + "/continue" + sep + "/abandon"
 	case m.state == stateStreaming:
 		return "Streaming…" + sep + "esc interrupt" + sep + "enter queues prompt" + sep + "ctrl+c cancel turn"
 	case m.palette != nil:
@@ -1497,6 +1512,69 @@ func (m model) renderToast(width int) string {
 		body += strings.Repeat(" ", width-w)
 	}
 	return m.styles.PermissionWarn.Render(body)
+}
+
+// renderPauseBanner draws the operator-hold banner above the input
+// box (R-HOLD-2). Renders only while the gate is shut and the
+// operator hasn't dismissed it with esc.
+//
+// Three lines, in the order the operator asks the questions: what
+// happened to my work, what can I do about it, and is anything still
+// running behind my back.
+func (m model) renderPauseBanner(width int) string {
+	if !m.pause.showBanner() || width <= 0 {
+		return ""
+	}
+	head := GlyphPaused + "  Agent held — no new turn will start"
+	if m.pause.Interrupted {
+		head = GlyphPaused + "  Interrupted — what do you want me to do instead?"
+	}
+	if r := strings.TrimSpace(m.pause.Reason); r != "" {
+		head += " (" + r + ")"
+	}
+	lines := []string{
+		head,
+		keyLegend("type to steer", "/continue to carry on", "/abandon to drop it", "esc dismiss"),
+	}
+	// The count comes from the SubagentReporter cache the sidebar
+	// already polls, not from the interrupt response: a hold stops the
+	// main loop, and an operator who assumes that means "everything
+	// stopped" is wrong in a way that costs money.
+	if n := m.runningSubagentCount(); n > 0 {
+		noun := "subagents"
+		if n == 1 {
+			noun = "subagent"
+		}
+		lines = append(lines, fmt.Sprintf("%d background %s still running", n, noun))
+	}
+	out := make([]string, len(lines))
+	for i, ln := range lines {
+		body := "  " + ln
+		if w := lipgloss.Width(body); w < width {
+			body += strings.Repeat(" ", width-w)
+		}
+		out[i] = m.styles.PermissionWarn.Render(body)
+	}
+	return strings.Join(out, "\n")
+}
+
+// runningSubagentCount reports how many subagents the cached roster
+// says are still working. Reads hostSnap rather than calling the host,
+// same as every other render-path capability read (host_snapshot.go).
+func (m model) runningSubagentCount() int {
+	if !m.hostSnap.hasSubagents {
+		return 0
+	}
+	n := 0
+	for _, s := range m.hostSnap.subagents {
+		// Same untyped vocabulary + case-fold that
+		// subagentStatusChip reads (SubagentInfo.Status is documented
+		// as "running" / "done" / "failed" / "paused").
+		if strings.EqualFold(s.Status, "running") {
+			n++
+		}
+	}
+	return n
 }
 
 // keyLegend joins key+action pairs into a "y allow once · n deny

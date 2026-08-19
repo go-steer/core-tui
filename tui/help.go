@@ -199,6 +199,12 @@ func helpSections() []helpSection {
 			{"esc", "interrupt in-flight turn (doesn't clear queue)"},
 			{"ctrl+c, ctrl+d", "exit"},
 		}},
+		{"Operator hold (hosts that can park their agent)", [][2]string{
+			{"esc", "also holds: no new turn starts until you resume"},
+			{"type + enter", "steer — your text becomes the new instruction"},
+			{"/continue · /abandon", "carry on · drop the held work"},
+			{"esc (while held)", "dismisses the banner; the agent stays held"},
+		}},
 	}
 }
 

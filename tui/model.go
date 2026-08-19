@@ -230,6 +230,16 @@ type model struct {
 	state      turnState
 	cancelTurn context.CancelFunc // non-nil while state == stateStreaming
 
+	// pause is the operator-hold gate (R-HOLD-1..4, issue #260),
+	// deliberately ORTHOGONAL to state rather than a third turnState
+	// value. state means "a Run-driven turn is in flight" and carries
+	// the cancelTurn invariant above; a paused session is usually
+	// stateIdle, is stateStreaming when /pause let a running turn
+	// finish, and in LiveAgent observer mode is stateIdle even while
+	// text streams (see turnInFlight in view.go). Folding pause into
+	// the enum would break one of those. See decisions.md D30.
+	pause pauseInfo
+
 	// turnStarted is when the current spinner animation began, and
 	// is what the thinking line's elapsed readout counts from
 	// (issue #111). Stamped at exactly the two sites that bump

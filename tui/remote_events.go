@@ -122,6 +122,31 @@ const (
 	InboxStateDequeued = "dequeued"
 )
 
+// PauseEvent matches the spec §2.8 pause payload (v1.5.0) — the
+// session's pause gate closing or opening. Consumers render a banner
+// from it and switch the input line into "what do you want me to do
+// instead?" mode. See pause.go for the capability side.
+//
+// Interrupted is set only on a paused event and says whether a turn
+// was actually cancelled on the way in. Mode is set only on a resumed
+// event and echoes the disposition the operator chose, so a second
+// client watching the stream can render what happened rather than
+// just that something did.
+type PauseEvent struct {
+	State       string    `json:"state"`
+	Reason      string    `json:"reason,omitempty"`
+	Interrupted bool      `json:"interrupted,omitempty"`
+	Mode        string    `json:"mode,omitempty"`
+	At          time.Time `json:"at"`
+}
+
+// Pause state values from spec §2.8. Hosts MAY emit unknown values;
+// consumers MUST tolerate them (treat as no-op).
+const (
+	PauseStatePaused  = "paused"
+	PauseStateResumed = "resumed"
+)
+
 // TurnSummary matches the spec §2.5 turn-complete payload —
 // per-turn tokens + cost + latency + model. CostUSD is OPTIONAL
 // in spec v1.1.0: servers that compute cost out-of-band (e.g.

@@ -127,14 +127,14 @@ func TestPalette_RankingOrderIsPinned(t *testing.T) {
 		{filter: "mo", want: []string{"model", "mouse", "memory"}},
 		{filter: "model", want: []string{"model"}},
 		{filter: "pricing", want: []string{"pricing", "pricing set", "pricing refresh"}},
-		{filter: "e", want: []string{"deny", "help", "keys", "clear", "model", "mouse", "theme", "memory", "reload", "resume", "interrupt", "subagents", "permissions", "pricing set", "allow bundle:", "pricing refresh"}},
+		{filter: "e", want: []string{"deny", "help", "keys", "clear", "model", "mouse", "pause", "theme", "memory", "reload", "resume", "continue", "interrupt", "subagents", "permissions", "pricing set", "allow bundle:", "pricing refresh"}},
 		{filter: "allow", want: []string{"allow", "allow bundle:"}},
 		{filter: "sw", want: []string{"switch"}},
 		{filter: "set", want: []string{"pricing set"}},
 		{filter: "ricing", want: []string{"pricing", "pricing set", "pricing refresh"}},
 		{filter: "help", want: []string{"help"}},
 		// Case folding is on the whole name, not just the head.
-		{filter: "S", want: []string{"stats", "skills", "switch", "subagents", "keys", "mouse", "tools", "resume", "permissions", "pricing set", "pricing refresh"}},
+		{filter: "S", want: []string{"stats", "skills", "switch", "subagents", "keys", "mouse", "pause", "tools", "resume", "permissions", "pricing set", "pricing refresh"}},
 		// Non-matching filters drop every row rather than scoring
 		// them to zero — the palette shows its "no matches" state.
 		{filter: "z", want: nil},

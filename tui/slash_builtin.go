@@ -45,25 +45,99 @@ import (
 // scrolled up reading backlog (refreshViewport alone preserves
 // scroll position by design). The scroll lives in refreshAndScroll
 // — each case calls it explicitly instead of refreshViewport.
-func (m model) dispatchBuiltinSlash(name, args string) (bool, tea.Model, tea.Cmd) {
-	// Alias normalization so internal/tui muscle memory carries
-	// over: /models→/model, /perms→/permissions, /by-the-way→/btw,
-	// /sub→/subagent. /q, /exit, /int are handled in their dispatch
-	// cases below.
+// canonicalSlashName folds slash aliases onto the name the dispatch
+// switch below keys off, so internal/tui muscle memory carries over:
+// /models→/model, /perms→/permissions, /by-the-way→/btw,
+// /sub→/subagent. Aliases whose dispatch case lists them directly
+// (/q, /exit, /int, /cont) are left alone — the case handles both.
+//
+// Shared rather than inlined because the mid-turn allowlist
+// (midTurnSlashDisposition) has to reach the same verdict for /int as
+// for /interrupt. Two copies of this fold would eventually disagree,
+// and the failure mode is a slash silently queued as prompt text.
+func canonicalSlashName(name string) string {
 	switch name {
 	case "models":
-		name = "model"
+		return "model"
 	case "themes":
-		name = "theme"
+		return "theme"
 	case "perms":
-		name = "permissions"
+		return "permissions"
 	case "by-the-way":
-		name = "btw"
+		return "btw"
 	case "sub":
-		name = "subagent"
+		return "subagent"
 	case "sess":
-		name = "switch"
+		return "switch"
 	}
+	return name
+}
+
+// midTurnDisposition is what the Enter handler does with a
+// /-prefixed line typed while a turn is in flight (R-HOLD-3).
+type midTurnDisposition int
+
+const (
+	// midTurnQueue is the default and today's behaviour: treat the
+	// line as prompt text and queue it. Deliberately the fallback for
+	// anything unrecognised — "/tmp is full, look at it" is prose, and
+	// hijacking it as a command would be worse than a slash that
+	// waits.
+	midTurnQueue midTurnDisposition = iota
+	// midTurnDispatch runs the slash now. Read-only introspection and
+	// the turn-control commands, which are useless if they have to
+	// wait for the turn they're meant to act on.
+	midTurnDispatch
+	// midTurnRefuse declines with an explanation. Reserved for
+	// commands that rewrite conversation state under a running turn.
+	midTurnRefuse
+)
+
+// midTurnSafeSlashes dispatch immediately mid-turn: they either read
+// state without touching the conversation, or they exist precisely to
+// act on a turn already running. Host-side names (btw, status,
+// context, agents) are here because SlashProvider owns them and the
+// host is the one that knows a turn is running.
+var midTurnSafeSlashes = map[string]bool{
+	"help": true, "?": true,
+	"stats": true, "tools": true, "subagents": true,
+	"mcp": true, "memory": true, "skills": true, "keys": true,
+	"interrupt": true, "int": true,
+	"pause": true, "continue": true, "cont": true, "abandon": true,
+	"btw": true, "status": true, "context": true, "agents": true,
+}
+
+// midTurnRefusedSlashes are declined mid-turn with a hint rather than
+// queued: each rewrites or truncates the conversation the running turn
+// is still appending to. Compacting or clearing under a live turn is a
+// race the operator can't see, and the host refuses most of them
+// server-side anyway — this just makes the client agree out loud
+// instead of silently queueing the text for later.
+var midTurnRefusedSlashes = map[string]bool{
+	"compact": true, "done": true, "replan": true,
+	"clear": true, "subagent": true,
+}
+
+// midTurnSlashDisposition classifies a /-prefixed input line. text is
+// the raw line including the leading slash.
+func midTurnSlashDisposition(text string) midTurnDisposition {
+	if !strings.HasPrefix(text, "/") {
+		return midTurnQueue
+	}
+	name, _, _ := strings.Cut(strings.TrimPrefix(text, "/"), " ")
+	name = canonicalSlashName(strings.ToLower(name))
+	switch {
+	case midTurnSafeSlashes[name]:
+		return midTurnDispatch
+	case midTurnRefusedSlashes[name]:
+		return midTurnRefuse
+	default:
+		return midTurnQueue
+	}
+}
+
+func (m model) dispatchBuiltinSlash(name, args string) (bool, tea.Model, tea.Cmd) {
+	name = canonicalSlashName(name)
 
 	switch name {
 	case "help", "?":
@@ -145,7 +219,22 @@ func (m model) dispatchBuiltinSlash(name, args string) (bool, tea.Model, tea.Cmd
 		if m.state == stateStreaming && m.cancelTurn != nil {
 			m.cancelTurn()
 			m.input.Reset()
+			// A host that can hold gets held too: cancelling the turn
+			// without closing the gate lets the scheduler start the
+			// next one, which is not what an operator hitting
+			// /interrupt means (R-HOLD-1).
+			if p, ok := m.opts.Agent.(Pauser); ok {
+				return true, m, pauseCmd(p, "operator interrupt")
+			}
 			return true, m, nil
+		}
+		// Pauser is the richer remote path: it parks the loop rather
+		// than cancelling one turn, so an idle agent stops picking up
+		// work instead of the slash reporting "no turn in flight" and
+		// doing nothing.
+		if p, ok := m.opts.Agent.(Pauser); ok {
+			m.input.Reset()
+			return true, m, pauseCmd(p, "operator interrupt")
 		}
 		// LiveAgent / observer-mode fallthrough: the daemon is running
 		// the turn autonomously (k8s-event injects, runaway tool loops,
@@ -168,6 +257,37 @@ func (m model) dispatchBuiltinSlash(name, args string) (bool, tea.Model, tea.Cmd
 		m.input.Reset()
 		m.refreshAndScroll()
 		return true, m, nil
+
+	case "pause":
+		// Unlike /interrupt this does not cancel: it shuts the gate
+		// and lets whatever is running finish. "Stop after this" and
+		// "stop now" are different operator intents and each gets a
+		// command (R-HOLD-1).
+		p, ok := m.opts.Agent.(Pauser)
+		if !ok {
+			m.history.Append(Message{Role: RoleSystem, Text: "/pause: agent doesn't implement Pauser"})
+			m.input.Reset()
+			m.refreshAndScroll()
+			return true, m, nil
+		}
+		if m.pause.paused() {
+			m.history.Append(Message{Role: RoleSystem, Text: "/pause: already held"})
+			m.input.Reset()
+			m.refreshAndScroll()
+			return true, m, nil
+		}
+		m.input.Reset()
+		return true, m, pauseCmd(p, strings.TrimSpace(args))
+
+	case "continue", "cont":
+		// NOT /resume: that name is taken by the saved-transcript
+		// loader below, and quietly overloading it would mean an
+		// operator reaching for their session list un-parks an agent
+		// instead. See issue #268 for the naming.
+		return m.dispatchResumeSlash(ResumeModeContinue)
+
+	case "abandon":
+		return m.dispatchResumeSlash(ResumeModeAbandon)
 
 	case "tools":
 		lister, ok := m.opts.Agent.(ToolLister)
@@ -660,7 +780,10 @@ func (m model) renderBuiltinHelp() string {
 	b.WriteString("  /permissions         — review session approvals\n")
 	b.WriteString("  /pricing refresh|set — manage cost rates\n")
 	b.WriteString("  /subagents [<name>]  — list subagents or open one's turn log\n")
-	b.WriteString("  /interrupt, /int     — cancel the in-flight turn\n")
+	b.WriteString("  /interrupt, /int     — cancel the in-flight turn and hold\n")
+	b.WriteString("  /pause               — hold: no new turn starts until you resume\n")
+	b.WriteString("  /continue, /cont     — release a hold and carry on\n")
+	b.WriteString("  /abandon             — release a hold and drop the held work\n")
 	b.WriteString("  /mouse               — toggle terminal mouse capture\n")
 
 	return strings.TrimRight(b.String(), "\n")
