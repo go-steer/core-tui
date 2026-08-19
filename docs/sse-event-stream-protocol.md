@@ -4,7 +4,7 @@ The wire-format contract between core-tui (consumer) and any server (producer �
 
 **Status:** Phase 1 — additive-only. See [core-tui #40](https://github.com/go-steer/core-tui/issues/40) and [core-agent #115](https://github.com/go-steer/core-agent/issues/115) for the phased-rollout context.
 
-**Protocol version:** `1.5.0`. Bumped on changes per the [Versioning](#versioning) rules below.
+**Protocol version:** `1.7.0`. Bumped on changes per the [Versioning](#versioning) rules below.
 
 ---
 
@@ -27,7 +27,7 @@ data: {"model":"gemini-2.5-pro","provider":"vertex","perm_mode":"default","turn_
 
 ## 2. Event types
 
-Seven event types are defined in this protocol version. Each section specifies: when the server emits the event, the payload schema (snake_case JSON), and a representative example.
+Nine event types are defined in this protocol version. Each section specifies: when the server emits the event, the payload schema (snake_case JSON), and a representative example.
 
 ### 2.1 `capabilities`
 
@@ -61,7 +61,8 @@ Suggested initial keys advertised on `features`. Servers MAY add unknown keys; c
 | `specialists` | Agent supports `POST /slash/subagent` (subagent spawn). |
 | `cross_daemon` | Server hosts the peer registry — clients can render a multi-daemon fleet picker. |
 | `interrupt` | Agent supports `POST /interrupt` (ESC-to-cancel). |
-| `pause` | Agent has a pause gate: `POST /pause` + `POST /resume` work, `POST /interrupt` parks the loop rather than only cancelling, and the session emits `pause` events (§2.8). |
+| `guardrails` | Agent exposes a guardrail surface the operator can read and reset — a tripped behavioral watchdog or cost ceiling can be cleared without restarting the agent. Distinct from `cost_ceiling`, which says only whether a spend bound is armed. |
+| `pause` (v1.5.0+) | Agent has a pause gate: `POST /pause` + `POST /resume` work, `POST /interrupt` parks the loop rather than only cancelling, and the session emits `pause` events (§2.8). Clients gate their "what should I do instead?" resume prompt on this — offering a steer against a producer that can't hold promises a park that never happens. |
 
 #### `capabilities.agent` (v1.4.0+)
 
@@ -78,9 +79,9 @@ Example:
 
 ```json
 {
-  "protocol_version": "1.5.0",
-  "event_types": ["status-update", "usage-update", "inbox", "turn-complete", "turn-error", "pause", "stream-chunk", "tool-call", "tool-result"],
-  "server": "core-agent/2.8.0-dev",
+  "protocol_version": "1.7.0",
+  "event_types": ["status-update", "usage-update", "inbox", "turn-complete", "turn-error", "pause", "wake", "stream-chunk", "tool-call", "tool-result"],
+  "server": "core-agent/2.9.0-dev",
   "features": {
     "multi_session": true,
     "perms_stream": true,
@@ -89,13 +90,14 @@ Example:
     "cross_daemon": false,
     "interrupt": true,
     "pause": true,
+    "guardrails": true,
     "cost_ceiling": false,
     "observer_mode": false
   },
   "slash_commands": ["btw", "compact", "done", "replan", "subagent"],
   "agent": {
     "name": "core-agent",
-    "version": "v2.8.0-dev",
+    "version": "v2.9.0-dev",
     "description": "Autonomous coding assistant for the core-agent repository.",
     "model": "gemini-3.1-pro",
     "url": "https://agents.example.com/core-agent"
@@ -105,6 +107,10 @@ Example:
 ```
 
 (`stream-chunk`, `tool-call`, `tool-result` are pre-existing event types that predate this protocol document; listed here so the example reflects real server output.)
+
+`event_types` is also how a client detects the two event types added after v1.4.0. `pause` and `wake` are both purely additive, and a pre-v1.5.0 / pre-v1.7.0 producer omits the name and never sends the frame — so a client written against the newer version degrades to silence on that surface rather than to an error.
+
+Note what `event_types` does and does not tell you. It is the list of frames the **server** knows how to emit, not a claim about the **agent** behind it: a v1.5.0 server lists `pause` whether or not the agent it is serving can actually hold its loop. `features` is the runtime-capability half. So a client offering a pause control gates it on `features.pause`, and a client rendering pause *state* it receives gates that on `"pause"` in `event_types`. `wake` has no paired feature key, because there is no capability to decline — a wake either fires or it doesn't.
 
 ### 2.2 `status-update`
 
@@ -391,6 +397,10 @@ Example (LLM-subagent digest wrap + latency):
 
 **When emitted:** when the session's pause gate closes or opens. A paused session is one where no NEW turn starts until someone resumes — a different fact from "no turn is running", since an idle agent picks up the next queued prompt on its own and a paused one does not. Producers emit one frame per transition, on every path into and out of the gate: an explicit `POST /pause`, a `POST /interrupt` that parks the loop, and every `POST /resume` regardless of disposition.
 
+Emitted for **every** transition regardless of which client caused it, and emitted by the agent rather than by the request handler, so a park triggered in-process — an embedded TUI, a library caller, a scheduler — reaches remote watchers identically to one driven over HTTP. A second client watching the same session learns that someone else parked the agent without polling.
+
+Detection has two halves that answer different questions — see the note under §2.1. `"pause"` in `event_types` says the server speaks the frame; `features.pause` says the agent behind it can actually hold. A client that renders received pause state checks the first; a client that offers the operator a pause or resume control checks the second, because offering a park against a producer that cannot hold promises something that will not happen.
+
 **Payload:**
 
 | Field | Type | Required | Description |
@@ -398,8 +408,10 @@ Example (LLM-subagent digest wrap + latency):
 | `state` | string | yes | `"paused"` or `"resumed"`. Future states MAY be added; clients MUST tolerate unknown values and treat them as no-ops rather than guessing. |
 | `reason` | string | no | Human-readable cause, shown verbatim in the client's banner — `"operator interrupt"`, `"cost ceiling reached"`. Absent when the producer has nothing to add beyond the state. |
 | `interrupted` | bool | no | Set only on `paused`. True when a turn was actually cancelled on the way in, false (or absent) for a plain `/pause` or an interrupt that landed while the agent was idle. "Your work was killed" and "the loop just won't start" are different situations, and it is the first thing an operator asks. |
-| `mode` | string | no | Set only on `resumed`. Echoes the disposition the operator chose — `"steer"`, `"continue"` or `"abandon"` — so a second client watching the stream can render what happened rather than just that something did. |
+| `mode` | string | no | Set only on `resumed`. Echoes the disposition the operator chose: `"steer"` (a new instruction was injected under interrupt framing), `"continue"` (a carry-on note was injected), or `"abandon"` (the gate opened, nothing was injected, and the agent stays quiet until something else drives it) — so a second client watching the stream can render what happened rather than just that something did. Clients MUST tolerate unknown values. |
 | `at` | string (RFC 3339) | yes | Transition timestamp. Clients date the banner from it and use it to order a push against a concurrently-polled `GET /status`. |
+
+The gate is idempotent on the producer side: a redundant park or release does not transition and therefore emits no event, so two operator surfaces racing the same click produce one frame, not two.
 
 **Consumer guidance.** The push is fast but not the only source: `GET /status` reports `state="paused"` with `paused_since` / `pause_reason` / `interrupted`, which is what lets a client attaching to an already-paused session render the banner without waiting for a transition that already happened. A client holding both SHOULD let an applied push win over a contradicting poll for a short settle window (core-tui uses two seconds) — a poll already in flight across a resume otherwise flips the banner back on for a tick — and let the server win after that, since a client that ignores the poll stays wrong forever after a missed event.
 
@@ -408,13 +420,41 @@ Producers advertise the whole feature through `capabilities.features.pause` (§2
 Example (interrupt parked a running turn):
 
 ```json
-{"state": "paused", "reason": "operator interrupt", "interrupted": true, "at": "2026-08-19T14:02:03Z"}
+{"state": "paused", "reason": "operator interrupt", "interrupted": true, "at": "2026-08-19T14:31:02.881Z"}
 ```
 
 Example (operator steered it back to work):
 
 ```json
-{"state": "resumed", "mode": "steer", "at": "2026-08-19T14:02:31Z"}
+{"state": "resumed", "mode": "steer", "at": "2026-08-19T14:32:44.219Z"}
+```
+
+### 2.9 `wake` (v1.7.0+)
+
+**When emitted:** when the agent's wake signal fires — something out of band decided the loop should look at the world again. Like `pause`, it is emitted from the agent rather than from a request handler, because the producer that matters most never touches one: a host draining background-manager alerts into the agent's wake entry point is the case this event exists to make visible, and putting the emit in the HTTP layer would hide it from exactly the operator who cannot see the process.
+
+**Payload:**
+
+| Field | Type | Required | Description |
+|---|---|---|---|
+| `at` | string (RFC 3339) | yes | When the signal fired. The only field. |
+
+**The payload is deliberately just a timestamp.** A wake carries no state a consumer can render, because whatever did the waking reports itself through its own frames: an alert arrives as an `inbox` event, a subagent's work as `agent` events, the resulting turn as `status-update` / `turn-complete`. What the wake adds is "look now", and the only thing worth attaching to that is when. A `reason` field is specified **absent, not reserved** — no producer can currently fill it (the in-process signal it mirrors is a bare channel with no payload), and a field consumers learn to branch on and producers cannot populate is a promise that gets broken later.
+
+The consequence for clients is the important half: **a wake does not mean an alert is waiting.** Client copy that asserts inbox contents on the strength of this event is wrong for every wake that isn't alert-driven. Render it as an attention signal and let the frames that follow say what happened.
+
+Further semantics:
+
+- **It is an edge, not a state.** There is no matching "unwake" and nothing to reconcile on reconnect. A client that missed one has missed a notification, not fallen out of sync.
+- **Coalescing is not promised in either direction.** The producer's wake signal is typically a one-slot channel that drops a fire while one is already pending, so two wakes microseconds apart may produce one frame or two. Consumers must treat this as an edge, not a count, and are free to coalesce on their own side.
+- **An operator-typed prompt does not produce one.** The inject that carries it already announces itself as an `inbox` frame, and a wake on top would make every prompt the operator types raise an attention notice about the operator's own typing. The one call that legitimately produces both is a wake request that carries a prompt, because it is an inject and an explicit wake request at once.
+
+Detection is the ordinary mechanism: look for `"wake"` in the `capabilities` frame's `event_types`. A pre-v1.7.0 producer omits the name and sends no frame, so a client written against v1.7.0 degrades to no notifications rather than to an error.
+
+Example:
+
+```json
+{"at": "2026-08-19T14:32:05.117Z"}
 ```
 
 ---
@@ -465,7 +505,7 @@ A complete representative session, viewed from the client side reading the SSE s
 
 ```
 event: capabilities
-data: {"protocol_version":"1.5.0","event_types":["status-update","usage-update","inbox","turn-complete","turn-error","pause","stream-chunk","tool-call","tool-result"],"server":"core-agent/2.8.0-dev","features":{"multi_session":true,"perms_stream":true,"mcp":true,"specialists":true,"cross_daemon":false,"interrupt":true,"pause":true,"cost_ceiling":false,"observer_mode":false},"slash_commands":["btw","compact","done","replan","subagent"],"agent":{"name":"core-agent","version":"v2.8.0-dev","model":"gemini-3.1-pro"},"caller_id":"alice@example.com"}
+data: {"protocol_version":"1.7.0","event_types":["status-update","usage-update","inbox","turn-complete","turn-error","pause","wake","stream-chunk","tool-call","tool-result"],"server":"core-agent/2.9.0-dev","features":{"multi_session":true,"perms_stream":true,"mcp":true,"specialists":true,"cross_daemon":false,"interrupt":true,"pause":true,"guardrails":true,"cost_ceiling":false,"observer_mode":false},"slash_commands":["btw","compact","done","replan","subagent"],"agent":{"name":"core-agent","version":"v2.9.0-dev","model":"gemini-3.1-pro"},"caller_id":"alice@example.com"}
 
 event: status-update
 data: {"model":"gemini-2.5-pro","provider":"vertex","perm_mode":"default","turn_state":"idle","context_pct":3}
@@ -519,6 +559,44 @@ data: {"turn_state":"idle"}
 
 Note: `turn-error` does NOT emit a `turn-complete` for the same `prompt_id` (the turn never completed). Clients track open `prompt_id`s and close them on either `turn-complete` or `turn-error`.
 
+And an operator parking the agent mid-turn, then steering it (v1.5.0+):
+
+```
+event: status-update
+data: {"turn_state":"streaming"}
+
+event: pause
+data: {"state":"paused","reason":"operator interrupt","interrupted":true,"at":"2026-08-19T14:31:02.881Z"}
+
+event: turn-error
+data: {"kind":"transient_network","code":"CANCELED","message":"model call canceled","retryable":true}
+
+event: status-update
+data: {"turn_state":"idle"}
+
+event: pause
+data: {"state":"resumed","mode":"steer","at":"2026-08-19T14:32:44.219Z"}
+
+event: inbox
+data: {"state":"queued","prompt_id":"p-9c4c"}
+
+event: status-update
+data: {"turn_state":"streaming"}
+```
+
+`interrupted: true` and the terminal frame for the killed turn are two different statements, and a client needs both. The `pause` frame says *why* the agent stopped and that it will not restart on its own; the open `prompt_id` still closes the ordinary way — a cancelled turn is a failed turn as far as the turn pipeline is concerned, so it ends on `turn-error` (which carries no `prompt_id`; clients close the open turn by ordering, per the note above). Do not treat `interrupted: true` as the close, and do not depend on whether the `pause` frame arrives before or after the terminal one — they come from different points in the producer and their relative order is not promised.
+
+The `turn-error` above is real core-agent output and worth reading as a caution rather than a model: an operator's deliberate cancellation surfaces as `transient_network` / `retryable: true`, because the classifier sees `context.Canceled` and cannot tell a killed turn from a dropped connection. A client that offers a retry affordance purely off `retryable` will offer one for work the operator just stopped. Suppress it when a `pause` frame is in play — that frame is the only thing on the wire that knows the difference.
+
+And a wake, which is the whole of what a wake looks like (v1.7.0+):
+
+```
+event: wake
+data: {"at":"2026-08-19T14:32:05.117Z"}
+```
+
+There is nothing else in it, and the client should not infer anything else from it. If a host-side alert was what fired the signal, that alert announces itself separately — as an `inbox` frame, since something had to put it where the model will read it — and the two frames are the producer's to order and pair, not this spec's. If a bare "look now" fired it, the wake is the only frame there will be. A client that renders "an alert is waiting" off this event is right in the first case and wrong in the second, which is the defect go-steer/core-agent#802 surfaced.
+
 ---
 
 ## 6. Slash-response conventions
@@ -542,7 +620,7 @@ The following are deliberately NOT specified here:
 
 - **Authentication** — `Authorization: Bearer` and `X-Attach-Token` semantics live in deployment-specific docs (per [core-tui #34](https://github.com/go-steer/core-tui/issues/34)).
 - **Endpoint paths** — the protocol is endpoint-agnostic. Server documentation specifies which path serves the SSE stream.
-- **Reverse direction (client → server)** — request endpoints are not specified here. That held cleanly while every revision was stream-only; v1.5.0 broke it, because the `pause` event is one half of a feature whose other half is `POST /pause`, `POST /resume` and `/interrupt`'s `hold` flag. §2.8 names them so the event is readable, but their schemas are not written down. [#270](https://github.com/go-steer/core-tui/issues/270) decides whether this document grows a REST section or a sibling document takes it.
+- **Reverse direction (client → server)** — request endpoints are not specified here. That held cleanly while every revision was stream-only; v1.5.0 broke it, because the `pause` event is one half of a feature whose other half is `POST /pause`, `POST /resume` and `/interrupt`'s `hold` flag. §2.8 names them so the event is readable, but their schemas are not written down. [#270](https://github.com/go-steer/core-tui/issues/270) decides whether this document grows a REST section or a sibling document takes it. Until it does, a version bump driven purely by that surface is recorded in §8 without a §2 section — see 1.6.0.
 - **Event replay / persistence** — out of scope for Phase 1. A future version may add `Last-Event-ID` resume semantics.
 - **TUI rendering decisions** — what each event LOOKS like in the terminal is core-tui's concern, not the wire protocol's.
 - **Other producers** — only core-agent emits these events today. Other producers MUST implement this spec faithfully or pick a different stream identifier.
@@ -553,7 +631,9 @@ The following are deliberately NOT specified here:
 
 | Version | Date | Change |
 |---|---|---|
-| 1.5.0 | 2026-08-19 | **MINOR.** New `pause` event type (§2.8) reporting the session's pause gate closing and opening, with `state` / `reason` / `interrupted` / `mode` / `at`. New `features.pause` key (§2.1) advertising the gate, the `POST /pause` + `POST /resume` endpoints behind it, and `POST /interrupt`'s new default of parking the loop rather than only cancelling the turn. §4 gains the two rows that matter: a pre-1.5.0 client against a 1.5.0 server gets a hold it cannot see, so producers MUST keep honouring `hold=false` on `/interrupt`. Additive on the wire — pre-v1.5.0 servers emit no `pause` frames and no `features.pause`, pre-v1.5.0 clients drop the frames. The REST half of the revision (the `/pause`, `/resume` and `/interrupt` request and response schemas, and `GET /status`'s `paused_since` / `pause_reason` / `interrupted`) is not written down here yet — this document has never specified REST, and [#270](https://github.com/go-steer/core-tui/issues/270) is where that gap gets closed. Consumed by core-tui's `Pauser` capability ([#260](https://github.com/go-steer/core-tui/issues/260)). |
+| 1.7.0 | 2026-08-19 | **MINOR.** New `wake` event type (§2.9) reporting that the agent's wake signal fired — an operator asked the loop to look now, or a host wired its own out-of-band trigger (a background subagent's alert) into the same signal. Payload is a single `at` timestamp and deliberately no `reason`: the thing that did the waking reports itself through its own frames, and no producer can fill a reason field today. Emitted from the agent rather than a request handler so an in-process wake reaches remote watchers. Shipped in go-steer/core-agent#814, closing go-steer/core-agent#802 — where the defect being fixed was that the remote adapter's wake method never satisfied `WakeRequester` and there was no frame for it to receive either way. Fully backward-compatible — a pre-1.7.0 producer omits `"wake"` from `event_types` and sends nothing, and a pre-1.7.0 consumer drops the unknown event name per §3. |
+| 1.6.0 | 2026-08-19 | **MINOR — no SSE change.** The version namespace covers the whole attach contract, not only the event stream, and 1.6.0 is entirely on the REST side: `GET /sessions` rows carry an optional `title`, a short operator-facing label derived from the session's first prompt, so a session picker lists work rather than IDs. No frame in §2 changes. Recorded here so the numbering doesn't appear to skip and so a client negotiating a version knows what it is negotiating. Producer-side shape is pinned by [core-agent's `rest-sessions-list-v2` conformance fixture](https://github.com/go-steer/core-agent/blob/main/pkg/attach/testdata/conformance/rest-sessions-list-v2.json); endpoint semantics live in the producer's own reference doc per §7. `title` is omitted for pre-1.6.0 producers, for sessions whose first turn hasn't landed, and where titling is off, so every client needs the fall-back-to-session-ID path regardless of the version it negotiated. Shipped in go-steer/core-agent#809. |
+| 1.5.0 | 2026-08-19 | **MINOR.** New `pause` event type (§2.8) reporting the session's pause gate closing and opening, with `state` / `reason` / `interrupted` / `mode` / `at`. New `pause` feature key (§2.1) advertising that the producer can hold its loop — `POST /pause` and `POST /resume` (`steer` / `continue` / `abandon`) work, and `POST /interrupt` parks by default instead of only cancelling the turn. Emitted for every transition and from the agent rather than the handler, so a park driven in-process reaches remote watchers. Also backfills the `guardrails` feature key, which producers have advertised since go-steer/core-agent#670 without a bump — feature keys are additive by the §2.1 rule, so this row records it rather than claiming it as new. §4 gains the two rows that matter: a pre-1.5.0 client against a 1.5.0 server gets a hold it cannot see, so producers MUST keep honouring `hold=false` on `/interrupt`. Shipped in go-steer/core-agent#794 (design: `docs/operator-interrupt-design.md` in that repo) and consumed by core-tui's `Pauser` capability ([#260](https://github.com/go-steer/core-tui/issues/260)). The REST half of the revision (the `/pause`, `/resume` and `/interrupt` request and response schemas, and `GET /status`'s `paused_since` / `pause_reason` / `interrupted`) is not written down here yet — this document has never specified REST, and [#270](https://github.com/go-steer/core-tui/issues/270) is where that gap gets closed. Fully backward-compatible — a 1.4.0 consumer sees every pre-existing shape unchanged and drops the unknown event name. |
 | 1.4.0 | 2026-07-20 | **MINOR.** `capabilities` frame (§2.1) extended with four optional fields — `features` (feature-flag map), `slash_commands` (dynamic list of accepted slash names), `agent` (name/version/description/model/provider/url identity block), and `caller_id` (resolved caller identity display hint). Enables backend-agnostic clients (mast-web) to render without a code change per producer. `status-update` (§2.2) gained an optional `capabilities` merge field spec'd for hot capability changes (no producer emits it in v1.4.0 — reserved). New §6 documents reserved `_render` / `_schema` keys on slash-response bodies. New `GET /whoami` endpoint (unauthenticated-safe) returns the resolved caller identity + admin + auth source. Closes go-steer/core-agent#329, sibling to go-steer/mast-web#12. Fully backward-compatible — pre-v1.4.0 servers omit the new fields, pre-v1.4.0 clients ignore them. |
 | 1.3.0 | 2026-07-17 | **MINOR.** Added optional `savings` sidecar object on `tool-result` response payloads (§2.7) carrying the digest wrap's per-call byte / token reduction, router path, and (agentic path only) subagent usage. Closes go-steer/core-agent#223 Phase 4 tier 1 (per-tool inline chip) + tier 2 (detail-overlay chip). Session-level cumulative rendering (`/stats` block) tracked separately. Same response-map sidecar channel as v1.2.0's `latency_ms`. Fully backward-compatible — pre-v1.3.0 servers omit the object, pre-v1.3.0 clients ignore it. |
 | 1.2.0 | 2026-07-16 | **MINOR.** Added optional `latency_ms` sidecar key on `tool-result` response payloads (§2.7 — formally documented in this revision). Closes go-steer/core-agent#277 (emit) + core-tui#60 (consume) — completes core-tui#52 tier 3 (inline `[2.4s]` per tool row + latency chip in the expand-single detail overlay). Sidecar rides the response map itself because ADK's `tool.Run` has no write access to the enclosing `session.Event.CustomMetadata`; §2.7 documents the finding for future sidecars. Fully backward-compatible — pre-v1.2.0 servers omit the field, pre-v1.2.0 clients ignore it. |
