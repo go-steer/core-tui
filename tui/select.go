@@ -88,7 +88,7 @@ const (
 // scrolls whatever is needed to bring the new item into view. Stops
 // at both ends rather than wrapping: a cursor that reappears at the
 // other end of a long transcript reads as a jump, not as a move.
-func (m *Model) chatSelectBy(delta int) {
+func (m *model) chatSelectBy(delta int) {
 	n := m.history.Len()
 	if n == 0 {
 		return
@@ -102,13 +102,13 @@ func (m *Model) chatSelectBy(delta int) {
 // transcript. The scroll they pair with is the one the operator asked
 // for by pressing g / G — the first line of the session and the tail
 // — rather than the minimal scroll that would reveal the item.
-func (m *Model) chatSelectFirst() {
+func (m *model) chatSelectFirst() {
 	m.selIdx = 0
 	m.chatResetPan()
 	m.chatGotoTop()
 }
 
-func (m *Model) chatSelectLast() {
+func (m *model) chatSelectLast() {
 	m.selIdx = atLeast(m.history.Len()-1, 0)
 	m.chatResetPan()
 	m.chatGotoBottom()
@@ -124,7 +124,7 @@ func (m *Model) chatSelectLast() {
 // newest turn, and seeding at the top of the window would make the
 // common case a run of down-presses. Whichever it picks is already
 // visible, so entering focus mode never scrolls.
-func (m *Model) chatSeedSelection() {
+func (m *model) chatSeedSelection() {
 	n := m.history.Len()
 	if n == 0 {
 		m.selIdx = 0
@@ -161,7 +161,7 @@ func (m *Model) chatSeedSelection() {
 // the selected item for one window's worth more. Neither can be made
 // to measure the whole transcript, which is the rule chatlist.go's
 // header sets out.
-func (m *Model) chatRevealSelection() {
+func (m *model) chatRevealSelection() {
 	n := m.history.Len()
 	height := m.viewport.Height()
 	if n == 0 || height <= 0 {
@@ -201,7 +201,7 @@ func (m *Model) chatRevealSelection() {
 // after the content changed under it — a /clear, a session switch, a
 // resume. Called from refreshViewport next to clampChatOffset, for
 // the same reason and at the same cost.
-func (m *Model) clampChatSelection() {
+func (m *model) clampChatSelection() {
 	n := m.history.Len()
 	if n == 0 {
 		m.selIdx = 0
@@ -216,7 +216,7 @@ func (m *Model) clampChatSelection() {
 // keyed by Message.ID and History hands out fresh IDs after a reset,
 // so nothing would be misapplied — but the operator asked for a new
 // transcript and getting the old one's folds back is not that.
-func (m *Model) resetChatSelection() {
+func (m *model) resetChatSelection() {
 	m.selIdx = 0
 	m.collapsed = nil
 	m.chatResetPan()
@@ -234,7 +234,7 @@ func (m *Model) resetChatSelection() {
 // pinned. Re-pinning here rather than letting syncFollow observe the
 // gap is the same rule the rest of the transcript follows — follow is
 // tracked intent, not a measurement (issue #93).
-func (m *Model) chatToggleCollapsed() {
+func (m *model) chatToggleCollapsed() {
 	msg, ok := m.chatSelectedMessage()
 	if !ok {
 		return
@@ -256,7 +256,7 @@ func (m *Model) chatToggleCollapsed() {
 }
 
 // chatSelectedMessage is the history entry under the cursor.
-func (m Model) chatSelectedMessage() (Message, bool) {
+func (m model) chatSelectedMessage() (Message, bool) {
 	if m.selIdx < 0 || m.selIdx >= m.history.Len() {
 		return Message{}, false
 	}
@@ -274,7 +274,7 @@ func (m Model) chatSelectedMessage() (Message, bool) {
 // The lines it returns are a fresh slice: the ones it copies from
 // belong to the render cache, and a returned slice that aliased them
 // would let a later append write into the memo.
-func (m Model) chatCollapsedRow(lines []string) []string {
+func (m model) chatCollapsedRow(lines []string) []string {
 	if len(lines) <= chatCollapsedLines+1 {
 		return lines
 	}
@@ -285,7 +285,7 @@ func (m Model) chatCollapsedRow(lines []string) []string {
 }
 
 // chatRowCollapsed reports whether history row i is folded.
-func (m Model) chatRowCollapsed(msg Message) bool {
+func (m model) chatRowCollapsed(msg Message) bool {
 	return len(m.collapsed) > 0 && m.collapsed[msg.ID]
 }
 
@@ -300,12 +300,12 @@ func (m Model) chatRowCollapsed(msg Message) bool {
 // marker that stays lit would claim otherwise. The state survives the
 // round trip either way — it is drawing, not selection, that the
 // focus gates.
-func (m Model) chatRowMarked(i int) bool {
+func (m model) chatRowMarked(i int) bool {
 	return m.focus == focusTranscript && i == m.selIdx && i < m.history.Len()
 }
 
 // chatGutterPrefixes returns the marked and unmarked gutters, built
 // once per frame because every drawn line takes one of them.
-func (m Model) chatGutterPrefixes() (marked, plain string) {
+func (m model) chatGutterPrefixes() (marked, plain string) {
 	return m.styles.Accent.Render(glyphSelectBar) + " ", strings.Repeat(" ", chatGutterWidth)
 }

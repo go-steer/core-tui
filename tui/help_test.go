@@ -46,7 +46,7 @@ var (
 
 // openHelp builds a model of the given size with the panel open and
 // the layout reconciled, exactly as the `?` key leaves it.
-func openHelp(layout StatusLayout, w, h int) Model {
+func openHelp(layout StatusLayout, w, h int) model {
 	m := newFrameModel(layout, w, h)
 	m = withHostileTranscript(m)
 	m.advanceHelp()
@@ -57,7 +57,7 @@ func openHelp(layout StatusLayout, w, h int) Model {
 
 // helpRows renders the panel at the width View would use and returns
 // its rows.
-func helpRows(m Model) []string {
+func helpRows(m model) []string {
 	panel := m.renderHelpPanel(m.chromeWidth())
 	if panel == "" {
 		return nil
@@ -165,9 +165,9 @@ func TestHelpPanel_QuestionMarkPagesThenCloses(t *testing.T) {
 	m := newFrameModel(StatusHeader, 80, 24)
 	m = withHostileTranscript(m)
 
-	press := func() Model {
+	press := func() model {
 		out, _ := m.Update(keyPress("?"))
-		return out.(Model)
+		return out.(model)
 	}
 
 	m = press()
@@ -203,7 +203,7 @@ func TestHelpPanel_TypedQuestionMarkStillTypes(t *testing.T) {
 	m := newFrameModel(StatusHeader, 80, 24)
 	m.input.SetValue("what now")
 	out, _ := m.Update(keyPress("?"))
-	m = out.(Model)
+	m = out.(model)
 	if m.helpOpen {
 		t.Error("`?` opened the panel while the operator was typing")
 	}
@@ -223,7 +223,7 @@ func TestHelpPanel_EscClosesAndForgetsThePage(t *testing.T) {
 		t.Fatal("precondition: expected to be past the first page")
 	}
 	out, _ := m.Update(keyPress("esc"))
-	m = out.(Model)
+	m = out.(model)
 	if m.helpOpen {
 		t.Error("esc left the help panel open")
 	}
@@ -241,7 +241,7 @@ func TestHelpPanel_StalePageSurvivesAShrink(t *testing.T) {
 	m.helpPage = 12 // far past any page count
 
 	out, _ := m.Update(tea.WindowSizeMsg{Width: 80, Height: 24})
-	m = out.(Model)
+	m = out.(model)
 
 	panel := m.renderHelpPanel(m.chromeWidth())
 	if panel == "" {

@@ -37,7 +37,7 @@ import (
 // doesn't satisfy InboxDrainer, the inbox is empty, or the soft
 // cap has been hit — caller should fall through to the regular
 // maybeDrainQueue path in those cases.
-func (m Model) maybeAutoContinue() (Model, tea.Cmd, bool) {
+func (m model) maybeAutoContinue() (model, tea.Cmd, bool) {
 	if m.opts.MidTurnInjectionMode != AutoContinueFromInbox {
 		return m, nil, false
 	}
@@ -128,7 +128,7 @@ func compactNonEmpty(in []string) []string {
 // before AutoContinueFromInbox was wired (and a stale duplicate
 // in the inbox) could mis-match. Acceptable: worst case the
 // stale entry lingers an extra cullTTL.
-func (m *Model) markQueueDoneByText(drained []string) {
+func (m *model) markQueueDoneByText(drained []string) {
 	if len(drained) == 0 {
 		return
 	}

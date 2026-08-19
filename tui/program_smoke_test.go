@@ -322,16 +322,16 @@ func TestProgramSmokePermissionRoundTrip(t *testing.T) {
 // The entries are substrings rather than whole symbols because the
 // compiler decorates the closure's name with wherever it inlined the
 // constructor. The same listener shows up as
-// `tui.Model.wakeListener.func1` when it wasn't inlined and as
-// `tui.Model.Init.Model.eventListener.func2` when it was, so the
+// `tui.model.wakeListener.func1` when it wasn't inlined and as
+// `tui.model.Init.model.eventListener.func2` when it was, so the
 // receiver-qualified method name is the longest part that is stable
 // across an inlining decision.
 var smokeListenerFrames = []string{
-	".Model.eventListener",
-	".Model.wakeListener",
-	".Model.promptListener",
-	".Model.elicitListener",
-	".Model.notifyListener",
+	".model.eventListener",
+	".model.wakeListener",
+	".model.promptListener",
+	".model.elicitListener",
+	".model.notifyListener",
 }
 
 // TestProgramSmokeListenersReleasedOnQuit is the assertion the issue

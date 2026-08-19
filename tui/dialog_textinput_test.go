@@ -29,13 +29,13 @@ import (
 // renderPlain renders a dialog and strips styling — the virtual
 // cursor block wraps the character under it in its own escape
 // sequence, which splits substrings apart in the raw output.
-func renderPlain(d dialog, m *Model) string {
+func renderPlain(d dialog, m *model) string {
 	return ansi.Strip(d.Render(80, m))
 }
 
 // typeInto feeds each rune of s to the dialog as a separate
 // keystroke, the way a terminal delivers typing.
-func typeInto(t *testing.T, d dialog, m *Model, s string) {
+func typeInto(t *testing.T, d dialog, m *model, s string) {
 	t.Helper()
 	for _, r := range s {
 		act := d.HandleKey(string(r), m)
@@ -48,7 +48,7 @@ func typeInto(t *testing.T, d dialog, m *Model, s string) {
 // TestTextInputDialog_Defaults — the zero-ish config still yields a
 // usable dialog (stable ID, a title, a renderable body).
 func TestTextInputDialog_Defaults(t *testing.T) {
-	m := NewModel(Options{Agent: &bareAgent{id: "a"}})
+	m := newModel(Options{Agent: &bareAgent{id: "a"}})
 	m.viewport.SetWidth(80)
 
 	d := newTextInputDialog(textInputConfig{})
@@ -68,7 +68,7 @@ func TestTextInputDialog_Defaults(t *testing.T) {
 // hands the TRIMMED value to Submit, and Submit's dialogAction is
 // what the dialog returns verbatim.
 func TestTextInputDialog_TypeAndSubmit(t *testing.T) {
-	m := NewModel(Options{Agent: &bareAgent{id: "a"}})
+	m := newModel(Options{Agent: &bareAgent{id: "a"}})
 	m.viewport.SetWidth(80)
 
 	var got string
@@ -76,7 +76,7 @@ func TestTextInputDialog_TypeAndSubmit(t *testing.T) {
 	d := newTextInputDialog(textInputConfig{
 		Title:  "Attach",
 		Prompt: "Daemon URL:",
-		Submit: func(v string, mm *Model) dialogAction {
+		Submit: func(v string, mm *model) dialogAction {
 			got = v
 			sawModel = mm != nil
 			return dialogAction{Consumed: true, Close: true}
@@ -100,12 +100,12 @@ func TestTextInputDialog_TypeAndSubmit(t *testing.T) {
 // TestTextInputDialog_Editing — backspace / ctrl+u / cursor keys all
 // reach the widget through the stroke-string path.
 func TestTextInputDialog_Editing(t *testing.T) {
-	m := NewModel(Options{Agent: &bareAgent{id: "a"}})
+	m := newModel(Options{Agent: &bareAgent{id: "a"}})
 	m.viewport.SetWidth(80)
 
 	var got string
 	d := newTextInputDialog(textInputConfig{
-		Submit: func(v string, _ *Model) dialogAction {
+		Submit: func(v string, _ *model) dialogAction {
 			got = v
 			return dialogAction{Consumed: true, Close: true}
 		},
@@ -131,12 +131,12 @@ func TestTextInputDialog_Editing(t *testing.T) {
 // a printable rune; regression guard that it inserts a space rather
 // than being swallowed.
 func TestTextInputDialog_SpaceIsTyped(t *testing.T) {
-	m := NewModel(Options{Agent: &bareAgent{id: "a"}})
+	m := newModel(Options{Agent: &bareAgent{id: "a"}})
 	m.viewport.SetWidth(80)
 
 	var got string
 	d := newTextInputDialog(textInputConfig{
-		Submit: func(v string, _ *Model) dialogAction {
+		Submit: func(v string, _ *model) dialogAction {
 			got = v
 			return dialogAction{Consumed: true, Close: true}
 		},
@@ -154,7 +154,7 @@ func TestTextInputDialog_SpaceIsTyped(t *testing.T) {
 // inline, keeps the dialog open, keeps the typed text, and never
 // calls Submit. A later fix submits normally.
 func TestTextInputDialog_ValidateKeepsOpen(t *testing.T) {
-	m := NewModel(Options{Agent: &bareAgent{id: "a"}})
+	m := newModel(Options{Agent: &bareAgent{id: "a"}})
 	m.viewport.SetWidth(80)
 
 	submits := 0
@@ -165,7 +165,7 @@ func TestTextInputDialog_ValidateKeepsOpen(t *testing.T) {
 			}
 			return ""
 		},
-		Submit: func(string, *Model) dialogAction {
+		Submit: func(string, *model) dialogAction {
 			submits++
 			return dialogAction{Consumed: true, Close: true}
 		},
@@ -204,12 +204,12 @@ func TestTextInputDialog_ValidateKeepsOpen(t *testing.T) {
 
 // TestTextInputDialog_EscCloses — esc closes without submitting.
 func TestTextInputDialog_EscCloses(t *testing.T) {
-	m := NewModel(Options{Agent: &bareAgent{id: "a"}})
+	m := newModel(Options{Agent: &bareAgent{id: "a"}})
 	m.viewport.SetWidth(80)
 
 	submits := 0
 	d := newTextInputDialog(textInputConfig{
-		Submit: func(string, *Model) dialogAction {
+		Submit: func(string, *model) dialogAction {
 			submits++
 			return dialogAction{Consumed: true, Close: true}
 		},
@@ -227,7 +227,7 @@ func TestTextInputDialog_EscCloses(t *testing.T) {
 // TestTextInputDialog_NilSubmitCloses — a config with no Submit is
 // degenerate but must not panic.
 func TestTextInputDialog_NilSubmitCloses(t *testing.T) {
-	m := NewModel(Options{Agent: &bareAgent{id: "a"}})
+	m := newModel(Options{Agent: &bareAgent{id: "a"}})
 	m.viewport.SetWidth(80)
 
 	d := newTextInputDialog(textInputConfig{})
@@ -240,7 +240,7 @@ func TestTextInputDialog_NilSubmitCloses(t *testing.T) {
 // TestTextInputDialog_InitialAndPlaceholder — Initial pre-fills the
 // buffer; Placeholder shows only while empty.
 func TestTextInputDialog_InitialAndPlaceholder(t *testing.T) {
-	m := NewModel(Options{Agent: &bareAgent{id: "a"}})
+	m := newModel(Options{Agent: &bareAgent{id: "a"}})
 	m.viewport.SetWidth(80)
 
 	empty := newTextInputDialog(textInputConfig{Placeholder: "http://host:7778"})
@@ -261,7 +261,7 @@ func TestTextInputDialog_InitialAndPlaceholder(t *testing.T) {
 	}
 	// Cursor lands at the end, so typing appends.
 	var got string
-	pre.cfg.Submit = func(v string, _ *Model) dialogAction {
+	pre.cfg.Submit = func(v string, _ *model) dialogAction {
 		got = v
 		return dialogAction{Consumed: true, Close: true}
 	}
@@ -276,12 +276,12 @@ func TestTextInputDialog_InitialAndPlaceholder(t *testing.T) {
 // the raw KeyPressMsg to a keyMsgDialog and falls back to the
 // stroke-string contract for plain Dialogs.
 func TestOverlay_HandleKeyMsg_PrefersKeyMsgDialog(t *testing.T) {
-	m := NewModel(Options{Agent: &bareAgent{id: "a"}})
+	m := newModel(Options{Agent: &bareAgent{id: "a"}})
 	m.viewport.SetWidth(80)
 
 	var got string
 	d := newTextInputDialog(textInputConfig{
-		Submit: func(v string, _ *Model) dialogAction {
+		Submit: func(v string, _ *model) dialogAction {
 			got = v
 			return dialogAction{Consumed: true, Close: true}
 		},
@@ -325,12 +325,12 @@ func TestOverlay_HandleKeyMsg_PrefersKeyMsgDialog(t *testing.T) {
 // TestTextInputDialog_PasteRoutesToDialog — bracketed paste lands in
 // the open dialog, NOT in the chat textarea behind it.
 func TestTextInputDialog_PasteRoutesToDialog(t *testing.T) {
-	m := NewModel(Options{Agent: &bareAgent{id: "a"}})
+	m := newModel(Options{Agent: &bareAgent{id: "a"}})
 	m.viewport.SetWidth(80)
 
 	var got string
 	d := newTextInputDialog(textInputConfig{
-		Submit: func(v string, _ *Model) dialogAction {
+		Submit: func(v string, _ *model) dialogAction {
 			got = v
 			return dialogAction{Consumed: true, Close: true}
 		},
@@ -338,13 +338,13 @@ func TestTextInputDialog_PasteRoutesToDialog(t *testing.T) {
 	m.overlayStack.open(d)
 
 	out, _ := m.Update(tea.PasteMsg{Content: "http://pasted:7778"})
-	m = out.(Model)
+	m = out.(model)
 	if v := m.input.Value(); v != "" {
 		t.Errorf("paste leaked into the chat textarea: %q", v)
 	}
 
 	out, _ = m.Update(tea.KeyPressMsg(tea.Key{Code: tea.KeyEnter}))
-	m = out.(Model)
+	m = out.(model)
 	if got != "http://pasted:7778" {
 		t.Errorf("pasted value = %q, want the URL", got)
 	}
@@ -353,11 +353,11 @@ func TestTextInputDialog_PasteRoutesToDialog(t *testing.T) {
 // TestTextInputDialog_PasteFallsThroughWithoutDialog — with no
 // text-input dialog open, paste keeps its old behavior (chat input).
 func TestTextInputDialog_PasteFallsThroughWithoutDialog(t *testing.T) {
-	m := NewModel(Options{Agent: &bareAgent{id: "a"}})
+	m := newModel(Options{Agent: &bareAgent{id: "a"}})
 	m.viewport.SetWidth(80)
 
 	out, _ := m.Update(tea.PasteMsg{Content: "plain text"})
-	m = out.(Model)
+	m = out.(model)
 	if v := m.input.Value(); v != "plain text" {
 		t.Errorf("chat textarea = %q, want the pasted text", v)
 	}

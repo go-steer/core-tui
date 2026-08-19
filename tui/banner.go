@@ -340,7 +340,7 @@ func renderBannerBlock(layout bannerLayout, styles styleSet, frame int, plain bo
 // width and height are the chat window's, not the terminal's: the
 // banner lives inside the transcript and must fit the room the
 // transcript actually has.
-func (m Model) renderBanner(width, height int) string {
+func (m model) renderBanner(width, height int) string {
 	if m.opts.Branding.DisableBanner {
 		return ""
 	}
@@ -355,7 +355,7 @@ func (m Model) renderBanner(width, height int) string {
 	if m.caps.ReducedMotion {
 		// Belt and braces with initialBannerFrame below. That seeds
 		// the settled frame at construction, which covers the normal
-		// case; this covers a host that overrides Model.caps after
+		// case; this covers a host that overrides model.caps after
 		// NewModel returns, as terminal_caps.go invites it to. Without
 		// it that host would get the unlit silhouette and no chain to
 		// light it.
@@ -367,7 +367,7 @@ func (m Model) renderBanner(width, height int) string {
 	return renderBannerBlock(layout, m.styles, frame, m.caps.NoColor)
 }
 
-// initialBannerFrame seeds Model.bannerFrame at construction.
+// initialBannerFrame seeds model.bannerFrame at construction.
 //
 // The banner starts *finished* unless it is actually going to be
 // animated. That ordering is the whole of the "never delay the first
@@ -400,7 +400,7 @@ func bannerTick() tea.Cmd {
 // once, from Init, and re-armed only by its own handler. There is no
 // second chain for a stale tick to belong to, and the frame counter is
 // monotonic, so a duplicate tick would at worst finish the wipe early.
-func (m Model) armBanner() tea.Cmd {
+func (m model) armBanner() tea.Cmd {
 	if !m.bannerAnimates() {
 		return nil
 	}
@@ -412,7 +412,7 @@ func (m Model) armBanner() tea.Cmd {
 // chain. False means whatever is on screen is already the settled
 // wordmark, which is why nothing needs to schedule a repaint to
 // "finish" it.
-func (m Model) bannerAnimates() bool {
+func (m model) bannerAnimates() bool {
 	if m.opts.Branding.DisableBanner || m.caps.ReducedMotion {
 		return false
 	}

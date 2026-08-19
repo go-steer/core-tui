@@ -15,7 +15,7 @@
 // Turn elapsed-time readout on the thinking line (issue #111).
 //
 // The output is a function of wall-clock time, so none of this is
-// goldened. Every test pins Model.now to a controllable clock and
+// goldened. Every test pins model.now to a controllable clock and
 // moves it by hand — the same technique the spinner-generation tests
 // use for the tick chain, for the same reason: a test that waits out
 // real time is a test that flakes.
@@ -34,12 +34,12 @@ func fixedClock(at *time.Time) func() time.Time {
 	return func() time.Time { return *at }
 }
 
-// elapsedModel returns a streaming Model whose clock the caller
+// elapsedModel returns a streaming model whose clock the caller
 // drives via the returned pointer. The turn is submitted at the
 // clock's initial value, so advancing it is the elapsed time.
-func elapsedModel(t *testing.T, at *time.Time) Model {
+func elapsedModel(t *testing.T, at *time.Time) model {
 	t.Helper()
-	m := NewModel(Options{Agent: stubAgent{}})
+	m := newModel(Options{Agent: stubAgent{}})
 	m.now = fixedClock(at)
 	m.viewport.SetWidth(80)
 	m = m.submitTurn("how long is this going to take")
@@ -199,12 +199,12 @@ func TestElapsed_NotRenderedWhenIdle(t *testing.T) {
 // zero time and render a fifty-five-year turn.
 func TestElapsed_LiveAgentPathStampsTheStretch(t *testing.T) {
 	clock := time.Date(2026, 8, 15, 9, 0, 0, 0, time.UTC)
-	m := NewModel(Options{Agent: newLiveAgentStub()})
+	m := newModel(Options{Agent: newLiveAgentStub()})
 	m.now = fixedClock(&clock)
 	m.viewport.SetWidth(80)
 
 	next, _ := m.Update(streamChunkMsg{gen: m.sessionGen, text: "tok", partial: true})
-	live := next.(Model)
+	live := next.(model)
 	if !live.spinnerActive {
 		t.Fatal("setup: expected spinnerActive after a partial chunk in liveMode")
 	}
@@ -231,7 +231,7 @@ func TestElapsed_LiveAgentPathStampsTheStretch(t *testing.T) {
 	clock = clock.Add(10 * time.Minute)
 	second := clock
 	restarted, _ := live.Update(streamChunkMsg{gen: live.sessionGen, text: "more", partial: true})
-	rm := restarted.(Model)
+	rm := restarted.(model)
 	if !rm.turnStarted.Equal(second) {
 		t.Fatalf("second stretch turnStarted = %v, want %v", rm.turnStarted, second)
 	}
@@ -247,11 +247,11 @@ func TestElapsed_LiveAgentPathStampsTheStretch(t *testing.T) {
 }
 
 // TestElapsed_ZeroValueModelRendersNothing guards the nil clock on a
-// hand-built Model{} — the fixture shape a lot of the render-path
+// hand-built model{} — the fixture shape a lot of the render-path
 // tests use. nowFn must not panic and turnElapsed must read the zero
 // turnStarted as "no turn".
 func TestElapsed_ZeroValueModelRendersNothing(t *testing.T) {
-	var m Model
+	var m model
 	if m.nowFn().IsZero() {
 		t.Error("nowFn on a zero-value Model returned the zero time, want time.Now")
 	}

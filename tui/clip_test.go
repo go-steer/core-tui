@@ -94,12 +94,12 @@ func TestClipFrame_NoOpWhenAlreadyFits(t *testing.T) {
 
 // TestView_ClipsOversizedFrame is the integration point: the post-
 // pass has to be wired into View, not merely available. Drives a
-// real Model at a size the composition is known to overflow.
+// real model at a size the composition is known to overflow.
 func TestView_ClipsOversizedFrame(t *testing.T) {
-	m := NewModel(Options{Agent: &bareAgent{id: "clip"}})
+	m := newModel(Options{Agent: &bareAgent{id: "clip"}})
 	m.helpOpen = true // the help panel renders rows ~82 cols wide
 	out, _ := m.Update(tea.WindowSizeMsg{Width: 40, Height: 12})
-	m = out.(Model)
+	m = out.(model)
 	lines := strings.Split(m.View().Content, "\n")
 	if len(lines) > 12 {
 		t.Errorf("View emitted %d lines into a 12-row terminal", len(lines))

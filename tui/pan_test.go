@@ -42,11 +42,11 @@ func panRuler() string {
 // parked mid-scroll with the keyboard on the transcript. Every row is
 // one line that overruns the window, which is the only shape panning
 // applies to.
-func panModel(t *testing.T) Model {
+func panModel(t *testing.T) model {
 	t.Helper()
-	m := NewModel(Options{Agent: &bareAgent{id: "pan"}})
+	m := newModel(Options{Agent: &bareAgent{id: "pan"}})
 	out, _ := m.Update(tea.WindowSizeMsg{Width: 100, Height: 40})
-	m = out.(Model)
+	m = out.(model)
 	ruler := panRuler()
 	for range 60 {
 		m.history.Append(Message{Role: RoleAssistant, Text: ruler, Rendered: ruler})
@@ -65,7 +65,7 @@ func panModel(t *testing.T) Model {
 // drawn line with its ANSI and its selection gutter removed. Blank
 // lines (the separators between rows) are dropped, so the result is
 // the ruler as the operator sees it.
-func panContent(t *testing.T, m Model) []string {
+func panContent(t *testing.T, m model) []string {
 	t.Helper()
 	var out []string
 	for _, ln := range strings.Split(m.chatView(), "\n") {
@@ -144,15 +144,15 @@ func TestPan_ClampsAtBothEnds(t *testing.T) {
 // opposite case — a tall table read a row at a time — so it keeps the
 // offset.
 func TestPan_WhatResetsItAndWhatDoesNot(t *testing.T) {
-	resets := map[string]func(m Model) Model{
-		"cursor down":   func(m Model) Model { return press(m, "down") },
-		"cursor up":     func(m Model) Model { return press(m, "up") },
-		"jump to top":   func(m Model) Model { return press(m, "g") },
-		"jump to end":   func(m Model) Model { return press(m, "G") },
-		"back to input": func(m Model) Model { return press(m, "tab") },
-		"resize": func(m Model) Model {
+	resets := map[string]func(m model) model{
+		"cursor down":   func(m model) model { return press(m, "down") },
+		"cursor up":     func(m model) model { return press(m, "up") },
+		"jump to top":   func(m model) model { return press(m, "g") },
+		"jump to end":   func(m model) model { return press(m, "G") },
+		"back to input": func(m model) model { return press(m, "tab") },
+		"resize": func(m model) model {
 			out, _ := m.Update(tea.WindowSizeMsg{Width: 120, Height: 40})
-			return out.(Model)
+			return out.(model)
 		},
 	}
 	for name, move := range resets {
@@ -188,7 +188,7 @@ func TestPan_WhatResetsItAndWhatDoesNot(t *testing.T) {
 func TestPan_ASameWidthResizeKeepsIt(t *testing.T) {
 	m := press(panModel(t), "shift+right")
 	out, _ := m.Update(tea.WindowSizeMsg{Width: 100, Height: 44})
-	if m = out.(Model); m.chatX != chatPanStep {
+	if m = out.(model); m.chatX != chatPanStep {
 		t.Errorf("a height-only resize dropped the pan to column %d", m.chatX)
 	}
 }

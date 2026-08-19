@@ -94,7 +94,7 @@ func TestAskResolver_ReArmsOnlyWhenTheFlowIsFree(t *testing.T) {
 	}
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
-			m := NewModel(Options{Asker: NewAsker()})
+			m := newModel(Options{Asker: NewAsker()})
 			cmd := askResolver(tc.ans, &m)
 			if got := cmd != nil; got != tc.reArms {
 				t.Errorf("re-armed = %v, want %v", got, tc.reArms)
@@ -103,7 +103,7 @@ func TestAskResolver_ReArmsOnlyWhenTheFlowIsFree(t *testing.T) {
 	}
 }
 
-// The single-select drives to an answer with no Model, no Update and
+// The single-select drives to an answer with no model, no Update and
 // no tea.Program — the property stage 3 of #164 bought, spent here by
 // the first surface built after it.
 func TestAskChoice_DrivesToAnAnswerWithoutAModel(t *testing.T) {
@@ -420,7 +420,7 @@ func askActionFor(t *testing.T, ans answer) AskAction {
 	a := NewAsker().(*asker)
 	flow := askFlow{response: make(chan askResponse, 1)}
 	a.pending = &flow
-	m := NewModel(Options{Asker: a})
+	m := newModel(Options{Asker: a})
 	askResolver(ans, &m)
 	select {
 	case r := <-flow.response:

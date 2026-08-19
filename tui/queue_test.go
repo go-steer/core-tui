@@ -43,7 +43,7 @@ func TestQueueState_StringLabels(t *testing.T) {
 // TestMarkInFlightTerminal_FlipsToDone pins that finalizeTurn's
 // success path flips the InFlight entry to Done (R-CHAT-10).
 func TestMarkInFlightTerminal_FlipsToDone(t *testing.T) {
-	m := NewModel(Options{})
+	m := newModel(Options{})
 	m.queue = []QueueEntry{
 		{Text: "x", State: QueueInFlight, Created: time.Now()},
 	}
@@ -59,7 +59,7 @@ func TestMarkInFlightTerminal_FlipsToDone(t *testing.T) {
 // TestMarkInFlightTerminal_FlipsToFailedWithReason pins the failure
 // path: state goes Failed + Err carries the reason for rendering.
 func TestMarkInFlightTerminal_FlipsToFailedWithReason(t *testing.T) {
-	m := NewModel(Options{})
+	m := newModel(Options{})
 	m.queue = []QueueEntry{
 		{Text: "x", State: QueueInFlight, Created: time.Now()},
 	}
@@ -76,7 +76,7 @@ func TestMarkInFlightTerminal_FlipsToFailedWithReason(t *testing.T) {
 // state entries older than cullTTL get dropped on the next render;
 // fresh terminal entries stay so the operator sees them.
 func TestCullQueue_DropsExpiredTerminal(t *testing.T) {
-	m := NewModel(Options{})
+	m := newModel(Options{})
 	old := time.Now().Add(-3 * cullTTL)
 	fresh := time.Now()
 	m.queue = []QueueEntry{
@@ -102,7 +102,7 @@ func TestCullQueue_DropsExpiredTerminal(t *testing.T) {
 // NEVER culled even if its Created stamp is ancient — the entry
 // stays in the panel for as long as the turn runs.
 func TestCullQueue_DoesNotCullInFlight(t *testing.T) {
-	m := NewModel(Options{})
+	m := newModel(Options{})
 	m.queue = []QueueEntry{
 		{Text: "long-running", State: QueueInFlight, Created: time.Now().Add(-10 * cullTTL)},
 	}
@@ -134,7 +134,7 @@ func (a *injectingAgent) Inject(msg string) error {
 // lands as Done (injected), NOT as Queued.
 func TestEnqueueDuringStream_InjectsWhenModeSet(t *testing.T) {
 	agent := &injectingAgent{}
-	m := NewModel(Options{
+	m := newModel(Options{
 		Agent:                agent,
 		MidTurnInjectionMode: InjectIntoCurrent,
 	})
@@ -159,7 +159,7 @@ func TestEnqueueDuringStream_InjectsWhenModeSet(t *testing.T) {
 // the mode degrades silently when the agent doesn't satisfy
 // InjectableAgent — entry lands as Queued, no error.
 func TestEnqueueDuringStream_FallsBackWhenAgentLacksInject(t *testing.T) {
-	m := NewModel(Options{
+	m := newModel(Options{
 		Agent:                stubAgent{}, // no Inject method
 		MidTurnInjectionMode: InjectIntoCurrent,
 	})
@@ -174,7 +174,7 @@ func TestEnqueueDuringStream_FallsBackWhenAgentLacksInject(t *testing.T) {
 // so the operator sees what happened instead of silent loss.
 func TestEnqueueDuringStream_InjectErrorMarksFailed(t *testing.T) {
 	agent := &injectingAgent{nextErr: errInjectStub}
-	m := NewModel(Options{
+	m := newModel(Options{
 		Agent:                agent,
 		MidTurnInjectionMode: InjectIntoCurrent,
 	})

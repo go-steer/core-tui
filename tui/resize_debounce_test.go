@@ -47,7 +47,7 @@ func maxRenderedWidth(s string) int {
 // coalesced repaint each schedules) until the reflow retires.
 // Mirrors what the Bubble Tea runtime does with the returned Cmds,
 // minus the wall-clock waits.
-func settleResizeReflow(t *testing.T, m Model) Model {
+func settleResizeReflow(t *testing.T, m model) model {
 	t.Helper()
 	m = deliverResizeVisibleTick(m)
 	for i := 0; m.reflowPending; i++ {
@@ -55,16 +55,16 @@ func settleResizeReflow(t *testing.T, m Model) Model {
 			t.Fatal("resize reflow never retired")
 		}
 		out, _ := m.Update(resizeReflowMsg{gen: m.resizeGen})
-		m = out.(Model)
+		m = out.(model)
 		out, _ = m.Update(coalescedRefreshMsg{})
-		m = out.(Model)
+		m = out.(model)
 	}
 	return m
 }
 
 // assistantVersions returns the per-index Version of every
 // assistant row — the fingerprint of "this message was re-rendered".
-func assistantVersions(m Model) map[int]uint64 {
+func assistantVersions(m model) map[int]uint64 {
 	out := map[int]uint64{}
 	for i, msg := range m.history.Snapshot() {
 		if msg.Role == RoleAssistant {
@@ -83,7 +83,7 @@ func TestResizeEvent_ReflowsOnlyVisible(t *testing.T) {
 	before := assistantVersions(m)
 
 	out, cmd := m.Update(tea.WindowSizeMsg{Width: 70, Height: 40})
-	m = out.(Model)
+	m = out.(model)
 	if cmd == nil {
 		t.Fatal("a width-changing resize must return the settle tick Cmd")
 	}
@@ -114,7 +114,7 @@ func TestResizeEvent_VisibleTextIsCorrectWidthImmediately(t *testing.T) {
 	m := newBenchDragModel(40)
 
 	out, _ := m.Update(tea.WindowSizeMsg{Width: 70, Height: 40})
-	m = out.(Model)
+	m = out.(model)
 
 	snap := m.history.Snapshot()
 	last := snap[len(snap)-1]
@@ -138,7 +138,7 @@ func TestResizeSettle_ReflowsWholeHistory(t *testing.T) {
 	// A drag: several width-changing events back to back.
 	for _, w := range []int{110, 104, 96, 88, 80} {
 		out, _ := m.Update(tea.WindowSizeMsg{Width: w, Height: 40})
-		m = out.(Model)
+		m = out.(model)
 	}
 	m = settleResizeReflow(t, m)
 
@@ -162,7 +162,7 @@ func TestResizeSettle_ReflowsWholeHistory(t *testing.T) {
 func TestResizeSettle_WarmsIncrementally(t *testing.T) {
 	m := newBenchDragModel(40)
 	out, _ := m.Update(tea.WindowSizeMsg{Width: 70, Height: 40})
-	m = out.(Model)
+	m = out.(model)
 
 	ticks := 0
 	for m.reflowPending {
@@ -171,7 +171,7 @@ func TestResizeSettle_WarmsIncrementally(t *testing.T) {
 			t.Fatal("resize reflow never retired")
 		}
 		out, cmd := m.Update(resizeReflowMsg{gen: m.resizeGen})
-		m = out.(Model)
+		m = out.(model)
 		if m.reflowPending && cmd == nil {
 			t.Fatal("an unfinished warm pass must return the next warm tick")
 		}
@@ -188,20 +188,20 @@ func TestResizeSettle_StaleTickDropped(t *testing.T) {
 	m := newBenchDragModel(40)
 
 	out, _ := m.Update(tea.WindowSizeMsg{Width: 70, Height: 40})
-	m = out.(Model)
+	m = out.(model)
 	staleGen := m.resizeGen
 
 	// Advance the first drag's warm walk a little so a stale tick
 	// resuming it would be visible as cursor movement.
 	out, _ = m.Update(resizeReflowMsg{gen: staleGen})
-	m = out.(Model)
+	m = out.(model)
 	if m.reflowCursor == 0 {
 		t.Fatal("setup: expected the warm walk to have advanced")
 	}
 
 	// A newer resize supersedes it and restarts the walk.
 	out, _ = m.Update(tea.WindowSizeMsg{Width: 60, Height: 40})
-	m = out.(Model)
+	m = out.(model)
 	if m.resizeGen == staleGen {
 		t.Fatal("a width change must bump resizeGen")
 	}
@@ -210,7 +210,7 @@ func TestResizeSettle_StaleTickDropped(t *testing.T) {
 
 	// The superseded drag's settle tick lands late.
 	out, cmd := m.Update(resizeReflowMsg{gen: staleGen})
-	m = out.(Model)
+	m = out.(model)
 	if cmd != nil {
 		t.Error("a stale settle tick must not schedule follow-on work")
 	}
@@ -243,7 +243,7 @@ func TestResizeDrag_KeepsFollow(t *testing.T) {
 
 	for i := range dragBurst {
 		out, _ := m.Update(tea.WindowSizeMsg{Width: dragWidthAt(i), Height: 40})
-		m = out.(Model)
+		m = out.(model)
 	}
 	if !m.follow {
 		t.Fatal("drag dropped the operator off the tail")
@@ -269,7 +269,7 @@ func TestResizeDrag_KeepsScrollbackDetached(t *testing.T) {
 	}
 
 	out, _ := m.Update(tea.WindowSizeMsg{Width: 70, Height: 40})
-	m = out.(Model)
+	m = out.(model)
 	if m.follow {
 		t.Error("resize re-armed follow for an operator reading scrollback")
 	}
@@ -304,7 +304,7 @@ func TestResize_ListCacheSurvivesUnchangedWidth(t *testing.T) {
 	}
 
 	out, _ := m.Update(tea.WindowSizeMsg{Width: benchDragBaseWidth, Height: 50})
-	m = out.(Model)
+	m = out.(model)
 
 	if got := len(m.listCache.entries); got < entriesBefore {
 		t.Errorf("height-only resize dropped cache entries: %d → %d", entriesBefore, got)
@@ -331,7 +331,7 @@ func TestResize_ListCacheKeepsEarlierWidth(t *testing.T) {
 	}
 
 	out, _ := m.Update(tea.WindowSizeMsg{Width: benchDragBaseWidth - 6, Height: 40})
-	m = out.(Model)
+	m = out.(model)
 	if m.viewport.Width() == wide {
 		t.Fatal("setup: expected the chat width to change")
 	}
@@ -358,7 +358,7 @@ func TestResizeSettle_WarmsTheBacklogTheDragSkipped(t *testing.T) {
 	m := newBenchDragModel(40)
 	for _, w := range []int{112, 100, 92, 84} {
 		out, _ := m.Update(tea.WindowSizeMsg{Width: w, Height: 40})
-		m = out.(Model)
+		m = out.(model)
 	}
 	width := m.viewport.Width()
 	drawn := 0
@@ -404,7 +404,7 @@ func TestResizeSettle_WarmsTheBacklogTheDragSkipped(t *testing.T) {
 func TestResizeMidWarm_ScrollExposesExactRows(t *testing.T) {
 	m := newBenchDragModel(40)
 	out, _ := m.Update(tea.WindowSizeMsg{Width: 72, Height: 40})
-	m = out.(Model)
+	m = out.(model)
 	m = deliverResizeVisibleTick(m)
 	if !m.reflowPending {
 		t.Fatal("setup: expected a pending reflow")
@@ -448,7 +448,7 @@ func TestResizeDrag_OnlyTheLeadingEventRuns(t *testing.T) {
 
 	before := assistantVersions(m)
 	out, _ := m.Update(tea.WindowSizeMsg{Width: dragWidthAt(0), Height: 40})
-	m = out.(Model)
+	m = out.(model)
 	leading := assistantVersions(m)
 	if bumpedBetween(before, leading) == 0 {
 		t.Fatal("the leading event of a drag must re-render the visible window")
@@ -457,7 +457,7 @@ func TestResizeDrag_OnlyTheLeadingEventRuns(t *testing.T) {
 	for i := 1; i < dragBurst; i++ {
 		prev := assistantVersions(m)
 		out, _ := m.Update(tea.WindowSizeMsg{Width: dragWidthAt(i), Height: 40})
-		m = out.(Model)
+		m = out.(model)
 		if n := bumpedBetween(prev, assistantVersions(m)); n != 0 {
 			t.Fatalf("event %d of the drag re-rendered %d message(s) through Glamour; "+
 				"only the leading event is allowed to", i, n)
@@ -472,7 +472,7 @@ func TestResizeDrag_VisibleTickReflowsTheScreen(t *testing.T) {
 	m := newBenchDragModel(40)
 	for i := range dragBurst {
 		out, _ := m.Update(tea.WindowSizeMsg{Width: dragWidthAt(i), Height: 40})
-		m = out.(Model)
+		m = out.(model)
 	}
 	width := m.viewport.Width()
 
@@ -494,13 +494,13 @@ func TestResizeDrag_LeadingEdgeRearms(t *testing.T) {
 	m := newBenchDragModel(40)
 	for i := range dragBurst {
 		out, _ := m.Update(tea.WindowSizeMsg{Width: dragWidthAt(i), Height: 40})
-		m = out.(Model)
+		m = out.(model)
 	}
 	m = deliverResizeVisibleTick(m)
 
 	before := assistantVersions(m)
 	out, _ := m.Update(tea.WindowSizeMsg{Width: 64, Height: 40})
-	m = out.(Model)
+	m = out.(model)
 	if bumpedBetween(before, assistantVersions(m)) == 0 {
 		t.Error("the first event of a second drag was treated as a continuation of the first")
 	}
@@ -520,7 +520,7 @@ func TestResizeDrag_ScrolledRowsStayInside(t *testing.T) {
 	m := newBenchDragModel(40)
 	for i := range dragBurst {
 		out, _ := m.Update(tea.WindowSizeMsg{Width: dragWidthAt(i), Height: 40})
-		m = out.(Model)
+		m = out.(model)
 	}
 	if !m.reflowHot {
 		t.Fatal("setup: expected the drag to still be hot")
@@ -550,7 +550,7 @@ func bumpedBetween(before, after map[int]uint64) int {
 // staleVisibleRows counts the assistant rows inside the current
 // window whose Glamour render is pinned to some width other than
 // want.
-func staleVisibleRows(m *Model, want int) int {
+func staleVisibleRows(m *model, want int) int {
 	n := 0
 	total := m.history.Len()
 	m.chatVisitWindow(func(i int) {
@@ -575,7 +575,7 @@ func TestResize_HeightOnlyDoesNotScheduleReflow(t *testing.T) {
 	genBefore := m.resizeGen
 
 	out, cmd := m.Update(tea.WindowSizeMsg{Width: benchDragBaseWidth, Height: 55})
-	m = out.(Model)
+	m = out.(model)
 
 	if cmd != nil {
 		t.Error("height-only resize must not schedule a settle tick")

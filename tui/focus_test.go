@@ -26,7 +26,7 @@ import (
 // focusedModel is followModel already switched to transcript focus,
 // parked mid-transcript so a scroll key can prove itself in either
 // direction.
-func focusedModel(t *testing.T, rows int) Model {
+func focusedModel(t *testing.T, rows int) model {
 	t.Helper()
 	m := followModel(t, 100, 40, rows)
 	m.chatSetYOffset(m.chatYOffset() / 2)
@@ -39,9 +39,9 @@ func focusedModel(t *testing.T, rows int) Model {
 }
 
 // press feeds one stroke through the real Update path.
-func press(m Model, stroke string) Model {
+func press(m model, stroke string) model {
 	out, _ := m.Update(keyPress(stroke))
-	return out.(Model)
+	return out.(model)
 }
 
 // Tab is the whole entry point to the mode, and blurring the
@@ -227,7 +227,7 @@ func TestFocus_PasteTakesTheKeyboardBack(t *testing.T) {
 	m := focusedModel(t, 200)
 
 	out, _ := m.Update(tea.PasteMsg{Content: "pasted text"})
-	m = out.(Model)
+	m = out.(model)
 
 	if m.focus != focusInput {
 		t.Error("a paste left the keyboard on the transcript")
@@ -358,7 +358,7 @@ func TestHelpPanel_TranscriptFocusKeysAreAllBound(t *testing.T) {
 	// is that the frame does not move — so what stands in for them is
 	// the notice they leave, which is also the only thing the operator
 	// sees (issue #153).
-	state := func(m Model) [6]int {
+	state := func(m model) [6]int {
 		return [6]int{m.chatYOffset(), m.selIdx, len(m.collapsed), int(m.focus), len(m.copyNotice), m.chatX}
 	}
 	for _, key := range keys {

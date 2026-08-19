@@ -26,7 +26,7 @@ import "time"
 
 // Chat-content + terminal msgs carry a `gen` field stamped by the
 // emitter (startAgentTurn / startLiveStream / emitEvent) with the
-// Model's sessionGen at goroutine start. Update's cases guard
+// model's sessionGen at goroutine start. Update's cases guard
 // `if msg.gen != m.sessionGen { drop }` so a mid-run applySwitchTarget
 // (issue #48 / #53) invalidates every in-flight msg from the outgoing
 // Agent without needing to swap m.eventCh or wait for cancellation
@@ -73,7 +73,7 @@ type toolResultMsg struct {
 
 // usageMsg snapshots the latest Usage from the agent. The TUI keeps
 // only the most recent value and reports it once at turn-end on the
-// finalized assistant message (R-USE-1). Cost / Model travel
+// finalized assistant message (R-USE-1). Cost / model travel
 // alongside so adapters that compute pricing per turn can surface
 // it without an extra round-trip; zero values suppress the
 // respective footer/sidebar segments.
@@ -357,7 +357,7 @@ type sessionSwitchedMsg struct {
 // slashCommandsMsg carries the host's SlashProvider.SlashCommands()
 // rows for a `/` palette that already opened with the built-ins.
 //
-// seq identifies the palette instance (Model.paletteSeq, bumped on
+// seq identifies the palette instance (model.paletteSeq, bumped on
 // every open). A palette opens and closes many times inside one
 // session generation, so gen alone can't tell whether the reply still
 // belongs to what is on screen.
@@ -431,7 +431,7 @@ type persistDoneMsg struct {
 // nil err IS news: it is the only acknowledgement a copy can get, so
 // it is what lets the notice stop hedging about OSC 52.
 //
-// gen is Model.copyGen at the time of the copy, not sessionGen — the
+// gen is model.copyGen at the time of the copy, not sessionGen — the
 // message edits a notice, and the notice turns over far faster than
 // the session does.
 type clipboardWrittenMsg struct {
@@ -488,7 +488,7 @@ type helpCommandsMsg struct {
 }
 
 // The two call sites #137 deferred: `/switch <id>` and dispatchSlash's
-// match-then-invoke. Both carry seq — Model.slashSeq as of the
+// match-then-invoke. Both carry seq — model.slashSeq as of the
 // dispatch — on top of gen, because both can be overtaken by the next
 // /cmd without the session ever changing.
 

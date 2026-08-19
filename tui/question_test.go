@@ -17,7 +17,7 @@
 //
 // The questions themselves are tested from outside the package
 // (question_external_test.go) precisely because they need nothing
-// from it. Everything here does need a *Model, which is the honest
+// from it. Everything here does need a *model, which is the honest
 // division: routing, exactly-once and teardown are the app's
 // concerns, not the widget's.
 
@@ -47,7 +47,7 @@ func (p *probeQuestion) Body(int, int, styleSet) string        { return "probe b
 // recordAnswers returns a resolver that appends every answer it is
 // handed, so a test can count runs as well as inspect them.
 func recordAnswers(into *[]answer) resolver {
-	return func(a answer, _ *Model) tea.Cmd {
+	return func(a answer, _ *model) tea.Cmd {
 		*into = append(*into, a)
 		return nil
 	}
@@ -57,7 +57,7 @@ func recordAnswers(into *[]answer) resolver {
 // in one keystroke — consumed, popped, resolved.
 func TestOverlayAsk_KeystrokeAnswersAndPops(t *testing.T) {
 	var got []answer
-	m := Model{}
+	m := model{}
 	m.overlayStack.ask(&probeQuestion{id: "probe", ans: chosen{ID: "x", Index: 3}}, askOperator, recordAnswers(&got))
 
 	consumed, _ := m.overlayStack.handleKeyMsg(keyMsgFromStroke("enter"), &m)
@@ -80,7 +80,7 @@ func TestOverlayAsk_KeystrokeAnswersAndPops(t *testing.T) {
 // an open modal is exclusive.
 func TestOverlayAsk_StillAskingKeepsTheQuestion(t *testing.T) {
 	var got []answer
-	m := Model{}
+	m := model{}
 	m.overlayStack.ask(&probeQuestion{id: "probe"}, askOperator, recordAnswers(&got))
 
 	consumed, _ := m.overlayStack.handleKeyMsg(keyMsgFromStroke("x"), &m)
@@ -104,7 +104,7 @@ func TestOverlayResolveAll_TellsEveryQuestionWhy(t *testing.T) {
 		dismissEscape, dismissSuperseded, dismissShutdown, dismissUnrenderable,
 	} {
 		var first, second []answer
-		m := Model{}
+		m := model{}
 		m.overlayStack.ask(&probeQuestion{id: "one"}, askOperator, recordAnswers(&first))
 		// A viewer with nothing to answer, in the middle of the
 		// stack, to prove it is dropped rather than skipped over.
@@ -142,13 +142,13 @@ type toldMsg struct{ id string }
 // one, so dropping them would reintroduce the stranded-flow bug in a
 // new place.
 func TestOverlayResolveAll_ReturnsWhatTheResolversScheduled(t *testing.T) {
-	m := Model{}
+	m := model{}
 	if cmd := m.overlayStack.resolveAll(dismissShutdown, &m); cmd != nil {
 		t.Errorf("resolveAll on an empty stack returned %v, want nil", cmd)
 	}
 
 	tell := func(id string) resolver {
-		return func(answer, *Model) tea.Cmd {
+		return func(answer, *model) tea.Cmd {
 			return func() tea.Msg { return toldMsg{id: id} }
 		}
 	}
@@ -182,7 +182,7 @@ func TestOverlayResolveAll_ReturnsWhatTheResolversScheduled(t *testing.T) {
 // operator just committed.
 func TestOverlayResolveAll_NeverResolvesTwice(t *testing.T) {
 	var got []answer
-	m := Model{}
+	m := model{}
 	q := &probeQuestion{id: "probe", ans: chosen{ID: "kept"}}
 	m.overlayStack.ask(q, askOperator, recordAnswers(&got))
 
@@ -207,7 +207,7 @@ func TestOverlayResolveAll_NeverResolvesTwice(t *testing.T) {
 // nil, which is what a dialog that did not implement cursorDialog at
 // all used to produce.
 func TestAskedQuestion_CaretOnlyWhenTheQuestionHasOne(t *testing.T) {
-	m := Model{}
+	m := model{}
 	m.styles = newStyles(true, Branding{})
 
 	m.overlayStack.ask(&probeQuestion{id: "probe"}, askOperator, nil)
@@ -228,7 +228,7 @@ func TestAskedQuestion_CaretOnlyWhenTheQuestionHasOne(t *testing.T) {
 // through to synthesizing one up/down keystroke — which is what a
 // list wants and what a scrolling body does not.
 func TestAskedQuestion_WheelStepsTheListByOne(t *testing.T) {
-	m := Model{}
+	m := model{}
 	m.styles = newStyles(true, Branding{})
 	m.themeName = "default"
 	q := askThemePicker(&m)

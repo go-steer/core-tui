@@ -167,7 +167,7 @@ func chromaFor(dark bool, darkName, lightName string) string {
 // Normalizing at the styleSet boundary
 // instead means the twelve builtins need no edits, host themes keep
 // working, and the two Branding override sites (newStyles and
-// Model.resolveStyles) that mutate Primary and then call
+// model.resolveStyles) that mutate Primary and then call
 // newStylesWithTheme re-derive OnPrimary for free.
 func normalizeTheme(t Theme) Theme {
 	if t.ChromaStyleName == "" {

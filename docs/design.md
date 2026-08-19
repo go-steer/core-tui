@@ -154,10 +154,12 @@ classified there:
   the seven transcript symbols, and `SystemClipboardWriter` are
   recommended for promotion into the list above; nothing is promoted
   until it is.
-- **67 incidental** — the `Glyph*` and `Brand*` vocabularies, the named
-  theme constructors, `History`, the queue types, `Model` / `NewModel`.
-  Exported without a host-facing purpose; being narrowed before the
-  freeze.
+- **66 incidental** — the `Glyph*` and `Brand*` vocabularies, the named
+  theme constructors, `History`, the queue types, `NewModel`. Exported
+  without a host-facing purpose; being narrowed before the freeze. The
+  concrete `Model` came off in #115: `NewModel` returns `tea.Model`
+  now, and the escape hatch D18 promises is the interface rather than a
+  struct hosts could reach into.
 
 A host that finds itself naming something outside §3.1's list is either
 using an unpromised symbol — file an issue asking for promotion — or has

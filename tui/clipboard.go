@@ -101,7 +101,7 @@ const clipboardWriteTimeout = 5 * time.Second
 //
 // gen is the copy notice's generation, not the session's: the reply
 // exists only to correct a notice, and the notice can be superseded
-// several times within one session (see Model.copyGen).
+// several times within one session (see model.copyGen).
 func clipboardWriteCmd(write func(string) error, gen uint64, text string) tea.Cmd {
 	if write == nil {
 		return nil

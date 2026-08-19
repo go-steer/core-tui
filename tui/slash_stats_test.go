@@ -37,7 +37,7 @@ func (t *bareTracker) SessionTurns() int              { return 1 }
 func (t *bareTracker) SessionDuration() time.Duration { return time.Second }
 
 func TestRenderStats_BareTracker_NoModelsRow(t *testing.T) {
-	m := NewModel(Options{UsageTracker: &bareTracker{
+	m := newModel(Options{UsageTracker: &bareTracker{
 		totals: Usage{InputTokens: 100, OutputTokens: 50},
 		cost:   0.01,
 	}})
@@ -48,7 +48,7 @@ func TestRenderStats_BareTracker_NoModelsRow(t *testing.T) {
 }
 
 func TestRenderStats_SortByCostDescending(t *testing.T) {
-	m := NewModel(Options{UsageTracker: &bareTracker{cost: 0.06}})
+	m := newModel(Options{UsageTracker: &bareTracker{cost: 0.06}})
 	m.sessionUsage = &UsageUpdate{CostUSDTotal: 0.06, TurnsTotal: 3,
 		ByModel: map[string]UsageByModel{
 			"cheap":  {Turns: 1, CostUSD: 0.01},
@@ -67,7 +67,7 @@ func TestRenderStats_SortByCostDescending(t *testing.T) {
 }
 
 func TestRenderStats_TurnsPluralization(t *testing.T) {
-	m := NewModel(Options{UsageTracker: &bareTracker{cost: 0.05}})
+	m := newModel(Options{UsageTracker: &bareTracker{cost: 0.05}})
 	m.sessionUsage = &UsageUpdate{CostUSDTotal: 0.05, TurnsTotal: 4,
 		ByModel: map[string]UsageByModel{
 			"single": {Turns: 1, CostUSD: 0.04},
@@ -101,7 +101,7 @@ func TestFormatModelBreakdown_FirstPrefixDiffersFromContinuation(t *testing.T) {
 
 func TestRenderStats_NoTracker_GracefulMessage(t *testing.T) {
 	// Sanity — no panic when UsageTracker is unwired.
-	m := NewModel(Options{})
+	m := newModel(Options{})
 	got := m.renderStats()
 	if !strings.Contains(got, "no UsageTracker") {
 		t.Errorf("expected helpful 'no UsageTracker' message, got: %q", got)
@@ -114,7 +114,7 @@ func TestRenderStats_NoTracker_GracefulMessage(t *testing.T) {
 // produces, and follow the same skip rules for single-entry / nil.
 
 func TestRenderStats_PushSessionUsage_MultiEntry_RendersBreakdown(t *testing.T) {
-	m := NewModel(Options{UsageTracker: &bareTracker{
+	m := newModel(Options{UsageTracker: &bareTracker{
 		totals: Usage{InputTokens: 1200, OutputTokens: 200},
 		cost:   0.012,
 	}})
@@ -149,7 +149,7 @@ func TestRenderStats_PushSessionUsage_MultiEntry_RendersBreakdown(t *testing.T) 
 func TestRenderStats_PushSessionUsage_SingleEntry_NoRow(t *testing.T) {
 	// Single-entry push breakdown duplicates the aggregate — skip
 	// (same rule as the pull path).
-	m := NewModel(Options{UsageTracker: &bareTracker{
+	m := newModel(Options{UsageTracker: &bareTracker{
 		totals: Usage{InputTokens: 100, OutputTokens: 50}, cost: 0.01,
 	}})
 	m.sessionUsage = &UsageUpdate{

@@ -29,7 +29,7 @@
 // What moved off the widget. It no longer type-asserts m.opts.Agent to
 // ModelSwapper, no longer reads m.displayModelName() while rendering,
 // no longer appends to m.history, and no longer builds a host Cmd out
-// of m.sessionGen. Those were the four reasons it needed a *Model, and
+// of m.sessionGen. Those were the four reasons it needed a *model, and
 // they are the four reasons it could not be tested without one.
 //
 // What deliberately did NOT move: attaching the new Agent, announcing
@@ -129,7 +129,7 @@ func newModelPickerQuestion(wired bool) *modelPickerQuestion {
 // the picker is already open or the capability is unwired — an unwired
 // picker still opens, because "this agent cannot swap models" is worth
 // saying on the surface the operator asked for.
-func (m *Model) openModelPicker() tea.Cmd {
+func (m *model) openModelPicker() tea.Cmd {
 	if m.overlayStack.hasID(modelPickerDialogID) {
 		return nil
 	}
@@ -183,7 +183,7 @@ func modelPickerOn(o *overlay) *modelPickerQuestion {
 // exactly-once latch, rather than being closed by whichever handler
 // noticed first.
 func modelPickerResolver(q *modelPickerQuestion) resolver {
-	return func(a answer, m *Model) tea.Cmd {
+	return func(a answer, m *model) tea.Cmd {
 		switch a := a.(type) {
 		case chosen:
 			return nil
@@ -440,7 +440,7 @@ func (q *modelPickerQuestion) Cursor(_ int) *tea.Cursor {
 // writes the pick to the host's config, so it does not belong on the
 // Update goroutine either (issue #137). Nil when unwired; the failure
 // row arrives later as persistDoneMsg.
-func (m *Model) applyModelSwitch(msg modelSwitchedMsg) tea.Cmd {
+func (m *model) applyModelSwitch(msg modelSwitchedMsg) tea.Cmd {
 	if reason := modelSwitchFailure(msg); reason != "" {
 		m.history.Append(Message{Role: RoleError, Text: "/model: " + reason})
 		m.refreshViewport()

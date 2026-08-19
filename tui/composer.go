@@ -37,10 +37,10 @@ import (
 // # Why the render is eager rather than lazy
 //
 // The obvious shape — a cache consulted by View — is not available
-// here. Model.View has a value receiver, so anything it writes lands
+// here. model.View has a value receiver, so anything it writes lands
 // in a copy that is thrown away when it returns; a lazy cache would
 // have to live behind a pointer shared between every copy of the
-// Model, and two copies that diverged would then read each other's
+// model, and two copies that diverged would then read each other's
 // entries. The listCache can afford that because its key carries a
 // message identity and version that pin the content exactly. A
 // textarea has no such identity, and the failure mode is the worst
@@ -74,14 +74,14 @@ type composer struct {
 
 	// rendered is ta.View() as of the last mutation. Kept in the
 	// value rather than behind a pointer so it travels with the
-	// Model copy that produced it.
+	// model copy that produced it.
 	rendered string
 
 	// ready distinguishes a composer that newComposer built from the
-	// zero value one gets from a bare `Model{}` literal. bubbles
+	// zero value one gets from a bare `model{}` literal. bubbles
 	// panics rendering an unconstructed textarea — LineInfo indexes
 	// into a line slice that textarea.New would have seeded with one
-	// empty entry — and a good number of tests build a Model by
+	// empty entry — and a good number of tests build a model by
 	// literal to exercise one dialog without standing up a whole
 	// widget tree. Those models are never drawn, so there is no
 	// block to keep fresh; rendering them was never possible and is

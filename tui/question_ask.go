@@ -24,7 +24,7 @@
 //
 // Everything the answer MEANS lives in askResolver, next to the flow
 // it writes back to. The widgets below decide "which row" and "what
-// text" and nothing else; none of them has ever seen a *Model.
+// text" and nothing else; none of them has ever seen a *model.
 
 package tui
 
@@ -91,7 +91,7 @@ func newAskQuestion(req AskRequest) askSurface {
 // from shutdown must NOT re-arm, because applySwitchTarget's step 8
 // already returns a fresh listener and two armed listeners on one
 // channel are two consumers taking alternate requests.
-func askResolver(a answer, m *Model) tea.Cmd {
+func askResolver(a answer, m *model) tea.Cmd {
 	switch a := a.(type) {
 	case chosen:
 		m.dispatchAsk(AskResult{Action: AskAnswered, ChoiceIDs: []string{a.ID}})
@@ -135,7 +135,7 @@ func askResolver(a answer, m *Model) tea.Cmd {
 // editor round trip, the tests that drive one to completion. Ending
 // the question goes through overlay.resolve so the exactly-once latch
 // cannot be sidestepped.
-func (m *Model) openAsk() askSurface {
+func (m *model) openAsk() askSurface {
 	aq := m.overlayStack.asked(askDialogID)
 	if aq == nil {
 		return nil

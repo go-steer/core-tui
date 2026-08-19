@@ -44,11 +44,11 @@ import (
 // stale between ticks.
 const turnElapsedFloor = spinnerCadence
 
-// nowFn is the Model's clock. Tests set Model.now directly to make
+// nowFn is the model's clock. Tests set model.now directly to make
 // the elapsed readout deterministic; everything else gets time.Now.
-// Nil-safe so a zero-value Model{} — how a lot of the render-path
+// Nil-safe so a zero-value model{} — how a lot of the render-path
 // tests build their fixture — still works.
-func (m Model) nowFn() time.Time {
+func (m model) nowFn() time.Time {
 	if m.now != nil {
 		return m.now()
 	}
@@ -60,11 +60,11 @@ func (m Model) nowFn() time.Time {
 //
 // The IsZero guard is load-bearing: turnStarted is stamped only
 // where the animation starts (submitTurn and applyStreamChunk's
-// spinnerActive false→true flip), so an unstamped Model would
+// spinnerActive false→true flip), so an unstamped model would
 // otherwise measure from the zero time and report a fifty-five-year
 // turn. A backwards clock (NTP step, suspend/resume) clamps to 0 for
 // the same reason — the readout degrades to absent, never to garbage.
-func (m Model) turnElapsed() time.Duration {
+func (m model) turnElapsed() time.Duration {
 	if m.turnStarted.IsZero() {
 		return 0
 	}
@@ -109,7 +109,7 @@ func formatTurnElapsed(d time.Duration) string {
 // renderTurnElapsed returns the styled suffix for the thinking line
 // — a leading space plus the muted duration — or "" when the turn is
 // younger than turnElapsedFloor or no turn is in flight.
-func (m Model) renderTurnElapsed() string {
+func (m model) renderTurnElapsed() string {
 	d := m.turnElapsed()
 	if d < turnElapsedFloor {
 		return ""

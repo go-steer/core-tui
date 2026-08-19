@@ -68,8 +68,8 @@ import (
 // it sits in the row list.
 //
 // It holds no content. Everything that needs to know what a row looks
-// like goes through the Model, which owns the history and the render
-// cache — which is why the scroll operations are Model methods rather
+// like goes through the model, which owns the history and the render
+// cache — which is why the scroll operations are model methods rather
 // than methods here. What is left is the geometry, and the geometry
 // is what the layout code (resize, budget) reads.
 type chatViewport struct {
@@ -129,7 +129,7 @@ func (v chatViewport) Offset() (int, int) { return v.offsetIdx, v.offsetLine }
 // following window is never off screen, because follow means the window
 // is pinned to the end of the transcript, which is where the tail is —
 // the same rule chatVisitWindow itself follows (issue #93).
-func (m *Model) chatTailOffScreen() bool {
+func (m *model) chatTailOffScreen() bool {
 	if len(m.chatTail) == 0 || m.follow {
 		return false
 	}
@@ -149,7 +149,7 @@ func (m *Model) chatTailOffScreen() bool {
 
 // chatRowCount is the number of rows in the transcript: one per
 // history message, plus the live tail when it has anything to show.
-func (m Model) chatRowCount() int {
+func (m model) chatRowCount() int {
 	n := m.history.Len()
 	if len(m.chatTail) > 0 {
 		n++
@@ -165,7 +165,7 @@ func (m Model) chatRowCount() int {
 // the bottom-offset walk, the flat-offset conversion — so a row is
 // rendered at most once no matter how many of them ask, and usually
 // zero times because listCache already has it.
-func (m Model) chatRowLines(i int) []string {
+func (m model) chatRowLines(i int) []string {
 	n := m.history.Len()
 	if i < 0 || i > n {
 		return nil
@@ -211,7 +211,7 @@ func (m Model) chatRowLines(i int) []string {
 // shared one is no weaker a contract than the file already keeps.
 var chatBlankSeparator = []string{""}
 
-func (m Model) chatSeparator(msg Message) []string {
+func (m model) chatSeparator(msg Message) []string {
 	if msg.Role != RoleUser {
 		return chatBlankSeparator
 	}
@@ -228,7 +228,7 @@ func (m Model) chatSeparator(msg Message) []string {
 // memo is rebuilt every refresh, so the only way to reach it stale is
 // a resize that has not repainted yet — hence the width guard and the
 // fall back to building it here.
-func (m Model) chatRuleLine() string {
+func (m model) chatRuleLine() string {
 	if m.chatRule != "" && m.chatRuleWidth == m.viewport.Width() {
 		return m.chatRule
 	}
@@ -236,7 +236,7 @@ func (m Model) chatRuleLine() string {
 }
 
 // buildChatRule renders the separator rule at the current width.
-func (m Model) buildChatRule() string {
+func (m model) buildChatRule() string {
 	return m.styles.Rule.Render(strings.Repeat(GlyphRule, m.viewport.Width()))
 }
 
@@ -255,7 +255,7 @@ func (m Model) buildChatRule() string {
 // A fold (issue #152) is applied on the way out rather than being
 // rendered: it is the head of the ordinary render plus a count, so
 // the cache neither knows nor needs to know that the row is folded.
-func (m Model) chatMessageLines(i, total int, msg Message) []string {
+func (m model) chatMessageLines(i, total int, msg Message) []string {
 	width := m.viewport.Width()
 	// Looked up by ID rather than through listItem so the hit path does
 	// not build (and heap-allocate) a messageItem it would throw away
@@ -281,7 +281,7 @@ func (m Model) chatMessageLines(i, total int, msg Message) []string {
 // lookup, and a lookup by ID does not want one — so asking for them
 // was asking the caller to assemble a value purely to be discarded
 // (issue #204).
-func (m Model) chatRowCached(msg Message) bool {
+func (m model) chatRowCached(msg Message) bool {
 	_, ok := m.listCache.getLinesByID(msg.ID, msg.Version, m.viewport.Width())
 	return ok
 }
@@ -307,7 +307,7 @@ func (m Model) chatRowCached(msg Message) bool {
 // of refreshViewport — so the walk runs backward from the last row
 // instead. Trusting m.follow over the stale offset is the same rule
 // refreshViewport follows (issue #93).
-func (m *Model) chatVisitWindow(visit func(i int)) {
+func (m *model) chatVisitWindow(visit func(i int)) {
 	height := m.viewport.Height()
 	n := m.chatRowCount()
 	if height <= 0 || n == 0 {
@@ -350,7 +350,7 @@ func (m *Model) chatVisitWindow(visit func(i int)) {
 // block is always exactly height rows of exactly that many columns, so
 // the frame it is joined into does not shift when the transcript is
 // short. See chatBlock for why that pad is hand-rolled.
-func (m Model) chatView() string {
+func (m model) chatView() string {
 	w, h := m.viewport.Width(), m.viewport.Height()
 	if w <= 0 || h <= 0 {
 		return ""
@@ -548,7 +548,7 @@ func chatWriteSpaces(b *strings.Builder, n int) {
 // the resize path's "is this row exact yet" contract is about what a
 // repaint has settled, not about what the last paint happened to
 // touch.
-func (m *Model) warmChatWindow() {
+func (m *model) warmChatWindow() {
 	m.chatVisitWindow(func(int) {})
 }
 
@@ -561,7 +561,7 @@ func (m *Model) warmChatWindow() {
 // caching it would never hit; instead it is rendered once per refresh
 // and read from m.chatTail by every walk in this file. Everything
 // that can change it already ends in a refresh.
-func (m *Model) buildChatTail() []string {
+func (m *model) buildChatTail() []string {
 	var b strings.Builder
 	if inProgress := m.renderInProgress(); inProgress != "" {
 		if m.history.Len() > 0 {
@@ -655,7 +655,7 @@ func chatCutLine(ln string, x, width int) string {
 // exhaustive total: it walks UP from the end and stops as soon as it
 // has covered a window's worth of lines, so it costs the same at
 // 4,000 rows as at 10.
-func (m Model) chatBottomOffset() (int, int) {
+func (m model) chatBottomOffset() (int, int) {
 	n := m.chatRowCount()
 	if n == 0 {
 		return 0, 0
@@ -668,7 +668,7 @@ func (m Model) chatBottomOffset() (int, int) {
 // chatBottomOffset, and bounded for the same reason: it stops as soon
 // as it has covered a window's worth of lines. The selection reveal
 // (issue #152) uses it to scroll an item just far enough into view.
-func (m Model) chatEndOffset(last int) (int, int) {
+func (m model) chatEndOffset(last int) (int, int) {
 	need := m.viewport.Height()
 	for i := last; i >= 0; i-- {
 		h := len(m.chatRowLines(i))
@@ -681,25 +681,25 @@ func (m Model) chatEndOffset(last int) (int, int) {
 }
 
 // chatAtBottom reports whether the last content line is visible.
-func (m Model) chatAtBottom() bool {
+func (m model) chatAtBottom() bool {
 	idx, line := m.chatBottomOffset()
 	cur, curLine := m.viewport.Offset()
 	return cur > idx || (cur == idx && curLine >= line)
 }
 
 // chatGotoBottom pins the window to the end of the transcript.
-func (m *Model) chatGotoBottom() {
+func (m *model) chatGotoBottom() {
 	m.viewport.offsetIdx, m.viewport.offsetLine = m.chatBottomOffset()
 }
 
 // chatGotoTop pins the window to the start.
-func (m *Model) chatGotoTop() {
+func (m *model) chatGotoTop() {
 	m.viewport.offsetIdx, m.viewport.offsetLine = 0, 0
 }
 
 // chatScrollBy moves the window n lines, positive for down. Stops at
 // either end.
-func (m *Model) chatScrollBy(n int) {
+func (m *model) chatScrollBy(n int) {
 	for ; n > 0; n-- {
 		m.chatScrollDown()
 	}
@@ -709,11 +709,11 @@ func (m *Model) chatScrollBy(n int) {
 }
 
 // chatPageBy moves the window n screenfuls, positive for down.
-func (m *Model) chatPageBy(n int) {
+func (m *model) chatPageBy(n int) {
 	m.chatScrollBy(n * m.viewport.Height())
 }
 
-func (m *Model) chatScrollDown() {
+func (m *model) chatScrollDown() {
 	bi, bl := m.chatBottomOffset()
 	cur, curLine := m.viewport.Offset()
 	if cur > bi || (cur == bi && curLine >= bl) {
@@ -726,7 +726,7 @@ func (m *Model) chatScrollDown() {
 	}
 }
 
-func (m *Model) chatScrollUp() {
+func (m *model) chatScrollUp() {
 	if m.viewport.offsetLine > 0 {
 		m.viewport.offsetLine--
 		return
@@ -745,7 +745,7 @@ func (m *Model) chatScrollUp() {
 // Costs one row render in the common case (the offset row is on
 // screen and therefore cached) and nothing at all when the transcript
 // is empty.
-func (m *Model) clampChatOffset() {
+func (m *model) clampChatOffset() {
 	n := m.chatRowCount()
 	if n == 0 {
 		m.viewport.offsetIdx, m.viewport.offsetLine = 0, 0
@@ -787,7 +787,7 @@ const chatWheelDelta = 3
 // already dead code. Only its ctrl+u half survives, and it is kept
 // because half of a pair still beats none — pgup/pgdn cover the
 // other direction.
-func (m *Model) forwardChatScroll(msg tea.Msg) {
+func (m *model) forwardChatScroll(msg tea.Msg) {
 	switch msg := msg.(type) {
 	case tea.KeyPressMsg:
 		switch msg.String() {
@@ -815,7 +815,7 @@ func (m *Model) forwardChatScroll(msg tea.Msg) {
 // because a flat offset is the natural way to ASSERT on a scroll
 // position, and because SetYOffset needs an inverse. Nothing on the
 // frame path may call it.
-func (m Model) chatYOffset() int {
+func (m model) chatYOffset() int {
 	total := 0
 	for i := 0; i < m.viewport.offsetIdx && i < m.chatRowCount(); i++ {
 		total += len(m.chatRowLines(i))
@@ -826,7 +826,7 @@ func (m Model) chatYOffset() int {
 // chatSetYOffset moves the window to a flat line offset, resolving it
 // against the rows. The inverse of chatYOffset and equally
 // exhaustive; same rule about the frame path.
-func (m *Model) chatSetYOffset(y int) {
+func (m *model) chatSetYOffset(y int) {
 	if y <= 0 {
 		m.chatGotoTop()
 		return

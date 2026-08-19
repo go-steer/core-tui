@@ -51,7 +51,7 @@ type spinnerFrameCache struct {
 // 10-frame loop so the glyph reads as "alive" without distracting
 // from the verb that follows it. Pre-builds + caches the frames
 // the first time it's called for a given (theme, brightness).
-func (m *Model) renderBrailleFrame(step int) string {
+func (m *model) renderBrailleFrame(step int) string {
 	primary := m.styles.Theme.Primary
 	if m.spinnerCache == nil ||
 		m.spinnerCache.primary != primary ||

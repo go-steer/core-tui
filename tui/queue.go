@@ -84,7 +84,7 @@ func (s QueueState) terminalState() bool {
 // from "subagent / external alert arrived" — the former produces a
 // queue entry the operator can already see in the panel and doesn't
 // need a redundant system-message about an inbox alert.
-func (m *Model) hasPendingQueueEntry() bool {
+func (m *model) hasPendingQueueEntry() bool {
 	for _, e := range m.queue {
 		if !e.State.terminalState() {
 			return true

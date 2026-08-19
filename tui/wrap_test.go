@@ -141,7 +141,7 @@ func TestRenderedWidth_PricesATabTheWayLipglossDrawsIt(t *testing.T) {
 // makes the whole table hold.
 func TestRenderMessage_UserCardWithATabStaysInTheColumn(t *testing.T) {
 	const width = 40
-	m := NewModel(Options{})
+	m := newModel(Options{})
 	m.viewport.SetWidth(width)
 
 	for _, text := range []string{
@@ -295,7 +295,7 @@ func TestRenderMessage_EveryRoleStaysInTheColumnWithTabs(t *testing.T) {
 		for _, tc := range tabWrapCases {
 			t.Run(r.name+"/"+tc.name, func(t *testing.T) {
 				for _, width := range []int{40, 80} {
-					m := NewModel(Options{})
+					m := newModel(Options{})
 					m.viewport.SetWidth(width)
 					out := m.renderMessage(Message{Role: r.role, Text: tc.s})
 					for i, line := range strings.Split(out, "\n") {
@@ -333,7 +333,7 @@ func TestPermissionInline_StaysInTheColumnWithTabs(t *testing.T) {
 		for _, tc := range tabWrapCases {
 			t.Run(k.name+"/"+tc.name, func(t *testing.T) {
 				for _, width := range []int{40, 80} {
-					m := NewModel(Options{})
+					m := newModel(Options{})
 					m.viewport.SetWidth(width)
 					q := newPermissionQuestion(PermissionRequest{
 						ToolName:   "bash",

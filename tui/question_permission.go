@@ -21,7 +21,7 @@
 // had a byte-level capture of both its layouts to be held against
 // (golden_permission_test.go).
 //
-// What the move buys, beyond the two Model fields and the fifty-line
+// What the move buys, beyond the two model fields and the fifty-line
 // arm of handleKey it deletes. R-PERM-2's six decision keys were a
 // switch whose arms each named a PermissionDecision, duplicated once
 // as a legend builder that had to list the same keys in the same order
@@ -84,7 +84,7 @@ type permissionQuestion struct {
 	sc     scrollState
 
 	// md caches the Glamour renderer the DetailDiff path needs, keyed
-	// on exactly what Model.ensureMarkdown keys its own on. A question
+	// on exactly what model.ensureMarkdown keys its own on. A question
 	// cannot reach the app's cached renderer — Body is handed a styleSet
 	// and a width and nothing else — and building one per frame is not
 	// free, so the question keeps its own for as long as it is open.
@@ -125,11 +125,11 @@ func newPermissionQuestion(req PermissionRequest, layout PermissionLayout) *perm
 // the AlwaysAllow callback is handed the whole PermissionRequest so
 // the host knows what scope to persist, and the transcript echo names
 // the tool. Closing over the question is safe in a way closing over a
-// *Model is not: the question is heap-allocated and outlives every
+// *model is not: the question is heap-allocated and outlives every
 // per-Update copy of the model, which is the reason resolver takes its
-// *Model as a parameter in the first place.
+// *model as a parameter in the first place.
 func permissionResolver(q *permissionQuestion) resolver {
-	return func(a answer, m *Model) tea.Cmd {
+	return func(a answer, m *model) tea.Cmd {
 		switch a := a.(type) {
 		case decision:
 			m.dispatchPermission(a.Value, q.req)
@@ -370,7 +370,7 @@ func (q *permissionQuestion) detail(width int, st styleSet) string {
 
 // markdown returns a Glamour renderer for width, rebuilding it when
 // the width or the light/dark polarity moves under it — the same three
-// keys Model.ensureMarkdown compares, for the same reason.
+// keys model.ensureMarkdown compares, for the same reason.
 func (q *permissionQuestion) markdown(width int, st styleSet) *markdownRenderer {
 	if width <= 0 {
 		width = 80
@@ -386,7 +386,7 @@ func (q *permissionQuestion) markdown(width int, st styleSet) *markdownRenderer 
 // overlay stack, or nil. It replaces the `m.pendingPermission != nil`
 // test the renderers, the footer legend and the session switch used to
 // spell out.
-func (m *Model) openPermission() *permissionQuestion {
+func (m *model) openPermission() *permissionQuestion {
 	aq := m.overlayStack.asked(permissionDialogID)
 	if aq == nil {
 		return nil

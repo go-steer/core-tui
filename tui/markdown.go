@@ -25,9 +25,9 @@ import (
 
 // markdownRenderer wraps a Glamour TermRenderer with the parameters
 // the TUI tracks — the active theme, dark/light background and
-// viewport width. Held by Model and lazily rebuilt when the width or
+// viewport width. Held by model and lazily rebuilt when the width or
 // the dark flag changes; a theme change nils the field outright
-// (Model.refreshTheme), because Theme carries a slice and so cannot
+// (model.refreshTheme), because Theme carries a slice and so cannot
 // be compared for equality the way dark/width can.
 //
 // R-CHAT-4 / R-MD-3: assistant text is rendered through Glamour on

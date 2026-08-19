@@ -42,7 +42,7 @@ import tea "charm.land/bubbletea/v2"
 
 // focusTarget names the region that currently owns the keyboard.
 //
-// focusInput is the zero value on purpose: a bare Model{} — which
+// focusInput is the zero value on purpose: a bare model{} — which
 // the tests build constantly, and which NewModel starts from —
 // composes into the prompt exactly as it did before this file
 // existed. Focus mode is something the operator opts into.
@@ -73,7 +73,7 @@ const (
 // widget every call, so a caller that only wants to re-arm a
 // textarea it never blurred (the turn-end path) gets the same answer
 // as one changing modes, and the two states can't drift apart.
-func (m *Model) setFocus(t focusTarget) {
+func (m *model) setFocus(t focusTarget) {
 	m.focus = t
 	// The copy notice belongs to the mode it was made in: it is shown
 	// in the focus legend, which the composer does not draw, so
@@ -104,7 +104,7 @@ func (m *Model) setFocus(t focusTarget) {
 // carries this and shift+tab keeps the permission-mode chip it has
 // had since R-PERM-1. Add a third region and that stops being true —
 // split the binding then, not before.
-func (m *Model) cycleFocus() {
+func (m *model) cycleFocus() {
 	if m.focus == focusInput {
 		m.setFocus(focusTranscript)
 		return
@@ -141,7 +141,7 @@ func (m *Model) cycleFocus() {
 //     unconditionally and is far too load-bearing to shadow in a
 //     mode the operator can enter by accident; a half-page keymap
 //     with only one working half is worse than none.
-func (m *Model) handleTranscriptKey(stroke string) (tea.Cmd, bool) {
+func (m *model) handleTranscriptKey(stroke string) (tea.Cmd, bool) {
 	// Whatever the last copy said, this key is the operator moving on
 	// (issue #153). Cleared before the switch so a copy arm can set a
 	// fresh one, and so the two copy keys in a row each report their

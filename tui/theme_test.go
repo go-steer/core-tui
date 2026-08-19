@@ -327,7 +327,7 @@ func TestBuiltinThemes_ChromaStyleNamesResolve(t *testing.T) {
 // would keep the modal body on the previous palette until its width
 // happened to change.
 func TestRefreshTheme_InvalidatesBothMarkdownRenderers(t *testing.T) {
-	m := NewModel(Options{Agent: &bareAgent{id: "theme"}})
+	m := newModel(Options{Agent: &bareAgent{id: "theme"}})
 	m.themeName = "matrix"
 	m.refreshTheme()
 	before := m.ensureModalMarkdown(60)

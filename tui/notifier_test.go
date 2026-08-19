@@ -184,7 +184,7 @@ func TestRoleString_NoticeRoundtrip(t *testing.T) {
 // RoleNotice row must contain the ◇ glyph (the operator-facing
 // distinguisher from RoleSystem's ℹ).
 func TestRenderMessage_NoticeUsesDiamondGlyph(t *testing.T) {
-	m := NewModel(Options{ForceTheme: ThemeDark})
+	m := newModel(Options{ForceTheme: ThemeDark})
 	m.viewport.SetWidth(80)
 	out := m.renderMessage(Message{Role: RoleNotice, Text: "hello-notice"})
 	if !strings.Contains(out, "◇") {

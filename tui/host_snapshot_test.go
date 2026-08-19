@@ -61,7 +61,7 @@ func (h *hostileHost) SessionDuration() time.Duration { h.failUsage("SessionDura
 // test, each helper must still return a value.
 func TestRenderHelpers_NeverCallHost(t *testing.T) {
 	h := &hostileHost{t: t}
-	m := NewModel(Options{ForceTheme: ThemeDark, Agent: h, UsageTracker: h})
+	m := newModel(Options{ForceTheme: ThemeDark, Agent: h, UsageTracker: h})
 
 	// Cold cache: no refresh has landed, so the helpers fall back to
 	// placeholders/empty — and crucially do NOT reach the host.
@@ -108,11 +108,11 @@ func TestRenderHelpers_NeverCallHost(t *testing.T) {
 // in-generation snapshot is adopted and a re-arm tick is scheduled, while
 // a stale-generation snapshot is dropped.
 func TestHostSnapshotMsg_AdoptsAndReArms(t *testing.T) {
-	m := NewModel(Options{ForceTheme: ThemeDark, Agent: &noopAgent{}})
+	m := newModel(Options{ForceTheme: ThemeDark, Agent: &noopAgent{}})
 
 	snap := hostSnapshot{valid: true, modelName: "gemini-3.5-flash", provider: "gemini"}
 	got, cmd := m.Update(hostSnapshotMsg{gen: m.sessionGen, snap: snap})
-	m2 := got.(Model)
+	m2 := got.(model)
 	if m2.hostSnap.modelName != "gemini-3.5-flash" {
 		t.Errorf("adopted snapshot modelName = %q, want gemini-3.5-flash", m2.hostSnap.modelName)
 	}
@@ -122,7 +122,7 @@ func TestHostSnapshotMsg_AdoptsAndReArms(t *testing.T) {
 
 	// Stale generation: snapshot is ignored, no re-arm.
 	got2, cmd2 := m2.Update(hostSnapshotMsg{gen: m2.sessionGen + 1, snap: hostSnapshot{modelName: "stale"}})
-	m3 := got2.(Model)
+	m3 := got2.(model)
 	if m3.hostSnap.modelName != "gemini-3.5-flash" {
 		t.Errorf("stale snapshot mutated cache: modelName = %q, want gemini-3.5-flash", m3.hostSnap.modelName)
 	}

@@ -124,7 +124,7 @@ func TestRenderLatencyBadge(t *testing.T) {
 func TestApplyToolResult_LatencyBadgeAppendedToPreview(t *testing.T) {
 	// Mirrors the applyToolResult composition (see tool_verbose_test.go
 	// for the same convention): drive History helpers directly so the
-	// test doesn't need a full Model + viewport.
+	// test doesn't need a full model + viewport.
 	styles := newStyles(true, Branding{})
 	h := &History{}
 	args := map[string]any{"path": "main.go"}
@@ -163,7 +163,7 @@ func TestApplyToolResult_LatencyBadgeAppendedToPreview(t *testing.T) {
 
 func TestToolCallDialog_HeaderShowsLatencyChip(t *testing.T) {
 	styles := newStyles(true, Branding{})
-	m := Model{}
+	m := model{}
 	m.styles = styles
 	m.width = 120
 	m.height = 40

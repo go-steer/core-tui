@@ -111,7 +111,7 @@ import (
 // to occupy, and how many it actually took.
 //
 // The zero value means "never sized" — the panel renderers read the
-// caps directly and treat 0 as "no ceiling", so a Model that has not
+// caps directly and treat 0 as "no ceiling", so a model that has not
 // been through resize() renders exactly as it did before the budget
 // existed.
 type chromeBudget struct {
@@ -166,7 +166,7 @@ func (b chromeBudget) frameRows() int {
 // chromeWidth is the column the sibling chrome renders in — chatWidth
 // in sidebar mode (View wraps the whole left stack to the chat
 // column), m.width in header mode.
-func (m *Model) allocateChrome(layout StatusLayout, chromeWidth int) chromeBudget {
+func (m *model) allocateChrome(layout StatusLayout, chromeWidth int) chromeBudget {
 	var b chromeBudget
 
 	// --- Unshrinkable chrome, reserved off the top -----------------
@@ -269,7 +269,7 @@ func (m *Model) allocateChrome(layout StatusLayout, chromeWidth int) chromeBudge
 // be zero or negative on a terminal too short to hold the chrome; the
 // box still gets its minimum, which is the one thing the budget will
 // not take away (priority 1).
-func (m *Model) fitInputBox(maxRows int) (rows, inputMax int) {
+func (m *model) fitInputBox(maxRows int) (rows, inputMax int) {
 	want := m.input.LineCount()
 	if want < textareaMinHeight {
 		want = textareaMinHeight
@@ -303,7 +303,7 @@ func (m *Model) fitInputBox(maxRows int) (rows, inputMax int) {
 // for the help panel that defect is issue #119's to fix. This is the
 // mechanism that stops it reaching the frame, not a UI for living
 // with it.
-func (m Model) fitPanelRows(lines []string, maxRows, width int) []string {
+func (m model) fitPanelRows(lines []string, maxRows, width int) []string {
 	if maxRows <= 0 || len(lines) <= maxRows {
 		return lines
 	}
@@ -322,7 +322,7 @@ func (m Model) fitPanelRows(lines []string, maxRows, width int) []string {
 
 // joinPanelRows is fitPanelRows plus the join every panel renderer
 // ends with.
-func (m Model) joinPanelRows(lines []string, maxRows, width int) string {
+func (m model) joinPanelRows(lines []string, maxRows, width int) string {
 	return strings.Join(m.fitPanelRows(lines, maxRows, width), "\n")
 }
 

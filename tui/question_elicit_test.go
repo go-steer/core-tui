@@ -82,7 +82,7 @@ func TestElicitResolver_ReArmsOnlyWhenTheFlowIsFree(t *testing.T) {
 	}
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
-			m := NewModel(Options{Elicitor: NewElicitor()})
+			m := newModel(Options{Elicitor: NewElicitor()})
 			cmd := elicitResolver(tc.ans, &m)
 			if got := cmd != nil; got != tc.reArms {
 				t.Errorf("re-armed = %v, want %v", got, tc.reArms)
@@ -122,7 +122,7 @@ func TestElicitURLMode_AcceptCarriesNoValues(t *testing.T) {
 // calling Footer() by hand after Body() would pass whichever order
 // Render used.
 func TestElicitForm_ScrollHintReachesTheFooter(t *testing.T) {
-	m := NewModel(Options{Agent: &bareAgent{id: "a"}})
+	m := newModel(Options{Agent: &bareAgent{id: "a"}})
 	m.width, m.height = 100, 24
 	m.resize()
 	fields := make([]ElicitField, 40)
@@ -143,7 +143,7 @@ func TestElicitForm_ScrollHintReachesTheFooter(t *testing.T) {
 		Title:  "small form",
 		Fields: []ElicitField{{Name: "who", Type: ElicitFieldString}},
 	})
-	var m2 Model
+	var m2 model
 	m2.styles, m2.width, m2.height = newStyles(true, Branding{}), 100, 24
 	m2.overlayStack.ask(short, askAgent, nil)
 	if got := ansi.Strip(m2.overlayStack.render(m2.width, &m2)); strings.Contains(got, scrollHint(true)) {
@@ -155,8 +155,8 @@ func TestElicitForm_ScrollHintReachesTheFooter(t *testing.T) {
 // keystrokes plus a renderer, and neither half needs an app model.
 // This drives one to a complete answer with no NewModel, no Update
 // and no tea.Program — which the predecessor could not have done at
-// any price, because its state lived on Model and its renderer read
-// Model.styles.
+// any price, because its state lived on model and its renderer read
+// model.styles.
 func TestElicitQuestion_DrivesToAnAnswerWithoutAModel(t *testing.T) {
 	q := newElicitQuestion("srv", ElicitRequest{
 		Title: "creds",

@@ -49,12 +49,12 @@ const copySrc = "Two things. " + "The first is that the loader resolves every pa
 // copyModel is a transcript with one of each thing worth copying: a
 // prompt, an assistant turn with code in it, and a tool call carrying
 // structured args and a structured response.
-func copyModel(t *testing.T, sel int) Model {
+func copyModel(t *testing.T, sel int) model {
 	t.Helper()
-	m := NewModel(Options{Agent: &bareAgent{id: "copy"}})
+	m := newModel(Options{Agent: &bareAgent{id: "copy"}})
 	m.styles = newStylesWithTheme(true, goldenTheme())
 	out, _ := m.Update(tea.WindowSizeMsg{Width: 80, Height: 24})
-	m = out.(Model)
+	m = out.(model)
 
 	m.history.Append(Message{Role: RoleUser, Text: "why is the include path wrong?", Rendered: "why is the include path wrong?"})
 	m.history.Append(Message{Role: RoleAssistant, Text: copySrc, Rendered: m.ensureMarkdown().renderMarkdown(copySrc)})
@@ -74,9 +74,9 @@ func copyModel(t *testing.T, sel int) Model {
 
 // pressCmd feeds one stroke through the real Update path and keeps
 // the Cmd, which is where a copy lives.
-func pressCmd(m Model, stroke string) (Model, tea.Cmd) {
+func pressCmd(m model, stroke string) (model, tea.Cmd) {
 	out, cmd := m.Update(keyPress(stroke))
-	return out.(Model), cmd
+	return out.(model), cmd
 }
 
 // clipboardText unwraps bubbletea's unexported OSC 52 message. Its

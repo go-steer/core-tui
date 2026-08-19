@@ -72,7 +72,7 @@ const pricingRefreshTimeout = 30 * time.Second
 // Update goroutine for the model picker's open-time snapshot. Nil when
 // the capability is unwired — the dialog renders its own
 // "does not implement ModelSwapper" body in that case.
-func (m Model) availableModelsCmd() tea.Cmd {
+func (m model) availableModelsCmd() tea.Cmd {
 	swapper, ok := m.opts.Agent.(ModelSwapper)
 	if !ok {
 		return nil
@@ -101,7 +101,7 @@ func switchModelCmd(swapper ModelSwapper, gen uint64, id string) tea.Cmd {
 // sessionsCmd pulls SessionSwitcher.Sessions() off the Update
 // goroutine for the session picker's open-time snapshot. Nil when the
 // capability is unwired.
-func (m Model) sessionsCmd() tea.Cmd {
+func (m model) sessionsCmd() tea.Cmd {
 	switcher, ok := m.opts.Agent.(SessionSwitcher)
 	if !ok {
 		return nil
@@ -132,7 +132,7 @@ func switchToSessionCmd(switcher SessionSwitcher, gen uint64, id string) tea.Cmd
 // opened and closed many times within one session generation, so the
 // handler needs to know the reply belongs to the palette that is open
 // right now.
-func (m Model) slashCommandsCmd(seq uint64) tea.Cmd {
+func (m model) slashCommandsCmd(seq uint64) tea.Cmd {
 	provider, ok := m.opts.Agent.(SlashProvider)
 	if !ok {
 		return nil

@@ -35,12 +35,12 @@ func TestForceRenderMsg_NoOpHandler(t *testing.T) {
 	// purpose is to force a fresh Update → View cycle. If a
 	// future refactor sneaks state into this handler, the modal-
 	// painting story regresses.
-	m := NewModel(Options{})
+	m := newModel(Options{})
 	m.viewport.SetWidth(80)
 	historyBefore := m.history.Len()
 
 	out, cmd := m.Update(forceRenderMsg{})
-	got := out.(Model)
+	got := out.(model)
 
 	if cmd != nil {
 		t.Errorf("forceRenderMsg handler should return nil Cmd, got %T", cmd)
@@ -59,13 +59,13 @@ func TestPermissionRequestMsg_ReturnsRenderKickCmd(t *testing.T) {
 	// prompts to stall until the next keypress. The fix returns
 	// a forceRenderTick — verify by exercising the Cmd and
 	// checking the eventual Msg type.
-	m := NewModel(Options{})
+	m := newModel(Options{})
 	m.viewport.SetWidth(80)
 
 	out, cmd := m.Update(permissionRequestMsg{
 		req: PermissionRequest{ToolName: "bash", Detail: "ls /tmp"},
 	})
-	got := out.(Model)
+	got := out.(model)
 	if got.openPermission() == nil {
 		t.Fatal("expected the permission question on the overlay stack")
 	}
@@ -78,7 +78,7 @@ func TestPermissionRequestMsg_ReturnsRenderKickCmd(t *testing.T) {
 }
 
 func TestElicitRequestMsg_ReturnsRenderKickCmd(t *testing.T) {
-	m := NewModel(Options{})
+	m := newModel(Options{})
 	m.viewport.SetWidth(80)
 
 	out, cmd := m.Update(elicitRequestMsg{
@@ -91,7 +91,7 @@ func TestElicitRequestMsg_ReturnsRenderKickCmd(t *testing.T) {
 			Fields: []ElicitField{{Name: "who", Type: ElicitFieldString}},
 		},
 	})
-	got := out.(Model)
+	got := out.(model)
 	if got.openElicit() == nil {
 		t.Fatal("expected the elicit form on the overlay stack")
 	}
@@ -113,11 +113,11 @@ func TestElicitRequestMsg_ReturnsRenderKickCmd(t *testing.T) {
 // gets read — the actual symptom #28 reported.
 
 func TestLiveStreamStartedMsg_ReArmsEventListener(t *testing.T) {
-	m := NewModel(Options{Agent: newLiveAgentStub()})
+	m := newModel(Options{Agent: newLiveAgentStub()})
 	m.viewport.SetWidth(80)
 
 	out, cmd := m.Update(liveStreamStartedMsg{cancel: func() {}})
-	got := out.(Model)
+	got := out.(model)
 	if cmd == nil {
 		t.Fatal("expected non-nil Cmd (render kick + listener re-arm), got nil")
 	}
@@ -128,11 +128,11 @@ func TestLiveStreamErrMsg_ReArmsEventListener(t *testing.T) {
 	// The original #28 repro: this Msg ARRIVES via eventListener
 	// (pushed by startLiveStream). Failing to re-arm kills the
 	// drain — subsequent events sit buffered forever.
-	m := NewModel(Options{Agent: newLiveAgentStub()})
+	m := newModel(Options{Agent: newLiveAgentStub()})
 	m.viewport.SetWidth(80)
 
 	out, cmd := m.Update(liveStreamErrMsg{err: errors.New("boom")})
-	got := out.(Model)
+	got := out.(model)
 	if cmd == nil {
 		t.Fatal("expected non-nil Cmd (render kick + listener re-arm), got nil")
 	}
@@ -140,11 +140,11 @@ func TestLiveStreamErrMsg_ReArmsEventListener(t *testing.T) {
 }
 
 func TestLiveStreamEndedMsg_ReArmsEventListener(t *testing.T) {
-	m := NewModel(Options{Agent: newLiveAgentStub()})
+	m := newModel(Options{Agent: newLiveAgentStub()})
 	m.viewport.SetWidth(80)
 
 	out, cmd := m.Update(liveStreamEndedMsg{})
-	got := out.(Model)
+	got := out.(model)
 	if cmd == nil {
 		t.Fatal("expected non-nil Cmd (render kick + listener re-arm), got nil")
 	}
@@ -157,7 +157,7 @@ func TestLiveStreamEndedMsg_ReArmsEventListener(t *testing.T) {
 // the background, and asserts the goroutine pulled the Msg back
 // out. If the listener wasn't re-armed, the channel buffer would
 // keep the Msg and this test would time out.
-func requireEventListenerReArmed(t *testing.T, m Model, cmd tea.Cmd) {
+func requireEventListenerReArmed(t *testing.T, m model, cmd tea.Cmd) {
 	t.Helper()
 	// Push a sentinel Msg onto m.eventCh; if the helper's
 	// eventListener fires, it'll read this and surface it via
@@ -217,7 +217,7 @@ func requireEventListenerReArmed(t *testing.T, m Model, cmd tea.Cmd) {
 // (Simpler than that: test the helper directly by liveMode bit.)
 
 func TestLiveStreamRenderCmd_LiveMode_IncludesKick(t *testing.T) {
-	m := NewModel(Options{Agent: newLiveAgentStub()})
+	m := newModel(Options{Agent: newLiveAgentStub()})
 	m.viewport.SetWidth(80)
 	if !m.liveMode {
 		t.Fatal("setup: expected liveMode=true")
@@ -236,7 +236,7 @@ func TestLiveStreamRenderCmd_LiveMode_IncludesKick(t *testing.T) {
 func TestLiveStreamRenderCmd_RunMode_NoKick(t *testing.T) {
 	// Plain (non-Live) agent — liveStreamRenderCmd should return
 	// just the eventListener, no batched kick.
-	m := NewModel(Options{Agent: &slashAgent{}})
+	m := newModel(Options{Agent: &slashAgent{}})
 	m.viewport.SetWidth(80)
 	if m.liveMode {
 		t.Fatal("setup: expected liveMode=false")
@@ -256,7 +256,7 @@ func TestStreamChunkMsg_LiveMode_KickIsBatched(t *testing.T) {
 	// chunk) — the case the issue's repro exercises. In Run mode
 	// the same path doesn't get the kick (covered by the Run
 	// mode sibling test below).
-	m := NewModel(Options{Agent: newLiveAgentStub()})
+	m := newModel(Options{Agent: newLiveAgentStub()})
 	m.viewport.SetWidth(80)
 	_, cmd := m.Update(streamChunkMsg{text: "hello", partial: false})
 	if cmd == nil {
@@ -274,7 +274,7 @@ func TestStreamChunkMsg_RunMode_StillReturnsListener(t *testing.T) {
 	// Regression guard the other way: Run mode must not regress
 	// — handler still returns a non-nil Cmd (the eventListener)
 	// even though there's no kick.
-	m := NewModel(Options{Agent: &slashAgent{}})
+	m := newModel(Options{Agent: &slashAgent{}})
 	m.viewport.SetWidth(80)
 	_, cmd := m.Update(streamChunkMsg{text: "hello", partial: false})
 	if cmd == nil {
@@ -283,7 +283,7 @@ func TestStreamChunkMsg_RunMode_StillReturnsListener(t *testing.T) {
 }
 
 func TestToolCallMsg_LiveMode_ReturnsCmd(t *testing.T) {
-	m := NewModel(Options{Agent: newLiveAgentStub()})
+	m := newModel(Options{Agent: newLiveAgentStub()})
 	m.viewport.SetWidth(80)
 	_, cmd := m.Update(toolCallMsg{id: "t-1", name: "bash", args: map[string]any{}})
 	if cmd == nil {
@@ -292,7 +292,7 @@ func TestToolCallMsg_LiveMode_ReturnsCmd(t *testing.T) {
 }
 
 func TestToolResultMsg_LiveMode_ReturnsCmd(t *testing.T) {
-	m := NewModel(Options{Agent: newLiveAgentStub()})
+	m := newModel(Options{Agent: newLiveAgentStub()})
 	m.viewport.SetWidth(80)
 	_, cmd := m.Update(toolResultMsg{id: "t-1", name: "bash", response: map[string]any{}})
 	if cmd == nil {
@@ -301,7 +301,7 @@ func TestToolResultMsg_LiveMode_ReturnsCmd(t *testing.T) {
 }
 
 func TestUsageMsg_LiveMode_ReturnsCmd(t *testing.T) {
-	m := NewModel(Options{Agent: newLiveAgentStub()})
+	m := newModel(Options{Agent: newLiveAgentStub()})
 	m.viewport.SetWidth(80)
 	_, cmd := m.Update(usageMsg{usage: Usage{InputTokens: 100}, model: "test"})
 	if cmd == nil {

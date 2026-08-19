@@ -167,7 +167,7 @@ func subagentTailTick(gen uint64, callID string) tea.Cmd {
 // spinner for two minutes. Returns nil — no tail, no cost — when the
 // host can't serve turns, the row has no wire-level call ID to key
 // on, or this tool name has already been proven not to be a subagent.
-func (m *Model) startSubagentTail(msg toolCallMsg) tea.Cmd {
+func (m *model) startSubagentTail(msg toolCallMsg) tea.Cmd {
 	reporter, ok := m.opts.Agent.(SubagentReporter)
 	if !ok || msg.id == "" {
 		return nil
@@ -201,7 +201,7 @@ func subagentTailName(tool string, args map[string]any) string {
 
 // applySubagentTail folds one tail page into the tool row and decides
 // whether to keep polling.
-func (m *Model) applySubagentTail(msg subagentTailMsg) tea.Cmd {
+func (m *model) applySubagentTail(msg subagentTailMsg) tea.Cmd {
 	t := m.subagentTails[msg.callID]
 	if t == nil || t.name != msg.name {
 		return nil
@@ -249,7 +249,7 @@ func (m *Model) applySubagentTail(msg subagentTailMsg) tea.Cmd {
 }
 
 // resumeSubagentTail issues the next poll for one tail.
-func (m *Model) resumeSubagentTail(callID string) tea.Cmd {
+func (m *model) resumeSubagentTail(callID string) tea.Cmd {
 	t := m.subagentTails[callID]
 	if t == nil || t.inflight {
 		return nil
@@ -266,7 +266,7 @@ func (m *Model) resumeSubagentTail(callID string) tea.Cmd {
 // collapsing the live block to a one-line summary that points at the
 // overlay holding the full log. Returns false when the call wasn't
 // being tailed, so applyToolResult can render normally.
-func (m *Model) stopSubagentTail(callID string) (*subagentTail, bool) {
+func (m *model) stopSubagentTail(callID string) (*subagentTail, bool) {
 	t := m.subagentTails[callID]
 	if t == nil {
 		return nil, false
@@ -281,7 +281,7 @@ func (m *Model) stopSubagentTail(callID string) (*subagentTail, bool) {
 // refreshSubagentTailPreview rewrites the tool row's preview with the
 // current tail block. Recomputed from the call-time preview each time
 // rather than appended, so repeated polls don't stack blocks.
-func (m *Model) refreshSubagentTailPreview(callID string, t *subagentTail) {
+func (m *model) refreshSubagentTailPreview(callID string, t *subagentTail) {
 	idx := m.history.FindByToolCallID(callID)
 	if idx < 0 {
 		return
@@ -417,7 +417,7 @@ func subagentDeclaredName(name string) string {
 // against the roster, open the drill-down overlay on it, and kick off
 // the first fetch plus the live tail. Returns a system-message string
 // instead when there's nothing to open.
-func (m *Model) openSubagentDetail(query string) (string, tea.Cmd) {
+func (m *model) openSubagentDetail(query string) (string, tea.Cmd) {
 	reporter, ok := m.opts.Agent.(SubagentReporter)
 	if !ok {
 		return "/subagents: agent doesn't implement SubagentReporter — no turn log to show", nil

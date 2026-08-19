@@ -15,11 +15,11 @@
 // End-to-end coverage for the Options.ToolDetailVerbose knob
 // (core-tui #52 tier 2): flipping it on should append the raw
 // args + response detail block under every tool row's compact
-// preview via applyToolResult's Model logic. Off (default) leaves
+// preview via applyToolResult's model logic. Off (default) leaves
 // the compact preview intact. Follows the existing convention in
 // TestApplyToolResult_UpdatesPreview: drive History helpers
 // directly and mirror the applyToolResult composition — cheaper
-// than spinning up a full Model with a viewport / listcache.
+// than spinning up a full model with a viewport / listcache.
 
 package tui
 
@@ -29,8 +29,8 @@ import (
 )
 
 // applyToolResultLogic replays the composition inside
-// (*Model).applyToolResult so the tests can exercise the verbose
-// gating without booting a Model + viewport. Keep the shape in sync
+// (*model).applyToolResult so the tests can exercise the verbose
+// gating without booting a model + viewport. Keep the shape in sync
 // with update.go's applyToolResult body — that's the only place
 // verbose is actually threaded.
 func applyToolResultLogic(h *History, verbose bool, name string, args, response map[string]any, errStr string, styles styleSet) {

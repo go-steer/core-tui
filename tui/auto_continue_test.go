@@ -52,7 +52,7 @@ func (a *inboxAgent) PendingInboxCount() int { return len(a.mu) }
 
 func TestMaybeAutoContinue_NoOpForWrongMode(t *testing.T) {
 	agent := &inboxAgent{mu: []string{"hello"}}
-	m := NewModel(Options{
+	m := newModel(Options{
 		Agent:                agent,
 		MidTurnInjectionMode: QueueForNext, // not AutoContinueFromInbox
 	})
@@ -69,7 +69,7 @@ func TestMaybeAutoContinue_NoOpWhenAgentDoesNotSatisfyInboxDrainer(t *testing.T)
 	// Plain Agent (no InboxDrainer) → AutoContinueFromInbox falls
 	// through cleanly.
 	agent := &slashAgent{} // satisfies Agent only
-	m := NewModel(Options{
+	m := newModel(Options{
 		Agent:                agent,
 		MidTurnInjectionMode: AutoContinueFromInbox,
 	})
@@ -81,7 +81,7 @@ func TestMaybeAutoContinue_NoOpWhenAgentDoesNotSatisfyInboxDrainer(t *testing.T)
 
 func TestMaybeAutoContinue_NoOpWhenInboxEmpty(t *testing.T) {
 	agent := &inboxAgent{} // empty
-	m := NewModel(Options{
+	m := newModel(Options{
 		Agent:                agent,
 		MidTurnInjectionMode: AutoContinueFromInbox,
 	})
@@ -96,7 +96,7 @@ func TestMaybeAutoContinue_NoOpWhenInboxEmpty(t *testing.T) {
 
 func TestMaybeAutoContinue_SubmitsSyntheticTurn(t *testing.T) {
 	agent := &inboxAgent{mu: []string{"first note", "second note"}}
-	m := NewModel(Options{
+	m := newModel(Options{
 		Agent:                agent,
 		MidTurnInjectionMode: AutoContinueFromInbox,
 	})
@@ -131,7 +131,7 @@ func TestMaybeAutoContinue_SubmitsSyntheticTurn(t *testing.T) {
 
 func TestMaybeAutoContinue_HonorsCustomFormatter(t *testing.T) {
 	agent := &inboxAgent{mu: []string{"x", "y"}}
-	m := NewModel(Options{
+	m := newModel(Options{
 		Agent:                agent,
 		MidTurnInjectionMode: AutoContinueFromInbox,
 		AutoContinueFormatter: func(msgs []string) string {
@@ -151,7 +151,7 @@ func TestMaybeAutoContinue_HonorsCustomFormatter(t *testing.T) {
 
 func TestMaybeAutoContinue_SoftCapStopsLoop(t *testing.T) {
 	agent := &inboxAgent{mu: []string{"hi"}}
-	m := NewModel(Options{
+	m := newModel(Options{
 		Agent:                agent,
 		MidTurnInjectionMode: AutoContinueFromInbox,
 		AutoContinueCap:      3,
@@ -170,7 +170,7 @@ func TestMaybeAutoContinue_SoftCapStopsLoop(t *testing.T) {
 
 func TestMaybeAutoContinue_NegativeCapDisablesIt(t *testing.T) {
 	agent := &inboxAgent{mu: []string{"hi"}}
-	m := NewModel(Options{
+	m := newModel(Options{
 		Agent:                agent,
 		MidTurnInjectionMode: AutoContinueFromInbox,
 		AutoContinueCap:      -1, // disabled
@@ -185,7 +185,7 @@ func TestMaybeAutoContinue_NegativeCapDisablesIt(t *testing.T) {
 
 func TestMaybeAutoContinue_FiltersBlankMessages(t *testing.T) {
 	agent := &inboxAgent{mu: []string{"real", "  ", "", "also real"}}
-	m := NewModel(Options{
+	m := newModel(Options{
 		Agent:                agent,
 		MidTurnInjectionMode: AutoContinueFromInbox,
 	})
@@ -202,7 +202,7 @@ func TestMaybeAutoContinue_FiltersBlankMessages(t *testing.T) {
 
 func TestMaybeAutoContinue_MarksMatchingQueueEntriesDone(t *testing.T) {
 	agent := &inboxAgent{mu: []string{"queued-text"}}
-	m := NewModel(Options{
+	m := newModel(Options{
 		Agent:                agent,
 		MidTurnInjectionMode: AutoContinueFromInbox,
 	})
@@ -245,7 +245,7 @@ func TestCompactNonEmpty(t *testing.T) {
 
 func TestEnqueueDuringStream_AutoContinueMode_InjectsAndQueues(t *testing.T) {
 	agent := &inboxAgent{}
-	m := NewModel(Options{
+	m := newModel(Options{
 		Agent:                agent,
 		MidTurnInjectionMode: AutoContinueFromInbox,
 	})

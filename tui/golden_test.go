@@ -318,11 +318,11 @@ func TestGolden_LiveFrame(t *testing.T) {
 // partial chunk accumulated, spinner running.
 //
 // The elapsed readout is time-dependent, so it is pinned through the
-// injected clock (Model.now, issue #111) rather than suppressed —
+// injected clock (model.now, issue #111) rather than suppressed —
 // forty-two seconds is past turnElapsedFloor, which means the suffix
 // is actually in the captured bytes. Left on the wall clock this
 // corpus would re-diff on every run.
-func goldenLiveModel(t *testing.T, w, h int) Model {
+func goldenLiveModel(t *testing.T, w, h int) model {
 	t.Helper()
 	m := goldenModel(t, w, h)
 	m.liveMode = true
@@ -331,7 +331,7 @@ func goldenLiveModel(t *testing.T, w, h int) Model {
 		text:    "Reading the package and working out what changed.",
 		partial: true,
 	})
-	m = out.(Model)
+	m = out.(model)
 	start := time.Date(2026, 8, 15, 9, 0, 0, 0, time.UTC)
 	m.turnStarted = start
 	m.now = func() time.Time { return start.Add(42 * time.Second) }
@@ -372,7 +372,7 @@ func TestGolden_HelpFrame(t *testing.T) {
 
 // goldenHelpModel is goldenModel with the help panel opened and
 // walked to page, through the same advanceHelp the `?` key runs.
-func goldenHelpModel(t *testing.T, w, h, page int) Model {
+func goldenHelpModel(t *testing.T, w, h, page int) model {
 	t.Helper()
 	m := goldenModel(t, w, h)
 	m.advanceHelp()
@@ -400,9 +400,9 @@ func goldenHelpModel(t *testing.T, w, h, page int) Model {
 // enough to churn every full-frame golden depending on where
 // -update was run. Call pinCwd alongside this for the third
 // environment input, the working directory in the status header.
-func goldenModel(t *testing.T, w, h int) Model {
+func goldenModel(t *testing.T, w, h int) model {
 	t.Helper()
-	m := NewModel(Options{
+	m := newModel(Options{
 		Agent: &bareAgent{id: "golden"},
 		SeedHistory: []Message{
 			{Role: RoleUser, Text: "read main.go", Rendered: "read main.go"},
@@ -414,12 +414,12 @@ func goldenModel(t *testing.T, w, h int) Model {
 	m.caps = terminalCapabilities{}
 	m.newlineHint = defaultNewlineHint("")
 	out, _ := m.Update(tea.WindowSizeMsg{Width: w, Height: h})
-	return out.(Model)
+	return out.(model)
 }
 
-// --- Model-free renderer goldens -------------------------------
+// --- model-free renderer goldens -------------------------------
 //
-// These seven take a styleSet, not a *Model, which is what makes
+// These seven take a styleSet, not a *model, which is what makes
 // them cheap to golden. Note that most are NOT width-parameterized
 // — renderToolPreview, renderToolPreviewWithResult, renderDiffInline,
 // renderCodeInline, renderLatencyBadge and renderReadPreview all

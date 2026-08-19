@@ -21,7 +21,7 @@
 // tea.NewProgram, and passing the zero Styles to Body.
 //
 // That is what this file does, and the discipline is the point rather
-// than the coverage. There is no Model in it, no theme, no terminal
+// than the coverage. There is no model in it, no theme, no terminal
 // and no goroutine; a question that grew a reach back into the app
 // would stop compiling here before it stopped working anywhere else.
 // Every subsequent question migrated in stages 3-6 belongs in this
@@ -67,7 +67,7 @@ func namedKey(code rune) tea.KeyPressMsg {
 // drive feeds a question a sequence of keystrokes and returns the
 // first answer it produced, or nil if it is still asking. Every Cmd
 // the question scheduled comes back too, already run — a question's
-// Cmd is its own machinery and never touches a Model, so running it
+// Cmd is its own machinery and never touches a model, so running it
 // here is safe and is the only way to see the theme preview.
 func drive(t *testing.T, q tui.Question, keys ...tea.KeyPressMsg) (tui.Answer, []tea.Msg) {
 	t.Helper()
@@ -154,7 +154,7 @@ func TestThemeQuestion_EmptyRegistryIsUnrenderable(t *testing.T) {
 // TestThemeQuestion_CursorMovementSchedulesAPreview. The preview is
 // the one effect the widget cannot simply return, so it schedules it
 // — and a test can now see exactly what it scheduled, which was not
-// observable at all while the widget wrote it into a *Model.
+// observable at all while the widget wrote it into a *model.
 func TestThemeQuestion_CursorMovementSchedulesAPreview(t *testing.T) {
 	q := tui.NewThemePickerQuestion(probeThemes(), "alpha")
 
@@ -273,7 +273,7 @@ func TestThemeQuestion_CaretFollowsTheFilter(t *testing.T) {
 // answer arrives from Update several hundred milliseconds later.
 //
 // That half cannot be tested here, and should not be: what belongs in
-// this file is the claim that the widget itself needs no Model, which
+// this file is the claim that the widget itself needs no model, which
 // for this picker means the list, the filter, the caret, the four
 // unrenderable-or-inert states, and exactly what Enter commits to.
 
@@ -600,7 +600,7 @@ func TestModelQuestion_CaretFollowsTheFilter(t *testing.T) {
 // things that make it the harder of the pair: a row whose Enter starts
 // somebody ELSE's question, and a row whose Enter answers in the same
 // keystroke. Three outcomes from one key, and which one you get is
-// decided entirely from the row — no Model, which is the claim.
+// decided entirely from the row — no model, which is the claim.
 
 // probeSessions is a fixed five-row snapshot covering every row kind
 // the picker has to tell apart: the attached one, plain ones whose

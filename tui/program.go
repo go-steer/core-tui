@@ -22,7 +22,7 @@ import (
 	tea "charm.land/bubbletea/v2"
 )
 
-// Run constructs the Model and runs the Bubble Tea program until exit.
+// Run constructs the model and runs the Bubble Tea program until exit.
 // Blocks until the user quits or ctx is cancelled. Returns the first
 // error encountered by tea.Program.Run, if any.
 //
@@ -41,10 +41,10 @@ func Run(ctx context.Context, opts Options) error {
 		return fmt.Errorf("tui.Run: Options.Agent is required")
 	}
 
-	m := NewModel(opts)
+	m := newModel(opts)
 	// Release the listener drain loops once the program is done,
 	// whatever ended it (issue #202). The Update paths that quit
-	// deliberately already do this for themselves via Model.quitCmd,
+	// deliberately already do this for themselves via model.quitCmd,
 	// and have to — they are the only ones that can release the
 	// goroutines while the program is still up. This defer is for
 	// everything Update cannot see: a cancelled ctx, SIGINT,
@@ -53,7 +53,7 @@ func Run(ctx context.Context, opts Options) error {
 	// model.Update first, so after the fact is the earliest the
 	// library can learn about them.
 	//
-	// Calling it on the local copy of the Model works because the
+	// Calling it on the local copy of the model works because the
 	// cancel closure is shared with every copy bubbletea made; see
 	// the lifeCtx field comment in model.go.
 	defer m.endListeners()
@@ -82,7 +82,7 @@ func Run(ctx context.Context, opts Options) error {
 	// the final model rather than holding onto our pre-Run handle so
 	// the snapshot reflects every history mutation up to quit.
 	if opts.AgentsDir != "" {
-		if fm, ok := finalModel.(Model); ok {
+		if fm, ok := finalModel.(model); ok {
 			t := buildTranscript(&fm)
 			if path, terr := saveTranscriptFile(opts.AgentsDir, t); terr != nil {
 				fmt.Fprintf(os.Stderr, "core-tui: transcript save: %v\n", terr)

@@ -45,7 +45,7 @@ var modalEdgeWidths = []int{24, 34, 40, 60, 76, 100, 160}
 // the side answer and the embedded huh form — at every width.
 //
 // It asserts on the block each surface returns, which is the block
-// View splices over the frame. Going through Model.modalFrame for the
+// View splices over the frame. Going through model.modalFrame for the
 // form rather than reaching for modalSurface directly is deliberate:
 // the claim is that the cascade cannot grow a sixth surface that misses
 // the treatment, and that is a claim about the cascade.

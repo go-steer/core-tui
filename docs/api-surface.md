@@ -608,32 +608,34 @@ no host observes it and no `Event` carries it. Blocked on `tui/update.go` and
 | `QueueState` | type | `queue.go:27` | 7 refs in 2 non-test file(s), 1 in 1 test file(s) — **blocked**: touches `view.go` |
 | `QueueState.String` | method | `queue.go:37` | follows `QueueState` |
 
-#### Bubble Tea model (6)
+#### Bubble Tea model (6) — settled by #115, done
 
-`Model` is incidental by the same test as everything else here — no host
-constructs one, `Run` is the documented entry point, and `Model` cannot be
-usefully embedded because a parent `tea.Model` silently drops the
-`AltScreen` / `MouseMode` / `Cursor` fields set in `Model.View`.
+`Model` was incidental by the same test as everything else here — no host
+constructed one, `Run` is the documented entry point, and `Model` could not
+be usefully embedded because a parent `tea.Model` silently drops the
+`AltScreen` / `MouseMode` / `Cursor` fields set in `View`.
 
-**But it is not this issue's to unexport.**
-[#115](https://github.com/go-steer/core-tui/issues/115) owns `Model` /
-`NewModel` explicitly, pairs the unexport with replacing `NewModel` by
-`NewProgram(opts Options) (*tea.Program, error)` so external benchmarking
-survives, and requires both in one commit because either alone is a break.
-#115 is deferred past the architecture spike. Listed here so the
-classification is complete; excluded from any unexport sweep until #115 runs.
-The mechanical cost is also the largest in the table by an order of magnitude
-— 373 non-test references across 48 files, all five currently-held files
-among them.
+**Resolved by [#115](https://github.com/go-steer/core-tui/issues/115).** The
+concrete type is `model` now and `NewModel` returns `tea.Model`, so the
+escape hatch D18 promises survives as an interface. The `NewProgram`
+replacement this section anticipated was *not* taken: `*tea.Program` offers
+`Send` and `Run` and no way to drive `Update` / `View` or capture a frame,
+so it could not have stood in for what `NewModel` gives external drivers —
+the in-tree `package tui_test` smoke harness being the proof, since it needs
+`WithInput` / `WithOutput` / `WithWindowSize` on a program it owns.
+`ApplyTranscript` was the one capability that fell off the reachable surface
+with the concrete type, and `Options.Transcript` replaced it.
 
-| symbol | kind | declared | cost to unexport |
+Recorded as **D18a** in `decisions.md`.
+
+| symbol | kind | was | outcome |
 |---|---|---|---|
-| `Model` | type | `model.go:54` | 373 refs in 48 non-test file(s), 562 in 53 test file(s) — **blocked**: touches `chatlist.go,cursor.go,dialog_scroll.go,update.go,view.go` |
-| `Model.ApplyTranscript` | method | `transcript.go:327` | follows `Model` |
-| `Model.Init` | method | `update.go:35` | follows `Model` |
-| `Model.Update` | method | `update.go:99` | follows `Model` |
-| `Model.View` | method | `view.go:134` | follows `Model` |
-| `NewModel` | func | `model.go:570` | 18 refs in 9 non-test file(s), 262 in 44 test file(s) — **blocked**: touches `chatlist.go,dialog_scroll.go,update.go` |
+| `Model` | type | `model.go:54` | unexported to `model` |
+| `Model.ApplyTranscript` | method | `transcript.go:327` | unexported; replaced by `Options.Transcript` |
+| `Model.Init` | method | `update.go:35` | follows `Model`; on `tea.Model` |
+| `Model.Update` | method | `update.go:99` | follows `Model`; on `tea.Model` |
+| `Model.View` | method | `view.go:134` | follows `Model`; on `tea.Model` |
+| `NewModel` | func | `model.go:570` | kept, returns `tea.Model` |
 
 ---
 

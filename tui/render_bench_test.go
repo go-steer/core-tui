@@ -52,12 +52,12 @@ var benchTurnCounts = []int{10, 100, 400}
 // chatlist_test.go can assert on the same fixture the benchmarks
 // measure — a boundedness property that holds only for a fixture
 // nobody times is not the property anyone cares about.
-func benchModel(tb testing.TB, turns, w, h int) Model {
+func benchModel(tb testing.TB, turns, w, h int) model {
 	tb.Helper()
-	m := NewModel(Options{Agent: &bareAgent{id: "bench"}})
+	m := newModel(Options{Agent: &bareAgent{id: "bench"}})
 	m.styles = newStylesWithTheme(true, goldenTheme())
 	out, _ := m.Update(tea.WindowSizeMsg{Width: w, Height: h})
-	m = out.(Model)
+	m = out.(model)
 	for i := 0; i < turns; i++ {
 		q := "turn " + strconv.Itoa(i) + ": what does this function do?"
 		m.history.Append(Message{Role: RoleUser, Text: q, Rendered: q})
@@ -120,7 +120,7 @@ func BenchmarkResizeWidthChange(b *testing.B) {
 			b.ResetTimer()
 			for i := 0; i < b.N; i++ {
 				out, _ := m.Update(tea.WindowSizeMsg{Width: widths[i%2], Height: 40})
-				m = out.(Model)
+				m = out.(model)
 			}
 		})
 	}
@@ -139,7 +139,7 @@ func BenchmarkResizeHeightOnly(b *testing.B) {
 			b.ResetTimer()
 			for i := 0; i < b.N; i++ {
 				out, _ := m.Update(tea.WindowSizeMsg{Width: 100, Height: heights[i%2]})
-				m = out.(Model)
+				m = out.(model)
 			}
 		})
 	}

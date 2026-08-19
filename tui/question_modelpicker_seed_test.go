@@ -81,15 +81,15 @@ func TestApplyModels_SeedsCursorOnCurrent(t *testing.T) {
 // the cursor must be on the row Render tags "(current)" rather than on
 // whatever the host happened to list first.
 func TestModelsLoadedMsg_CursorLandsOnTheCurrentRow(t *testing.T) {
-	m := NewModel(Options{})
+	m := newModel(Options{})
 	out, _ := m.Update(tea.WindowSizeMsg{Width: 100, Height: 30})
-	m = out.(Model)
+	m = out.(model)
 	m.currentModel = "beta-2"
 
 	q := askModelPicker(&m, true)
 
 	out, _ = m.Update(modelsLoadedMsg{gen: m.sessionGen, models: seedModels})
-	m = out.(Model)
+	m = out.(model)
 
 	if q.idx != 1 {
 		t.Fatalf("cursor at %d, want 1 (beta-2)", q.idx)

@@ -51,7 +51,7 @@ func frameLines(frame string) int {
 // seedInput fills the textarea and reconciles the layout through the
 // contract every keystroke path follows: syncInputHeight, then
 // resize() when the height moved.
-func seedInput(m *Model, text string) bool {
+func seedInput(m *model, text string) bool {
 	m.input.SetValue(text)
 	grew := m.syncInputHeight()
 	if grew {
@@ -315,7 +315,7 @@ func TestResize_BudgetSurvivesResizeSequence(t *testing.T) {
 	}
 	for _, s := range seq {
 		out, _ := m.Update(tea.WindowSizeMsg{Width: s.w, Height: s.h})
-		m = out.(Model)
+		m = out.(model)
 		t.Run(strconv.Itoa(s.w)+"x"+strconv.Itoa(s.h), func(t *testing.T) {
 			assertBudgetExact(t, m)
 			assertFrameFits(t, m.View().Content, s.w, s.h)
@@ -334,7 +334,7 @@ func TestUpdate_NewlineKeyGrowsTheBox(t *testing.T) {
 	m := newFrameModel(StatusHeader, 100, 40)
 	for i := 1; i <= 6; i++ {
 		out, _ := m.Update(tea.KeyPressMsg(tea.Key{Code: 'j', Mod: tea.ModCtrl}))
-		m = out.(Model)
+		m = out.(model)
 		want := i + 1
 		if want < textareaMinHeight {
 			want = textareaMinHeight
@@ -358,7 +358,7 @@ func TestUpdate_NewlineKeyGrowsTheBox(t *testing.T) {
 func TestUpdate_PasteGrowsTheBox(t *testing.T) {
 	m := newFrameModel(StatusHeader, 100, 40)
 	out, _ := m.Update(tea.PasteMsg{Content: strings.Repeat("pasted line\n", 5) + "pasted line"})
-	m = out.(Model)
+	m = out.(model)
 
 	if got, want := m.input.LineCount(), 6; got != want {
 		t.Fatalf("paste produced %d lines, want %d", got, want)

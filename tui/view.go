@@ -203,7 +203,7 @@ func wordWrapIndent(s string, width int, indent string) string {
 // effectiveLayout returns the layout we'll actually render — falls
 // back from StatusSidebar to StatusHeader when the terminal is too
 // narrow to fit both the sidebar and a useful chat column.
-func (m Model) effectiveLayout() StatusLayout {
+func (m model) effectiveLayout() StatusLayout {
 	// Anything that is not the sidebar — including a StatusLayout
 	// value outside the declared pair, which Options accepts because
 	// the type is an exported int — is the header layout. Normalizing
@@ -226,7 +226,7 @@ func (m Model) effectiveLayout() StatusLayout {
 // resize() measures them at, so anything outside the render path that
 // needs to reason about a panel's geometry (advanceHelp, the tests)
 // asks here rather than re-deriving it.
-func (m Model) chromeWidth() int {
+func (m model) chromeWidth() int {
 	if m.effectiveLayout() == StatusSidebar {
 		return m.width - sidebarWidth - 3
 	}
@@ -237,7 +237,7 @@ func (m Model) chromeWidth() int {
 // mouse capture per Options.Mouse, and the terminal's real cursor
 // parked on whichever text surface owns input (cursor.go). Layout is
 // governed by m.statusLayout (R-USE-2).
-func (m Model) View() tea.View {
+func (m model) View() tea.View {
 	if m.width == 0 || m.height == 0 {
 		return tea.NewView("")
 	}
@@ -500,7 +500,7 @@ const chatMinHeight = 3
 // in-progress assistant block) is already paid for out of the
 // viewport's own rows and must not be subtracted again — see the
 // queue note in budget.go.
-func (m *Model) resize() {
+func (m *model) resize() {
 	if m.width == 0 || m.height == 0 {
 		return
 	}
@@ -563,7 +563,7 @@ func (m *Model) resize() {
 // rendered and the box never appeared (issue #121). Asking here for a
 // height that resize would only take back again would leave the same
 // disagreement in place, one keystroke at a time.
-func (m *Model) syncInputHeight() bool {
+func (m *model) syncInputHeight() bool {
 	desired := m.input.LineCount()
 	if desired < textareaMinHeight {
 		desired = textareaMinHeight
@@ -590,7 +590,7 @@ func (m *Model) syncInputHeight() bool {
 // commands, submit) where the operator should always see the new
 // content even if they'd previously scrolled up. Autonomous paths
 // (stream chunks) use refreshViewport directly to preserve scroll.
-func (m *Model) refreshAndScroll() {
+func (m *model) refreshAndScroll() {
 	// Operator-initiated paths usually reset or replace the input
 	// (slash dispatch, history recall, palette insert) which can
 	// shrink the textarea back to MinHeight. Sync the height first
@@ -606,7 +606,7 @@ func (m *Model) refreshAndScroll() {
 	m.chatGotoBottom()
 }
 
-func (m *Model) refreshViewport() {
+func (m *model) refreshViewport() {
 	if m.width == 0 {
 		return
 	}
@@ -660,7 +660,7 @@ func (m *Model) refreshViewport() {
 // only meaningful while the geometry is the one the operator scrolled
 // in. Scrolling up drops follow; scrolling back down to the bottom
 // re-arms it.
-func (m *Model) syncFollow() {
+func (m *model) syncFollow() {
 	m.follow = m.chatAtBottom()
 }
 
@@ -694,7 +694,7 @@ func (m *Model) syncFollow() {
 // m.state meaning "a Run-driven turn is in flight"; teaching the live
 // path to adopt that state is a separate decision with its own blast
 // radius.
-func (m Model) turnInFlight() bool {
+func (m model) turnInFlight() bool {
 	return m.state == stateStreaming || (m.liveMode && m.spinnerActive)
 }
 
@@ -703,7 +703,7 @@ func (m Model) turnInFlight() bool {
 // through Glamour (R-CHAT-4), followed by the spinner verb line
 // (R-CHAT-3) and the prompt queue panel (R-CHAT-10). Empty string
 // when no turn is in flight AND the queue is empty.
-func (m *Model) renderInProgress() string {
+func (m *model) renderInProgress() string {
 	if !m.turnInFlight() && len(m.queue) == 0 {
 		return ""
 	}
@@ -747,7 +747,7 @@ func (m *Model) renderInProgress() string {
 // entry state glyphs (○ queued · ● in-flight · ✓ done · ✗ failed).
 // Done / Failed entries linger for cullTTL before falling off so the
 // operator sees the result. Empty string when the queue is empty.
-func (m *Model) renderQueuePanel() string {
+func (m *model) renderQueuePanel() string {
 	m.cullQueue()
 	if len(m.queue) == 0 {
 		return ""
@@ -796,7 +796,7 @@ func (m *Model) renderQueuePanel() string {
 // Injected entries (R-CHAT-11 InjectIntoCurrent mode) get a dim
 // "(injected)" suffix so the operator can tell them apart from
 // queue-drained Done entries.
-func (m Model) renderQueueRow(e QueueEntry, width int) string {
+func (m model) renderQueueRow(e QueueEntry, width int) string {
 	glyph, style := m.queueRowStyle(e.State)
 	body := trimToolArg(e.Text, width-6)
 	row := "  " + glyph + " " + body
@@ -812,7 +812,7 @@ func (m Model) renderQueueRow(e QueueEntry, width int) string {
 // queueRowStyle returns the (glyph, base style) pair for one queue
 // state. Reuses the tool-state glyph vocabulary from style.md §2 so
 // the panel matches the rest of the TUI.
-func (m Model) queueRowStyle(s QueueState) (string, lipgloss.Style) {
+func (m model) queueRowStyle(s QueueState) (string, lipgloss.Style) {
 	switch s {
 	case QueueInFlight:
 		return GlyphTool, m.styles.Accent
@@ -842,7 +842,7 @@ func (m Model) queueRowStyle(s QueueState) (string, lipgloss.Style) {
 // phrase that punctuates itself would otherwise render "Thinking...…"
 // (issue #141). That applies to Options.ThinkingPhrases /
 // Options.WorkingPhrases exactly as it does to the built-in pools.
-func (m *Model) renderSpinnerLine() string {
+func (m *model) renderSpinnerLine() string {
 	pool := m.thinkingPhrases()
 	if m.toolActive {
 		pool = m.workingPhrases()
@@ -888,7 +888,7 @@ func trimTrailingEllipsis(s string) string {
 // renderMessage renders a single Message row with the correct glyph
 // + style for its Role (style.md §2 + §4). Output is word-wrapped to
 // the viewport width so narrow terminals don't run text off-screen.
-func (m Model) renderMessage(msg Message) string {
+func (m model) renderMessage(msg Message) string {
 	width := m.viewport.Width()
 	switch msg.Role {
 	case RoleUser:
@@ -1019,7 +1019,7 @@ func (m Model) renderMessage(msg Message) string {
 // is drawn twice per layout pass besides, since allocateChrome
 // measures its height before View draws it. See statusKey for why the
 // key is the values themselves rather than a version stamp.
-func (m Model) renderHeader() string {
+func (m model) renderHeader() string {
 	key := m.statusLineKey()
 	if m.statusCache != nil && m.statusCache.valid && m.statusCache.key == key {
 		return m.statusCache.rendered
@@ -1042,7 +1042,7 @@ func (m Model) renderHeader() string {
 // human-readable form: `15.2K in · 4.1K out · $0.04 · 9% ctx` rather
 // than the bare "9% (19.3K)" which conflated context-fill % with
 // total tokens.
-func (m Model) renderStatusLine() string {
+func (m model) renderStatusLine() string {
 	// Wordmark · [agent-identity ·] model. The cursor block that
 	// used to sit between wordmark and model is gone — the
 	// AsyncSlashProvider work added a sticky "running" segment
@@ -1106,7 +1106,7 @@ func (m Model) renderStatusLine() string {
 // UsageTracker + SubagentReporter. The "modified files" preview section
 // was dropped pending a real file-watch capability; until one exists
 // any rendered value is fiction.
-func (m Model) renderSidebar() string {
+func (m model) renderSidebar() string {
 	headerLines := []string{
 		sidebarRow(2, m.styles.AgentIdentity.Render(GlyphModel+" "+m.displayModelName())),
 		sidebarRow(4, m.styles.Muted.Render(m.permMode.String())),
@@ -1175,7 +1175,7 @@ const sidebarIndent = 2
 // The measurement is lipgloss.Width, not len: the glyph in the label
 // is multi-byte, a heading is a display string, and the arithmetic
 // they feed is in cells.
-func (m Model) sidebarSection(heading string, rows ...string) string {
+func (m model) sidebarSection(heading string, rows ...string) string {
 	label := GlyphRule + " " + heading + " "
 	fill := sidebarWidth - sidebarIndent - lipgloss.Width(label)
 	if fill < 1 {
@@ -1197,7 +1197,7 @@ func (m Model) sidebarSection(heading string, rows ...string) string {
 
 // renderPermissionChip renders the permission-mode chip (R-PERM-6).
 // The bypassPermissions state uses the warning style.
-func (m Model) renderPermissionChip() string {
+func (m model) renderPermissionChip() string {
 	if m.permMode == PermissionModeBypass {
 		return m.styles.PermissionWarn.Render(m.permMode.String())
 	}
@@ -1215,7 +1215,7 @@ func (m Model) renderPermissionChip() string {
 // for free. It is the second of three signals, alongside the footer
 // legend and the hardware cursor setFocus takes away: a mode reachable
 // in one keystroke has to be visible without one.
-func (m Model) renderInputBox() string {
+func (m model) renderInputBox() string {
 	width := m.viewport.Width()
 	if width <= 0 {
 		width = m.width
@@ -1237,7 +1237,7 @@ func (m Model) renderInputBox() string {
 // else (modal shortcuts, layout / mode cycling, newline insertion)
 // is discoverable via `?`, mirroring how Antigravity and Claude Code
 // keep their footer terse.
-func (m Model) renderFooter(width int) string {
+func (m model) renderFooter(width int) string {
 	hint := m.opts.Branding.FooterHint
 	if hint == "" {
 		hint = m.footerHint()
@@ -1253,7 +1253,7 @@ func (m Model) renderFooter(width int) string {
 // operator's most discoverable affordance after `?`, so we surface
 // the active flow's keys instead of the generic submit/newline
 // reminder when something specific is open.
-func (m Model) footerHint() string {
+func (m model) footerHint() string {
 	sep := " " + GlyphSeparator + " "
 	switch {
 	case m.confirmingClear:
@@ -1335,7 +1335,7 @@ func (m Model) footerHint() string {
 }
 
 // sep returns the dim ` · ` separator used in status assembly.
-func (m Model) sep() string {
+func (m model) sep() string {
 	return m.styles.Muted.Render(" " + GlyphSeparator + " ")
 }
 
@@ -1343,7 +1343,7 @@ func (m Model) sep() string {
 // when the message carries Usage / Model / Elapsed metadata. Empty
 // string when no metadata is present so seeded or mid-stream
 // messages don't get an empty stub.
-func (m Model) renderTurnFooter(msg Message) string {
+func (m model) renderTurnFooter(msg Message) string {
 	if msg.Usage == nil && msg.Model == "" && msg.Elapsed == 0 {
 		return ""
 	}
@@ -1378,7 +1378,7 @@ func (m Model) renderTurnFooter(msg Message) string {
 // "the modal, whichever one is up" — the caret path, the frame
 // invariants — asks here instead of restating the cascade, so a fourth
 // surface cannot be added to View and quietly miss the treatment.
-func (m *Model) modalFrame() (string, bool) {
+func (m *model) modalFrame() (string, bool) {
 	switch {
 	case m.pendingForm != nil:
 		// Embedded huh.Form (e.g. /pricing set) takes priority
@@ -1413,7 +1413,7 @@ func (m *Model) modalFrame() (string, bool) {
 // The question lands in the title bar (truncated), the answer renders
 // through Glamour in the body, the footer shows the dismiss keys.
 // Returns empty when no side-answer is active.
-func (m *Model) renderSideAnswer() string {
+func (m *model) renderSideAnswer() string {
 	if m.sideAnswer == nil {
 		return ""
 	}
@@ -1485,7 +1485,7 @@ func (m *Model) renderSideAnswer() string {
 // >4s slash would lose the toast at the secondary check even
 // though the slash hasn't completed and toastClearMsg correctly
 // left the field set.
-func (m Model) renderToast(width int) string {
+func (m model) renderToast(width int) string {
 	if m.toast == "" || width <= 0 {
 		return ""
 	}
@@ -1569,7 +1569,7 @@ func nonNeg(x int) int {
 //
 // Header (kind line) is bold-error. Body lines indented to match
 // other multi-line block renders (RoleSystem, RoleNotice).
-func (m Model) renderTurnErrorBlock(te TurnError, width int) string {
+func (m model) renderTurnErrorBlock(te TurnError, width int) string {
 	kind := te.Kind
 	if kind == "" {
 		kind = TurnErrorUnknown

@@ -41,7 +41,7 @@ func (a *wakingAgent) WakeRequested() <-chan struct{} { return a.wakeCh }
 // listener returns.
 func TestWakeListener_FiresWakeMsg(t *testing.T) {
 	agent := newWakingAgent()
-	m := NewModel(Options{Agent: agent})
+	m := newModel(Options{Agent: agent})
 
 	cmd := m.wakeListener()
 	if cmd == nil {
@@ -60,7 +60,7 @@ func TestWakeListener_FiresWakeMsg(t *testing.T) {
 // whose agent doesn't satisfy WakeRequester gets nil from the
 // listener — Init still launches cleanly, no goroutine leak.
 func TestWakeListener_NilForAgentWithoutCapability(t *testing.T) {
-	m := NewModel(Options{Agent: stubAgent{}})
+	m := newModel(Options{Agent: stubAgent{}})
 	if cmd := m.wakeListener(); cmd != nil {
 		t.Errorf("wakeListener should be nil for an agent without WakeRequester")
 	}
@@ -70,7 +70,7 @@ func TestWakeListener_NilForAgentWithoutCapability(t *testing.T) {
 // that returns nil from WakeRequested() is treated as "no signals"
 // — no panic, no leaked goroutine.
 func TestWakeListener_NilChannelHandledGracefully(t *testing.T) {
-	m := NewModel(Options{Agent: nilWakeAgent{}})
+	m := newModel(Options{Agent: nilWakeAgent{}})
 	if cmd := m.wakeListener(); cmd != nil {
 		t.Errorf("wakeListener should be nil when WakeRequested() returns nil")
 	}
@@ -81,12 +81,12 @@ func TestWakeListener_NilChannelHandledGracefully(t *testing.T) {
 // surface the banner.
 func TestUpdate_WakeMsgRaisesToast(t *testing.T) {
 	agent := newWakingAgent()
-	m := NewModel(Options{Agent: agent})
+	m := newModel(Options{Agent: agent})
 	m.viewport.SetWidth(80)
 
 	before := time.Now()
 	out, _ := m.Update(wakeMsg{})
-	got := out.(Model)
+	got := out.(model)
 
 	if got.toast == "" {
 		t.Errorf("toast = empty, want non-empty after wakeMsg")
@@ -103,14 +103,14 @@ func TestUpdate_WakeMsgRaisesToast(t *testing.T) {
 // is already the right surface for that signal.
 func TestUpdate_WakeMsg_SuppressedWhenQueuePending(t *testing.T) {
 	agent := newWakingAgent()
-	m := NewModel(Options{Agent: agent})
+	m := newModel(Options{Agent: agent})
 	m.viewport.SetWidth(80)
 	m.queue = []QueueEntry{
 		{Text: "queued by operator", State: QueueQueued, Created: time.Now()},
 	}
 
 	out, _ := m.Update(wakeMsg{})
-	got := out.(Model)
+	got := out.(model)
 
 	if got.toast != "" {
 		t.Errorf("expected empty toast when queue has pending entry, got %q", got.toast)
@@ -127,12 +127,12 @@ func TestUpdate_WakeMsg_SuppressedWhenQueuePending(t *testing.T) {
 // toast + system message (subagent / external-alert path).
 func TestUpdate_WakeMsg_FiresWhenQueueEmpty(t *testing.T) {
 	agent := newWakingAgent()
-	m := NewModel(Options{Agent: agent})
+	m := newModel(Options{Agent: agent})
 	m.viewport.SetWidth(80)
 	// queue is empty by default
 
 	out, _ := m.Update(wakeMsg{})
-	got := out.(Model)
+	got := out.(model)
 
 	if got.toast == "" {
 		t.Errorf("expected non-empty toast when queue is empty (subagent path)")
@@ -147,14 +147,14 @@ func TestUpdate_WakeMsg_FiresWhenQueueEmpty(t *testing.T) {
 // drained from the queue and is the running turn).
 func TestUpdate_WakeMsg_SuppressedWithInFlightEntry(t *testing.T) {
 	agent := newWakingAgent()
-	m := NewModel(Options{Agent: agent})
+	m := newModel(Options{Agent: agent})
 	m.viewport.SetWidth(80)
 	m.queue = []QueueEntry{
 		{Text: "in flight", State: QueueInFlight, Created: time.Now()},
 	}
 
 	out, _ := m.Update(wakeMsg{})
-	got := out.(Model)
+	got := out.(model)
 
 	if got.toast != "" {
 		t.Errorf("expected suppression for QueueInFlight, got toast %q", got.toast)
@@ -167,7 +167,7 @@ func TestUpdate_WakeMsg_SuppressedWithInFlightEntry(t *testing.T) {
 // fading-out remnants, not active work).
 func TestUpdate_WakeMsg_FiresWhenAllQueueEntriesTerminal(t *testing.T) {
 	agent := newWakingAgent()
-	m := NewModel(Options{Agent: agent})
+	m := newModel(Options{Agent: agent})
 	m.viewport.SetWidth(80)
 	m.queue = []QueueEntry{
 		{Text: "fading", State: QueueDone, Created: time.Now()},
@@ -175,7 +175,7 @@ func TestUpdate_WakeMsg_FiresWhenAllQueueEntriesTerminal(t *testing.T) {
 	}
 
 	out, _ := m.Update(wakeMsg{})
-	got := out.(Model)
+	got := out.(model)
 
 	if got.toast == "" {
 		t.Errorf("expected toast when only terminal entries present (no active queue work)")
@@ -195,7 +195,7 @@ func TestCullTTL_LongerThan2s(t *testing.T) {
 // as empty (the cull check in renderToast is the secondary defense
 // behind the toastClearMsg timer).
 func TestRenderToast_RespectsTTL(t *testing.T) {
-	m := NewModel(Options{})
+	m := newModel(Options{})
 	m.viewport.SetWidth(80)
 	m.toast = "stale"
 	m.toastSetAt = time.Now().Add(-2 * toastTTL)
@@ -212,7 +212,7 @@ func TestRenderToast_RespectsTTL(t *testing.T) {
 // indicator at the secondary check despite the slash still
 // pending.
 func TestRenderToast_StickyWhenSlashInFlight(t *testing.T) {
-	m := NewModel(Options{})
+	m := newModel(Options{})
 	m.viewport.SetWidth(80)
 	m.toast = "▸ /compact running…"
 	m.toastSetAt = time.Now().Add(-2 * toastTTL) // way past TTL
@@ -228,7 +228,7 @@ func TestRenderToast_StickyWhenSlashInFlight(t *testing.T) {
 // arrived) the TTL backstop takes over and the toast hides as
 // expected.
 func TestRenderToast_NoLongerStickyAfterSlashClears(t *testing.T) {
-	m := NewModel(Options{})
+	m := newModel(Options{})
 	m.viewport.SetWidth(80)
 	m.toast = "stale"
 	m.toastSetAt = time.Now().Add(-2 * toastTTL)

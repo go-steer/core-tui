@@ -22,3 +22,17 @@
 # behind that tag now, and both are written up under Removed in the
 # v0.22.0 section of CHANGELOG.md. The 38 emptied at v0.21.0, from #77,
 # #78 and #213, are two baselines back.
+
+# Entries since v0.22.0 follow.
+
+# #115: the concrete Bubble Tea model is unexported, and the constructor
+# hands back tea.Model instead. The two go together — either alone is a
+# break, and NewModel returning an unexported type would not compile for
+# a caller. Nothing exported named Model except NewModel and its four
+# methods; Init, Update and View are all on tea.Model in v2, so an
+# external driver loop compiles unchanged. ApplyTranscript, the one
+# method tea.Model does not cover, is replaced by the compatible
+# Options.Transcript rather than dropped. Recipe in MIGRATION.md §7,
+# reasoning in docs/decisions.md D18a.
+./tui.Model: removed
+./tui.NewModel: changed from func(Options) Model to func(Options) charm.land/bubbletea/v2.Model

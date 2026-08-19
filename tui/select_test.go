@@ -36,12 +36,12 @@ import (
 // selectModel is a transcript of tall items — ten-line answers, which
 // is the shape #152 is about: long enough that a fold changes the
 // frame and that a single item can fill a window.
-func selectModel(t *testing.T, turns, w, h int) Model {
+func selectModel(t *testing.T, turns, w, h int) model {
 	t.Helper()
-	m := NewModel(Options{Agent: &bareAgent{id: "sel"}})
+	m := newModel(Options{Agent: &bareAgent{id: "sel"}})
 	m.styles = newStylesWithTheme(true, goldenTheme())
 	out, _ := m.Update(tea.WindowSizeMsg{Width: w, Height: h})
-	m = out.(Model)
+	m = out.(model)
 	for i := range turns {
 		q := "turn " + strconv.Itoa(i) + ": what does this function do?"
 		m.history.Append(Message{Role: RoleUser, Text: q, Rendered: q})
@@ -56,7 +56,7 @@ func selectModel(t *testing.T, turns, w, h int) Model {
 }
 
 // chatWindowRows is the set of rows the window currently shows.
-func chatWindowRows(m *Model) map[int]bool {
+func chatWindowRows(m *model) map[int]bool {
 	rows := map[int]bool{}
 	m.chatVisitWindow(func(i int) { rows[i] = true })
 	return rows

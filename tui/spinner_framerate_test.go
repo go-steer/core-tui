@@ -36,7 +36,7 @@ import (
 // it into the leading glyph and the text after it. Works on the
 // stripped line because the glyph and the verb carry different styles
 // and the boundary between them is a cell, not a byte.
-func spinnerParts(t *testing.T, m *Model, frame int) (glyph, rest string) {
+func spinnerParts(t *testing.T, m *model, frame int) (glyph, rest string) {
 	t.Helper()
 	m.spinnerFrame = frame
 	line := ansi.Strip(m.renderSpinnerLine())
@@ -48,7 +48,7 @@ func spinnerParts(t *testing.T, m *Model, frame int) (glyph, rest string) {
 }
 
 func TestSpinnerFrameRate_GlyphAdvancesOnEveryFrame(t *testing.T) {
-	m := NewModel(Options{Agent: stubAgent{}})
+	m := newModel(Options{Agent: stubAgent{}})
 	m.viewport.SetWidth(80)
 	m = m.submitTurn("go")
 
@@ -64,7 +64,7 @@ func TestSpinnerFrameRate_GlyphAdvancesOnEveryFrame(t *testing.T) {
 }
 
 func TestSpinnerFrameRate_VerbHoldsForOneCadence(t *testing.T) {
-	m := NewModel(Options{Agent: stubAgent{}})
+	m := newModel(Options{Agent: stubAgent{}})
 	m.viewport.SetWidth(80)
 	m = m.submitTurn("go")
 

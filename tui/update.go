@@ -31,7 +31,7 @@ import (
 // the agent dispatch goroutine, and (when the host's agent
 // implements WakeRequester) subscribes to the wake channel for
 // transient toast banners (R-WAKE-1).
-func (m Model) Init() tea.Cmd {
+func (m model) Init() tea.Cmd {
 	cmds := []tea.Cmd{
 		tea.RequestBackgroundColor,
 		textarea.Blink,
@@ -89,7 +89,7 @@ func (m Model) Init() tea.Cmd {
 // the model: returns a Cmd that starts the drain goroutine and
 // reports back via liveStreamStartedMsg so the Update handler
 // can stash the cancel on the pointer it owns.
-func (m Model) spawnLiveStreamCmd(agent LiveAgent) tea.Cmd {
+func (m model) spawnLiveStreamCmd(agent LiveAgent) tea.Cmd {
 	// Capture the current sessionGen at Cmd-construction time so
 	// the returned liveStreamStartedMsg is discarded if
 	// applySwitchTarget bumps m.sessionGen before it lands.
@@ -103,7 +103,7 @@ func (m Model) spawnLiveStreamCmd(agent LiveAgent) tea.Cmd {
 // Update is the Bubble Tea dispatcher. The visual-preview slice
 // handles window-resize, background-color, and a small keymap; later
 // slices add agent-event dispatch, modal forms, etc.
-func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
+func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	// Pending huh.Form intercepts EVERY tea.Msg (KeyPress,
 	// WindowSize, ticks) so the embedded form runs its own
 	// state machine. On completion / abort, updatePricingForm
@@ -776,7 +776,7 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		return m, nil
 	case themePreviewMsg:
 		// The theme picker's live preview, applied on the Update
-		// goroutine because the widget has no *Model to apply it
+		// goroutine because the widget has no *model to apply it
 		// with. Guarded on the picker still being open: the message
 		// is asynchronous, so an operator who arrows and immediately
 		// escapes can have it land after the resolver already put the
@@ -1287,7 +1287,7 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 // Mirrors View's z-order cascade: side answer → dialog stack. The
 // embedded huh form never reaches here; Update hands it every msg
 // before the switch.
-func (m *Model) handleWheel(msg tea.MouseWheelMsg) (tea.Cmd, bool) {
+func (m *model) handleWheel(msg tea.MouseWheelMsg) (tea.Cmd, bool) {
 	var delta int
 	switch msg.Button {
 	case tea.MouseWheelUp:
@@ -1331,7 +1331,7 @@ const modalInputGrace = 300 * time.Millisecond
 
 // withinGrace reports whether a modal stamped at shownAt is still
 // inside its no-commit window. A zero stamp is treated as expired so
-// a directly-constructed Model (tests, hosts poking state) behaves
+// a directly-constructed model (tests, hosts poking state) behaves
 // exactly as it did before the window existed — and so that a
 // question the OPERATOR opened, which carries no stamp, is never held
 // (see askOrigin).
@@ -1346,7 +1346,7 @@ func withinGrace(shownAt time.Time) bool {
 // We use msg.String() (a normalized keystroke like "ctrl+b" /
 // "shift+enter") for dispatch — Code+Mod bit-fiddling is brittle in
 // the face of v2's keyboard-enhancement protocol.
-func (m Model) handleKey(msg tea.KeyPressMsg) (tea.Model, tea.Cmd) {
+func (m model) handleKey(msg tea.KeyPressMsg) (tea.Model, tea.Cmd) {
 	stroke := msg.String()
 
 	// Esc cascades through overlays (R-CHAT-6): side-answer modal →
@@ -1479,7 +1479,7 @@ func (m Model) handleKey(msg tea.KeyPressMsg) (tea.Model, tea.Cmd) {
 			if sel, ok := m.palette.selected(); ok {
 				noAuto = sel.NoAutoSubmit
 			}
-			m = m.paletteInsert().(Model)
+			m = m.paletteInsert().(model)
 			if kind == paletteSlash && !noAuto {
 				text := strings.TrimSpace(m.input.Value())
 				if strings.HasPrefix(text, "/") {
@@ -1896,7 +1896,7 @@ func (m Model) handleKey(msg tea.KeyPressMsg) (tea.Model, tea.Cmd) {
 // full directory walk (scanFileItems), and neither may run on the
 // Update goroutine. The panel opens immediately either way and fills
 // in when the reply lands.
-func (m *Model) refreshPalette() tea.Cmd {
+func (m *model) refreshPalette() tea.Cmd {
 	value := m.input.Value()
 
 	if m.palette == nil {
@@ -1987,7 +1987,7 @@ func atFilterFrom(s string, triggerPos int) string {
 // of the matched palette items (Tab while palette is open). Leaves
 // the palette open for further filtering. Idempotent when the filter
 // is already the full common prefix.
-func (m Model) paletteComplete() tea.Model {
+func (m model) paletteComplete() tea.Model {
 	if m.palette == nil {
 		return m
 	}
@@ -2019,7 +2019,7 @@ func (m Model) paletteComplete() tea.Model {
 // section so the model sees inline content (R-PAL-2 + R-CHAT-13).
 // Failed reads are surfaced as system messages so the operator can
 // fix typos; the prompt still ships with the readable refs.
-func (m Model) submitTurn(text string) Model {
+func (m model) submitTurn(text string) model {
 	m.history.Append(Message{Role: RoleUser, Text: text})
 
 	// Resolve @-refs against the operator's view of the filesystem.
@@ -2075,7 +2075,7 @@ func (m Model) submitTurn(text string) Model {
 // partial tokens into m.inProgressText, flips the spinner from
 // tool-active back to model-active (R-CHAT-3), and re-renders the
 // viewport so the user sees the in-progress message grow.
-func (m *Model) applyStreamChunk(msg streamChunkMsg) {
+func (m *model) applyStreamChunk(msg streamChunkMsg) {
 	m.toolActive = false
 	// Stream chunk arriving after a tool call means that tool has
 	// finished — bump its Version so the lazy-render cache
@@ -2154,7 +2154,7 @@ func (m *Model) applyStreamChunk(msg streamChunkMsg) {
 // built-ins (bash → "$ <cmd>", read_file → path, grep → "pattern
 // in dir", etc.) and falls back to the first arg's value for
 // unknown tools.
-func (m *Model) applyToolCall(msg toolCallMsg) {
+func (m *model) applyToolCall(msg toolCallMsg) {
 	if msg.id != "" {
 		if m.seenToolIDs[msg.id] {
 			return
@@ -2218,7 +2218,7 @@ func (m *Model) applyToolCall(msg toolCallMsg) {
 // Silently no-ops when the result has no ID or no matching call —
 // adapters that emit results out of order with retries shouldn't
 // crash the TUI; the worst outcome is a missed preview update.
-func (m *Model) applyToolResult(msg toolResultMsg) {
+func (m *model) applyToolResult(msg toolResultMsg) {
 	if msg.id == "" {
 		return
 	}
@@ -2355,7 +2355,7 @@ func toolArgHint(name string, args map[string]any) string {
 // Usage / Model / Elapsed metadata, flips back to idle, re-focuses
 // the input. When notice is non-empty, an extra system / error row
 // is appended (used for "(interrupted)" and turnErr error text).
-func (m *Model) finalizeTurn(elapsed time.Duration, notice string) {
+func (m *model) finalizeTurn(elapsed time.Duration, notice string) {
 	if m.cancelTurn != nil {
 		m.cancelTurn()
 		m.cancelTurn = nil
@@ -2415,7 +2415,7 @@ func (m *Model) finalizeTurn(elapsed time.Duration, notice string) {
 // unrecognized names fall through to the agent's optional
 // SlashProvider (/btw, /subagent, etc.); anything still unmatched
 // surfaces as a system row pointing at /help.
-func (m Model) dispatchSlash(text string) (tea.Model, tea.Cmd) {
+func (m model) dispatchSlash(text string) (tea.Model, tea.Cmd) {
 	rest := strings.TrimPrefix(text, "/")
 	name, args, _ := strings.Cut(rest, " ")
 	name = strings.ToLower(name)
@@ -2468,7 +2468,7 @@ func (m Model) dispatchSlash(text string) (tea.Model, tea.Cmd) {
 //
 // The three cases: no match at all, a plain provider already invoked
 // out of line, or an async provider still to be started.
-func (m Model) applySlashDispatch(msg slashDispatchedMsg) (tea.Model, tea.Cmd) {
+func (m model) applySlashDispatch(msg slashDispatchedMsg) (tea.Model, tea.Cmd) {
 	if !msg.matched {
 		m.history.Append(Message{
 			Role: RoleSystem,
@@ -2533,7 +2533,7 @@ func (m Model) applySlashDispatch(msg slashDispatchedMsg) (tea.Model, tea.Cmd) {
 // refuseConcurrentSlash applies issue #13's concurrent-slash policy:
 // when an async slash is already in flight, log a RoleSystem refusal
 // for the new dispatch and return refused=true.
-func (m Model) refuseConcurrentSlash(name string) (Model, bool) {
+func (m model) refuseConcurrentSlash(name string) (model, bool) {
 	if m.inFlightSlash == nil {
 		return m, false
 	}
@@ -2563,7 +2563,7 @@ func awaitSlashChannel(name string, ch <-chan SlashResultOrErr) tea.Cmd {
 // synchronous and async slash paths. Returns the new model + a
 // Cmd (typically nil, or a listener batch when SwitchTo triggers
 // a session swap).
-func (m Model) applySlashResult(name string, res SlashResult, err error) (tea.Model, tea.Cmd) {
+func (m model) applySlashResult(name string, res SlashResult, err error) (tea.Model, tea.Cmd) {
 	if err != nil {
 		m.history.Append(Message{
 			Role: RoleError,
@@ -2613,7 +2613,7 @@ func (m Model) applySlashResult(name string, res SlashResult, err error) (tea.Mo
 // The outgoing Agent handle is NOT touched — host owns its lifecycle
 // (see SwitchTarget godoc). Server-side sessions are unaffected;
 // detach is local only.
-func (m *Model) applySwitchTarget(tgt *SwitchTarget) tea.Cmd {
+func (m *model) applySwitchTarget(tgt *SwitchTarget) tea.Cmd {
 	m.sessionGen++
 
 	// Step 1 — release local subscriptions on the outgoing Agent.
@@ -2811,7 +2811,7 @@ const promptHistoryCap = 100
 // recordPrompt appends text to the recall buffer, dedupes against the
 // most recent entry, caps at promptHistoryCap, and resets the cursor
 // so the next ↑ starts from the freshest entry.
-func (m *Model) recordPrompt(text string) {
+func (m *model) recordPrompt(text string) {
 	if text == "" {
 		return
 	}
@@ -2832,7 +2832,7 @@ func (m *Model) recordPrompt(text string) {
 // +1 forward (newer). The first backward step saves the operator's
 // in-flight input as historyDraft so stepping all the way forward
 // past the newest entry restores what they were typing.
-func (m *Model) recallPrompt(delta int) {
+func (m *model) recallPrompt(delta int) {
 	if len(m.promptHistory) == 0 {
 		return
 	}
@@ -2884,7 +2884,7 @@ func sliceContains(xs []string, target string) bool {
 // decision is DecisionAllowAlways, and echoes a system message naming
 // the decision.
 //
-// req is a parameter rather than Model state: the prompt is a question
+// req is a parameter rather than model state: the prompt is a question
 // on the overlay stack (question_permission.go), which owns the request
 // for as long as it is open and hands it here through its resolver. It
 // is still on the stack while this runs — overlay.resolve pops after
@@ -2900,7 +2900,7 @@ func sliceContains(xs []string, target string) bool {
 // writing to permissions.allow or path_scope.allow in .agents/
 // config.json). Errors are surfaced inline so the operator knows
 // the allow-always didn't stick.
-func (m *Model) dispatchPermission(d PermissionDecision, req PermissionRequest) {
+func (m *model) dispatchPermission(d PermissionDecision, req PermissionRequest) {
 	if d == DecisionAllowAlways && m.opts.AlwaysAllow != nil {
 		if err := m.opts.AlwaysAllow(req); err != nil {
 			m.history.Append(Message{
@@ -2944,7 +2944,7 @@ func permissionDecisionLabel(d PermissionDecision) string {
 // pending elicitor flow and clears the modal state. Every caller of
 // this one is relaying a keystroke, so the error is nil: the operator
 // answered, and an answer is not a failure.
-func (m *Model) dispatchElicit(r ElicitResult) {
+func (m *model) dispatchElicit(r ElicitResult) {
 	m.dispatchElicitErr(r, nil)
 }
 
@@ -2955,7 +2955,7 @@ func (m *Model) dispatchElicit(r ElicitResult) {
 // dispatchElicit, because four of the five call sites relay an
 // operator and would all read `, nil`, which is exactly the sort of
 // argument that stops being read.
-func (m *Model) dispatchElicitErr(r ElicitResult, err error) {
+func (m *model) dispatchElicitErr(r ElicitResult, err error) {
 	if e, ok := m.opts.Elicitor.(*elicitor); ok {
 		e.dispatchResult(r, err)
 	}
@@ -2965,14 +2965,14 @@ func (m *Model) dispatchElicitErr(r ElicitResult, err error) {
 // dispatchAsk writes the operator's answer back to the pending ask
 // flow (R-PROMPT-1). Same split, for the same reason, as the elicit
 // pair above: this one is always relaying a person.
-func (m *Model) dispatchAsk(r AskResult) {
+func (m *model) dispatchAsk(r AskResult) {
 	m.dispatchAskErr(r, nil)
 }
 
 // dispatchAskErr is dispatchAsk for the case where the TUI answers on
 // its own account — today only the ErrAskUnsupported refusal, which
 // never opens a modal, so no operator saw the question.
-func (m *Model) dispatchAskErr(r AskResult, err error) {
+func (m *model) dispatchAskErr(r AskResult, err error) {
 	if a, ok := m.opts.Asker.(*asker); ok {
 		a.dispatchResult(r, err)
 	}
@@ -2984,7 +2984,7 @@ func (m *Model) dispatchAskErr(r AskResult, err error) {
 // in the queue panel during streaming, then finalizeTurn flips it to
 // Done / Failed. Skips terminal-state entries (Done / Failed) that
 // haven't culled yet. Returns the next-step Cmd batch.
-func (m Model) maybeDrainQueue() (tea.Model, tea.Cmd) {
+func (m model) maybeDrainQueue() (tea.Model, tea.Cmd) {
 	next, idx := -1, -1
 	for i := range m.queue {
 		if m.queue[i].State == QueueQueued {
@@ -3011,7 +3011,7 @@ func (m Model) maybeDrainQueue() (tea.Model, tea.Cmd) {
 //     immediately as Done so the operator sees what was injected;
 //     cullTTL drops it after ~2s. Falls back to `QueueForNext` when
 //     the agent doesn't satisfy `InjectableAgent` (no runtime error).
-func (m *Model) enqueueDuringStream(text string) {
+func (m *model) enqueueDuringStream(text string) {
 	if m.opts.MidTurnInjectionMode == InjectIntoCurrent {
 		if injector, ok := m.opts.Agent.(InjectableAgent); ok {
 			if err := injector.Inject(text); err != nil {
@@ -3073,7 +3073,7 @@ func (m *Model) enqueueDuringStream(text string) {
 // markInFlightTerminal flips the InFlight queue entry (if any) to a
 // terminal state. Called from finalizeTurn so the panel can show the
 // result before the cullTTL drops it.
-func (m *Model) markInFlightTerminal(success bool, reason string) {
+func (m *model) markInFlightTerminal(success bool, reason string) {
 	for i := range m.queue {
 		if m.queue[i].State != QueueInFlight {
 			continue
@@ -3092,7 +3092,7 @@ func (m *Model) markInFlightTerminal(success bool, reason string) {
 // cullQueue drops Done / Failed entries whose terminal-state TTL has
 // elapsed. Called from the render path so the panel naturally fades
 // completed entries as the operator keeps using the TUI.
-func (m *Model) cullQueue() {
+func (m *model) cullQueue() {
 	if len(m.queue) == 0 {
 		return
 	}
@@ -3139,7 +3139,7 @@ func trimToolArg(s string, max int) string {
 //     `@`. The palette re-filters to entries under the new prefix.
 //   - Unavailable items are skipped — closing the palette silently
 //     — until a real slice surfaces a system-message hint.
-func (m Model) paletteInsert() tea.Model {
+func (m model) paletteInsert() tea.Model {
 	if m.palette == nil {
 		return m
 	}
