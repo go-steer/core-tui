@@ -282,7 +282,7 @@ func (a *cogoAgent) Run(ctx context.Context, prompt string) iter.Seq2[tui.Event,
 ### 3.3 Optional capability interfaces
 
 Each interface matches one user-visible feature and is documented as
-such. There are sixteen, and this section declares all sixteen: a
+such. There are seventeen, and this section declares all seventeen: a
 capability that does not appear here is not part of the plug-in
 surface. [`api-surface.md`](./api-surface.md) §3.1 is the mechanical
 list the roster is checked against, and
@@ -298,7 +298,7 @@ satisfied separately (`SubagentLister` + `SubagentEventReader` →
 its place by being a thing a host can plausibly do WITHOUT doing the
 one next to it. See [`api-audit.md`](./api-audit.md) §5.
 
-Fifteen of the sixteen are feature-detected on the `Agent` by type
+Sixteen of the seventeen are feature-detected on the `Agent` by type
 assertion. `UsageTracker` is the exception: it is supplied through
 `Options.UsageTracker` (§3.4) rather than found on the `Agent`, so it
 may live on a type of its own.
@@ -351,6 +351,46 @@ type PermanentStreamError interface {
 // ctx cancellation of a locally-driven turn always works regardless.
 type RemoteInterrupter interface {
     Interrupt(ctx context.Context) error
+}
+
+// Pauser is for hosts that can park their agent loop (R-HOLD-1..5,
+// issue #260). A paused session is one where no NEW turn starts until
+// someone resumes, which is a different fact from "no turn is
+// running": an idle agent picks up the next queued prompt on its own,
+// a paused one does not. That distinction is what lets ESC mean "stop
+// and wait for me" rather than "cancel this turn and let the scheduler
+// start another", and it is why the capability is separate from
+// RemoteInterrupter — cancelling and holding are different powers, and
+// a host can have either without the other.
+//
+// Pause and Resume MAY block briefly on network I/O, on
+// RemoteInterrupter's terms: called off the Update-loop path with a
+// short deadline, errors surfacing as an inline RoleError row.
+// PauseState is the polled fallback and must NOT block — same
+// concurrency rule as StatusReporter, refreshed from the same
+// background tick, never called from View(). Hosts that push a
+// PauseEvent through Event.Pause still need it: it is what makes a TUI
+// attaching to an already-paused session render the banner without
+// waiting for a transition that already happened.
+//
+// Without the capability ESC falls through to the local cancel (or to
+// RemoteInterrupter, which parks server-side on hosts new enough to
+// hold) and /pause, /continue and /abandon report themselves as not
+// available in this host.
+type Pauser interface {
+    Pause(ctx context.Context, reason string) error
+    Resume(ctx context.Context, req ResumeRequest) error
+    PauseState() PauseInfo
+}
+type PauseInfo struct {
+    Paused      bool
+    Since       time.Time
+    Reason      string
+    Interrupted bool // a turn was killed on the way in, vs the loop merely held
+}
+type ResumeRequest struct {
+    Mode  string // ResumeModeSteer | ResumeModeContinue | ResumeModeAbandon
+    Steer string // the new instruction; ResumeModeSteer only
 }
 
 // StatusReporter feeds the header bar. Most hosts leave the model
@@ -1247,6 +1287,9 @@ condensation of it. core-agent's setup mirrors §6.1 but adds:
   `GET /sessions/{id}/agents/{name}/events`.
 - `RemoteInterrupter` adapter (wraps `Agent.Interrupt`), so
   `/interrupt` reaches a daemon-driven turn in attach mode.
+- `Pauser` adapter over the daemon's pause gate (`POST /pause`,
+  `POST /resume`, and `GET /status`'s paused fields), attach flavor
+  only — a per-turn in-process host has no loop to hold back.
 - `SlashProvider` adapter exposing core-agent's agent-side commands
   (and, in attach mode, forwarding `InvokeSlash` to the remote agent
   over HTTP so the same command set works locally and over the wire).
@@ -1284,7 +1327,7 @@ Adapter LOC budget: ~400 lines (more capabilities to wire).
   Shipped for issue #82. Two flavors — `localAdapter` (in-process,
   the shape of core-agent's `cmd/core-agent/coretui_enabled.go`) and
   `attachAdapter` (HTTP + SSE, the shape of its
-  `internal/coretuiremote`) — covering 17 plug-in interfaces between
+  `internal/coretuiremote`) — covering 18 plug-in interfaces between
   them via `var _ tui.X = ...` assertions, which is what makes the
   build fail rather than merely the behavior drift. It deliberately
   does NOT depend on the real core-agent module: core-agent depends
@@ -1330,7 +1373,7 @@ Adapter LOC budget: ~400 lines (more capabilities to wire).
 ## 10. Open risks
 
 1. **Adapter boilerplate fatigue.** Each capability interface a host
-   wants is another block of translation code, and at sixteen (§3.3)
+   wants is another block of translation code, and at seventeen (§3.3)
    the count is already past the ~10 where writing an adapter starts
    to feel like a chore.
 
@@ -1341,11 +1384,12 @@ Adapter LOC budget: ~400 lines (more capabilities to wire).
    host pays whether or not it wants the feature, which is the wrong
    direction for an interface whose whole claim (§1 goal 3) is that
    `Run` is all you must write. #77 took the surface from twenty to
-   sixteen this way and left `Agent` at one method.
+   sixteen this way and left `Agent` at one method; #260 has since
+   added `Pauser`, the first capability admitted under the rule.
 
    What promotion IS for: a capability so near-universal that
    declining it produces a broken TUI rather than a degraded one.
-   None of the sixteen is that today.
+   None of the seventeen is that today.
 2. **Hidden ADK assumptions in the rendering code.** Tool-call args
    are `map[string]any` which is a JSON-ish shape ADK happens to use.
    If a non-ADK adapter ever wants to render structured tool args

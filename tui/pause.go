@@ -12,7 +12,7 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-// Operator hold — the pause gate (R-HOLD-1..4, issue #260).
+// Operator hold — the pause gate (R-HOLD-1..5, issue #260).
 //
 // A paused session is one where no new turn starts until someone
 // resumes. That is a different thing from "no turn is running": an

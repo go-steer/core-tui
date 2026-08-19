@@ -865,3 +865,43 @@ selection, search or copy paths, never grew a corpus during a run (so
 cache eviction was never designed), wrote every probe to `io.Discard`,
 and ran on one Linux box — the ratios are the trustworthy part, not the
 absolutes.
+
+---
+
+## D30. Paused is a field on the model, not a third turn state
+
+**Question:** the operator hold (#260) adds a state the whole UI reads —
+held or not held. `m.state` is already an enum of turn states
+(`stateIdle`, `stateStreaming`). Does paused join it as `statePaused`,
+or live beside it?
+
+**Options:**
+
+- (A) **A separate `m.pause pauseInfo` field.** `m.state` keeps
+  meaning exactly what it means today; the banner, the footer arm and
+  the Enter routing read the new field.
+- (B) A `statePaused` value on the existing enum. One state variable,
+  one `switch`, no question about which of two fields to read.
+
+**Recommendation: (A).** (B) does not typecheck against the invariants
+the rest of the model already depends on.
+
+`m.state == stateStreaming` means "a `Run`-driven turn is in flight",
+and `m.cancelTurn` is documented non-nil for exactly that window. A
+`statePaused` would have to either leave `cancelTurn` set while not
+being `stateStreaming` — breaking the pairing — or clear it, which
+loses the ability to cancel a turn that a `/pause` deliberately let
+finish.
+
+The two conditions are also not mutually exclusive, which is the part
+an enum cannot express. `/pause` shuts the gate without touching the
+running turn, so a session is routinely streaming AND held. Conversely
+the LiveAgent observer path stays `stateIdle` while the daemon streams
+(`tui/view.go` argues this at length), so in observer mode —
+*the* mode the hold exists for — a `statePaused` reachable only from
+`stateStreaming` would never be reached at all.
+
+The cost of (A) is one more field to read at each decision point. The
+count is small and the reads are honest: the eleven existing
+`stateStreaming` comparisons keep working untouched, and the handful of
+places where held changes the answer say so.

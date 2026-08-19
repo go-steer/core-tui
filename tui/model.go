@@ -230,7 +230,7 @@ type model struct {
 	state      turnState
 	cancelTurn context.CancelFunc // non-nil while state == stateStreaming
 
-	// pause is the operator-hold gate (R-HOLD-1..4, issue #260),
+	// pause is the operator-hold gate (R-HOLD-1..5, issue #260),
 	// deliberately ORTHOGONAL to state rather than a third turnState
 	// value. state means "a Run-driven turn is in flight" and carries
 	// the cancelTurn invariant above; a paused session is usually

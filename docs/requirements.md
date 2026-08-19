@@ -706,6 +706,56 @@ listed in `/help`:
   times. Narrowing the list moves the cursor to the best match, and
   Enter commits the highlighted row of the FILTERED list.
 
+### 3.25 Operator hold (must) — issue #260
+
+- **R-HOLD-1** Esc arms the strongest stop the host offers, whether or
+  not the TUI thinks a turn is running. A locally driven turn is
+  cancelled first, because that is instant and unwedges the local
+  stack. Then, if the host implements the optional `Pauser` capability
+  (`Pause` / `Resume` / `PauseState`), the TUI holds the agent's loop;
+  failing that, `RemoteInterrupter.Interrupt` runs, which parks the
+  loop server-side on hosts new enough to hold. A host offering
+  neither leaves Esc the no-op it is today — no row, no error. Esc
+  fires at idle as well as mid-turn: with a daemon-driven agent the
+  window between turns is exactly where an operator wants to get
+  ahead of the next one.
+- **R-HOLD-2** A held session renders a banner above the input,
+  stating whether a turn was killed on the way in ("interrupted") or
+  the loop is merely held ("paused"), the host's reason when it gave
+  one, the three ways out, and a count of background subagents still
+  running. The banner is unshrinkable chrome charged to the layout
+  budget like the toast, and every row of it fits the terminal's
+  width at every width the TUI supports — the reason and the key
+  legend degrade rather than wrap, because a wrapped banner silently
+  costs the viewport a row. Esc while held dismisses the banner and
+  leaves the gate shut, so Esc can never accidentally resume.
+- **R-HOLD-3** Slash commands typed during a turn dispatch instead of
+  queueing as prose, for the commands that are read-only or exist to
+  end a turn — `/interrupt`, `/pause`, `/continue`, `/abandon`,
+  `/help`, `/stats`, `/tools`, `/subagents` and the rest of the
+  informational set. Commands that rewrite conversation state
+  (`/compact`, `/clear`, `/done`, `/replan`) refuse with a row saying
+  to interrupt first, matching what the host would do anyway. Any
+  other `/word` still queues as literal text, so prose starting with a
+  slash is not hijacked.
+- **R-HOLD-4** Enter with text while held resumes with
+  `ResumeModeSteer` carrying that text, never a fresh turn — a new
+  turn would block on the host's gate and spin forever. `/continue`
+  (alias `/cont`) resumes with `ResumeModeContinue` and no new
+  instruction; `/abandon` resumes with `ResumeModeAbandon`, dropping
+  the interrupted work without waking the loop; `/pause` shuts the
+  gate without interrupting anything. Each degrades to the standard
+  "not available in this host" system row when `Pauser` is absent.
+- **R-HOLD-5** The gate's state comes from two sources that can
+  disagree: the `pause` push event (SSE spec §2.8) and the polled
+  `PauseState()`. A transition the TUI applied wins over a
+  contradicting poll for two seconds — long enough that a poll already
+  in flight across a resume cannot flip the banner back on — and after
+  that the host's answer wins, because it is the truth and a TUI that
+  ignored it would stay wrong forever after a missed event. A TUI
+  attaching to an already-held session renders the banner from the
+  first poll, without waiting for a transition that already happened.
+
 ## 4. Non-functional Requirements
 
 - **N-LANG** Go ≥ 1.23 (for `iter.Seq2`). No cgo.
