@@ -56,6 +56,9 @@ func composedRows(m model) int {
 	if m.palette != nil {
 		rows += lipgloss.Height(m.renderPalette(chromeWidth))
 	}
+	if banner := m.renderPauseBanner(chromeWidth); banner != "" {
+		rows += lipgloss.Height(banner)
+	}
 	rows += lipgloss.Height(m.renderInputBox())
 	if toast := m.renderToast(chromeWidth); toast != "" {
 		rows += lipgloss.Height(toast)
@@ -65,10 +68,10 @@ func composedRows(m model) int {
 }
 
 // irreducibleRows is the shortest frame resize() can compose for
-// this model: the chrome View always draws (header, toast, footer),
-// the input box at its minimum, the chat viewport at its floor, and
-// one row for each collapsible panel that is open — an open panel
-// keeps a row to say so (budget.go).
+// this model: the chrome View always draws (header, pause banner,
+// toast, footer), the input box at its minimum, the chat viewport at
+// its floor, and one row for each collapsible panel that is open — an
+// open panel keeps a row to say so (budget.go).
 //
 // Computed here from the model rather than read out of m.chrome so
 // that the assertion below is an independent check on the budget and
@@ -84,6 +87,9 @@ func irreducibleRows(m model) int {
 	rows += lipgloss.Height(m.renderFooter(chromeWidth))
 	if toast := m.renderToast(chromeWidth); toast != "" {
 		rows += lipgloss.Height(toast)
+	}
+	if banner := m.renderPauseBanner(chromeWidth); banner != "" {
+		rows += lipgloss.Height(banner)
 	}
 	// The input box's minimum: textareaMinHeight plus whatever
 	// renderInputBox spends on its own border, derived by measuring
@@ -136,9 +142,9 @@ func assertBudgetExact(t *testing.T, m model) {
 	// budget that is exact by luck.
 	if got := m.chrome.frameRows(); got != composedRows(m) {
 		t.Errorf("budget adds up to %d rows but the frame composes %d "+
-			"(header %d, chat %d, palette %d, help %d, input %d, toast %d, footer %d)",
+			"(header %d, chat %d, palette %d, help %d, banner %d, input %d, toast %d, footer %d)",
 			got, composedRows(m), m.chrome.header, m.chrome.chat, m.chrome.palette,
-			m.chrome.help, m.chrome.input, m.chrome.toast, m.chrome.footer)
+			m.chrome.help, m.chrome.banner, m.chrome.input, m.chrome.toast, m.chrome.footer)
 	}
 }
 
@@ -353,6 +359,38 @@ func budgetStates() []frameState {
 			setup: func(_ *testing.T, m model, _, _ int) model {
 				m = withHostileTranscript(m)
 				m = withPalette(m)
+				m.refreshViewport()
+				return m
+			},
+		},
+		{
+			// The pause banner is the other unshrinkable block View
+			// stacks around the input box (R-HOLD-2). Held with a
+			// subagent still running is its tallest form, three rows.
+			name: "pause-banner",
+			setup: func(_ *testing.T, m model, _, _ int) model {
+				m = withHostileTranscript(m)
+				m.pause.Paused = true
+				m.pause.Interrupted = true
+				m.pause.Reason = "operator interrupt"
+				m.hostSnap.hasSubagents = true
+				m.hostSnap.subagents = []SubagentInfo{{Name: "watcher", Status: "running"}}
+				m.resize()
+				m.refreshViewport()
+				return m
+			},
+		},
+		{
+			// Banner and toast at once: the wake toast fires on a
+			// model change, which an operator can trigger from the
+			// held state.
+			name: "pause-banner+toast",
+			setup: func(_ *testing.T, m model, _, _ int) model {
+				m = withHostileTranscript(m)
+				m.pause.Paused = true
+				m.toast = "woke up: agent switched to a model with a long name"
+				m.toastSetAt = time.Now()
+				m.resize()
 				m.refreshViewport()
 				return m
 			},

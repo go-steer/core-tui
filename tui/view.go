@@ -1525,17 +1525,40 @@ func (m model) renderPauseBanner(width int) string {
 	if !m.pause.showBanner() || width <= 0 {
 		return ""
 	}
+	// Every row is one line, never wrapped: the banner is stacked
+	// between the viewport and the input box, so a row that wrapped
+	// would silently cost the viewport a line and push the cursor off
+	// the origin renderInputBox was given. Both variable-width pieces
+	// therefore degrade to fit rather than overflow.
+	room := width - 2 // the two-space indent below
+
 	head := GlyphPaused + "  Agent held — no new turn will start"
 	if m.pause.Interrupted {
 		head = GlyphPaused + "  Interrupted — what do you want me to do instead?"
 	}
+	// The reason is the first thing dropped: it is the host's own
+	// prose, so it is the one part of the header with no bound.
 	if r := strings.TrimSpace(m.pause.Reason); r != "" {
-		head += " (" + r + ")"
+		if withReason := head + " (" + r + ")"; lipgloss.Width(withReason) <= room {
+			head = withReason
+		}
 	}
-	lines := []string{
-		head,
-		keyLegend("type to steer", "/continue to carry on", "/abandon to drop it", "esc dismiss"),
+	// Widest legend that fits. The narrow forms keep all three verbs
+	// and shed their glosses — an operator who can't see /abandon has
+	// no way out of the hold but guessing.
+	legends := [][]string{
+		{"type to steer", "/continue to carry on", "/abandon to drop it", "esc dismiss"},
+		{"type to steer", "/continue", "/abandon", "esc dismiss"},
+		{"steer", "/continue", "/abandon"},
 	}
+	legend := keyLegend(legends[len(legends)-1]...)
+	for _, cand := range legends {
+		if s := keyLegend(cand...); lipgloss.Width(s) <= room {
+			legend = s
+			break
+		}
+	}
+	lines := []string{head, legend}
 	// The count comes from the SubagentReporter cache the sidebar
 	// already polls, not from the interrupt response: a hold stops the
 	// main loop, and an operator who assumes that means "everything

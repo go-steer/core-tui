@@ -50,9 +50,10 @@
 //     the chat.
 //  2. The footer. It is the only place the quit key is written down,
 //     and it is one row on any sane width.
-//  3. The header (StatusHeader only) and the toast. Both are small
-//     and both tell the operator something about state they cannot
-//     get anywhere else.
+//  3. The header (StatusHeader only), the pause banner and the toast.
+//     All three are small and all three tell the operator something
+//     about state they cannot get anywhere else — the banner most of
+//     all, since it is what says typing steers instead of submits.
 //  4. The chat viewport's floor, chatMinHeight, and one row for each
 //     collapsible panel that is open — enough to say it is open.
 //  5. The input box's GROWTH, up to textareaMaxHeight.
@@ -77,9 +78,9 @@
 //     chatMinHeight, but the help panel does get truncated to keep
 //     the chat at it.
 //
-// Items 2 and 3 are unshrinkable: View draws the header, the toast
-// and the footer at whatever height they render to, and resize has no
-// lever to make them smaller. Their position in the list is therefore
+// Items 2 and 3 are unshrinkable: View draws the header, the banner,
+// the toast and the footer at whatever height they render to, and
+// resize has no lever to make them smaller. Their position in the list is therefore
 // documentation rather than mechanism — they are reserved off the top
 // and the ordering between them never has to be applied. Items 1 and
 // 4-7 are the ones resize can actually control, via the textarea
@@ -123,6 +124,7 @@ type chromeBudget struct {
 	palette int
 	help    int
 	input   int
+	banner  int
 	toast   int
 	footer  int
 
@@ -148,7 +150,7 @@ type chromeBudget struct {
 
 // frameRows is the height of the frame this budget describes.
 func (b chromeBudget) frameRows() int {
-	return b.header + b.chat + b.palette + b.help + b.input + b.toast + b.footer
+	return b.header + b.chat + b.palette + b.help + b.banner + b.input + b.toast + b.footer
 }
 
 // allocateChrome hands out m.height's rows in the priority order
@@ -188,8 +190,17 @@ func (m *model) allocateChrome(layout StatusLayout, chromeWidth int) chromeBudge
 	if toast := m.renderToast(chromeWidth); toast != "" {
 		b.toast = lipgloss.Height(toast)
 	}
+	// Same guard, same reason: View stacks the pause banner above the
+	// input box whenever renderPauseBanner returns non-empty, and that
+	// renderer applies the dismissed bit as well as the gate. Charging
+	// it here is what keeps the frame at m.height while held — left
+	// unbudgeted its two or three rows push the footer off the bottom
+	// through clipFrame.
+	if banner := m.renderPauseBanner(chromeWidth); banner != "" {
+		b.banner = lipgloss.Height(banner)
+	}
 
-	free := m.height - b.header - b.footer - b.toast
+	free := m.height - b.header - b.footer - b.toast - b.banner
 
 	// --- Priority 4: the chat floor and the open panels' one row ---
 	//
