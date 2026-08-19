@@ -438,9 +438,20 @@ a time rather than absorbing one large breaking bump.
 ### 7.2 Downstream follow-ups for core-agent
 
 - `coretuiremote.Adapter.RequestWake()` does not satisfy `WakeRequester`;
-  attach-mode wake toasts silently never fire (§3.1).
-- `cmd/core-agent/coretui_enabled.go:591` refers to `coretui.Interruptible`,
-  which has never existed. The interface it satisfies is `RemoteInterrupter`.
+  attach-mode wake toasts silently never fire (§3.1). Filed as
+  go-steer/core-agent#802.
+- `cmd/core-agent/coretui_enabled.go:708` refers to `coretui.Interruptible`,
+  which has never existed. **It satisfies nothing** — `RemoteInterrupter` is
+  `Interrupt(ctx context.Context) error` and this method is `Interrupt() bool`,
+  so local-mode interrupt is unreachable from the TUI. (An earlier revision of
+  this line said the interface it satisfies is `RemoteInterrupter`; that was
+  wrong, and recording the defect as benign is why it survived two version
+  bumps.) Filed as go-steer/core-agent#803.
+- Both of the above are instances of one class: capabilities are feature-detected
+  by type assertion, so a near-miss is indistinguishable from a host declining
+  the capability. core-agent carries two valid `var _ coretui.X` guards across
+  roughly 27 implemented surfaces. Filed as go-steer/core-agent#804, tracked
+  together in go-steer/core-agent#805.
 - Nine stale worktrees under `.claude/worktrees/` (§1).
 
 ---
