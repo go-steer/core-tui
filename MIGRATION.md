@@ -664,3 +664,54 @@ is worth an issue — a seam somebody is really using is a different
 argument from a seam nobody can reach, and the seams are addable
 compatibly, which is precisely why removing them first was the safe
 order.
+
+**`tui.Model` is gone and `NewModel` returns `tea.Model`. What is the
+migration?**
+Nothing at all if you call `tui.Run`, which is every host we know of.
+If you drive the model yourself
+([#115](https://github.com/go-steer/core-tui/issues/115)), there are
+three mechanical edits and one that needs a decision.
+
+Mechanical: drop the type name. A `var m tui.Model` becomes
+`m := tui.NewModel(opts)`, a `func f(m tui.Model)` takes `tea.Model`
+(import `tea "charm.land/bubbletea/v2"`), and a
+`finalModel.(tui.Model)` type assertion has nothing to assert to —
+delete it, since everything you could reach through it was unexported
+anyway. `Init`, `Update` and `View` are all on `tea.Model` in Bubble
+Tea v2, so a driver loop compiles unchanged.
+
+The one that needs a decision is `ApplyTranscript`, the only method
+that was not on `tea.Model`. Its replacement is `Options.Transcript`,
+set before construction rather than called after it:
+
+```go
+// before
+m := tui.NewModel(opts)
+t, err := tui.LoadTranscript(path)
+if err != nil {
+    return err
+}
+m.ApplyTranscript(t)
+
+// after
+t, err := tui.LoadTranscript(path)
+if err != nil {
+    return err
+}
+opts.Transcript = t
+m := tui.NewModel(opts)
+```
+
+This also works with `tui.Run`, which it could not before — resuming a
+saved session at startup no longer costs you the program lifecycle.
+Note that `Options.SeedHistory` is *not* the same thing and never was:
+it appends messages raw, so assistant markdown renders word-wrapped
+rather than through Glamour. Use `Transcript` for a real session and
+`SeedHistory` for fixtures.
+
+There is no `NewProgram`. It was proposed in #115 as `NewModel`'s
+replacement and rejected: a `*tea.Program` you did not construct gives
+you `Send` and `Run` and no way to pass `WithInput` / `WithOutput` /
+`WithWindowSize`, which is the whole reason to be down here. If you own
+the program, keep owning it — `tea.NewProgram(tui.NewModel(opts), …)`
+is the supported shape, and `docs/decisions.md` D18a is the reasoning.
