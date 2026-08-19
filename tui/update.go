@@ -1201,17 +1201,28 @@ func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		if m.hasPendingQueueEntry() {
 			return m, m.wakeListener()
 		}
-		// Transient toast says "something arrived"; permanent
-		// history entry says "this is what arrived + how to act".
-		// Wake signals are sourced from inbox pushes (subagent
-		// report_alert, etc.) — the inbox auto-drains on the
-		// next operator-initiated turn, so the only "action" is
-		// to continue working.
-		m.toast = "⚠ wake — alert in inbox · drains on next turn · /subagents for status"
+		// Transient toast says "something wants attention"; the
+		// permanent history entry outlives the 4s toast TTL so the
+		// operator can scroll back later and see when each wake
+		// fired. The row is kept for that reason and no other — it
+		// is the only durable record of an event that has no other
+		// trace in the transcript.
+		//
+		// Neither may assert WHAT woke the agent. The signal is a
+		// bare `<-chan struct{}` (WakeRequester) carrying no payload,
+		// and the two things that fire it are indistinguishable from
+		// here: a host draining a background subagent's alert into
+		// the channel, and an operator or scheduler asking the loop
+		// to look now with nothing behind it. The old copy stated
+		// that an alert was waiting in the inbox, which is a fact
+		// about the first case only, and false for a bare wake where
+		// the inbox is empty. See docs/sse-event-stream-protocol.md
+		// §2.9 and go-steer/core-agent#802.
+		m.toast = "⚠ wake — something asked the agent to look now · /subagents for status"
 		m.toastSetAt = time.Now()
 		m.history.Append(Message{
 			Role: RoleSystem,
-			Text: "Wake signal received — an external alert (typically a background subagent's report) is waiting in the inbox. It will be prepended to the model's context on your next turn. Run /subagents to see which subagents have run recently.",
+			Text: "Wake signal received — something out of band asked the agent to look at its work again. The signal carries no detail, so this row cannot say what raised it. If a host-side alert did (typically a background subagent's report) it is sitting in the inbox, and anything in the inbox is prepended to the model's context on your next turn; a bare wake request carries nothing with it. Run /subagents to see which subagents have run recently.",
 		})
 		m.refreshViewport()
 		// Re-issue both the wake subscription (drain the next one)

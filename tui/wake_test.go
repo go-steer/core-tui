@@ -17,6 +17,7 @@ package tui
 import (
 	"context"
 	"iter"
+	"strings"
 	"testing"
 	"time"
 )
@@ -139,6 +140,56 @@ func TestUpdate_WakeMsg_FiresWhenQueueEmpty(t *testing.T) {
 	}
 	if got.history.Len() == 0 {
 		t.Errorf("expected system message appended when queue is empty")
+	}
+}
+
+// TestUpdate_WakeMsg_RowAssertsNothingAboutTheInbox pins R-WAKE-2.
+// The wake signal is a payload-free `<-chan struct{}`, so the TUI
+// cannot know whether an alert is sitting in the inbox or whether
+// somebody just asked the loop to look now with nothing behind it.
+// The row shipped through v0.22.0 stated the first as fact ("an
+// external alert ... is waiting in the inbox"), which is wrong for
+// every wake of the second kind — see go-steer/core-agent#802. This
+// test fails against that copy.
+func TestUpdate_WakeMsg_RowAssertsNothingAboutTheInbox(t *testing.T) {
+	agent := newWakingAgent()
+	m := newModel(Options{Agent: agent})
+	m.viewport.SetWidth(80)
+
+	out, _ := m.Update(wakeMsg{})
+	got := out.(model)
+
+	snap := got.history.Snapshot()
+	if len(snap) != 1 {
+		t.Fatalf("history = %d rows, want 1", len(snap))
+	}
+	row := snap[0]
+	if row.Role != RoleSystem {
+		t.Errorf("role = %v, want RoleSystem", row.Role)
+	}
+
+	// Unconditional claims about what woke the agent. Each of these
+	// is a statement the signal cannot support.
+	for _, banned := range []string{
+		"is waiting in the inbox",
+		"alert is waiting",
+	} {
+		if strings.Contains(row.Text, banned) {
+			t.Errorf("wake row asserts %q as fact; the signal carries no payload that could justify it.\nrow: %s", banned, row.Text)
+		}
+	}
+
+	// The toast is the same promise in one line.
+	if strings.Contains(got.toast, "alert in inbox") {
+		t.Errorf("wake toast asserts an inbox alert as fact: %q", got.toast)
+	}
+
+	// Positive half: the row must still say a wake happened and must
+	// say the signal is contentless, or it has stopped being useful.
+	for _, want := range []string{"Wake signal received", "carries no detail"} {
+		if !strings.Contains(row.Text, want) {
+			t.Errorf("wake row missing %q.\nrow: %s", want, row.Text)
+		}
 	}
 }
 
