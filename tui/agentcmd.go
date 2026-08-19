@@ -33,26 +33,37 @@ var (
 
 // spinnerCadence is the rotation period for thinking/working verbs
 // (R-CHAT-3).
+//
+// It stays at 3 s, and the step-3 note that "the 3000 ms verb hold can
+// go" (issue #248) is declined deliberately. That note reads the hold
+// as a leftover of the single counter issue #162 split — but the shared
+// counter was the bug, and 3 s was never what caused it. A phrase has
+// to sit still long enough to be read; R-CHAT-3 asks for this period by
+// name, and R-CHAT-3a pins the elapsed readout's floor to it. Deleted
+// at 20 fps the pool would rotate sixty times faster than it can be
+// read, which is the same defect #162 fixed, pointed the other way.
 const spinnerCadence = 3 * time.Second
 
 // spinnerFrameCadence is how often the tick chain fires, and so how
-// often the Braille glyph advances.
+// often the Braille glyph advances. 20 fps.
 //
-// These used to be one constant, which is issue #162: the glyph and
-// the verb were both indexed by the same counter, and that counter
-// advanced once every spinnerCadence, so the animation ran at 0.33 Hz
-// and read as frozen. The cadence was never a performance decision —
-// 3 s is the right period for a phrase to sit still long enough to be
-// read, and the wrong period by two orders of magnitude for a spinner.
+// This and spinnerCadence used to be one constant, which is issue #162:
+// the glyph and the verb were both indexed by the same counter, and
+// that counter advanced once every spinnerCadence, so the animation ran
+// at 0.33 Hz and read as frozen.
 //
-// 10 fps rather than the 20 the reference measurement used. At 20 fps
-// the animation cost 0.05% CPU *less* than a static control, which is
-// to say nothing at all — but that was on a frame costing 1.13 ms, and
-// a spinner tick rebuilds the chat tail and repaints, so the real cost
-// tracks the frame rather than the tick. 10 fps is already past the
-// point where a Braille cycle reads as continuous motion, and it
-// halves a cost that is paid for as long as the model is thinking.
-const spinnerFrameCadence = 100 * time.Millisecond
+// #162 split them and landed the glyph at 10 fps rather than the 20 the
+// reference measurement used, for a reason that was correct at the
+// time: a tick is not a timer, it is a chat-tail rebuild and a repaint,
+// so the animation's real cost tracks the frame rather than the tick,
+// and the frame was expensive. The frame is not expensive any more. A
+// tick costs exactly one item render at every transcript size (issues
+// #161 and #247), and measured against a static control repainting at
+// the same rate the animated arm came in at 4.02% CPU against 4.07% —
+// −0.05% attributable to the animation, which is the right answer for a
+// prerendered frame table indexed by a counter. So the halving is
+// affordable now in the way it was not then (issue #248).
+const spinnerFrameCadence = 50 * time.Millisecond
 
 // spinnerFramesPerVerb is how many glyph frames pass before the verb
 // rotates, which is what preserves the 3 s phrase period across the

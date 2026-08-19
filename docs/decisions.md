@@ -766,10 +766,26 @@ The order, with where each step now stands:
     because the spike's phrasing reads as an instruction, and following
     it would re-break panning.
 - **Step 3 — H4 falls out for free** once items are individually
-  invalidatable. [#248](https://github.com/go-steer/core-tui/issues/248).
-  Nothing beyond a prerendered frame table, which `tui/spinner.go`
-  already has, and pausing off-screen animation. The 3000 ms verb hold
-  can go.
+  invalidatable. [#248](https://github.com/go-steer/core-tui/issues/248),
+  **landed**. Nothing beyond a prerendered frame table, which
+  `tui/spinner.go` already had, and pausing off-screen animation:
+  `spinnerFrameCadence` is 50 ms, and a tick that lands while the live
+  tail is scrolled out of the window advances nothing and paints
+  nothing, while leaving the chain armed so the next tick after the
+  operator scrolls back resumes it. "Zero renders off screen" and
+  "resumes correctly" are asserted separately, because they fail in
+  opposite directions.
+  - **The 3000 ms verb hold stays, and the step's instruction to delete
+    it is declined.** It reads the hold as a leftover of the single
+    counter [#162](https://github.com/go-steer/core-tui/issues/162)
+    split, but the shared counter was the bug and 3 s was never what
+    caused it: a phrase has to sit still long enough to be read,
+    R-CHAT-3 asks for this period by name, and R-CHAT-3a pins the
+    elapsed readout's floor to it. Deleted at 20 fps the pool would
+    rotate sixty times faster than it can be read — the same defect
+    #162 fixed, pointed the other way. `spinnerFramesPerVerb` is
+    derived from the two constants rather than written down, so the
+    phrase period survived the cadence change without being touched.
 
 **H3's fourth clause is now answered, and it does not demote H1.** The
 spike never built the suppression-only arm — the Glamour pass

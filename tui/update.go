@@ -1003,6 +1003,17 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		if !m.turnInFlight() {
 			return m, nil
 		}
+		// Scrolled away from the tail, the animation is off screen, so
+		// it does not run (issue #248). The chain stays armed rather
+		// than being torn down and re-armed on scroll: a tick that
+		// advances nothing and paints nothing costs a comparison, and
+		// making the resume depend on every path that can move the
+		// window would be a list to keep complete. The frame counter
+		// holds too — pausing the glyph mid-cycle and continuing from
+		// there is what the operator saw when they scrolled away.
+		if m.chatTailOffScreen() {
+			return m, m.armSpinner()
+		}
 		m.spinnerFrame++
 		m.markViewportDirty()
 		if refresh := m.scheduleCoalescedRefresh(); refresh != nil {

@@ -335,13 +335,16 @@ func TestGolden_EmptyStateFrame(t *testing.T) {
 
 // TestGolden_BannerWipeFrame pins one mid-wipe frame, which is the
 // only capture in the corpus where the leading edge's colour and the
-// unlit foreground both appear. Frame 5 of 12 puts the edge in the
-// middle of the wordmark rather than against either end.
+// unlit foreground both appear. The edge wants to be in the middle of
+// the wordmark rather than against either end, and bannerZoneAt puts
+// it at exactly half the span on the frame below — written as an
+// expression rather than as a number so the capture stays on the same
+// pixels when the frame count moves, which issue #248 made it do.
 func TestGolden_BannerWipeFrame(t *testing.T) {
 	pinChromaStyle(t)
 	pinCwd(t)
 	m := goldenEmptyModel(t, 100, 24)
-	m.bannerFrame = 5
+	m.bannerFrame = bannerFrames/2 - 1
 	m.refreshViewport()
 	assertGolden(t, "banner_wipe_w100", m.View().Content)
 }
