@@ -106,7 +106,7 @@ func pullHostSnapshot(status StatusReporter, tracker UsageTracker, subs Subagent
 // View helpers fall back to placeholders). The host interfaces and
 // sessionGen are captured at construction so the closure doesn't touch the
 // model from its goroutine.
-func (m Model) refreshHostSnapshotCmd() tea.Cmd {
+func (m model) refreshHostSnapshotCmd() tea.Cmd {
 	status, _ := m.opts.Agent.(StatusReporter)
 	subs, _ := m.opts.Agent.(SubagentReporter)
 	tracker := m.opts.UsageTracker

@@ -183,7 +183,7 @@ func atomicWriteTranscript(path string, data []byte, mode fs.FileMode) error {
 // the structured fields alongside the empty Text so post-mortem
 // readers can see what each tool was actually called with and what
 // it returned.
-func buildTranscript(m *Model) Transcript {
+func buildTranscript(m *model) Transcript {
 	msgs := m.history.Snapshot()
 	out := make([]TranscriptMsg, 0, len(msgs))
 	for _, msg := range msgs {
@@ -324,7 +324,7 @@ type TranscriptInfo struct {
 //
 // Doesn't restore the in-flight turn, queue, or modal state — a
 // resumed session starts idle.
-func (m *Model) ApplyTranscript(t Transcript) {
+func (m *model) applyTranscript(t Transcript) {
 	m.history.Reset()
 	mr := m.ensureMarkdown()
 	for _, msg := range t.Messages {

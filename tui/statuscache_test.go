@@ -31,7 +31,7 @@ import (
 // two lists in two files that have to agree.
 //
 // So the assertion is differential rather than expected-value. Move
-// one input, then compare the memoized header against the same Model
+// one input, then compare the memoized header against the same model
 // rendered with the cache switched off. A key missing a field shows up
 // on the step that moves that field, naming it. Adding a segment to
 // the status line and forgetting to key on it is caught here as long
@@ -42,61 +42,61 @@ import (
 // working directory was exactly that: displayCwd read it back out of
 // the process on every call, which a test has no business changing, so
 // the cwd leg of the key was asserted by inspection rather than here.
-// It is a plain Model field now, resolved once in NewModel, so the
+// It is a plain model field now, resolved once in NewModel, so the
 // steps below move it like any other input and the carve-out is gone.
 func TestStatusCache_StaysFresh(t *testing.T) {
 	m := benchModel(t, 3, 100, 40)
 
 	steps := []struct {
 		name string
-		do   func(m *Model)
+		do   func(m *model)
 	}{
-		{"initial", func(*Model) {}},
-		{"narrow", func(m *Model) { *m = resizeModel(*m, 60, 24) }},
-		{"widen", func(m *Model) { *m = resizeModel(*m, 140, 40) }},
-		{"theme swap", func(m *Model) { m.applyNamedTheme(BuiltinThemes()[1].Name) }},
-		{"theme swap back", func(m *Model) { m.applyNamedTheme(BuiltinThemes()[0].Name) }},
-		{"light mode", func(m *Model) { m.styles = newStylesWithTheme(false, m.styles.Theme) }},
-		{"wordmark", func(m *Model) { m.opts.Branding.Wordmark = "acme" }},
-		{"identity", func(m *Model) { m.opts.Branding.AgentIdentity = "acme-agent" }},
-		{"model name", func(m *Model) { m.currentModel = "a-model" }},
-		{"model name again", func(m *Model) { m.currentModel = "another-model" }},
-		{"model from the host snapshot", func(m *Model) { m.hostSnap.modelName = "snapshot-model" }},
-		{"provider", func(m *Model) { m.pushedProvider = "a-provider" }},
-		{"provider again", func(m *Model) { m.pushedProvider = "another-provider" }},
-		{"cwd", func(m *Model) { m.cwd = "~/projects/core-tui" }},
-		{"cwd again", func(m *Model) { m.cwd = "/srv/build/core-tui" }},
-		{"cwd unresolvable", func(m *Model) { m.cwd = "" }},
+		{"initial", func(*model) {}},
+		{"narrow", func(m *model) { *m = resizeModel(*m, 60, 24) }},
+		{"widen", func(m *model) { *m = resizeModel(*m, 140, 40) }},
+		{"theme swap", func(m *model) { m.applyNamedTheme(BuiltinThemes()[1].Name) }},
+		{"theme swap back", func(m *model) { m.applyNamedTheme(BuiltinThemes()[0].Name) }},
+		{"light mode", func(m *model) { m.styles = newStylesWithTheme(false, m.styles.Theme) }},
+		{"wordmark", func(m *model) { m.opts.Branding.Wordmark = "acme" }},
+		{"identity", func(m *model) { m.opts.Branding.AgentIdentity = "acme-agent" }},
+		{"model name", func(m *model) { m.currentModel = "a-model" }},
+		{"model name again", func(m *model) { m.currentModel = "another-model" }},
+		{"model from the host snapshot", func(m *model) { m.hostSnap.modelName = "snapshot-model" }},
+		{"provider", func(m *model) { m.pushedProvider = "a-provider" }},
+		{"provider again", func(m *model) { m.pushedProvider = "another-provider" }},
+		{"cwd", func(m *model) { m.cwd = "~/projects/core-tui" }},
+		{"cwd again", func(m *model) { m.cwd = "/srv/build/core-tui" }},
+		{"cwd unresolvable", func(m *model) { m.cwd = "" }},
 		// The chip is only drawn when the host wired a setter, so the
 		// wiring and the mode are two separate inputs and both are keyed.
-		{"permission chip wired", func(m *Model) {
+		{"permission chip wired", func(m *model) {
 			m.opts.PermissionMode.Set = func(PermissionMode) error { return nil }
 		}},
-		{"permission mode", func(m *Model) { m.permMode = PermissionModeAcceptEdits }},
-		{"permission mode again", func(m *Model) { m.permMode = PermissionModePlan }},
-		{"usage wired", func(m *Model) {
+		{"permission mode", func(m *model) { m.permMode = PermissionModeAcceptEdits }},
+		{"permission mode again", func(m *model) { m.permMode = PermissionModePlan }},
+		{"usage wired", func(m *model) {
 			m.opts.UsageTracker = &bareTracker{totals: Usage{InputTokens: 1200, OutputTokens: 340}, cost: 0.0123}
 			m.hostSnap.hasUsage = true
 			m.hostSnap.totals = Usage{InputTokens: 1200, OutputTokens: 340}
 			m.hostSnap.cost = 0.0123
 		}},
-		{"usage moves", func(m *Model) {
+		{"usage moves", func(m *model) {
 			m.hostSnap.totals = Usage{InputTokens: 9400, OutputTokens: 2100}
 			m.hostSnap.cost = 0.4567
 		}},
-		{"context window appears", func(m *Model) {
+		{"context window appears", func(m *model) {
 			m.hostSnap.winUsed, m.hostSnap.winSize = 12_000, 200_000
 		}},
-		{"context window fills", func(m *Model) {
+		{"context window fills", func(m *model) {
 			m.hostSnap.winUsed = 190_000
 		}},
-		{"slash in flight", func(m *Model) {
+		{"slash in flight", func(m *model) {
 			m.inFlightSlash = &slashFlight{name: "compact", startedAt: time.Unix(0, 0)}
 		}},
-		{"a different slash in flight", func(m *Model) {
+		{"a different slash in flight", func(m *model) {
 			m.inFlightSlash = &slashFlight{name: "reload", startedAt: time.Unix(0, 0)}
 		}},
-		{"slash lands", func(m *Model) { m.inFlightSlash = nil }},
+		{"slash lands", func(m *model) { m.inFlightSlash = nil }},
 	}
 
 	for _, step := range steps {
@@ -131,7 +131,7 @@ func TestStatusCache_HitsOnASettledFrame(t *testing.T) {
 // uncachedHeader renders the header the long way. renderHeader has a
 // value receiver, so blanking the cache pointer on the copy is enough
 // to force the miss without disturbing the caller's model.
-func uncachedHeader(m Model) string {
+func uncachedHeader(m model) string {
 	m.statusCache = nil
 	return m.renderHeader()
 }

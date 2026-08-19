@@ -55,10 +55,10 @@ func (s *slashAgent) InvokeSlash(_ context.Context, name, args string) (SlashRes
 // result-channel drain for the async shapes. Only for commands that
 // reach the host: a built-in never issues a slashDispatchedMsg and
 // this fails rather than run its Cmd blind.
-func submitSlash(t *testing.T, m Model, text string) (Model, tea.Cmd) {
+func submitSlash(t *testing.T, m model, text string) (model, tea.Cmd) {
 	t.Helper()
 	out, cmd := m.dispatchSlash(text)
-	m = out.(Model)
+	m = out.(model)
 	if cmd == nil {
 		t.Fatalf("dispatchSlash(%q) returned no Cmd — the host would never be asked", text)
 	}
@@ -67,7 +67,7 @@ func submitSlash(t *testing.T, m Model, text string) (Model, tea.Cmd) {
 		t.Fatalf("dispatchSlash(%q) produced a %T, want slashDispatchedMsg", text, msg)
 	}
 	out, cmd = m.Update(msg)
-	return out.(Model), cmd
+	return out.(model), cmd
 }
 
 // TestDispatchSlash_OpensSideAnswerModal pins R-CMD-5: a SlashResult
@@ -78,7 +78,7 @@ func TestDispatchSlash_OpensSideAnswerModal(t *testing.T) {
 		specs: []SlashCommandSpec{{Name: "btw"}},
 		res:   SlashResult{ModalAnswer: &SideAnswer{Question: "q?", Answer: "a."}},
 	}
-	m := NewModel(Options{Agent: agent})
+	m := newModel(Options{Agent: agent})
 	m.input.SetValue("/btw what now")
 	m.viewport.SetWidth(80)
 
@@ -107,7 +107,7 @@ func TestDispatchSlash_AppendsSystemMessage(t *testing.T) {
 		specs: []SlashCommandSpec{{Name: "ping"}},
 		res:   SlashResult{SystemMessage: "pong"},
 	}
-	m := NewModel(Options{Agent: agent})
+	m := newModel(Options{Agent: agent})
 	m.viewport.SetWidth(80)
 
 	got, _ := submitSlash(t, m, "/ping")
@@ -127,7 +127,7 @@ func TestDispatchSlash_SurfacesError(t *testing.T) {
 		specs: []SlashCommandSpec{{Name: "boom"}},
 		err:   errors.New("kaboom"),
 	}
-	m := NewModel(Options{Agent: agent})
+	m := newModel(Options{Agent: agent})
 	m.viewport.SetWidth(80)
 
 	got, _ := submitSlash(t, m, "/boom")
@@ -146,7 +146,7 @@ func TestDispatchSlash_AliasMatches(t *testing.T) {
 		},
 		res: SlashResult{SystemMessage: "matched"},
 	}
-	m := NewModel(Options{Agent: agent})
+	m := newModel(Options{Agent: agent})
 	m.viewport.SetWidth(80)
 
 	got, _ := submitSlash(t, m, "/by-the-way hello")
@@ -166,7 +166,7 @@ func TestDispatchSlash_AliasMatches(t *testing.T) {
 // counts as the y/yes answer and wipes history.
 func TestSlashClear_BareEnterConfirms(t *testing.T) {
 	agent := &slashAgent{}
-	m := NewModel(Options{Agent: agent})
+	m := newModel(Options{Agent: agent})
 	m.viewport.SetWidth(80)
 	// Seed some content so we can confirm the wipe.
 	m.history.Append(Message{Role: RoleUser, Text: "hello"})
@@ -174,7 +174,7 @@ func TestSlashClear_BareEnterConfirms(t *testing.T) {
 
 	// Arm the confirmation.
 	out, _ := m.dispatchSlash("/clear")
-	m = out.(Model)
+	m = out.(model)
 	if !m.confirmingClear {
 		t.Fatalf("expected confirmingClear=true after /clear")
 	}
@@ -186,7 +186,7 @@ func TestSlashClear_BareEnterConfirms(t *testing.T) {
 	// Bare Enter (empty input) MUST wipe history.
 	enter := tea.KeyPressMsg(tea.Key{Code: tea.KeyEnter})
 	out2, _ := m.Update(enter)
-	m = out2.(Model)
+	m = out2.(model)
 	if m.confirmingClear {
 		t.Errorf("expected confirmingClear=false after bare-Enter confirmation")
 	}
@@ -200,17 +200,17 @@ func TestSlashClear_BareEnterConfirms(t *testing.T) {
 // shortcut.
 func TestSlashClear_YesConfirms(t *testing.T) {
 	agent := &slashAgent{}
-	m := NewModel(Options{Agent: agent})
+	m := newModel(Options{Agent: agent})
 	m.viewport.SetWidth(80)
 	m.history.Append(Message{Role: RoleUser, Text: "hello"})
 
 	out, _ := m.dispatchSlash("/clear")
-	m = out.(Model)
+	m = out.(model)
 
 	m.input.SetValue("yes")
 	enter := tea.KeyPressMsg(tea.Key{Code: tea.KeyEnter})
 	out2, _ := m.Update(enter)
-	m = out2.(Model)
+	m = out2.(model)
 	if m.history.Len() != 0 {
 		t.Errorf("expected history wiped after typed 'yes', got Len=%d", m.history.Len())
 	}
@@ -220,18 +220,18 @@ func TestSlashClear_YesConfirms(t *testing.T) {
 // without clearing and leaves a "clear cancelled" system row.
 func TestSlashClear_OtherTextCancels(t *testing.T) {
 	agent := &slashAgent{}
-	m := NewModel(Options{Agent: agent})
+	m := newModel(Options{Agent: agent})
 	m.viewport.SetWidth(80)
 	m.history.Append(Message{Role: RoleUser, Text: "hello"})
 
 	out, _ := m.dispatchSlash("/clear")
-	m = out.(Model)
+	m = out.(model)
 	armedLen := m.history.Len()
 
 	m.input.SetValue("nope")
 	enter := tea.KeyPressMsg(tea.Key{Code: tea.KeyEnter})
 	out2, _ := m.Update(enter)
-	m = out2.(Model)
+	m = out2.(model)
 
 	if m.confirmingClear {
 		t.Errorf("expected confirmingClear=false after cancel")
@@ -290,7 +290,7 @@ func TestDispatchSlash_AsyncPathReturnsCmd(t *testing.T) {
 	ch := make(chan SlashResultOrErr, 1)
 	ch <- SlashResultOrErr{Res: SlashResult{ModalAnswer: &SideAnswer{Question: "q?", Answer: "a."}}}
 	agent := &asyncSlashAgent{specs: []SlashCommandSpec{{Name: "btw"}}, out: ch}
-	m := NewModel(Options{Agent: agent})
+	m := newModel(Options{Agent: agent})
 	m.input.SetValue("/btw hello")
 	m.viewport.SetWidth(80)
 
@@ -316,12 +316,12 @@ func TestDispatchSlash_AsyncPath_RoutesThroughApplySlashResult(t *testing.T) {
 	ch := make(chan SlashResultOrErr, 1)
 	ch <- SlashResultOrErr{Res: SlashResult{ModalAnswer: &SideAnswer{Question: "q?", Answer: "a."}}}
 	agent := &asyncSlashAgent{specs: []SlashCommandSpec{{Name: "btw"}}, out: ch}
-	m := NewModel(Options{Agent: agent})
+	m := newModel(Options{Agent: agent})
 	m.viewport.SetWidth(80)
 
 	// Hand-deliver the message (no goroutine race in the test).
 	out, _ := m.Update(slashResultMsg{name: "btw", res: SlashResult{ModalAnswer: &SideAnswer{Question: "q?", Answer: "a."}}})
-	got := out.(Model)
+	got := out.(model)
 	if got.sideAnswer == nil {
 		t.Fatalf("expected sideAnswer to be set after slashResultMsg")
 	}
@@ -337,7 +337,7 @@ func TestDispatchSlash_SyncFallbackWhenNoAsync(t *testing.T) {
 		specs: []SlashCommandSpec{{Name: "btw"}},
 		res:   SlashResult{SystemMessage: "ok"},
 	}
-	m := NewModel(Options{Agent: agent})
+	m := newModel(Options{Agent: agent})
 	m.viewport.SetWidth(80)
 
 	got, cmd := submitSlash(t, m, "/btw ping")
@@ -354,7 +354,7 @@ func TestDispatchSlash_Async_ArmsInFlightAndStickyToast(t *testing.T) {
 		specs: []SlashCommandSpec{{Name: "compact"}},
 		out:   make(chan SlashResultOrErr, 1),
 	}
-	m := NewModel(Options{Agent: agent})
+	m := newModel(Options{Agent: agent})
 	m.viewport.SetWidth(80)
 
 	got, cmd := submitSlash(t, m, "/compact")
@@ -376,28 +376,28 @@ func TestUpdate_ToastClearMsg_StickyWhenSlashInFlight(t *testing.T) {
 	// Set up a model with an in-flight slash. The toastClearMsg
 	// handler must NOT clear the toast while a slash is pending,
 	// regardless of how long ago the toast was set.
-	m := NewModel(Options{})
+	m := newModel(Options{})
 	m.viewport.SetWidth(80)
 	m.inFlightSlash = &slashFlight{name: "compact", startedAt: time.Now().Add(-30 * time.Second)}
 	m.toast = "▸ /compact running…"
 	m.toastSetAt = time.Now().Add(-30 * time.Second) // way past TTL
 
 	out, _ := m.Update(toastClearMsg{})
-	got := out.(Model)
+	got := out.(model)
 	if got.toast == "" {
 		t.Errorf("expected toast to persist while slash in flight, got cleared")
 	}
 }
 
 func TestUpdate_SlashResultMsg_ClearsInFlightAndToast(t *testing.T) {
-	m := NewModel(Options{})
+	m := newModel(Options{})
 	m.viewport.SetWidth(80)
 	m.inFlightSlash = &slashFlight{name: "btw", startedAt: time.Now()}
 	m.cancelSlash = func() {}
 	m.toast = "▸ /btw running…"
 
 	out, _ := m.Update(slashResultMsg{name: "btw", res: SlashResult{SystemMessage: "answer"}})
-	got := out.(Model)
+	got := out.(model)
 	if got.inFlightSlash != nil {
 		t.Errorf("expected inFlightSlash cleared on result, got %+v", got.inFlightSlash)
 	}
@@ -416,7 +416,7 @@ func TestDispatchSlash_Async_RefusesConcurrent(t *testing.T) {
 		specs: []SlashCommandSpec{{Name: "compact"}, {Name: "btw"}},
 		out:   make(chan SlashResultOrErr, 1),
 	}
-	m := NewModel(Options{Agent: agent})
+	m := newModel(Options{Agent: agent})
 	m.viewport.SetWidth(80)
 
 	m, _ = submitSlash(t, m, "/compact")
@@ -443,14 +443,14 @@ func TestDispatchSlash_Async_RefusesConcurrent(t *testing.T) {
 
 func TestUpdate_Esc_CancelsInFlightSlash(t *testing.T) {
 	cancelled := false
-	m := NewModel(Options{})
+	m := newModel(Options{})
 	m.viewport.SetWidth(80)
 	m.inFlightSlash = &slashFlight{name: "compact", startedAt: time.Now()}
 	m.cancelSlash = func() { cancelled = true }
 
 	esc := tea.KeyPressMsg(tea.Key{Code: tea.KeyEsc})
 	out, _ := m.Update(esc)
-	got := out.(Model)
+	got := out.(model)
 	if !cancelled {
 		t.Error("expected Esc to fire cancelSlash")
 	}
@@ -471,7 +471,7 @@ func TestRenderStatusLine_NoCursorBlock(t *testing.T) {
 	// The cursor block (glyphCursor) used to sit between the
 	// wordmark and the model. It's gone — the AsyncSlashProvider
 	// "running" segment is the new alive-and-working affordance.
-	m := NewModel(Options{})
+	m := newModel(Options{})
 	m.viewport.SetWidth(80)
 	line := m.renderStatusLine()
 	if strings.Contains(line, glyphCursor) {
@@ -482,7 +482,7 @@ func TestRenderStatusLine_NoCursorBlock(t *testing.T) {
 func TestRenderStatusLine_ShowsAgentIdentity(t *testing.T) {
 	// When Branding.AgentIdentity is set and differs from the
 	// wordmark, render "<wordmark> · <identity> · <model>".
-	m := NewModel(Options{Branding: Branding{AgentIdentity: "scion"}})
+	m := newModel(Options{Branding: Branding{AgentIdentity: "scion"}})
 	m.viewport.SetWidth(80)
 	line := m.renderStatusLine()
 	if !strings.Contains(line, "scion") {
@@ -496,7 +496,7 @@ func TestRenderStatusLine_OmitsIdentityWhenSameAsWordmark(t *testing.T) {
 	// substring is deliberately something that can't legitimately
 	// appear elsewhere in the status line like a cwd, model, or
 	// provider label).
-	m := NewModel(Options{Branding: Branding{
+	m := newModel(Options{Branding: Branding{
 		Wordmark:      "Zinnia-The-Brand",
 		AgentIdentity: "Zinnia-The-Brand",
 	}})
@@ -510,7 +510,7 @@ func TestRenderStatusLine_OmitsIdentityWhenSameAsWordmark(t *testing.T) {
 func TestRenderStatusLine_OmitsIdentityWhenEmpty(t *testing.T) {
 	// Zero Branding (no AgentIdentity) leaves the banner as
 	// "<wordmark> · <model>" — no extra segment.
-	m := NewModel(Options{})
+	m := newModel(Options{})
 	m.viewport.SetWidth(80)
 	line := m.renderStatusLine()
 	// Should have wordmark + model glyph, no "· <identity> ·"
@@ -525,7 +525,7 @@ func TestRenderStatusLine_OmitsIdentityWhenEmpty(t *testing.T) {
 }
 
 func TestRenderStatusLine_ShowsInFlightSlashSegment(t *testing.T) {
-	m := NewModel(Options{})
+	m := newModel(Options{})
 	m.viewport.SetWidth(80)
 	m.inFlightSlash = &slashFlight{name: "compact", startedAt: time.Now()}
 
@@ -536,7 +536,7 @@ func TestRenderStatusLine_ShowsInFlightSlashSegment(t *testing.T) {
 }
 
 func TestRenderStatusLine_NoSegmentWhenIdle(t *testing.T) {
-	m := NewModel(Options{})
+	m := newModel(Options{})
 	m.viewport.SetWidth(80)
 	// no inFlightSlash set
 	line := m.renderStatusLine()
@@ -557,7 +557,7 @@ func TestDispatchSlash_Async_PreambleAppendsAtDispatch(t *testing.T) {
 		preamble: "ℹ Capturing checkpoint summary…",
 		out:      ch,
 	}
-	m := NewModel(Options{Agent: agent})
+	m := newModel(Options{Agent: agent})
 	m.viewport.SetWidth(80)
 
 	got, cmd := submitSlash(t, m, "/done")
@@ -594,7 +594,7 @@ func TestDispatchSlash_Async_EmptyPreambleSkipsRow(t *testing.T) {
 		preamble: "",
 		out:      ch,
 	}
-	m := NewModel(Options{Agent: agent})
+	m := newModel(Options{Agent: agent})
 	m.viewport.SetWidth(80)
 
 	got, cmd := submitSlash(t, m, "/compact")
@@ -617,7 +617,7 @@ func TestDispatchSlash_Async_PreambleDrainsResultChannel(t *testing.T) {
 		preamble: "checkpointing…",
 		out:      ch,
 	}
-	m := NewModel(Options{Agent: agent})
+	m := newModel(Options{Agent: agent})
 	m.viewport.SetWidth(80)
 
 	_, cmd := submitSlash(t, m, "/done")
@@ -633,7 +633,7 @@ func TestDispatchSlash_Async_PreambleDrainsResultChannel(t *testing.T) {
 
 func TestDispatchSlash_Async_PassesCancellableCtx(t *testing.T) {
 	// Dispatch must thread a cancellable ctx to the host so Esc
-	// can cancel — and the post-dispatch Model's cancelSlash, when
+	// can cancel — and the post-dispatch model's cancelSlash, when
 	// fired, must propagate cancellation to that ctx.
 	ch := make(chan SlashResultOrErr, 1)
 	agent := &asyncSlashAgent{
@@ -641,7 +641,7 @@ func TestDispatchSlash_Async_PassesCancellableCtx(t *testing.T) {
 		preamble: "running…",
 		out:      ch,
 	}
-	m := NewModel(Options{Agent: agent})
+	m := newModel(Options{Agent: agent})
 	m.viewport.SetWidth(80)
 
 	got, _ := submitSlash(t, m, "/done")
@@ -676,7 +676,7 @@ func TestDispatchSlash_Async_RefusalAddsNoSecondPreamble(t *testing.T) {
 		preamble: "first running…",
 		out:      ch1,
 	}
-	m := NewModel(Options{Agent: agent})
+	m := newModel(Options{Agent: agent})
 	m.viewport.SetWidth(80)
 
 	m, _ = submitSlash(t, m, "/done")
@@ -702,7 +702,7 @@ func TestDispatchSlash_Async_RefusalAddsNoSecondPreamble(t *testing.T) {
 // helpful system row instead of failing silently or panicking.
 func TestDispatchSlash_UnknownCommand(t *testing.T) {
 	agent := &slashAgent{specs: []SlashCommandSpec{{Name: "known"}}}
-	m := NewModel(Options{Agent: agent})
+	m := newModel(Options{Agent: agent})
 	m.viewport.SetWidth(80)
 
 	got, _ := submitSlash(t, m, "/nope")

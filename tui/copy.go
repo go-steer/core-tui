@@ -79,7 +79,7 @@ import (
 )
 
 // chatCopyItem copies the whole selected item.
-func (m *Model) chatCopyItem() tea.Cmd {
+func (m *model) chatCopyItem() tea.Cmd {
 	msg, ok := m.chatSelectedMessage()
 	if !ok {
 		return m.copyNothing("nothing to copy")
@@ -97,7 +97,7 @@ func (m *Model) chatCopyItem() tea.Cmd {
 // and picking one for the operator would be guessing; a second cursor
 // for choosing between them is a whole navigation model for a case
 // that is mostly "there is exactly one".
-func (m *Model) chatCopyCode() tea.Cmd {
+func (m *model) chatCopyCode() tea.Cmd {
 	msg, ok := m.chatSelectedMessage()
 	if !ok {
 		return m.copyNothing("nothing to copy")
@@ -146,7 +146,7 @@ const (
 // tea.Sequence: they go to different machines' clipboards and neither
 // depends on the other, so there is nothing to order them by, and
 // ordering them would make the fast one wait for the slow one.
-func (m *Model) copyToClipboard(text, what string) tea.Cmd {
+func (m *model) copyToClipboard(text, what string) tea.Cmd {
 	text = strings.TrimRight(text, "\n")
 	if strings.TrimSpace(text) == "" {
 		return m.copyNothing("nothing to copy")
@@ -166,7 +166,7 @@ func (m *Model) copyToClipboard(text, what string) tea.Cmd {
 
 // copyNothing reports why a copy did not happen. Returns a nil Cmd so
 // the caller can `return m.copyNothing(…)` on every declining path.
-func (m *Model) copyNothing(why string) tea.Cmd {
+func (m *model) copyNothing(why string) tea.Cmd {
 	m.copyGen++
 	m.copyNotice = why
 	return nil
@@ -177,7 +177,7 @@ func (m *Model) copyNothing(why string) tea.Cmd {
 // footer. Every site that drops the notice goes through here for that
 // reason (issue #175); setting the field alone would leave the door
 // open for a reply to resurrect a copy the operator has moved on from.
-func (m *Model) clearCopyNotice() {
+func (m *model) clearCopyNotice() {
 	m.copyNotice = ""
 	m.copyGen++
 }
@@ -191,7 +191,7 @@ func (m *Model) clearCopyNotice() {
 // — moving their position to tell them about a clipboard is a worse
 // interruption than the failure. The notice is also the surface that
 // made the claim, so it is the one that has to take it back.
-func (m *Model) applyClipboardResult(msg clipboardWrittenMsg) {
+func (m *model) applyClipboardResult(msg clipboardWrittenMsg) {
 	if msg.gen != m.copyGen {
 		return
 	}

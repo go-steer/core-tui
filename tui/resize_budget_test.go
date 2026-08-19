@@ -41,7 +41,7 @@ import (
 // It deliberately mirrors View's composition rather than calling
 // View: the whole point is to catch a budget that only looks right
 // because the frame got trimmed on the way out.
-func composedRows(m Model) int {
+func composedRows(m model) int {
 	chromeWidth := m.width
 	rows := 0
 	if m.effectiveLayout() == StatusSidebar {
@@ -73,7 +73,7 @@ func composedRows(m Model) int {
 // Computed here from the model rather than read out of m.chrome so
 // that the assertion below is an independent check on the budget and
 // not a restatement of it.
-func irreducibleRows(m Model) int {
+func irreducibleRows(m model) int {
 	chromeWidth := m.width
 	rows := 0
 	if m.effectiveLayout() == StatusSidebar {
@@ -112,7 +112,7 @@ func irreducibleRows(m Model) int {
 // skipped instead, silently, and the grid stayed green while the
 // input box and the footer were being clipped out of the frame. An
 // exhausted budget is now a checkable number, so it is checked.
-func assertBudgetExact(t *testing.T, m Model) {
+func assertBudgetExact(t *testing.T, m model) {
 	t.Helper()
 	irreducible := irreducibleRows(m)
 	want := m.height
@@ -302,19 +302,19 @@ func budgetStates() []frameState {
 	return []frameState{
 		{
 			name: "transcript",
-			setup: func(_ *testing.T, m Model, _, _ int) Model {
+			setup: func(_ *testing.T, m model, _, _ int) model {
 				return withHostileTranscript(m)
 			},
 		},
 		{
 			name: "tall-textarea",
-			setup: func(_ *testing.T, m Model, _, _ int) Model {
+			setup: func(_ *testing.T, m model, _, _ int) model {
 				return withTallTextarea(withHostileTranscript(m))
 			},
 		},
 		{
 			name: "help-panel",
-			setup: func(_ *testing.T, m Model, _, _ int) Model {
+			setup: func(_ *testing.T, m model, _, _ int) model {
 				m = withHostileTranscript(m)
 				m.helpOpen = true
 				m.resize()
@@ -329,7 +329,7 @@ func budgetStates() []frameState {
 			// spend back to the chat. The budget has to stay exact on
 			// a page that is not the first one.
 			name: "help-panel-paged",
-			setup: func(_ *testing.T, m Model, _, _ int) Model {
+			setup: func(_ *testing.T, m model, _, _ int) model {
 				m = withHostileTranscript(m)
 				m.advanceHelp()
 				m.resize()
@@ -341,7 +341,7 @@ func budgetStates() []frameState {
 		},
 		{
 			name: "tall-textarea+help-panel",
-			setup: func(_ *testing.T, m Model, _, _ int) Model {
+			setup: func(_ *testing.T, m model, _, _ int) model {
 				m = withHostileTranscript(m)
 				m.helpOpen = true
 				m.resize()
@@ -350,7 +350,7 @@ func budgetStates() []frameState {
 		},
 		{
 			name: "palette",
-			setup: func(_ *testing.T, m Model, _, _ int) Model {
+			setup: func(_ *testing.T, m model, _, _ int) model {
 				m = withHostileTranscript(m)
 				m = withPalette(m)
 				m.refreshViewport()
@@ -359,7 +359,7 @@ func budgetStates() []frameState {
 		},
 		{
 			name: "toast",
-			setup: func(_ *testing.T, m Model, _, _ int) Model {
+			setup: func(_ *testing.T, m model, _, _ int) model {
 				m = withHostileTranscript(m)
 				m.toast = "woke up: agent switched to a model with a long name"
 				m.toastSetAt = time.Now()
@@ -374,7 +374,7 @@ func budgetStates() []frameState {
 // withPalette opens the slash palette the way a keystroke does —
 // refreshPalette is what handleKey calls after forwarding one, and
 // it resizes on open.
-func withPalette(m Model) Model {
+func withPalette(m model) model {
 	m.input.SetValue("/")
 	m.refreshPalette()
 	return m
@@ -383,7 +383,7 @@ func withPalette(m Model) Model {
 // withTallTextarea fills the input with more lines than
 // textareaMaxHeight and reconciles the layout the way every
 // keystroke path does (syncInputHeight, then resize on a change).
-func withTallTextarea(m Model) Model {
+func withTallTextarea(m model) model {
 	m.input.SetValue(strings.Repeat("a typed line\n", textareaMaxHeight+5))
 	if m.syncInputHeight() {
 		m.resize()

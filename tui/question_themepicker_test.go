@@ -13,7 +13,7 @@
 // limitations under the License.
 
 // Theme picker tests, from the app's side. What the widget answers on
-// its own, with no Model anywhere, is question_external_test.go; this
+// its own, with no model anywhere, is question_external_test.go; this
 // file is the other half — that the resolver turns those answers into
 // the effects the picker has always had.
 //
@@ -32,18 +32,18 @@ import (
 
 // askThemePicker opens the picker exactly as /theme does — the
 // question, plus the resolver that knows what its answer means.
-func askThemePicker(m *Model) *themePickerQuestion {
+func askThemePicker(m *model) *themePickerQuestion {
 	q := newThemePickerQuestion(BuiltinThemes(), m.themeName)
 	m.overlayStack.ask(q, askOperator, themePickerResolver(m.themeName))
 	return q
 }
 
-func openThemePickerFixture(t *testing.T) (Model, *themePickerQuestion) {
+func openThemePickerFixture(t *testing.T) (model, *themePickerQuestion) {
 	t.Helper()
-	m := NewModel(Options{Agent: &bareAgent{id: "theme"}})
+	m := newModel(Options{Agent: &bareAgent{id: "theme"}})
 	m.styles = newStylesWithTheme(true, goldenTheme())
 	out, _ := m.Update(tea.WindowSizeMsg{Width: 100, Height: 30})
-	m = out.(Model)
+	m = out.(model)
 	m.applyNamedTheme("default")
 	return m, askThemePicker(&m)
 }
@@ -53,20 +53,20 @@ func openThemePickerFixture(t *testing.T) (Model, *themePickerQuestion) {
 // once the frame settles.
 //
 // Settling is the part that is new. The live preview is no longer a
-// write the widget makes to a *Model it was handed — it cannot be,
-// since Model.Update has a value receiver and any *Model the widget
+// write the widget makes to a *model it was handed — it cannot be,
+// since model.Update has a value receiver and any *model the widget
 // held would be a dead per-Update copy — so it arrives as a
 // themePreviewMsg the Update loop applies. Commit and restore still
 // happen synchronously, inside the resolver.
-func pressPicker(t *testing.T, m *Model, stroke string) (consumed bool) {
+func pressPicker(t *testing.T, m *model, stroke string) (consumed bool) {
 	t.Helper()
 	consumed, cmd := m.overlayStack.handleKeyMsg(keyMsgFromStroke(stroke), m)
 	for _, msg := range drainBatch(t, cmd) {
 		out, follow := m.Update(msg)
-		*m = out.(Model)
+		*m = out.(model)
 		for _, next := range drainBatch(t, follow) {
 			out, _ = m.Update(next)
-			*m = out.(Model)
+			*m = out.(model)
 		}
 	}
 	return consumed
@@ -163,7 +163,7 @@ func TestThemePicker_PreviewDiesWithThePicker(t *testing.T) {
 
 	// Now the preview arrives, too late.
 	out, _ := m.Update(stale[0])
-	m = out.(Model)
+	m = out.(model)
 	if m.themeName != original {
 		t.Errorf("a preview delivered after esc changed the theme to %q, want %q",
 			m.themeName, original)
@@ -314,7 +314,7 @@ func TestThemePicker_CursorSitsInTheFilterRow(t *testing.T) {
 // pre-existing unsized behaviour (no WindowSizeMsg = no windowing)
 // true of the filtered list too.
 func TestThemePicker_UnsizedRendersEveryFilteredRow(t *testing.T) {
-	m := Model{}
+	m := model{}
 	m.styles = newStyles(true, Branding{})
 	q := askThemePicker(&m)
 	typeIntoFilter(&q.filter, "e")

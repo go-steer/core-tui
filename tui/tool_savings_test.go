@@ -295,7 +295,7 @@ func TestApplyToolResult_SavingsBadgeAppendedToPreview(t *testing.T) {
 // future refactor drops the chip from the header rendering path.
 func TestToolCallDialog_HeaderShowsSavingsChip(t *testing.T) {
 	styles := newStyles(true, Branding{})
-	m := Model{}
+	m := model{}
 	m.styles = styles
 	m.width = 120
 	m.height = 40

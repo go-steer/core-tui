@@ -16,7 +16,7 @@
 // Every dialog before this one was arrow-nav + Enter; pickers that
 // need an operator-supplied string (the session picker's
 // "+ Attach to endpoint…" row being the motivating case) had no
-// modal to hand off to. huh.Form on Model.pendingForm covers
+// modal to hand off to. huh.Form on model.pendingForm covers
 // multi-field forms but is a separate lane that doesn't ride the
 // overlay stack and doesn't wear the renderContext chrome.
 //
@@ -57,8 +57,8 @@ const defaultTextInputWidth = 64
 // Unexported in #254, with the NewTextInputDialog constructor that
 // took it. Both were exported for a host that never had a way to reach
 // them: opening one needs an overlay, and the only overlay in
-// existence is an unexported field of Model. Submit's signature is
-// unchanged — it still takes the live Model and returns a
+// existence is an unexported field of model. Submit's signature is
+// unchanged — it still takes the live model and returns a
 // dialogAction, because the one caller that wraps this primitive needs
 // exactly that. See the field's own comment.
 type textInputConfig struct {
@@ -94,7 +94,7 @@ type textInputConfig struct {
 	Validate func(value string) string
 
 	// Submit is called on Enter once Validate passes. It receives
-	// the trimmed value and the live Model, and returns the
+	// the trimmed value and the live model, and returns the
 	// dialogAction the overlay applies — so a submit closure can
 	// close this dialog (Close: true), leave it open, emit a Cmd,
 	// and/or Open another dialog on the stack. Nil Submit closes
@@ -108,7 +108,7 @@ type textInputConfig struct {
 	// in-flight commit (dialog_sessioninput.go) has to return a Cmd
 	// and has to stay OPEN while the host's dial is out, and an error
 	// return can say neither.
-	Submit func(value string, m *Model) dialogAction
+	Submit func(value string, m *model) dialogAction
 
 	// Footer overrides the default "enter submit · esc cancel"
 	// hint line.
@@ -156,7 +156,7 @@ type textInputDialog struct {
 //	        if v == "" { return "endpoint is required" }
 //	        return ""
 //	    },
-//	    Submit: func(v string, m *Model) dialogAction {
+//	    Submit: func(v string, m *model) dialogAction {
 //	        tgt, err := dialTheThing(v)
 //	        if err != nil {
 //	            m.history.Append(Message{Role: RoleError, Text: err.Error()})
@@ -219,13 +219,13 @@ func (d *textInputDialog) Value() string { return d.input.Value() }
 // HandleKey satisfies dialog for callers holding only a normalized
 // stroke. It synthesizes a KeyPressMsg and delegates so both entry
 // points behave identically.
-func (d *textInputDialog) HandleKey(stroke string, m *Model) dialogAction {
+func (d *textInputDialog) HandleKey(stroke string, m *model) dialogAction {
 	return d.HandleKeyMsg(keyMsgFromStroke(stroke), m)
 }
 
 // HandleKeyMsg is the real key handler. Enter validates + submits;
 // Esc closes without submitting; everything else feeds the input.
-func (d *textInputDialog) HandleKeyMsg(msg tea.KeyPressMsg, m *Model) dialogAction {
+func (d *textInputDialog) HandleKeyMsg(msg tea.KeyPressMsg, m *model) dialogAction {
 	switch msg.String() {
 	case "esc":
 		return dialogAction{Consumed: true, Close: true}
@@ -273,7 +273,7 @@ func (d *textInputDialog) dialogWidth(totalWidth int) int {
 	return width
 }
 
-func (d *textInputDialog) Render(totalWidth int, m *Model) string {
+func (d *textInputDialog) Render(totalWidth int, m *model) string {
 	width := d.dialogWidth(totalWidth)
 
 	d.syncStyles(m.styles)
@@ -320,7 +320,7 @@ func (d *textInputDialog) Render(totalWidth int, m *Model) string {
 // The column comes from textInputCursor rather than straight from the
 // widget: bubbles' own textinput.Cursor() mixes a rune index with a
 // cell width and ignores its scroll offset (issue #125, cursor.go).
-func (d *textInputDialog) DialogCursor(_ int, _ *Model) *tea.Cursor {
+func (d *textInputDialog) DialogCursor(_ int, _ *model) *tea.Cursor {
 	c := textInputCursor(d.input, d.input.Prompt)
 	if c == nil {
 		return nil // blurred

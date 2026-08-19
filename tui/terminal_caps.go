@@ -13,7 +13,7 @@
 // limitations under the License.
 
 // Terminal capability sniffing (agentic-tui skill §18.A). Probe
-// once at startup, store on Model, branch on the bits when a
+// once at startup, store on model, branch on the bits when a
 // renderer wants a richer affordance (hyperlinks for `@`-ref
 // targets, OSC 52 for "copy to clipboard" hints, Kitty graphics
 // for inline images later).
@@ -21,7 +21,7 @@
 // All sniffing is env-var based — no terminal queries (which
 // would need the alt-screen torn down + a stdin write/read cycle
 // that races bubbletea v2's input loop). Hosts that want
-// authoritative detection can override Model.caps post-NewModel.
+// authoritative detection can override model.caps post-NewModel.
 
 package tui
 
@@ -87,7 +87,7 @@ type terminalCapabilities struct {
 
 // detectCapabilities probes the environment once and returns the
 // best-guess capability bag. Called from NewModel; hosts can
-// override on Model.caps after NewModel returns if they have a
+// override on model.caps after NewModel returns if they have a
 // better signal.
 func detectCapabilities() terminalCapabilities {
 	colorterm := strings.ToLower(os.Getenv("COLORTERM"))

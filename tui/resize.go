@@ -175,7 +175,7 @@ func resizeWarmTick(gen uint64) tea.Cmd {
 // free, which is the shape the operator feels as "it kept up". And
 // the leading frame is the one the eye is least able to time, because
 // it is simultaneous with the mouse-down.
-func (m *Model) beginResizeReflow() tea.Cmd {
+func (m *model) beginResizeReflow() tea.Cmd {
 	m.resizeGen++
 	// reflowHot doubles as "a drag is already in flight": it is set
 	// at the bottom of this function and cleared by the visible tick,
@@ -207,7 +207,7 @@ func (m *Model) beginResizeReflow() tea.Cmd {
 // stopped moving, so the rows on screen can be re-wrapped and the
 // backlog settle can be scheduled behind them. Returns the repaint
 // plus that tick.
-func (m *Model) finishResizeDrag() tea.Cmd {
+func (m *model) finishResizeDrag() tea.Cmd {
 	// Cleared before the pending check: reflowHot is what tells the
 	// next width change it is a leading edge, and a drag that ended
 	// with nothing left to reflow still ended.
@@ -233,7 +233,7 @@ func (m *Model) finishResizeDrag() tea.Cmd {
 // whatever comes next: another warm tick while messages remain, or
 // just the coalesced repaint once the backlog is fully warm. The
 // generation guard lives in the Update handler.
-func (m *Model) continueResizeReflow() tea.Cmd {
+func (m *model) continueResizeReflow() tea.Cmd {
 	if !m.reflowPending {
 		return nil
 	}
@@ -286,7 +286,7 @@ func (m *Model) continueResizeReflow() tea.Cmd {
 // history.at, not Snapshot: this runs from every refreshViewport while
 // a reflow is pending, and copying the whole transcript to look at a
 // screenful of it costs ~220KB per repaint at 400 turns.
-func (m *Model) reflowVisible() {
+func (m *model) reflowVisible() {
 	if !m.reflowPending || m.reflowHot {
 		return
 	}
@@ -325,7 +325,7 @@ func (m *Model) reflowVisible() {
 // scroll into. Warming it here is what keeps that scroll instant, and
 // spreading it over ticks is what keeps the warming itself
 // imperceptible.
-func (m *Model) warmReflowSlice() bool {
+func (m *model) warmReflowSlice() bool {
 	mr := m.ensureMarkdown()
 	if mr == nil {
 		return true
@@ -364,7 +364,7 @@ func (m *Model) warmReflowSlice() bool {
 
 // warmRowCache re-renders row i at the current width and stores it,
 // so the next paint reads it straight out of the cache.
-func (m *Model) warmRowCache(i, total int) {
+func (m *model) warmRowCache(i, total int) {
 	if m.listCache == nil {
 		return
 	}
@@ -385,7 +385,7 @@ func (m *Model) warmRowCache(i, total int) {
 // a pane narrow and back wide again leaves the messages that were
 // never touched at their original width, and they are skipped
 // outright on the way back.
-func (m *Model) reflowMessage(i int, msg Message, mr *markdownRenderer) bool {
+func (m *model) reflowMessage(i int, msg Message, mr *markdownRenderer) bool {
 	if msg.Role != RoleAssistant || msg.Text == "" {
 		return false
 	}

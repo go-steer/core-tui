@@ -38,21 +38,21 @@ import (
 // about the spinner line.
 const liveVerb = "LIVEVERB-thinking"
 
-// liveRenderModel builds a sized, live-mode Model with a pinned verb
+// liveRenderModel builds a sized, live-mode model with a pinned verb
 // pool and, when at is non-nil, a pinned clock. It goes through
 // NewModel + WindowSizeMsg so the viewport and chrome budget are the
 // real ones — the frame assertions below are worthless against a
-// hand-built Model with a zero-width viewport.
-func liveRenderModel(t *testing.T, at *time.Time) Model {
+// hand-built model with a zero-width viewport.
+func liveRenderModel(t *testing.T, at *time.Time) model {
 	t.Helper()
 	return liveRenderModelWith(t, at, newLiveAgentStub())
 }
 
 // liveRenderModelWith is liveRenderModel over a caller-supplied host,
 // for the tests that need one implementing InjectableAgent as well.
-func liveRenderModelWith(t *testing.T, at *time.Time, agent Agent) Model {
+func liveRenderModelWith(t *testing.T, at *time.Time, agent Agent) model {
 	t.Helper()
-	m := NewModel(Options{
+	m := newModel(Options{
 		Agent:           agent,
 		ThinkingPhrases: []string{liveVerb},
 	})
@@ -63,16 +63,16 @@ func liveRenderModelWith(t *testing.T, at *time.Time, agent Agent) Model {
 		m.now = fixedClock(at)
 	}
 	out, _ := m.Update(tea.WindowSizeMsg{Width: 100, Height: 30})
-	return out.(Model)
+	return out.(model)
 }
 
 // livePartial pushes one partial chunk through the real Update path
 // (not applyStreamChunk directly) so the sessionGen guard, the
 // spinner arming and the render kick all run as they do in a session.
-func livePartial(t *testing.T, m Model, text string) Model {
+func livePartial(t *testing.T, m model, text string) model {
 	t.Helper()
 	out, _ := m.Update(streamChunkMsg{gen: m.sessionGen, text: text, partial: true})
-	next := out.(Model)
+	next := out.(model)
 	next.refreshViewport()
 	return next
 }
@@ -149,7 +149,7 @@ func TestLiveRender_CommitClosesTheBlock(t *testing.T) {
 	m = livePartial(t, m, "SENTINEL streamed prose")
 
 	out, _ := m.Update(streamChunkMsg{gen: m.sessionGen, text: "SENTINEL streamed prose", partial: false})
-	m = out.(Model)
+	m = out.(model)
 	m.refreshViewport()
 
 	if m.spinnerActive {
@@ -187,7 +187,7 @@ func TestLiveRender_ElapsedIsPerStretch(t *testing.T) {
 	// Commit, then idle for ten minutes. Nothing is in flight, so
 	// nothing may claim to be.
 	out, _ := m.Update(streamChunkMsg{gen: m.sessionGen, text: "first stretch", partial: false})
-	m = out.(Model)
+	m = out.(model)
 	clock = clock.Add(10 * time.Minute)
 	m.refreshViewport()
 	if got := m.View().Content; strings.Contains(got, "10m") {
@@ -220,7 +220,7 @@ func TestLiveRender_SpinnerGenPerStretch(t *testing.T) {
 	// The live chain ticks and the rotation is visible.
 	before := m.spinnerFrame
 	out, _ := m.Update(spinnerTickMsg{gen: firstGen})
-	m = out.(Model)
+	m = out.(model)
 	if m.spinnerFrame != before+1 {
 		t.Errorf("live tick did not rotate the verb: spinnerFrame %d → %d", before, m.spinnerFrame)
 	}
@@ -228,10 +228,10 @@ func TestLiveRender_SpinnerGenPerStretch(t *testing.T) {
 	// Commit ends the stretch; a leftover tick from the dead chain
 	// must not restart the animation.
 	out, _ = m.Update(streamChunkMsg{gen: m.sessionGen, text: "first", partial: false})
-	m = out.(Model)
+	m = out.(model)
 	idle := m.spinnerFrame
 	out, _ = m.Update(spinnerTickMsg{gen: firstGen})
-	m = out.(Model)
+	m = out.(model)
 	if m.spinnerFrame != idle {
 		t.Error("a tick from the committed stretch kept rotating after the block closed")
 	}
@@ -244,12 +244,12 @@ func TestLiveRender_SpinnerGenPerStretch(t *testing.T) {
 	}
 	stale := m.spinnerFrame
 	out, _ = m.Update(spinnerTickMsg{gen: firstGen})
-	m = out.(Model)
+	m = out.(model)
 	if m.spinnerFrame != stale {
 		t.Error("superseded tick chain rotated the second stretch's verb")
 	}
 	out, _ = m.Update(spinnerTickMsg{gen: m.spinnerGen})
-	m = out.(Model)
+	m = out.(model)
 	if m.spinnerFrame != stale+1 {
 		t.Error("second stretch's own tick chain did not rotate the verb")
 	}
@@ -280,7 +280,7 @@ func TestTurnInFlight(t *testing.T) {
 	}
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
-			m := Model{state: tc.state, liveMode: tc.live, spinnerActive: tc.spinner}
+			m := model{state: tc.state, liveMode: tc.live, spinnerActive: tc.spinner}
 			if got := m.turnInFlight(); got != tc.want {
 				t.Errorf("turnInFlight() = %v, want %v", got, tc.want)
 			}
@@ -294,18 +294,18 @@ func TestTurnInFlight(t *testing.T) {
 // nothing at all.
 func TestRenderInProgress_NonLivePathsUnchanged(t *testing.T) {
 	t.Run("idle-empty", func(t *testing.T) {
-		m := NewModel(Options{Agent: &bareAgent{id: "idle"}})
+		m := newModel(Options{Agent: &bareAgent{id: "idle"}})
 		out, _ := m.Update(tea.WindowSizeMsg{Width: 100, Height: 30})
-		m = out.(Model)
+		m = out.(model)
 		if got := m.renderInProgress(); got != "" {
 			t.Errorf("renderInProgress() on an idle model = %q, want empty", got)
 		}
 	})
 
 	t.Run("queue-only", func(t *testing.T) {
-		m := NewModel(Options{Agent: &bareAgent{id: "queue"}})
+		m := newModel(Options{Agent: &bareAgent{id: "queue"}})
 		out, _ := m.Update(tea.WindowSizeMsg{Width: 100, Height: 30})
-		m = out.(Model)
+		m = out.(model)
 		m.queue = append(m.queue, QueueEntry{Text: "QUEUED-SENTINEL", State: QueueQueued})
 		if m.state == stateStreaming {
 			t.Fatal("setup: wanted an idle model with a non-empty queue")
@@ -327,15 +327,15 @@ func TestRenderInProgress_NonLivePathsUnchanged(t *testing.T) {
 	})
 }
 
-// liveSubmit types text into a live-mode Model and presses enter,
-// returning the resulting Model and the Cmd Update handed back. It
+// liveSubmit types text into a live-mode model and presses enter,
+// returning the resulting model and the Cmd Update handed back. It
 // drains the stub's injectsOut so a test can assert the host was
 // actually called.
-func liveSubmit(t *testing.T, m Model, text string) (Model, tea.Cmd) {
+func liveSubmit(t *testing.T, m model, text string) (model, tea.Cmd) {
 	t.Helper()
 	m.input.SetValue(text)
 	out, cmd := m.Update(tea.KeyPressMsg(tea.Key{Code: tea.KeyEnter}))
-	next := out.(Model)
+	next := out.(model)
 	next.refreshViewport()
 	return next, cmd
 }
@@ -418,7 +418,7 @@ func TestLiveRender_CommitOnlyHostGetsASpinner(t *testing.T) {
 
 	// The host's entire reply, in one committed chunk.
 	out, _ := m.Update(streamChunkMsg{gen: m.sessionGen, text: "SENTINEL whole reply", partial: false})
-	m = out.(Model)
+	m = out.(model)
 	m.refreshViewport()
 
 	if m.spinnerActive {
@@ -491,7 +491,7 @@ func TestLiveRender_DisconnectStopsTheSpinner(t *testing.T) {
 			}
 
 			out, _ := m.Update(tc.msg(m.sessionGen))
-			m = out.(Model)
+			m = out.(model)
 			m.refreshViewport()
 
 			if m.spinnerActive {

@@ -41,7 +41,7 @@ type statusKey struct {
 
 	// The palette. styleSet is rebuilt by resolveStyles from exactly
 	// these two plus Branding, and Branding is fixed for the life of
-	// a Model, so naming the theme and the mode pins the styling.
+	// a model, so naming the theme and the mode pins the styling.
 	theme string
 	dark  bool
 
@@ -50,8 +50,8 @@ type statusKey struct {
 	model    string
 	provider string
 
-	// cwd is kept even though Model.cwd is now fixed for the life of a
-	// Model (issue #223), because the property this struct rests on is
+	// cwd is kept even though model.cwd is now fixed for the life of a
+	// model (issue #223), because the property this struct rests on is
 	// that the key IS every value the renderer reads — not that it is
 	// every value the renderer reads minus the ones someone has argued
 	// cannot move. Dropping it would trade a self-evident invariant for
@@ -76,13 +76,13 @@ type statusKey struct {
 
 // statusCache holds the last header and the key that produced it.
 //
-// It lives behind a pointer because Model.View has a value receiver:
+// It lives behind a pointer because model.View has a value receiver:
 // anything View writes to its receiver lands in a copy that is
 // discarded on return, so a cache filled during a draw has to be
 // reachable through a field that survives the copy. That is only safe
 // because the key above is content-derived. A pointer cache keyed on
 // a version stamp would be a hazard here — two divergent copies of a
-// Model can hold the same stamp with different content, and the
+// model can hold the same stamp with different content, and the
 // second one to draw would be handed the first one's header. Keyed on
 // the values, divergent copies simply miss and re-render.
 type statusCache struct {
@@ -95,7 +95,7 @@ type statusCache struct {
 // rather than in view.go so that adding a segment to the status line
 // and forgetting to key on it is a one-file mistake rather than a
 // two-file one.
-func (m Model) statusLineKey() statusKey {
+func (m model) statusLineKey() statusKey {
 	k := statusKey{
 		width:     m.width,
 		theme:     m.styles.Theme.Name,

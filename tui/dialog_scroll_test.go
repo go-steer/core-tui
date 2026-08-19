@@ -360,7 +360,7 @@ func keyPress(stroke string) tea.KeyPressMsg {
 // The chat viewport keeps the wheel when no modal is up — handleWheel
 // must decline so Update forwards the event as it always has.
 func TestHandleWheel_NoModalFallsThroughToViewport(t *testing.T) {
-	m := NewModel(Options{Agent: &bareAgent{id: "a"}})
+	m := newModel(Options{Agent: &bareAgent{id: "a"}})
 	if _, handled := m.handleWheel(wheel(tea.MouseWheelDown)); handled {
 		t.Error("handleWheel claimed the event with no modal open")
 	}
@@ -387,14 +387,14 @@ func TestHandleWheel_ScrollsSideAnswer(t *testing.T) {
 func TestHandleWheel_PermissionLayoutDecidesOwner(t *testing.T) {
 	req := PermissionRequest{ToolName: "bash", Detail: strings.Repeat("echo hi\n", 200), DetailKind: DetailShell}
 
-	inline := NewModel(Options{Agent: &bareAgent{id: "a"}})
+	inline := newModel(Options{Agent: &bareAgent{id: "a"}})
 	inline.width, inline.height = 100, 30
 	inline.overlayStack.ask(newPermissionQuestion(req, PermissionInline), askAgent, nil)
 	if _, handled := inline.handleWheel(wheel(tea.MouseWheelDown)); handled {
 		t.Error("inline permission layout claimed the wheel; the chat viewport should keep it")
 	}
 
-	overlay := NewModel(Options{Agent: &bareAgent{id: "a"}, PermissionLayout: PermissionOverlay})
+	overlay := newModel(Options{Agent: &bareAgent{id: "a"}, PermissionLayout: PermissionOverlay})
 	overlay.width, overlay.height = 100, 30
 	overlay.overlayStack.ask(newPermissionQuestion(req, PermissionOverlay), askAgent, nil)
 	if _, handled := overlay.handleWheel(wheel(tea.MouseWheelDown)); !handled {
@@ -420,7 +420,7 @@ func TestOverlayHandleWheel_ScrollDialogVsPicker(t *testing.T) {
 
 	// The picker repaints the chat on every preview, so it needs a
 	// fully-wired model rather than the bare tool-call fixture.
-	pm := NewModel(Options{Agent: &bareAgent{id: "a"}})
+	pm := newModel(Options{Agent: &bareAgent{id: "a"}})
 	pm.width, pm.height = 100, 30
 	pm.resize()
 	pm.applyNamedTheme("default")
@@ -449,7 +449,7 @@ func TestToolCallDialog_ScrollByClampsToBody(t *testing.T) {
 // Scrolling the subagent log up releases the follow-the-tail pin;
 // wheeling back to the bottom re-arms it.
 func TestSubagentDialog_ScrollByTogglesPin(t *testing.T) {
-	m := Model{}
+	m := model{}
 	m.styles = newStyles(true, Branding{})
 	m.height = 40
 	d := newSubagentDialog("worker")
@@ -470,9 +470,9 @@ func TestSubagentDialog_ScrollByTogglesPin(t *testing.T) {
 
 // sideAnswerModel returns a sized model with an n-line /btw answer
 // open, already rendered once so the scroll geometry is measured.
-func sideAnswerModel(t *testing.T, n int) *Model {
+func sideAnswerModel(t *testing.T, n int) *model {
 	t.Helper()
-	m := NewModel(Options{Agent: &bareAgent{id: "a"}})
+	m := newModel(Options{Agent: &bareAgent{id: "a"}})
 	m.width, m.height = 100, 30
 	m.resize()
 	body := make([]string, n)
@@ -491,7 +491,7 @@ func TestSideAnswer_ScrollsWithKeys(t *testing.T) {
 	}
 
 	out, _ := m.handleKey(keyPress("down"))
-	got := out.(Model)
+	got := out.(model)
 	if got.sideAnswer == nil {
 		t.Fatal("down dismissed the modal; it should scroll it")
 	}
@@ -500,14 +500,14 @@ func TestSideAnswer_ScrollsWithKeys(t *testing.T) {
 	}
 
 	out, _ = got.handleKey(keyPress("end"))
-	got = out.(Model)
+	got = out.(model)
 	if want := got.scroll().maxOffset(); got.scroll().offset != want || want == 0 {
 		t.Errorf("offset after end = %d, want %d", got.scroll().offset, want)
 	}
 
 	// Dismissal keys still win over scrolling.
 	out, _ = got.handleKey(keyPress("esc"))
-	if out.(Model).sideAnswer != nil {
+	if out.(model).sideAnswer != nil {
 		t.Error("esc did not dismiss the side answer")
 	}
 }
@@ -538,7 +538,7 @@ func TestSideAnswer_ShortAnswerUnchanged(t *testing.T) {
 }
 
 func TestPermissionOverlay_ScrollsWithKeys(t *testing.T) {
-	m := NewModel(Options{Agent: &bareAgent{id: "a"}, PermissionLayout: PermissionOverlay})
+	m := newModel(Options{Agent: &bareAgent{id: "a"}, PermissionLayout: PermissionOverlay})
 	m.width, m.height = 100, 30
 	m.resize()
 	q := newPermissionQuestion(PermissionRequest{
@@ -553,7 +553,7 @@ func TestPermissionOverlay_ScrollsWithKeys(t *testing.T) {
 	}
 
 	out, _ := m.handleKey(keyPress("pgdn"))
-	got := out.(Model)
+	got := out.(model)
 	if got.openPermission() == nil {
 		t.Fatal("pgdn resolved the permission prompt; it should only scroll")
 	}
@@ -573,7 +573,7 @@ func TestPermissionOverlay_ScrollsWithKeys(t *testing.T) {
 
 // Tab-ing to a field below the fold scrolls it into view.
 func TestElicitModal_FollowsFocusedField(t *testing.T) {
-	m := NewModel(Options{Agent: &bareAgent{id: "a"}})
+	m := newModel(Options{Agent: &bareAgent{id: "a"}})
 	m.width, m.height = 100, 24
 	m.resize()
 	fields := make([]ElicitField, 40)
@@ -630,7 +630,7 @@ func TestElicitModal_FollowsFocusedField(t *testing.T) {
 // --- picker windowing ----------------------------------------------
 
 func TestThemePicker_WindowsLongListToTerminal(t *testing.T) {
-	m := Model{}
+	m := model{}
 	m.styles = newStyles(true, Branding{})
 	m.width, m.height = 100, 14
 	m.themeName = "default"
@@ -655,7 +655,7 @@ func TestThemePicker_WindowsLongListToTerminal(t *testing.T) {
 // An unsized model (no WindowSizeMsg yet) renders every row, exactly
 // as it did before windowing existed.
 func TestThemePicker_UnsizedRendersEveryRow(t *testing.T) {
-	m := Model{}
+	m := model{}
 	m.styles = newStyles(true, Branding{})
 	m.themeName = "default"
 	askThemePicker(&m)

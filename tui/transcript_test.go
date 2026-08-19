@@ -196,3 +196,93 @@ func TestTranscript_NewerReaderHandlesV2(t *testing.T) {
 		t.Errorf("ToolName round-trip failed: got %q", got.Messages[0].ToolName)
 	}
 }
+
+// TestOptionsTranscript_RendersAssistantMarkdown covers the startup
+// half of resume (issue #115). ApplyTranscript used to be the only way
+// to get a saved session into the model, and it was reachable only
+// because the concrete model type was exported; Options.Transcript is
+// what replaces it. The property that matters is the one SeedHistory
+// does not have: assistant text arrives through Glamour, so Rendered
+// is populated and view.go never falls back to plain word-wrap.
+func TestOptionsTranscript_RendersAssistantMarkdown(t *testing.T) {
+	m := newModel(Options{
+		ForceTheme: ThemeDark,
+		Transcript: Transcript{
+			Version: TranscriptSchemaVersion,
+			Messages: []TranscriptMsg{
+				{Role: "user", Text: "hello"},
+				{Role: "assistant", Text: "# heading\n\nsome **bold** text"},
+			},
+		},
+	})
+	got := m.history.Snapshot()
+	if len(got) != 2 {
+		t.Fatalf("history len = %d, want 2", len(got))
+	}
+	if got[0].Role != RoleUser || got[0].Text != "hello" {
+		t.Errorf("history[0] = %+v, want the user row", got[0])
+	}
+	if got[1].Role != RoleAssistant {
+		t.Fatalf("history[1].Role = %v, want assistant", got[1].Role)
+	}
+	if got[1].Rendered == "" {
+		t.Error("assistant Rendered is empty: Options.Transcript did not run Glamour, " +
+			"which is the whole difference between it and SeedHistory")
+	}
+	if got[1].Rendered == got[1].Text {
+		t.Error("assistant Rendered is the raw text: markdown was not rendered")
+	}
+}
+
+// TestOptionsSeedHistory_LeavesAssistantUnrendered pins the other side
+// of the same contract, because Options documents the difference and a
+// host choosing between the two fields is choosing on that basis.
+// SeedHistory appends raw; the visual-preview binary it exists for does
+// not care, and a host resuming a real session should not use it.
+func TestOptionsSeedHistory_LeavesAssistantUnrendered(t *testing.T) {
+	m := newModel(Options{
+		ForceTheme: ThemeDark,
+		SeedHistory: []Message{
+			{Role: RoleAssistant, Text: "# heading\n\nsome **bold** text"},
+		},
+	})
+	got := m.history.Snapshot()
+	if len(got) != 1 {
+		t.Fatalf("history len = %d, want 1", len(got))
+	}
+	if got[0].Rendered != "" {
+		t.Errorf("SeedHistory should append raw, but Rendered = %q", got[0].Rendered)
+	}
+}
+
+// TestOptionsTranscript_AppliedBeforeSeedHistory pins the documented
+// order. applyTranscript resets history, so the opposite order would
+// discard SeedHistory without saying so — the reason Options spells the
+// composition out rather than leaving it to whichever runs first.
+func TestOptionsTranscript_AppliedBeforeSeedHistory(t *testing.T) {
+	m := newModel(Options{
+		ForceTheme: ThemeDark,
+		Transcript: Transcript{
+			Version:  TranscriptSchemaVersion,
+			Messages: []TranscriptMsg{{Role: "user", Text: "resumed"}},
+		},
+		SeedHistory: []Message{{Role: RoleUser, Text: "seeded"}},
+	})
+	got := m.history.Snapshot()
+	if len(got) != 2 {
+		t.Fatalf("history len = %d, want 2 (transcript then seed)", len(got))
+	}
+	if got[0].Text != "resumed" || got[1].Text != "seeded" {
+		t.Errorf("order = [%q %q], want [\"resumed\" \"seeded\"]", got[0].Text, got[1].Text)
+	}
+}
+
+// TestOptionsTranscript_ZeroValueStartsEmpty keeps the zero value inert:
+// every host that does not resume passes an Options with no Transcript
+// field set, and that must not go anywhere near applyTranscript.
+func TestOptionsTranscript_ZeroValueStartsEmpty(t *testing.T) {
+	m := newModel(Options{ForceTheme: ThemeDark})
+	if n := m.history.Len(); n != 0 {
+		t.Errorf("history len = %d, want 0 for a zero-value Transcript", n)
+	}
+}

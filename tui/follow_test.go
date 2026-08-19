@@ -25,11 +25,11 @@ import (
 
 // followModel returns a sized model holding a transcript several
 // screens tall, pinned to the tail.
-func followModel(t *testing.T, w, h, rows int) Model {
+func followModel(t *testing.T, w, h, rows int) model {
 	t.Helper()
-	m := NewModel(Options{Agent: &bareAgent{id: "a"}})
+	m := newModel(Options{Agent: &bareAgent{id: "a"}})
 	out, _ := m.Update(tea.WindowSizeMsg{Width: w, Height: h})
-	m = out.(Model)
+	m = out.(model)
 	for i := 0; i < rows; i++ {
 		m.history.Append(Message{Role: RoleAssistant, Text: "line " + strconv.Itoa(i), Rendered: "line " + strconv.Itoa(i)})
 	}
@@ -51,7 +51,7 @@ func TestFollow_SurvivesWindowResizeMidStream(t *testing.T) {
 
 	// The terminal loses a row while the turn is streaming.
 	out, _ := m.Update(tea.WindowSizeMsg{Width: 100, Height: 39})
-	m = out.(Model)
+	m = out.(model)
 	if !m.follow {
 		t.Error("follow cleared by a resize; it is operator intent and must survive geometry changes")
 	}
@@ -68,7 +68,7 @@ func TestFollow_SurvivesWindowResizeMidStream(t *testing.T) {
 
 	// Growing back is equally fine.
 	out, _ = m.Update(tea.WindowSizeMsg{Width: 100, Height: 60})
-	m = out.(Model)
+	m = out.(model)
 	m.history.Append(Message{Role: RoleAssistant, Text: "another", Rendered: "another"})
 	m.refreshViewport()
 	if !m.chatAtBottom() {
@@ -85,7 +85,7 @@ func TestFollow_SurvivesTextareaGrowth(t *testing.T) {
 	for i := 0; i < 200; i++ {
 		key := tea.KeyPressMsg(tea.Key{Code: 'x', Text: "x"})
 		out, _ := m.Update(key)
-		m = out.(Model)
+		m = out.(model)
 	}
 	if m.input.Height() < 2 {
 		t.Fatalf("setup: expected the textarea to have grown, height=%d", m.input.Height())
@@ -107,7 +107,7 @@ func TestFollow_ScrollUpReleasesAndBottomReArms(t *testing.T) {
 	m := followModel(t, 100, 40, 200)
 
 	out, _ := m.Update(tea.KeyPressMsg(tea.Key{Code: tea.KeyPgUp}))
-	m = out.(Model)
+	m = out.(model)
 	if m.follow {
 		t.Fatal("PgUp did not release follow")
 	}
@@ -122,7 +122,7 @@ func TestFollow_ScrollUpReleasesAndBottomReArms(t *testing.T) {
 	// chunk pins again.
 	for i := 0; i < 10 && !m.chatAtBottom(); i++ {
 		out, _ = m.Update(tea.KeyPressMsg(tea.Key{Code: tea.KeyPgDown}))
-		m = out.(Model)
+		m = out.(model)
 	}
 	if !m.follow {
 		t.Fatalf("scrolling back to the bottom did not re-arm follow (AtBottom=%v)", m.chatAtBottom())
@@ -140,12 +140,12 @@ func TestFollow_ResizeDoesNotReArmWhileScrolledUp(t *testing.T) {
 	m := followModel(t, 100, 40, 200)
 
 	out, _ := m.Update(tea.KeyPressMsg(tea.Key{Code: tea.KeyPgUp}))
-	m = out.(Model)
+	m = out.(model)
 	if m.follow {
 		t.Fatal("setup: PgUp did not release follow")
 	}
 	out, _ = m.Update(tea.WindowSizeMsg{Width: 100, Height: 30})
-	m = out.(Model)
+	m = out.(model)
 	if m.follow {
 		t.Error("resize re-armed follow behind the operator's back")
 	}
@@ -163,7 +163,7 @@ func TestFollow_ExplicitJumpsSetTheFlag(t *testing.T) {
 	m := followModel(t, 100, 40, 200)
 
 	out, _ := m.Update(tea.KeyPressMsg(tea.Key{Code: tea.KeyPgUp}))
-	m = out.(Model)
+	m = out.(model)
 	if m.follow {
 		t.Fatal("setup: PgUp did not release follow")
 	}
@@ -173,7 +173,7 @@ func TestFollow_ExplicitJumpsSetTheFlag(t *testing.T) {
 	}
 
 	out, _ = m.Update(tea.KeyPressMsg(tea.Key{Code: 'l', Mod: tea.ModCtrl}))
-	m = out.(Model)
+	m = out.(model)
 	if m.follow {
 		t.Error("ctrl+l jumped to the top but left follow armed — the next repaint would drag the operator back down")
 	}
@@ -193,7 +193,7 @@ func TestFollow_EndJumpsToTailAndReArms(t *testing.T) {
 	m := followModel(t, 100, 40, 200)
 
 	out, _ := m.Update(keyPress("pgup"))
-	m = out.(Model)
+	m = out.(model)
 	if m.follow {
 		t.Fatal("setup: PgUp did not release follow")
 	}
@@ -202,7 +202,7 @@ func TestFollow_EndJumpsToTailAndReArms(t *testing.T) {
 	}
 
 	out, cmd := m.Update(keyPress("end"))
-	m = out.(Model)
+	m = out.(model)
 	if !m.follow {
 		t.Error("end jumped to the tail but left follow released — the next repaint would drag the operator back off it")
 	}
@@ -228,7 +228,7 @@ func TestFollow_EndLeavesTheInputAlone(t *testing.T) {
 	m.input.SetValue("half-typed prompt")
 
 	out, _ := m.Update(keyPress("end"))
-	m = out.(Model)
+	m = out.(model)
 	if got := m.input.Value(); got != "half-typed prompt" {
 		t.Errorf("end mutated the input: %q", got)
 	}
@@ -248,7 +248,7 @@ func TestFollow_EndYieldsToTheInputWhenComposing(t *testing.T) {
 	before := m.chatYOffset()
 
 	out, _ := m.Update(keyPress("end"))
-	m = out.(Model)
+	m = out.(model)
 
 	if m.follow {
 		t.Error("end re-armed follow while the operator was composing; want the textarea to own the key")
@@ -267,7 +267,7 @@ func TestFollow_EndClaimedWhenInputEmpty(t *testing.T) {
 	m.input.SetValue("")
 
 	out, _ := m.Update(keyPress("end"))
-	m = out.(Model)
+	m = out.(model)
 
 	if !m.follow {
 		t.Error("end did not re-arm follow with an empty input")
@@ -284,7 +284,7 @@ func TestFollow_EndDoesNotUnshadowQuitOrKillLine(t *testing.T) {
 	t.Run("ctrl+d still quits", func(t *testing.T) {
 		m := followModel(t, 100, 40, 200)
 		out, cmd := m.Update(keyPress("ctrl+d"))
-		m = out.(Model)
+		m = out.(model)
 		if !m.quitting {
 			t.Error("ctrl+d did not set quitting — it scrolled instead of quitting")
 		}
@@ -301,7 +301,7 @@ func TestFollow_EndDoesNotUnshadowQuitOrKillLine(t *testing.T) {
 		m.input.SetValue("text to kill")
 		m.historyCursor = 3
 		out, _ := m.Update(keyPress("ctrl+u"))
-		m = out.(Model)
+		m = out.(model)
 		if got := m.input.Value(); got != "" {
 			t.Errorf("ctrl+u left %q in the input — it scrolled instead of clearing", got)
 		}
@@ -335,7 +335,7 @@ func TestHelpPanel_NavigationKeysAreAllBound(t *testing.T) {
 			before := probe.chatYOffset()
 
 			out, _ := probe.Update(keyPress(stroke))
-			probe = out.(Model)
+			probe = out.(model)
 			if probe.chatYOffset() == before {
 				t.Errorf("help panel advertises %q under Navigation but it left the viewport at YOffset=%d", stroke, before)
 			}
@@ -346,7 +346,7 @@ func TestHelpPanel_NavigationKeysAreAllBound(t *testing.T) {
 // helpPanelSectionKeys renders the help panel and returns the
 // individual key strokes named in the given section, splitting rows
 // like "pgup / pgdn" into their parts.
-func helpPanelSectionKeys(t *testing.T, m Model, section string) []string {
+func helpPanelSectionKeys(t *testing.T, m model, section string) []string {
 	t.Helper()
 
 	panel := ansi.Strip(m.renderHelpPanel(100))

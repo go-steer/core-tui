@@ -407,6 +407,53 @@ host-specific.
 **Recommendation: (C).** `Run` covers 95% of cases; `New` is the
 escape hatch. Mirrors how `http.ListenAndServe` vs `http.Server` works.
 
+### D18a. Amendment (2026-08-19, #115): the escape hatch is an interface
+
+(C) stands — `Run` plus a constructor — but the constructor hands back
+`tea.Model`, not a `*Model`. The concrete type is unexported.
+
+**What changed.** D18 was written before there was a `Model` to look
+at. Now that there is, the struct half of (C) turns out to promise
+nothing a host can use. Every method worth calling — `Init`, `Update`,
+`View` — is on `tea.Model` already, and the one reason to want the
+concrete type is embedding, which is a trap here: `View` sets
+`AltScreen`, `Cursor` and `MouseMode` on the `tea.View` it returns, and
+a parent that composes its own `tea.View` drops all three. The failure
+mode is a TUI rendering into the scrollback with no cursor and no
+mouse, with no compile error and no runtime error.
+
+**What was considered and rejected.** #115 opened proposing
+`NewProgram(opts) (*tea.Program, error)` in place of the constructor.
+That is not the same escape hatch: `*tea.Program` offers `Send`
+(fire-and-forget, untimeable) and `Run` (blocking, TTY-bound), and no
+way to drive `Update` / `View` directly or to capture a frame. The
+in-tree `package tui_test` smoke harness is the standing proof — it
+needs `WithInput`, `WithOutput`, `WithWindowSize` and
+`WithoutSignalHandler` on a program it constructs itself, and none of
+that is reachable through a program core-tui built. Deleting the
+constructor would have removed a capability with nothing behind it, so
+`NewProgram` is not in the library at all; if a host ever wants it, it
+is a compatible addition after 1.0.
+
+**What it cost, and what replaced it.** `ApplyTranscript` was the only
+method on `Model` that `tea.Model` does not cover, so unexporting the
+type takes it off the reachable surface. That is a real capability —
+`Transcript`, `TranscriptMsg`, `LoadTranscript` and `ListTranscripts`
+are all exported, so a host can load a saved session and would have had
+no way left to apply one. `Options.SeedHistory` is not a substitute: it
+appends raw, and `view.go` word-wraps assistant text with no `Rendered`
+instead of running Glamour. `Options.Transcript` replaces it — the
+startup form of what `/resume` does mid-session, applied inside the
+constructor through the same path.
+
+**Consequence worth naming.** With the type unexported, switching
+`model`'s receivers from value to pointer stops being a breaking change
+and becomes available at any time. That lifts the constraint documented
+at `model.go` on `displayCwd` — that anything the render path wants to
+memoise has to be resolved in the constructor, because `View` has a
+value receiver and writes to it land in a discarded copy. Not taken
+here; see #266.
+
 ---
 
 ## D19. Tool-call rendering

@@ -19,12 +19,12 @@
 // new case in renderTUI's z-order switch.
 //
 // Every agent-opened modal is here now. The elicit form and the
-// permission prompt were the last two holding inline state in Model,
+// permission prompt were the last two holding inline state in model,
 // and both left in #164 stage 3 to ride the overlay as questions
 // (question_elicit.go, question_permission.go) — which is where the
 // channel-based Prompter / Elicitor lifecycle turned out to fit after
 // all: the dispatch happens in the question's resolver rather than in
-// the widget. What remains on Model is the /btw side answer and the
+// the widget. What remains on model is the /btw side answer and the
 // embedded huh form, neither of which the agent opens.
 
 package tui
@@ -48,12 +48,12 @@ type dialog interface {
 	// HandleKey is invoked for every keystroke the front-most
 	// dialog receives. Returns the action the overlay should
 	// take (consume + render; close + pop; etc.).
-	HandleKey(stroke string, m *Model) dialogAction
+	HandleKey(stroke string, m *model) dialogAction
 
 	// Render returns the styled string for the dialog body at
 	// the given total terminal width. The overlay wraps the
 	// result in chrome via renderContext.
-	Render(width int, m *Model) string
+	Render(width int, m *model) string
 }
 
 // keyMsgDialog is an optional extension of dialog for modals whose
@@ -73,14 +73,14 @@ type dialog interface {
 //
 // Unexported in #254. It was exported for a host that might implement
 // a text-editing modal, and no host can: the overlay stack is an
-// unexported field of Model, so there is nothing outside the package
+// unexported field of model, so there is nothing outside the package
 // to install an implementation into. Every implementor is in this
 // package. #257 took the rest of the set down on the same ground.
 type keyMsgDialog interface {
 	dialog
 
 	// HandleKeyMsg is the full-fidelity twin of HandleKey.
-	HandleKeyMsg(msg tea.KeyPressMsg, m *Model) dialogAction
+	HandleKeyMsg(msg tea.KeyPressMsg, m *model) dialogAction
 }
 
 // dialogAction is the return shape of HandleKey. Composite so
@@ -98,7 +98,7 @@ type dialogAction struct {
 	// Cmd is an optional tea.Cmd to dispatch alongside the
 	// state mutation — used by dialogs that need to notify the
 	// host of a commit (e.g. ThemeChangedMsg). Nil for the
-	// common case where the dialog just mutates Model.
+	// common case where the dialog just mutates model.
 	Cmd tea.Cmd
 }
 
@@ -187,7 +187,7 @@ func (o *overlay) front() dialog {
 // end its only caller was handleWheel's synthesized up/down, which
 // builds a tea.KeyPressMsg with keyMsgFromStroke instead. Two entry
 // points into the same routing is one place for the two to drift.
-func (o *overlay) handleKeyMsg(msg tea.KeyPressMsg, m *Model) (consumed bool, cmd tea.Cmd) {
+func (o *overlay) handleKeyMsg(msg tea.KeyPressMsg, m *model) (consumed bool, cmd tea.Cmd) {
 	front := o.front()
 	if front == nil {
 		return false, nil
@@ -208,7 +208,7 @@ func (o *overlay) handleKeyMsg(msg tea.KeyPressMsg, m *Model) (consumed bool, cm
 // styled string wrapped in modal chrome. Empty stack returns "".
 // Today we only render the FRONT (no layered painting); future
 // translucent overlays would draw deeper dialogs first.
-func (o *overlay) render(width int, m *Model) string {
+func (o *overlay) render(width int, m *model) string {
 	front := o.front()
 	if front == nil {
 		return ""
@@ -226,8 +226,8 @@ type renderContext struct {
 	Footer string
 	Width  int
 	// Height is the terminal height the composed modal has to fit
-	// inside — Model.height at the call site. Zero means "unknown
-	// geometry" (a pre-resize frame, or a bare Model{} in a test)
+	// inside — model.height at the call site. Zero means "unknown
+	// geometry" (a pre-resize frame, or a bare model{} in a test)
 	// and disables the fit pass, which is the historical behavior.
 	// Callers that set it get fitModalContent's guarantee: on a
 	// terminal too short for the whole modal, spacing goes before
@@ -421,7 +421,7 @@ func (rc renderContext) render() string {
 //
 // termHeight is the TERMINAL's height, not the content's: the two
 // rows of box edge modalSurface adds afterwards are subtracted here
-// (issue #199), so a caller still passes Model.height and does not
+// (issue #199), so a caller still passes model.height and does not
 // have to know the edge exists.
 func fitModalContent(width, termHeight int, titleLine, body, footerRule, footerLine string) string {
 	head := []string{titleLine, ""}

@@ -66,7 +66,7 @@ type listItem interface {
 
 	// Render returns the styled string for the given viewport
 	// width. Called only on cache miss / version bump.
-	Render(m *Model, width int) string
+	Render(m *model, width int) string
 }
 
 // There was an optional capability interface here, RawRenderable, for
@@ -123,7 +123,7 @@ type listCacheKey struct {
 // swept through — which is what a jittery drag actually revisits.
 const retainedWidths = 3
 
-// listCache is the per-Model render memo, keyed by (listItem.Identity(),
+// listCache is the per-model render memo, keyed by (listItem.Identity(),
 // width). Per-entry invalidation happens on version mismatch;
 // widths beyond retainedWidths are evicted least-recently-used.
 type listCache struct {
@@ -280,7 +280,7 @@ func (c *listCache) drop(id uint64) {
 // in-progress text renders via the stable-prefix path in
 // renderInProgress, never through this cache).
 //
-// The index is needed so Render can ask the parent Model whether
+// The index is needed so Render can ask the parent model whether
 // the previous message was RoleUser (controls whether the
 // separator rule renders above this entry — see refreshViewport).
 type messageItem struct {
@@ -293,10 +293,10 @@ func (mi messageItem) Identity() uint64 { return mi.msg.ID }
 func (mi messageItem) Version() uint64  { return mi.msg.Version }
 func (mi messageItem) Finished() bool   { return true }
 
-// Render delegates to the Model's renderMessage. The cache calls
+// Render delegates to the model's renderMessage. The cache calls
 // this only on miss, so the per-message rendering cost (Glamour,
 // word-wrap, lipgloss styling) is paid at most once per
 // (message, width) pair.
-func (mi messageItem) Render(m *Model, width int) string {
+func (mi messageItem) Render(m *model, width int) string {
 	return m.renderMessage(mi.msg)
 }

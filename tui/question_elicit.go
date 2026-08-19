@@ -15,7 +15,7 @@
 // The MCP elicitation form, as a question (issue #164, stage 3).
 //
 // This is the first of the two surfaces that were never Dialogs at
-// all. The form lived as five fields on Model — the request, the
+// all. The form lived as five fields on model — the request, the
 // server name, the focused field index, the in-progress values and
 // the grace stamp — read by a key handler in update.go, a renderer in
 // view.go and a caret path in cursor.go, none of which could see the
@@ -29,7 +29,7 @@
 // about rather than a convention. The effects — writing the result
 // back to the elicitor and re-arming its listener — are in
 // elicitResolver, which is the only part of this file that has ever
-// seen a *Model.
+// seen a *model.
 //
 // Two behaviours this stage brings with it, both described in
 // docs/design-question-dialogs.md:
@@ -83,7 +83,7 @@ type elicitQuestion struct {
 	values map[string]any
 
 	// sc windows the body. Owned here rather than borrowed from
-	// Model.modalScroll: the caret path has to subtract the offset the
+	// model.modalScroll: the caret path has to subtract the offset the
 	// render just settled on, and a question that reaches back to the
 	// app model for it is exactly the coupling this stage removes.
 	sc scrollState
@@ -114,7 +114,7 @@ func newElicitQuestion(serverName string, req ElicitRequest) *elicitQuestion {
 // on the same channel is a second consumer — one of the two would
 // take a request and the other would take the next one, so requests
 // would land in the modal on alternate turns.
-func elicitResolver(a answer, m *Model) tea.Cmd {
+func elicitResolver(a answer, m *model) tea.Cmd {
 	switch a := a.(type) {
 	case fields:
 		// Both submits arrive here. A form sends its values; URL mode
@@ -548,12 +548,12 @@ func indexOfEnum(choices []string, v any) int {
 
 // openElicit returns the elicit form currently on the overlay stack,
 // or nil when none is open. It is what replaced `m.pendingElicit !=
-// nil` for the Model-side code that has a legitimate reason to ask —
+// nil` for the model-side code that has a legitimate reason to ask —
 // the footer legend, and the tests that drive a form to completion.
 //
 // Note what it is NOT for: ending the question. That goes through
 // overlay.resolve, so the exactly-once latch cannot be sidestepped.
-func (m *Model) openElicit() *elicitQuestion {
+func (m *model) openElicit() *elicitQuestion {
 	aq := m.overlayStack.asked(elicitDialogID)
 	if aq == nil {
 		return nil

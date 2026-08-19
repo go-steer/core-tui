@@ -61,7 +61,7 @@ func findInitialPromptCmd(t *testing.T, cmd tea.Cmd) *initialPromptMsg {
 }
 
 func TestInit_InitialPrompt_EmitsMsgWhenSet(t *testing.T) {
-	m := NewModel(Options{
+	m := newModel(Options{
 		Agent:         stubAgent{},
 		InitialPrompt: "audit this repo for races",
 	})
@@ -75,18 +75,18 @@ func TestInit_InitialPrompt_EmitsMsgWhenSet(t *testing.T) {
 }
 
 func TestInit_InitialPrompt_SkippedWhenEmpty(t *testing.T) {
-	m := NewModel(Options{Agent: stubAgent{}})
+	m := newModel(Options{Agent: stubAgent{}})
 	if got := findInitialPromptCmd(t, m.Init()); got != nil {
 		t.Errorf("Init should not emit initialPromptMsg when InitialPrompt is empty, got %+v", got)
 	}
 }
 
 func TestUpdate_InitialPromptMsg_SubmitsTurn(t *testing.T) {
-	m := NewModel(Options{Agent: stubAgent{}})
+	m := newModel(Options{Agent: stubAgent{}})
 	m.viewport.SetWidth(80)
 
 	next, _ := m.Update(initialPromptMsg{text: "hello world"})
-	nm := next.(Model)
+	nm := next.(model)
 
 	entries := nm.history.Snapshot()
 	if len(entries) == 0 {
@@ -106,11 +106,11 @@ func TestUpdate_InitialPromptMsg_SubmitsTurn(t *testing.T) {
 }
 
 func TestUpdate_InitialPromptMsg_EmptyIsNoOp(t *testing.T) {
-	m := NewModel(Options{Agent: stubAgent{}})
+	m := newModel(Options{Agent: stubAgent{}})
 	m.viewport.SetWidth(80)
 
 	next, cmd := m.Update(initialPromptMsg{text: "   "})
-	nm := next.(Model)
+	nm := next.(model)
 
 	if entries := nm.history.Snapshot(); len(entries) != 0 {
 		t.Errorf("empty InitialPrompt should not append history, got %d entries", len(entries))
@@ -121,11 +121,11 @@ func TestUpdate_InitialPromptMsg_EmptyIsNoOp(t *testing.T) {
 }
 
 func TestUpdate_InitialPromptMsg_SlashCommandRejected(t *testing.T) {
-	m := NewModel(Options{Agent: stubAgent{}})
+	m := newModel(Options{Agent: stubAgent{}})
 	m.viewport.SetWidth(80)
 
 	next, _ := m.Update(initialPromptMsg{text: "/help"})
-	nm := next.(Model)
+	nm := next.(model)
 
 	entries := nm.history.Snapshot()
 	if len(entries) != 1 {

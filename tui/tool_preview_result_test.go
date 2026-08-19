@@ -208,7 +208,7 @@ func TestApplyToolResult_UpdatesPreview(t *testing.T) {
 	})
 
 	// Mimic applyToolResult's side effect via the History helpers
-	// directly (Model construction is heavier than these tests need).
+	// directly (model construction is heavier than these tests need).
 	idx := h.FindByToolCallID("call-1")
 	if idx < 0 {
 		t.Fatal("expected to find tool by call ID")

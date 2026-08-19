@@ -30,19 +30,19 @@ import (
 	tea "charm.land/bubbletea/v2"
 )
 
-// offscreenSpinnerModel returns a streaming Model with a transcript
+// offscreenSpinnerModel returns a streaming model with a transcript
 // long enough to scroll, settled through one coalesced refresh so the
 // live tail has actually been built — chatTailOffScreen answers "not
 // off screen" for a tail that does not exist yet, which is the right
 // answer and the wrong starting state for these tests.
-func offscreenSpinnerModel(t *testing.T) Model {
+func offscreenSpinnerModel(t *testing.T) model {
 	t.Helper()
-	m := NewModel(Options{Agent: stubAgent{}})
+	m := newModel(Options{Agent: stubAgent{}})
 	// A real sizing, not viewport.SetWidth: refreshViewport returns
 	// early while m.width is zero, so a hand-sized viewport builds no
 	// tail at all.
 	out, _ := m.Update(tea.WindowSizeMsg{Width: 80, Height: 24})
-	m = out.(Model)
+	m = out.(model)
 	for i := range 40 {
 		n := strconv.Itoa(i)
 		m.history.Append(Message{Role: RoleUser, Text: "question " + n})
@@ -68,7 +68,7 @@ func offscreenSpinnerModel(t *testing.T) Model {
 // scrollAwayFromTail scrolls to the top of the transcript and syncs
 // follow the way the key handler does, which is what detaches the
 // window from the tail.
-func scrollAwayFromTail(t *testing.T, m Model) Model {
+func scrollAwayFromTail(t *testing.T, m model) model {
 	t.Helper()
 	m.chatGotoTop()
 	m.syncFollow()
@@ -94,7 +94,7 @@ func TestSpinnerOffScreen_TickRendersNothing(t *testing.T) {
 
 	for i := range 40 {
 		out, cmd := m.Update(spinnerTickMsg{gen: m.spinnerGen})
-		m = out.(Model)
+		m = out.(model)
 		if cmd == nil {
 			t.Fatalf("tick %d did not re-arm — a chain torn down off screen has nothing to resume", i)
 		}
@@ -114,7 +114,7 @@ func TestSpinnerOffScreen_TickRendersNothing(t *testing.T) {
 	// mean the render is happening somewhere the dirty flag does not
 	// account for.
 	out, _ := m.Update(coalescedRefreshMsg{})
-	m = out.(Model)
+	m = out.(model)
 	if got := strings.Join(m.chatTail, "\n"); got != tailBefore {
 		t.Error("the live tail was rebuilt while off screen — that is one item render per tick, " +
 			"which is the cost the pause exists to remove")
@@ -129,7 +129,7 @@ func TestSpinnerOffScreen_ResumesWhenScrolledBack(t *testing.T) {
 	m := scrollAwayFromTail(t, offscreenSpinnerModel(t))
 	for range 5 {
 		out, _ := m.Update(spinnerTickMsg{gen: m.spinnerGen})
-		m = out.(Model)
+		m = out.(model)
 	}
 	paused := strings.Join(m.chatTail, "\n")
 	frameBefore := m.spinnerFrame
@@ -141,7 +141,7 @@ func TestSpinnerOffScreen_ResumesWhenScrolledBack(t *testing.T) {
 	}
 
 	out, cmd := m.Update(spinnerTickMsg{gen: m.spinnerGen})
-	m = out.(Model)
+	m = out.(model)
 	if cmd == nil {
 		t.Fatal("the first tick after scrolling back did not re-arm")
 	}
@@ -154,7 +154,7 @@ func TestSpinnerOffScreen_ResumesWhenScrolledBack(t *testing.T) {
 	}
 
 	out, _ = m.Update(coalescedRefreshMsg{})
-	m = out.(Model)
+	m = out.(model)
 	if got := strings.Join(m.chatTail, "\n"); got == paused {
 		t.Error("the tail is byte-identical to the paused one after resuming — the glyph is still frozen")
 	}
@@ -176,7 +176,7 @@ func TestSpinnerOffScreen_FollowingTailAlwaysAnimates(t *testing.T) {
 	frameBefore := m.spinnerFrame
 
 	out, _ := m.Update(spinnerTickMsg{gen: m.spinnerGen})
-	if got := out.(Model).spinnerFrame; got != frameBefore+1 {
+	if got := out.(model).spinnerFrame; got != frameBefore+1 {
 		t.Errorf("spinnerFrame = %d, want %d — the pause swallowed a tick on the following path",
 			got, frameBefore+1)
 	}
@@ -188,9 +188,9 @@ func TestSpinnerOffScreen_FollowingTailAlwaysAnimates(t *testing.T) {
 // there is nothing to be visible — and answering "hidden" there would
 // suppress the very repaint that brings the animation into existence.
 func TestSpinnerOffScreen_UnbuiltTailIsNotHidden(t *testing.T) {
-	m := NewModel(Options{Agent: stubAgent{}})
+	m := newModel(Options{Agent: stubAgent{}})
 	out, _ := m.Update(tea.WindowSizeMsg{Width: 80, Height: 24})
-	m = out.(Model)
+	m = out.(model)
 	m = m.submitTurn("go")
 	m.chatTail = nil
 	m.follow = false

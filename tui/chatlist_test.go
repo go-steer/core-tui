@@ -38,7 +38,7 @@ import (
 // Cut to the window's width the way chatView cuts, since #154 moved
 // that from the cache to the draw: a cached row is now as wide as its
 // content, and the oracle has to be what reaches the frame.
-func chatAllLines(m Model) []string {
+func chatAllLines(m model) []string {
 	var out []string
 	for i := range m.chatRowCount() {
 		for _, ln := range m.chatRowLines(i) {
@@ -67,7 +67,7 @@ func chatViewLines(view string) []string {
 // chatEntriesAtWidth counts the rows the cache holds an exact render
 // for at the current width — i.e. how many rows the model has
 // actually assembled since the cache was dropped.
-func chatEntriesAtWidth(m Model) int {
+func chatEntriesAtWidth(m model) int {
 	n := 0
 	for key := range m.listCache.entries {
 		if key.width == m.viewport.Width() {
@@ -298,7 +298,7 @@ func TestChatView_NoLineExceedsTheWidth(t *testing.T) {
 // before the first WindowSizeMsg lands, and during a drag a narrow
 // pane can take the derived width to zero.
 func TestChatView_ZeroSizeDrawsNothing(t *testing.T) {
-	m := NewModel(Options{})
+	m := newModel(Options{})
 	m.history.Append(Message{Role: RoleUser, Text: "hello"})
 	for _, size := range [][2]int{{0, 0}, {0, 20}, {80, 0}} {
 		m.viewport.SetWidth(size[0])
@@ -314,7 +314,7 @@ func TestChatView_ZeroSizeDrawsNothing(t *testing.T) {
 // exchange. Line counts matter as much as content: they are what the
 // lazy walk budgets against.
 func TestChatRowLines_SeparatorOpensUserTurns(t *testing.T) {
-	m := NewModel(Options{})
+	m := newModel(Options{})
 	m.viewport.SetWidth(60)
 	m.viewport.SetHeight(20)
 	m.history.Append(Message{Role: RoleUser, Text: "first", Rendered: "first"})

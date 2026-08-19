@@ -15,13 +15,13 @@
 // Session picker tests, in-package half.
 //
 // The split follows design-question-dialogs.md §8, the same way the
-// model picker's does. Anything that needs a *Model is here: the
+// model picker's does. Anything that needs a *model is here: the
 // resolver's effects, the three Update-side async arms, the action
 // row's hand-off to its text input, and the composed frame, which
 // reaches the widget through the overlay because a question renders no
 // chrome of its own. Behaviour the WIDGET owns — what the filter
 // matches, what Enter commits to, which states own the caret — is in
-// question_external_test.go, driven with no Model at all, which is the
+// question_external_test.go, driven with no model at all, which is the
 // property the migration was for.
 //
 // The /switch built-in that opens the picker is covered from
@@ -61,13 +61,13 @@ func pickerSessions() []SessionInfo {
 // askSessionPicker puts a picker on the stack with its real resolver —
 // the pairing openSessionPicker does, minus the host Cmd, so a test can
 // choose what the snapshot contains.
-func askSessionPicker(m *Model, wired bool) *sessionPickerQuestion {
+func askSessionPicker(m *model, wired bool) *sessionPickerQuestion {
 	q := newSessionPickerQuestion(wired)
 	m.overlayStack.ask(q, askOperator, sessionPickerResolver(q))
 	return q
 }
 
-func openSessionPickerFixture(t *testing.T) (Model, *sessionPickerQuestion) {
+func openSessionPickerFixture(t *testing.T) (model, *sessionPickerQuestion) {
 	t.Helper()
 	return openSessionPickerSized(t, 30, pickerSessions())
 }
@@ -76,12 +76,12 @@ func openSessionPickerFixture(t *testing.T) (Model, *sessionPickerQuestion) {
 // the session list under the test's control — which is what the
 // windowing tests need, since the window only engages once the body is
 // taller than modalBodyHeight.
-func openSessionPickerSized(t *testing.T, height int, sessions []SessionInfo) (Model, *sessionPickerQuestion) {
+func openSessionPickerSized(t *testing.T, height int, sessions []SessionInfo) (model, *sessionPickerQuestion) {
 	t.Helper()
-	m := NewModel(Options{Agent: &switchAgent{id: "cur", sessions: sessions}})
+	m := newModel(Options{Agent: &switchAgent{id: "cur", sessions: sessions}})
 	m.styles = newStylesWithTheme(true, goldenTheme())
 	out, _ := m.Update(tea.WindowSizeMsg{Width: 100, Height: height})
-	m = out.(Model)
+	m = out.(model)
 	q := askSessionPicker(&m, true)
 	q.applySessions(sessions)
 	return m, q
@@ -113,7 +113,7 @@ func overlayIDs(o *overlay) []string {
 // padding removed — fitRow pads every windowed row out to the content
 // width, and that padding is noise for a "which lines are on screen"
 // assertion, as is the edge glyph now sitting on both ends of it.
-func sessionPickerLines(m *Model) []string {
+func sessionPickerLines(m *model) []string {
 	return modalContentLines(m.overlayStack.render(100, m))
 }
 
@@ -194,7 +194,7 @@ func TestSessionPicker_RequestReadsTheLiveSwitcherAndGen(t *testing.T) {
 	m.opts.Agent = next
 
 	out, follow := m.Update(sessionSwitchRequestedMsg{ID: id})
-	m = out.(Model)
+	m = out.(model)
 	drainBatch(t, follow)
 
 	if len(next.switchCalls) != 1 || next.switchCalls[0] != "prod-042" {
@@ -212,7 +212,7 @@ func TestSessionPicker_StaleRequestIsDropped(t *testing.T) {
 	pressPicker(t, &m, "esc")
 
 	out, _ := m.Update(sessionSwitchRequestedMsg{ID: requestedSession(t, msgs)})
-	m = out.(Model)
+	m = out.(model)
 
 	agent := m.opts.Agent.(*switchAgent)
 	if len(agent.switchCalls) != 0 {
@@ -235,7 +235,7 @@ func TestSessionPicker_AttachLandingAnswersThePicker(t *testing.T) {
 		id:     "prod-042",
 		target: SwitchTarget{Agent: &bareAgent{id: "attached"}},
 	})
-	m = out.(Model)
+	m = out.(model)
 
 	if m.overlayStack.hasID(sessionPickerDialogID) {
 		t.Error("the attach landed and the picker is still up")
@@ -276,7 +276,7 @@ func TestSessionPicker_FailedAttachKeepsTheListUp(t *testing.T) {
 			msg.gen = m.sessionGen
 
 			out, _ := m.Update(msg)
-			m = out.(Model)
+			m = out.(model)
 
 			if !m.overlayStack.hasID(sessionPickerDialogID) {
 				t.Fatal("a failed attach closed the picker")
@@ -328,7 +328,7 @@ func TestSessionPicker_FailedAttachSaysWhyOnThePicker(t *testing.T) {
 			msg.gen = m.sessionGen
 
 			out, _ := m.Update(msg)
-			m = out.(Model)
+			m = out.(model)
 
 			lines := sessionPickerLines(&m)
 			at := lineWith(lines, tc.want)
@@ -391,7 +391,7 @@ func TestSessionPicker_ReplyForSomeoneElsesAttachLeavesThePicker(t *testing.T) {
 		id:     "prod-042", // a different attach
 		target: SwitchTarget{Agent: &bareAgent{id: "attached"}},
 	})
-	m = out.(Model)
+	m = out.(model)
 
 	if !m.overlayStack.hasID(sessionPickerDialogID) {
 		t.Error("a reply for another attach closed this picker")
@@ -469,7 +469,7 @@ func TestSessionPicker_ActionRowDoesNotStackTwoInputs(t *testing.T) {
 	row := pickerSessions()[4]
 	for range 2 {
 		out, _ := m.Update(sessionInputRequestedMsg{Row: row})
-		m = out.(Model)
+		m = out.(model)
 	}
 
 	var inputs int
@@ -557,9 +557,9 @@ func TestSessionInputAnswer(t *testing.T) {
 
 // TestSessionPicker_HostWithNoSessionsSaysSo pins the pre-filter
 // behaviour for an empty enumeration, which is now a resolver effect
-// rather than something the widget does to a *Model.
+// rather than something the widget does to a *model.
 func TestSessionPicker_HostWithNoSessionsSaysSo(t *testing.T) {
-	m := NewModel(Options{Agent: &switchAgent{id: "cur"}})
+	m := newModel(Options{Agent: &switchAgent{id: "cur"}})
 	m.viewport.SetWidth(80)
 	q := askSessionPicker(&m, true)
 	q.applySessions(nil)
@@ -582,7 +582,7 @@ func TestSessionPicker_HostWithNoSessionsSaysSo(t *testing.T) {
 // question.
 func TestSessionPicker_ResolverTellsTheTwoUnrenderableStatesApart(t *testing.T) {
 	t.Run("unwired agent says nothing", func(t *testing.T) {
-		m := NewModel(Options{Agent: &bareAgent{id: "bare"}})
+		m := newModel(Options{Agent: &bareAgent{id: "bare"}})
 		m.viewport.SetWidth(80)
 		askSessionPicker(&m, false)
 
@@ -596,7 +596,7 @@ func TestSessionPicker_ResolverTellsTheTwoUnrenderableStatesApart(t *testing.T) 
 		}
 	})
 	t.Run("a loading picker is not unrenderable", func(t *testing.T) {
-		m := NewModel(Options{Agent: &switchAgent{id: "cur"}})
+		m := newModel(Options{Agent: &switchAgent{id: "cur"}})
 		m.viewport.SetWidth(80)
 		askSessionPicker(&m, true) // no applySessions: still loading
 

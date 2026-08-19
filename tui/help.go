@@ -212,7 +212,7 @@ func helpSections() []helpSection {
 // chrome budget recorded in m.chrome.helpCap (0 = unsized model or no
 // ceiling, in which case the whole panel is one page). See the file
 // comment for why the height mechanism is pagination.
-func (m Model) renderHelpPanel(width int) string {
+func (m model) renderHelpPanel(width int) string {
 	if !m.helpOpen || width <= 0 {
 		return ""
 	}
@@ -233,7 +233,7 @@ func (m Model) renderHelpPanel(width int) string {
 // helpPages lays the whole panel out at width and packs it into pages
 // that fit the current cap. Always at least one page for a non-empty
 // panel; a cap of 0 means "no ceiling" and yields exactly one.
-func (m Model) helpPages(width int) [][]string {
+func (m model) helpPages(width int) [][]string {
 	sections := helpSections()
 	keyCol := helpKeyCol(sections, width)
 	blocks := make([][]string, 0, len(sections))
@@ -246,7 +246,7 @@ func (m Model) helpPages(width int) [][]string {
 // helpPageCount is how many pages the panel currently has, at the
 // width View will render it in. Read by advanceHelp to know when `?`
 // has reached the end and should close the panel instead.
-func (m Model) helpPageCount() int {
+func (m model) helpPageCount() int {
 	width := m.chromeWidth()
 	if width <= 0 {
 		return 1
@@ -258,7 +258,7 @@ func (m Model) helpPageCount() int {
 // walks it a page at a time, then closes it. Reusing the opening key
 // for paging is what lets the panel be height-aware without taking
 // pgup / pgdn away from the chat (see the file comment).
-func (m *Model) advanceHelp() {
+func (m *model) advanceHelp() {
 	if !m.helpOpen {
 		m.helpOpen, m.helpPage = true, 0
 		return
@@ -278,7 +278,7 @@ func (m *Model) advanceHelp() {
 // closeHelp shuts the panel and forgets the page. Called from the
 // last `?` of the cycle and from Esc's cascade — reopening always
 // starts at page one.
-func (m *Model) closeHelp() {
+func (m *model) closeHelp() {
 	m.helpOpen, m.helpPage = false, 0
 }
 
@@ -395,7 +395,7 @@ func helpKeyCol(sections []helpSection, width int) int {
 
 // helpSectionRows renders one section — its heading plus its key rows
 // — into the column width.
-func (m Model) helpSectionRows(sec helpSection, width, keyCol int) []string {
+func (m model) helpSectionRows(sec helpSection, width, keyCol int) []string {
 	rows := []string{fitRowWidth("  "+m.styles.SidebarHeading.Render(sec.title), width)}
 	stacked := width-helpIndent-keyCol < helpDescMin
 	for _, kv := range sec.keys {
@@ -412,7 +412,7 @@ func (m Model) helpSectionRows(sec helpSection, width, keyCol int) []string {
 // rendered as one sized lipgloss block: the surrounding chrome does
 // the same, deliberately, so that an inner reset cannot kill the
 // outer color for the rest of the row.
-func (m Model) helpKeyRows(key, desc string, width, keyCol int, stacked bool) []string {
+func (m model) helpKeyRows(key, desc string, width, keyCol int, stacked bool) []string {
 	indent := strings.Repeat(" ", helpIndent)
 	styledKey := indent + m.styles.AssistantText.Bold(true).Render(key)
 
@@ -441,7 +441,7 @@ func (m Model) helpKeyRows(key, desc string, width, keyCol int, stacked bool) []
 // more than one page — where the operator is in it and which key
 // moves. A single-page panel keeps the original wording, so the
 // paging vocabulary only appears on a terminal that needs it.
-func (m Model) helpTitle(page, pages, width int) string {
+func (m model) helpTitle(page, pages, width int) string {
 	hint := "(? to close)"
 	if pages > 1 {
 		hint = fmt.Sprintf("(page %d/%d %s ? next %s esc close)",

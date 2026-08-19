@@ -18,7 +18,7 @@
 // The problem this replaces. A dialog today expresses ROUTING — was
 // the key consumed, should the stack pop, here is a Cmd — and never
 // the DECISION the operator made. So the decision has to be acted on
-// where it is discovered, inside the widget, against a *Model the
+// where it is discovered, inside the widget, against a *model the
 // widget was handed for that purpose: the theme picker's Enter arm
 // applied a theme, appended a transcript row, refreshed the viewport,
 // built a host message and scheduled a persistence callback, all from
@@ -144,7 +144,7 @@ func (fields) isAnswer()    {}
 func (decision) isAnswer()  {}
 
 // question is a modal that asks exactly one thing and produces
-// exactly one answer. Note what is absent: no *Model, no tea.Cmd
+// exactly one answer. Note what is absent: no *model, no tea.Cmd
 // dispatch of effects, no history, no overlay manipulation. A
 // question is a pure state machine over keystrokes plus a renderer,
 // which is what lets one be driven to completion from
@@ -165,7 +165,7 @@ type question interface {
 	// The returned Cmd belongs to the question's own machinery — a
 	// bubbles textinput's cursor blink, or a message the question
 	// needs the Update loop to apply on its behalf because the
-	// *Model it would need is a per-Update copy (the theme picker's
+	// *model it would need is a per-Update copy (the theme picker's
 	// live preview is the one instance today). It is not an answer
 	// channel and must not carry host-visible messages.
 	Key(msg tea.KeyPressMsg) (answer, tea.Cmd)
@@ -283,7 +283,7 @@ type inlineQuestion interface {
 
 // cursorQuestion is a question with a text caret — anything with a
 // filter row or an input box. Mirrors today's cursorDialog, minus the
-// *Model argument, which was the only thing keeping that interface
+// *model argument, which was the only thing keeping that interface
 // tied to the app model.
 type cursorQuestion interface {
 	question
@@ -305,10 +305,10 @@ type cursorQuestion interface {
 // knows a decision means dispatchDecision.
 //
 // m is a parameter rather than something the resolver closes over,
-// and that is load-bearing: Model.Update has a value receiver, so a
-// *Model captured when the question was asked points at the Update
+// and that is load-bearing: model.Update has a value receiver, so a
+// *model captured when the question was asked points at the Update
 // copy that opened it and is dead by the time the answer arrives.
-type resolver func(a answer, m *Model) tea.Cmd
+type resolver func(a answer, m *model) tea.Cmd
 
 // askedQuestion is the adapter that lets a question ride the existing
 // overlay. It is the whole of the compatibility story for stage 1:
@@ -382,7 +382,7 @@ func (o *overlay) ask(q question, origin askOrigin, r resolver) {
 // modal and the flow waiting on it was never told anything at all.
 // Stage 2 wires it to applySwitchTarget and to the quit path; stage 1
 // ships the mechanism and its test.
-func (o *overlay) resolveAll(reason dismissReason, m *Model) tea.Cmd {
+func (o *overlay) resolveAll(reason dismissReason, m *model) tea.Cmd {
 	var cmds []tea.Cmd
 	for _, d := range o.dialogs {
 		aq, ok := d.(*askedQuestion)
@@ -454,7 +454,7 @@ func (o *overlay) inlineFront() (inlineQuestion, bool) {
 // too, so anything a resolver pushed would be what got popped. A
 // resolver that needs another modal returns a Cmd and lets Update open
 // it, the way the theme picker's live preview is applied.
-func (o *overlay) resolve(id string, ans answer, m *Model) tea.Cmd {
+func (o *overlay) resolve(id string, ans answer, m *model) tea.Cmd {
 	aq := o.asked(id)
 	if aq == nil {
 		return nil
@@ -466,7 +466,7 @@ func (o *overlay) resolve(id string, ans answer, m *Model) tea.Cmd {
 
 // resolve runs the resolver at most once and returns whatever it
 // scheduled.
-func (a *askedQuestion) resolve(ans answer, m *Model) tea.Cmd {
+func (a *askedQuestion) resolve(ans answer, m *model) tea.Cmd {
 	if a.resolved {
 		return nil
 	}
@@ -485,7 +485,7 @@ func (a *askedQuestion) ID() string { return a.q.ID() }
 // synthesizer builds a real KeyPressMsg — but dialog still declares
 // it, and an adapter that
 // panicked on the one method it is asked for least would be a trap.
-func (a *askedQuestion) HandleKey(stroke string, m *Model) dialogAction {
+func (a *askedQuestion) HandleKey(stroke string, m *model) dialogAction {
 	return a.HandleKeyMsg(keyMsgFromStroke(stroke), m)
 }
 
@@ -493,7 +493,7 @@ func (a *askedQuestion) HandleKey(stroke string, m *Model) dialogAction {
 // full-fidelity keystroke, because Key.Text and bracketed pastes are
 // exactly what a filter row or an input box needs and a stroke string
 // drops both.
-func (a *askedQuestion) HandleKeyMsg(msg tea.KeyPressMsg, m *Model) dialogAction {
+func (a *askedQuestion) HandleKeyMsg(msg tea.KeyPressMsg, m *model) dialogAction {
 	if a.held(msg) {
 		// A held stroke that would have TYPED a character is not
 		// swallowed — it is declined, so it falls through to the
@@ -577,7 +577,7 @@ func (a *askedQuestion) inline() (inlineQuestion, bool) {
 // Body measured — the elicit form's scroll hint is the one today —
 // depends on that, and swapping the two lines to read more nicely
 // would report last frame's answer.
-func (a *askedQuestion) Render(totalWidth int, m *Model) string {
+func (a *askedQuestion) Render(totalWidth int, m *model) string {
 	width := a.q.Width(totalWidth)
 	return renderContext{
 		Title:  a.q.Title(),
@@ -594,7 +594,7 @@ func (a *askedQuestion) Render(totalWidth int, m *Model) string {
 // question with no caret answers nil here, which is the same answer
 // overlay.cursor's type assertion produced for a dialog that did not
 // implement it at all.
-func (a *askedQuestion) DialogCursor(width int, _ *Model) *tea.Cursor {
+func (a *askedQuestion) DialogCursor(width int, _ *model) *tea.Cursor {
 	cq, ok := a.q.(cursorQuestion)
 	if !ok {
 		return nil

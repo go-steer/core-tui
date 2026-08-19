@@ -70,12 +70,12 @@ const goldenPermissionDiff = `--- a/config.go
 // path does to the viewport — the force-snap to the bottom is part of
 // what the inline layout looks like, and a golden that skipped it
 // would pin a frame the operator never gets.
-func goldenPermissionModel(t *testing.T, w, h int, layout PermissionLayout, req PermissionRequest) Model {
+func goldenPermissionModel(t *testing.T, w, h int, layout PermissionLayout, req PermissionRequest) model {
 	t.Helper()
 	m := goldenLiveModel(t, w, h)
 	m.opts.PermissionLayout = layout
 	out, _ := m.Update(permissionRequestMsg{req: req})
-	return out.(Model)
+	return out.(model)
 }
 
 // TestGolden_PermissionInlineFrame pins the default layout: a gutter
@@ -174,8 +174,8 @@ func TestGolden_PermissionOverlayScrolled(t *testing.T) {
 	// And the same modal a few rows down, which is the frame the arrow
 	// keys produce and the only one that proves the window moves.
 	out, _ := m.Update(tea.KeyPressMsg(tea.Key{Code: tea.KeyDown}))
-	m = out.(Model)
+	m = out.(model)
 	out, _ = m.Update(tea.KeyPressMsg(tea.Key{Code: tea.KeyDown}))
-	m = out.(Model)
+	m = out.(model)
 	assertGolden(t, "permission_overlay_scrolled_down", m.View().Content)
 }

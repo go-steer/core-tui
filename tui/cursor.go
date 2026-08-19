@@ -74,14 +74,14 @@ type cursorDialog interface {
 	// no meaningful cursor right now. The caller adds the origin
 	// the dialog was composited at; a dialog never needs to know
 	// where on screen it was placed.
-	DialogCursor(width int, m *Model) *tea.Cursor
+	DialogCursor(width int, m *model) *tea.Cursor
 }
 
 // Cursor returns the front-most dialog's cursor, dialog-relative, or
 // nil when the stack is empty or the front-most dialog has no text
 // surface. Mirrors Render: only the FRONT dialog is consulted,
 // because only the front dialog receives keystrokes.
-func (o *overlay) cursor(width int, m *Model) *tea.Cursor {
+func (o *overlay) cursor(width int, m *model) *tea.Cursor {
 	front := o.front()
 	if front == nil {
 		return nil
@@ -219,7 +219,7 @@ func stackColumn(parts []string, width int) string {
 //
 // Called after clipFrame so the clamp is against the frame the
 // operator will actually see.
-func (m Model) frameCursor(origin inputOrigin, modal string) *tea.Cursor {
+func (m model) frameCursor(origin inputOrigin, modal string) *tea.Cursor {
 	c, covered := m.modalCursor(modal)
 	if !covered {
 		// No overlay: the frame is the chat layout, and the textarea
@@ -236,7 +236,7 @@ func (m Model) frameCursor(origin inputOrigin, modal string) *tea.Cursor {
 // there), which is the "nothing should own the cursor" case for the
 // base layout — better a hidden cursor than one parked on an
 // arbitrary cell.
-func (m Model) textareaCursor(origin inputOrigin) *tea.Cursor {
+func (m model) textareaCursor(origin inputOrigin) *tea.Cursor {
 	c := m.input.Cursor()
 	if c == nil {
 		return nil
@@ -265,7 +265,7 @@ func (m Model) textareaCursor(origin inputOrigin) *tea.Cursor {
 // border. The pickers left that set in #117 — their filter row
 // implements DialogCursor, and without it this arm would answer
 // (nil, true) for a surface the operator is typing CJK into.
-func (m Model) modalCursor(modal string) (c *tea.Cursor, covered bool) {
+func (m model) modalCursor(modal string) (c *tea.Cursor, covered bool) {
 	switch {
 	case m.pendingForm != nil:
 		// huh renders its own caret and exposes no tea.Cursor in the
@@ -335,7 +335,7 @@ func placeCenterOffset(outer, inner int) int {
 //     typing, so nilling on x == width would blink the cursor out
 //     exactly when the operator fills the line.
 //
-// A zero-size frame (pre-WindowSizeMsg, or a bare Model in a test)
+// A zero-size frame (pre-WindowSizeMsg, or a bare model in a test)
 // has no cell to point at, so it gets no cursor.
 func clampCursor(c *tea.Cursor, width, height int) *tea.Cursor {
 	if c == nil || width <= 0 || height <= 0 {

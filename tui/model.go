@@ -48,10 +48,10 @@ const (
 	stateStreaming                  // turn in flight: input disabled, spinner active
 )
 
-// Model is the Bubble Tea model that drives the TUI. Field set is the
+// model is the Bubble Tea model that drives the TUI. Field set is the
 // minimum needed for the v0 visual-preview slice; later slices add
 // streaming state, modal forms, transcript persistence, etc.
-type Model struct {
+type model struct {
 	opts    Options
 	styles  styleSet
 	history History
@@ -126,7 +126,7 @@ type Model struct {
 
 	// focus is the region that owns the keyboard: the composer (the
 	// zero value, and what every path assumed before issue #151) or
-	// the transcript. Move it with Model.setFocus rather than
+	// the transcript. Move it with model.setFocus rather than
 	// assigning here — the textarea's own focus flag has to track
 	// it, and that is what keeps stray text out of a prompt nobody
 	// is looking at. See focus.go.
@@ -209,15 +209,15 @@ type Model struct {
 	sideAnswer *SideAnswer
 
 	// modalScroll is the scroll offset for the one modal that still
-	// lives on the Model rather than on the overlay stack: the /btw
+	// lives on the model rather than on the overlay stack: the /btw
 	// side answer. Questions on the stack own their own scrollState
 	// instead; see elicitQuestion.sc and permissionQuestion.sc.
 	//
 	// It's a POINTER because View() has a value receiver: the render
 	// path measures the body and writes the geometry back here so
 	// the next keystroke can clamp without re-rendering. Use
-	// Model.scroll() rather than touching the field — a zero-value
-	// Model{} (tests) has nil here.
+	// model.scroll() rather than touching the field — a zero-value
+	// model{} (tests) has nil here.
 	modalScroll *scrollState
 
 	// toast is a transient banner that renders between the input
@@ -237,16 +237,16 @@ type Model struct {
 	// applyStreamChunk's spinnerActive false→true flip for the
 	// LiveAgent path, which never calls submitTurn — and zeroed
 	// wherever that animation stops. Invariant: non-zero iff a
-	// spinner animation is live. Read via Model.turnElapsed, which
+	// spinner animation is live. Read via model.turnElapsed, which
 	// treats the zero value as "no turn" rather than as 1970.
 	turnStarted time.Time
 
-	// now is the Model's clock, defaulted to time.Now by NewModel.
+	// now is the model's clock, defaulted to time.Now by NewModel.
 	// Exists so tests can pin the elapsed readout instead of
 	// goldening wall-clock output. Unexported and deliberately NOT
 	// an Options field: this is test scaffolding, and Options is
 	// under the stability promise in CHANGELOG.md. Access through
-	// Model.nowFn, which tolerates the nil on a zero-value Model{}.
+	// model.nowFn, which tolerates the nil on a zero-value model{}.
 	now func() time.Time
 
 	inProgressText string  // accumulator for streamed tokens
@@ -294,7 +294,7 @@ type Model struct {
 
 	// statusCache memoizes the assembled status header keyed on the
 	// values that feed it (issue #201). Behind a pointer for the same
-	// reason listCache is: it is filled during a draw, and Model.View
+	// reason listCache is: it is filled during a draw, and model.View
 	// has a value receiver. See statuscache.go for why the key is the
 	// values rather than a version stamp, which is the one thing that
 	// makes a shared pointer safe here.
@@ -410,11 +410,11 @@ type Model struct {
 	// the process model, not a lifecycle: a host that embeds the TUI
 	// in a longer-lived process, or runs it twice, accumulates one
 	// permanently parked goroutine per listener per run, each one
-	// pinning the Model it captured.
+	// pinning the model it captured.
 	//
 	// The context is created in NewModel and cancelled at the two
 	// places that can observe shutdown: every Update path that
-	// returns tea.Quit (via Model.quitCmd), and Run's defer, which
+	// returns tea.Quit (via model.quitCmd), and Run's defer, which
 	// covers the paths Update cannot see at all — a cancelled
 	// Options context, tea.Program.Kill, SIGINT. Bubble Tea v2 hands
 	// the model nothing on those paths; its event loop intercepts
@@ -424,14 +424,14 @@ type Model struct {
 	// is the whole of the observable surface.
 	//
 	// Both fields are copied by value along with the rest of the
-	// Model, and that is fine here in a way it is not for listCache
+	// model, and that is fine here in a way it is not for listCache
 	// or modalScroll: nothing ever writes these fields after
 	// construction. Every copy carries the same context.Context
 	// interface value and the same cancel closure over the same
 	// cancelCtx, so cancelling through any copy cancels the one
 	// context all the listeners are parked on. Read them through
-	// Model.listenerCtx / Model.endListeners, which tolerate the nil
-	// a zero-value Model{} (tests) has.
+	// model.listenerCtx / model.endListeners, which tolerate the nil
+	// a zero-value model{} (tests) has.
 	lifeCtx    context.Context
 	lifeCancel context.CancelFunc
 
@@ -616,9 +616,29 @@ type Model struct {
 	slashSeq uint64
 }
 
-// NewModel constructs a Model from Options. SeedHistory entries are
-// appended in order before the first render.
-func NewModel(opts Options) Model {
+// NewModel constructs the Bubble Tea model that drives the TUI, for
+// hosts that own the tea.Program themselves. Run is the ordinary
+// entry point and covers almost every case; this is the escape hatch
+// for a host that needs to drive Update and View directly — a test
+// harness, an embedded frame capture, a custom program option (D18).
+//
+// The concrete type is deliberately unexported. Everything a caller
+// can do with it is on tea.Model, and the two things a caller might
+// otherwise reach for — seeding history and resuming a transcript —
+// are Options fields (SeedHistory, Transcript), so they are set
+// before construction rather than poked in afterwards.
+//
+// The returned model is NOT usable as an embedded sub-model: View
+// sets AltScreen, Cursor and MouseMode on the tea.View it returns,
+// and a parent that composes its own tea.View drops all three.
+func NewModel(opts Options) tea.Model {
+	return newModel(opts)
+}
+
+// newModel constructs a model from Options. Transcript is applied
+// first, then SeedHistory entries are appended in order, before the
+// first render.
+func newModel(opts Options) model {
 	ta := textarea.New()
 	ta.Placeholder = "Type a message and hit Enter. /help for commands."
 	if opts.Branding.InputPlaceholder != "" {
@@ -681,13 +701,13 @@ func NewModel(opts Options) Model {
 	// for the three readings to disagree.
 	caps := detectCapabilities()
 	// The listener lifetime starts here rather than in Init so that
-	// it is non-nil for every Model a host can get its hands on —
+	// it is non-nil for every model a host can get its hands on —
 	// Init runs on the Bubble Tea loop's goroutine, after
-	// tea.NewProgram has already copied the Model, and a context
+	// tea.NewProgram has already copied the model, and a context
 	// installed there would never reach the copy the program holds.
 	// See the lifeCtx field comment for what cancels it.
 	lifeCtx, lifeCancel := context.WithCancel(context.Background())
-	m := Model{
+	m := model{
 		opts:            opts,
 		lifeCtx:         lifeCtx,
 		lifeCancel:      lifeCancel,
@@ -721,6 +741,15 @@ func NewModel(opts Options) Model {
 	if _, ok := opts.Agent.(LiveAgent); ok {
 		m.liveMode = true
 	}
+	// Resume before seeding: applyTranscript resets history, so the
+	// other order would silently discard SeedHistory. There is no
+	// viewport width yet, so assistant markdown renders at the
+	// fallback 80 columns and carries renderedWidth 0 — which is
+	// exactly what makes reflowMessage re-render it on the first
+	// WindowSizeMsg, at the real width.
+	if len(opts.Transcript.Messages) > 0 {
+		m.applyTranscript(opts.Transcript)
+	}
 	for _, msg := range opts.SeedHistory {
 		m.history.Append(msg)
 	}
@@ -738,7 +767,7 @@ func NewModel(opts Options) Model {
 // the rendered line is "Thinking…" (issue #141). The entries stay
 // punctuated because they read as prose here, and because a
 // host-supplied pool gets the same normalization either way.
-func (m Model) thinkingPhrases() []string {
+func (m model) thinkingPhrases() []string {
 	if len(m.opts.ThinkingPhrases) > 0 {
 		return m.opts.ThinkingPhrases
 	}
@@ -762,7 +791,7 @@ func (m Model) thinkingPhrases() []string {
 	}
 }
 
-func (m Model) workingPhrases() []string {
+func (m model) workingPhrases() []string {
 	if len(m.opts.WorkingPhrases) > 0 {
 		return m.opts.WorkingPhrases
 	}
@@ -782,7 +811,7 @@ func (m Model) workingPhrases() []string {
 // invalidates the incremental stream cache too, since cached prefix
 // renders are width-pinned (re-rendering them with the new width is
 // what makes resize keep the in-progress text readable).
-func (m *Model) ensureMarkdown() *markdownRenderer {
+func (m *model) ensureMarkdown() *markdownRenderer {
 	width := m.viewport.Width()
 	if width <= 0 {
 		width = 80
@@ -805,7 +834,7 @@ func (m *Model) ensureMarkdown() *markdownRenderer {
 // impossible to measure for scrolling (source lines != screen rows).
 // Cached separately from m.markdown so a modal never evicts the
 // chat's renderer.
-func (m *Model) ensureModalMarkdown(width int) *markdownRenderer {
+func (m *model) ensureModalMarkdown(width int) *markdownRenderer {
 	if width <= 0 {
 		width = 80
 	}
@@ -816,12 +845,12 @@ func (m *Model) ensureModalMarkdown(width int) *markdownRenderer {
 }
 
 // permissionModeWired reports whether the host configured the chip.
-func (m Model) permissionModeWired() bool {
+func (m model) permissionModeWired() bool {
 	return m.opts.PermissionMode.Set != nil
 }
 
 // wordmark returns the brand identity string for the status surface.
-func (m Model) wordmark() string {
+func (m model) wordmark() string {
 	if m.opts.Branding.Wordmark != "" {
 		return m.opts.Branding.Wordmark
 	}
@@ -864,12 +893,12 @@ func defaultNewlineHint(termProgram string) string {
 // in NewModel by resolveDisplayCwd.
 //
 // It has to be a field resolved at construction rather than one filled
-// lazily on first use: Model is copied by value throughout the package
+// lazily on first use: model is copied by value throughout the package
 // and View has a value receiver, so anything the render path writes to
 // its receiver lands in a copy that is discarded on return. A lazily
 // filled field would do the syscalls on every frame anyway and simply
 // throw the answer away each time.
-func (m Model) displayCwd() string {
+func (m model) displayCwd() string {
 	return m.cwd
 }
 
@@ -877,7 +906,7 @@ func (m Model) displayCwd() string {
 // call, once, off the render path. Called from NewModel.
 //
 // HOME is read here rather than memoized in a package var: a process
-// var would be filled by whichever Model was constructed first and
+// var would be filled by whichever model was constructed first and
 // then be wrong for every later one, and the golden corpus constructs
 // models under a synthetic HOME (see pinCwd) precisely so the captured
 // frames do not carry the checkout path of whoever ran -update.
@@ -912,7 +941,7 @@ func abbreviateHome(dir, home string) string {
 // StatusReporter read. Otherwise falls back to the host snapshot
 // (see host_snapshot.go), or empty when neither path has surfaced a
 // provider. Reads only cached state so it's safe from View().
-func (m Model) displayProvider() string {
+func (m model) displayProvider() string {
 	if m.pushedProvider != "" {
 		return m.pushedProvider
 	}
@@ -932,7 +961,7 @@ func (m Model) displayProvider() string {
 // that markdown is built from Theme tokens, a /theme swap with the
 // /btw modal open would otherwise keep painting the modal body from
 // the previous palette until its width changed.
-func (m *Model) refreshTheme() {
+func (m *model) refreshTheme() {
 	m.styles = m.resolveStyles(m.styles.Dark)
 	m.markdown = nil
 	m.modalMarkdown = nil
@@ -955,7 +984,7 @@ func (m *Model) refreshTheme() {
 // (live preview), restore-on-cancel (esc), and commit (enter),
 // and by the `/theme <name>` slash form. Unknown names fall
 // through to defaultTheme via ThemeByName so a typo is safe.
-func (m *Model) applyNamedTheme(name string) {
+func (m *model) applyNamedTheme(name string) {
 	m.themeName = name
 	m.refreshTheme()
 	m.refreshViewport()
@@ -975,7 +1004,7 @@ func (m *Model) applyNamedTheme(name string) {
 // picked. Called from BackgroundColorMsg (first-paint dark/light
 // detect) and any time the active provider could have changed
 // (post-/model swap) or the operator switched themes.
-func (m Model) resolveStyles(dark bool) styleSet {
+func (m model) resolveStyles(dark bool) styleSet {
 	var theme Theme
 	switch {
 	case m.themeName != "":
@@ -1008,7 +1037,7 @@ func (m Model) resolveStyles(dark bool) styleSet {
 //     neither source has fired yet.
 //
 // Reads only cached state so it never calls the host from View().
-func (m Model) displayModelName() string {
+func (m model) displayModelName() string {
 	if m.hostSnap.modelName != "" {
 		return m.hostSnap.modelName
 	}
@@ -1022,7 +1051,7 @@ func (m Model) displayModelName() string {
 // spend block for the status header. Empty when no UsageTracker is
 // wired (the header just drops the trailing segment rather than
 // rendering placeholder zeros that look like real data).
-func (m Model) usageSummaryOneLine() string {
+func (m model) usageSummaryOneLine() string {
 	if m.opts.UsageTracker == nil || !m.hostSnap.hasUsage {
 		return ""
 	}
@@ -1044,7 +1073,7 @@ func (m Model) usageSummaryOneLine() string {
 // First line: "Nk in · Nk out"; second line: "$X · used / size" (or
 // just "$X" when context window is unknown). Empty pair when no
 // UsageTracker is wired.
-func (m Model) usageSummaryStacked() (string, string) {
+func (m model) usageSummaryStacked() (string, string) {
 	if m.opts.UsageTracker == nil || !m.hostSnap.hasUsage {
 		return "", ""
 	}
@@ -1069,7 +1098,7 @@ func (m Model) usageSummaryStacked() (string, string) {
 // skill §17.C). Lets the operator see overflow risk before it
 // bites. The tiers read from the active Theme rather than fixed
 // hex so the ramp keeps its contrast on light themes too.
-func (m Model) contextFillStyle(used, size int) lipgloss.Style {
+func (m model) contextFillStyle(used, size int) lipgloss.Style {
 	if size <= 0 {
 		return m.styles.Muted
 	}
@@ -1106,7 +1135,7 @@ func formatKTokens(n int) string {
 // from renderSidebar, i.e. from View(), which host_snapshot.go
 // guarantees never blocks on a host method. The roster refreshes on
 // the same hostSnapshotInterval tick as the header figures.
-func (m Model) subagentSummary() []string {
+func (m model) subagentSummary() []string {
 	if _, ok := m.opts.Agent.(SubagentReporter); !ok {
 		return []string{"none (no SubagentReporter)"}
 	}

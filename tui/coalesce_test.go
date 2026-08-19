@@ -37,7 +37,7 @@ import (
 // and assert that refreshPending latches high (i.e. exactly one tick
 // is in flight) even though every handler flipped viewportDirty.
 func TestCoalescedRefresh_BurstOfEvents_SchedulesOneRefresh(t *testing.T) {
-	m := NewModel(Options{Agent: newLiveAgentStub()})
+	m := newModel(Options{Agent: newLiveAgentStub()})
 	m.viewport.SetWidth(80)
 	if !m.liveMode {
 		t.Fatal("setup: expected liveMode=true so liveStreamRenderCmd folds in the scheduler")
@@ -46,7 +46,7 @@ func TestCoalescedRefresh_BurstOfEvents_SchedulesOneRefresh(t *testing.T) {
 	const burst = 25
 	for i := 0; i < burst; i++ {
 		out, _ := m.Update(streamChunkMsg{text: "chunk\n\n", partial: false})
-		m = out.(Model)
+		m = out.(model)
 		if !m.viewportDirty {
 			t.Fatalf("iteration %d: viewportDirty must latch true after streamChunkMsg", i)
 		}
@@ -60,19 +60,19 @@ func TestCoalescedRefresh_BurstOfEvents_SchedulesOneRefresh(t *testing.T) {
 // paint half. When coalescedRefreshMsg lands, both flags reset and
 // refreshViewport runs exactly once for the whole burst.
 func TestCoalescedRefresh_MsgHandlerClearsFlagsAndRefreshes(t *testing.T) {
-	m := NewModel(Options{Agent: newLiveAgentStub()})
+	m := newModel(Options{Agent: newLiveAgentStub()})
 	m.viewport.SetWidth(80)
 
 	// Prime: one event dirties + schedules.
 	out, _ := m.Update(streamChunkMsg{text: "hello\n\n", partial: false})
-	m = out.(Model)
+	m = out.(model)
 	if !m.viewportDirty || !m.refreshPending {
 		t.Fatal("prime: expected both flags true after first event")
 	}
 
 	// Flush.
 	out, cmd := m.Update(coalescedRefreshMsg{})
-	m = out.(Model)
+	m = out.(model)
 	if m.viewportDirty {
 		t.Error("viewportDirty should be false after coalescedRefreshMsg handler")
 	}
@@ -85,7 +85,7 @@ func TestCoalescedRefresh_MsgHandlerClearsFlagsAndRefreshes(t *testing.T) {
 
 	// A subsequent burst re-schedules cleanly (flags reset properly).
 	out, _ = m.Update(streamChunkMsg{text: "world\n\n", partial: false})
-	m = out.(Model)
+	m = out.(model)
 	if !m.viewportDirty || !m.refreshPending {
 		t.Fatal("post-flush: expected both flags true again after next event")
 	}
@@ -97,7 +97,7 @@ func TestCoalescedRefresh_MsgHandlerClearsFlagsAndRefreshes(t *testing.T) {
 // tick handler) don't wake bubble-tea for a refresh that has no
 // state to paint.
 func TestScheduleCoalescedRefresh_NoOpWhenClean(t *testing.T) {
-	m := NewModel(Options{})
+	m := newModel(Options{})
 	m.viewport.SetWidth(80)
 	if cmd := m.scheduleCoalescedRefresh(); cmd != nil {
 		t.Errorf("expected nil Cmd on clean model, got %T", cmd)
@@ -113,7 +113,7 @@ func TestScheduleCoalescedRefresh_NoOpWhenClean(t *testing.T) {
 // in a burst produce exactly ONE tick, not N ticks that each fire a
 // refresh.
 func TestScheduleCoalescedRefresh_ReturnsTickThenNil(t *testing.T) {
-	m := NewModel(Options{})
+	m := newModel(Options{})
 	m.viewport.SetWidth(80)
 	m.markViewportDirty()
 
@@ -146,7 +146,7 @@ func TestScheduleCoalescedRefresh_ReturnsTickThenNil(t *testing.T) {
 // the same tick as streamChunkMsg. Realistic mixed burst mirroring
 // what an attach-to-long-session actually replays.
 func TestCoalescedRefresh_ToolCallAndResult_AlsoCoalesce(t *testing.T) {
-	m := NewModel(Options{Agent: newLiveAgentStub()})
+	m := newModel(Options{Agent: newLiveAgentStub()})
 	m.viewport.SetWidth(80)
 
 	seq := []tea.Msg{
@@ -157,7 +157,7 @@ func TestCoalescedRefresh_ToolCallAndResult_AlsoCoalesce(t *testing.T) {
 	}
 	for i, msg := range seq {
 		out, _ := m.Update(msg)
-		m = out.(Model)
+		m = out.(model)
 		if !m.viewportDirty {
 			t.Fatalf("step %d (%T): viewportDirty must be true", i, msg)
 		}
@@ -174,7 +174,7 @@ func TestCoalescedRefresh_ToolCallAndResult_AlsoCoalesce(t *testing.T) {
 // that composes its own Cmd via liveStreamRenderCmd) have a clean
 // building block.
 func TestMarkViewportDirty_JustFlipsFlag(t *testing.T) {
-	m := NewModel(Options{})
+	m := newModel(Options{})
 	if m.viewportDirty {
 		t.Fatal("setup: viewportDirty should start false")
 	}
@@ -199,11 +199,11 @@ func TestMarkViewportDirty_JustFlipsFlag(t *testing.T) {
 // Bubble Tea can emit the initial + terminal-negotiated sizes back-
 // to-back; the guard keeps that from wasting an O(N) Glamour pass.
 func TestWindowSizeMsg_NoOpWhenUnchanged(t *testing.T) {
-	m := NewModel(Options{})
+	m := newModel(Options{})
 	// Prime the width so a later identical msg is a true no-op.
 	first := tea.WindowSizeMsg{Width: 100, Height: 40}
 	out, _ := m.Update(first)
-	m = out.(Model)
+	m = out.(model)
 
 	// Seed an assistant message with a Rendered value and pin its
 	// Version — rerenderHistoryMarkdown bumps Version on every
@@ -219,7 +219,7 @@ func TestWindowSizeMsg_NoOpWhenUnchanged(t *testing.T) {
 	// Second WindowSizeMsg — identical dimensions. Guard must
 	// short-circuit before rerenderHistoryMarkdown runs.
 	out, _ = m.Update(tea.WindowSizeMsg{Width: 100, Height: 40})
-	m = out.(Model)
+	m = out.(model)
 
 	snap = m.history.Snapshot()
 	versionAfter := snap[len(snap)-1].Version
@@ -233,17 +233,17 @@ func TestWindowSizeMsg_NoOpWhenUnchanged(t *testing.T) {
 // the O(N) rerenderHistoryMarkdown pass is wasted work. Only width
 // changes should bump assistant Version.
 func TestWindowSizeMsg_HeightOnlyChange_SkipsMarkdownRerender(t *testing.T) {
-	m := NewModel(Options{})
+	m := newModel(Options{})
 	// Prime.
 	out, _ := m.Update(tea.WindowSizeMsg{Width: 100, Height: 40})
-	m = out.(Model)
+	m = out.(model)
 
 	m.history.Append(Message{Role: RoleAssistant, Text: "hi", Rendered: "hi"})
 	versionBefore := m.history.Snapshot()[0].Version
 
 	// Height-only change.
 	out, _ = m.Update(tea.WindowSizeMsg{Width: 100, Height: 50})
-	m = out.(Model)
+	m = out.(model)
 
 	versionAfter := m.history.Snapshot()[0].Version
 	if versionAfter != versionBefore {

@@ -128,7 +128,7 @@ func TestPermissionQuestion_EscIsADismissal(t *testing.T) {
 // permissionRig delivers a request through the normal path with a live
 // Prompter behind it, so a dispatch is observable as the blocked
 // AskApproval call returning.
-func permissionRig(t *testing.T, layout PermissionLayout) (Model, <-chan PermissionDecision) {
+func permissionRig(t *testing.T, layout PermissionLayout) (model, <-chan PermissionDecision) {
 	t.Helper()
 	p := NewPrompter()
 	decided := make(chan PermissionDecision, 1)
@@ -141,11 +141,11 @@ func permissionRig(t *testing.T, layout PermissionLayout) (Model, <-chan Permiss
 		t.Fatal("setup: nextRequest returned !ok with a pending request")
 	}
 
-	m := NewModel(Options{Agent: &bareAgent{id: "a"}, Prompter: p, PermissionLayout: layout})
+	m := newModel(Options{Agent: &bareAgent{id: "a"}, Prompter: p, PermissionLayout: layout})
 	out, _ := m.Update(tea.WindowSizeMsg{Width: 100, Height: 30})
-	m = out.(Model)
+	m = out.(model)
 	out, _ = m.Update(permissionRequestMsg{req: req})
-	m = out.(Model)
+	m = out.(model)
 	if m.openPermission() == nil {
 		t.Fatal("setup: the permission question is not on the overlay stack")
 	}
@@ -162,7 +162,7 @@ func TestPermissionQuestion_DecisionDispatchesAndEchoes(t *testing.T) {
 	before := m.history.Len()
 
 	out, _ := m.Update(keyPress("s"))
-	m = out.(Model)
+	m = out.(model)
 
 	if m.openPermission() != nil {
 		t.Error("the question is still on the stack after a decision")
@@ -191,7 +191,7 @@ func TestPermissionQuestion_EscDeniesThroughTheResolver(t *testing.T) {
 	m, decided := permissionRig(t, PermissionOverlay)
 
 	out, _ := m.Update(keyPress("esc"))
-	m = out.(Model)
+	m = out.(model)
 
 	if m.openPermission() != nil {
 		t.Error("esc left the question on the stack")
@@ -245,7 +245,7 @@ func TestPermissionQuestion_OverlayIsAModal(t *testing.T) {
 }
 
 // A modal opened behind an inline prompt waits rather than drawing over
-// it. Before the migration the prompt was Model state and the overlay
+// it. Before the migration the prompt was model state and the overlay
 // stack drew regardless, so a picker could cover the block while the
 // keys still went to the block — pixels and keys disagreeing, which is
 // what #164 is about.
@@ -278,12 +278,12 @@ func TestPermissionQuestion_DiffRendersAtTheModalWidth(t *testing.T) {
 		DetailKind: DetailDiff,
 		Detail:     "--- a/config.go\n+++ b/config.go\n@@ -10,4 +10,4 @@\n-    return parse(b)\n+    return parse(b), nil\n",
 	}
-	m := NewModel(Options{Agent: &bareAgent{id: "a"}, PermissionLayout: PermissionOverlay})
+	m := newModel(Options{Agent: &bareAgent{id: "a"}, PermissionLayout: PermissionOverlay})
 	m.styles = newStylesWithTheme(true, goldenTheme())
 	out, _ := m.Update(tea.WindowSizeMsg{Width: 160, Height: 40})
-	m = out.(Model)
+	m = out.(model)
 	out, _ = m.Update(permissionRequestMsg{req: req})
-	m = out.(Model)
+	m = out.(model)
 
 	frame, ok := m.modalFrame()
 	if !ok {

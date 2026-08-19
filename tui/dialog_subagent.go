@@ -54,7 +54,7 @@ func subagentBodyHeight(termHeight int) int {
 }
 
 // subagentDialog is one open drill-down. Everything the host sent
-// lives here rather than on the Model: the overlay is the only
+// lives here rather than on the model: the overlay is the only
 // consumer, and closing it should drop the accumulated log.
 type subagentDialog struct {
 	name string
@@ -90,7 +90,7 @@ func newSubagentDialog(name string) *subagentDialog {
 
 func (d *subagentDialog) ID() string { return subagentDialogID }
 
-func (d *subagentDialog) HandleKey(stroke string, m *Model) dialogAction {
+func (d *subagentDialog) HandleKey(stroke string, m *model) dialogAction {
 	viewport := subagentBodyHeight(m.height)
 	maxScroll := nonNeg(d.lastBody - viewport)
 	switch stroke {
@@ -133,7 +133,7 @@ func (d *subagentDialog) HandleKey(stroke string, m *Model) dialogAction {
 // ScrollBy implements scrollDialog: mouse-wheel ticks move the log,
 // and scrolling up off the bottom releases the follow-the-tail pin
 // exactly as the arrow keys do.
-func (d *subagentDialog) ScrollBy(delta int, m *Model) {
+func (d *subagentDialog) ScrollBy(delta int, m *model) {
 	maxScroll := nonNeg(d.lastBody - subagentBodyHeight(m.height))
 	d.scroll = min(nonNeg(d.scroll+delta), maxScroll)
 	d.pinned = d.scroll >= maxScroll
@@ -175,7 +175,7 @@ func (d *subagentDialog) apply(msg subagentEventsMsg) bool {
 	return true
 }
 
-func (d *subagentDialog) Render(totalWidth int, m *Model) string {
+func (d *subagentDialog) Render(totalWidth int, m *model) string {
 	width := subagentDialogPreferredWidth
 	if totalWidth > 0 && width > totalWidth-4 {
 		width = totalWidth - 4

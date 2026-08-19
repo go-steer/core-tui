@@ -117,7 +117,7 @@ func newSessionInputDialog(row SessionInfo) *sessionInputDialog {
 // rather than when the dialog was opened: the guard's question is
 // "has the operator moved on since they pressed Enter", and the
 // dialog can sit open for as long as it takes to type a URL.
-func (d *sessionInputDialog) submit(value string, m *Model) dialogAction {
+func (d *sessionInputDialog) submit(value string, m *model) dialogAction {
 	in := d.row.Input
 	if in.Submit == nil {
 		// A malformed row — Input set, Submit nil. This is a nil
@@ -146,7 +146,7 @@ func (d *sessionInputDialog) submit(value string, m *Model) dialogAction {
 // stroke. Restated rather than inherited: the embedded
 // textInputDialog.HandleKey delegates to its OWN HandleKeyMsg, which
 // would route around the in-flight gate below.
-func (d *sessionInputDialog) HandleKey(stroke string, m *Model) dialogAction {
+func (d *sessionInputDialog) HandleKey(stroke string, m *model) dialogAction {
 	return d.HandleKeyMsg(keyMsgFromStroke(stroke), m)
 }
 
@@ -162,7 +162,7 @@ func (d *sessionInputDialog) HandleKey(stroke string, m *Model) dialogAction {
 // call is out, most of all a second Enter: the picker swallows keys
 // under an in-flight SwitchToSession for the same reason, and here a
 // second Enter would put a second dial on the wire.
-func (d *sessionInputDialog) HandleKeyMsg(msg tea.KeyPressMsg, m *Model) dialogAction {
+func (d *sessionInputDialog) HandleKeyMsg(msg tea.KeyPressMsg, m *model) dialogAction {
 	if !d.inflight {
 		return d.textInputDialog.HandleKeyMsg(msg, m)
 	}
@@ -178,7 +178,7 @@ func (d *sessionInputDialog) HandleKeyMsg(msg tea.KeyPressMsg, m *Model) dialogA
 // used so the modal doesn't jump on Enter. Same wording as the
 // picker's in-flight SwitchToSession, because from the operator's
 // side it is the same wait.
-func (d *sessionInputDialog) Render(totalWidth int, m *Model) string {
+func (d *sessionInputDialog) Render(totalWidth int, m *model) string {
 	if !d.inflight {
 		return d.textInputDialog.Render(totalWidth, m)
 	}
@@ -199,7 +199,7 @@ func (d *sessionInputDialog) Render(totalWidth int, m *Model) string {
 // DialogCursor drops the caret while the call is out — the input box
 // isn't on screen to put it in, and a caret parked on a progress line
 // would advertise a surface that no longer takes keys.
-func (d *sessionInputDialog) DialogCursor(width int, m *Model) *tea.Cursor {
+func (d *sessionInputDialog) DialogCursor(width int, m *model) *tea.Cursor {
 	if d.inflight {
 		return nil
 	}
@@ -224,7 +224,7 @@ func (d *sessionInputDialog) DialogCursor(width int, m *Model) *tea.Cursor {
 // The same check is what stops a reply from landing on the WRONG
 // dialog — see the value field's comment for the picker sequence
 // where gen and seq alone are not enough.
-func (m *Model) applySessionInputSubmit(msg sessionInputSubmittedMsg) tea.Cmd {
+func (m *model) applySessionInputSubmit(msg sessionInputSubmittedMsg) tea.Cmd {
 	d, ok := m.overlayStack.get(sessionInputDialogID).(*sessionInputDialog)
 	if !ok || !d.inflight || d.row.ID != msg.rowID || d.value != msg.value {
 		return nil
@@ -289,6 +289,6 @@ func sessionInputAnswer(rowID string, ok bool) answer {
 // hole the whole design exists to remove. A no-op when the input was
 // opened by `/switch <id>` naming an action row, which has no picker
 // under it at all.
-func (m *Model) endSessionPicker(ans answer) tea.Cmd {
+func (m *model) endSessionPicker(ans answer) tea.Cmd {
 	return m.overlayStack.resolve(sessionPickerDialogID, ans, m)
 }

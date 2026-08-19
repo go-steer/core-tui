@@ -26,7 +26,7 @@ import (
 // request through the normal msg path, so the question's shownAt is
 // stamped exactly as it is in production. decisions receives whatever
 // the blocked AskApproval call returns.
-func graceRig(t *testing.T) (Model, *Prompter, <-chan PermissionDecision) {
+func graceRig(t *testing.T) (model, *Prompter, <-chan PermissionDecision) {
 	t.Helper()
 	p := NewPrompter()
 	decisions := make(chan PermissionDecision, 1)
@@ -39,11 +39,11 @@ func graceRig(t *testing.T) (Model, *Prompter, <-chan PermissionDecision) {
 		t.Fatal("setup: nextRequest returned !ok with a pending request")
 	}
 
-	m := NewModel(Options{Prompter: p})
+	m := newModel(Options{Prompter: p})
 	out, _ := m.Update(tea.WindowSizeMsg{Width: 100, Height: 40})
-	m = out.(Model)
+	m = out.(model)
 	out, _ = m.Update(permissionRequestMsg{req: req})
-	m = out.(Model)
+	m = out.(model)
 	if m.openPermission() == nil {
 		t.Fatal("setup: expected the permission modal to be open")
 	}
@@ -53,10 +53,10 @@ func graceRig(t *testing.T) (Model, *Prompter, <-chan PermissionDecision) {
 	return m, p, decisions
 }
 
-func typeWord(m Model, word string) Model {
+func typeWord(m model, word string) model {
 	for _, r := range word {
 		out, _ := m.Update(tea.KeyPressMsg(tea.Key{Code: r, Text: string(r)}))
-		m = out.(Model)
+		m = out.(model)
 	}
 	return m
 }
@@ -94,7 +94,7 @@ func TestPermissionGrace_ExpiresAndDecidesNormally(t *testing.T) {
 	m.overlayStack.asked(permissionDialogID).shownAt = time.Now().Add(-modalInputGrace - time.Millisecond)
 
 	out, _ := m.Update(tea.KeyPressMsg(tea.Key{Code: 'y', Text: "y"}))
-	m = out.(Model)
+	m = out.(model)
 
 	if m.openPermission() != nil {
 		t.Fatal("y after the grace window did not close the modal")
@@ -118,7 +118,7 @@ func TestPermissionGrace_CoversEveryDecisionKey(t *testing.T) {
 	for _, stroke := range []string{"y", "n", "s", "v", "t", "a"} {
 		m, _, decisions := graceRig(t)
 		out, _ := m.Update(tea.KeyPressMsg(tea.Key{Code: rune(stroke[0]), Text: stroke}))
-		m = out.(Model)
+		m = out.(model)
 		if m.openPermission() == nil {
 			t.Errorf("%q decided inside the grace window", stroke)
 		}
@@ -136,7 +136,7 @@ func TestPermissionGrace_EscStillDenies(t *testing.T) {
 	m, _, decisions := graceRig(t)
 
 	out, _ := m.Update(tea.KeyPressMsg(tea.Key{Code: tea.KeyEsc}))
-	m = out.(Model)
+	m = out.(model)
 
 	if m.openPermission() != nil {
 		t.Fatal("Esc did not close the modal")
@@ -171,18 +171,18 @@ func TestElicitGrace_HoldsCommitKeysOnly(t *testing.T) {
 		t.Fatal("setup: nextRequest returned !ok with a pending request")
 	}
 
-	m := NewModel(Options{Elicitor: e})
+	m := newModel(Options{Elicitor: e})
 	out, _ := m.Update(tea.WindowSizeMsg{Width: 100, Height: 40})
-	m = out.(Model)
+	m = out.(model)
 	out, _ = m.Update(elicitRequestMsg{serverName: "srv", req: req})
-	m = out.(Model)
+	m = out.(model)
 	if m.overlayStack.asked(elicitDialogID).shownAt.IsZero() {
 		t.Fatal("setup: elicitRequestMsg did not stamp the grace window")
 	}
 
 	// Enter inside the window must not submit.
 	out, _ = m.Update(tea.KeyPressMsg(tea.Key{Code: tea.KeyEnter}))
-	m = out.(Model)
+	m = out.(model)
 	if m.openElicit() == nil {
 		t.Fatal("Enter submitted the form inside the grace window")
 	}
@@ -199,7 +199,7 @@ func TestElicitGrace_HoldsCommitKeysOnly(t *testing.T) {
 		t.Errorf("field edits blocked during the grace window: user = %q", got)
 	}
 	out, _ = m.Update(tea.KeyPressMsg(tea.Key{Code: tea.KeyTab}))
-	m = out.(Model)
+	m = out.(model)
 	if idx := m.openElicit().idx; idx != 1 {
 		t.Errorf("Tab nav blocked during the grace window: fieldIdx = %d", idx)
 	}
@@ -207,7 +207,7 @@ func TestElicitGrace_HoldsCommitKeysOnly(t *testing.T) {
 	// Past the window, Enter submits and the values reach the host.
 	m = pastGrace(m)
 	out, _ = m.Update(tea.KeyPressMsg(tea.Key{Code: tea.KeyEnter}))
-	m = out.(Model)
+	m = out.(model)
 	if m.openElicit() != nil {
 		t.Fatal("Enter after the grace window did not submit")
 	}
@@ -246,7 +246,7 @@ func TestModalGrace_ZeroStampIsExpired(t *testing.T) {
 // protect against. The elicit form is the control: same overlay, same
 // gate, opened by the agent.
 func TestModalGrace_OperatorOpenedQuestionsAreNeverHeld(t *testing.T) {
-	var m Model
+	var m model
 	q := newThemePickerQuestion(BuiltinThemes(), "default")
 	m.overlayStack.ask(q, askOperator, nil)
 	aq := m.overlayStack.asked(themePickerDialogID)
@@ -264,7 +264,7 @@ func TestModalGrace_OperatorOpenedQuestionsAreNeverHeld(t *testing.T) {
 // the operator pressing the one key that visibly does nothing on a
 // modal they are trying to get out of.
 func TestModalGrace_EscIsExemptForAgentOpenedQuestions(t *testing.T) {
-	var m Model
+	var m model
 	m.overlayStack.ask(
 		newElicitQuestion("srv", ElicitRequest{
 			Fields: []ElicitField{{Name: "user", Type: ElicitFieldString}},
@@ -289,7 +289,7 @@ func TestModalGrace_EscIsExemptForAgentOpenedQuestions(t *testing.T) {
 // second of inertness, and the cost of guessing wrong is an answer
 // the operator never gave.
 func TestModalGrace_UndeclaredQuestionsHoldEveryKey(t *testing.T) {
-	var m Model
+	var m model
 	m.overlayStack.ask(&probeQuestion{id: "probe"}, askAgent, nil)
 	aq := m.overlayStack.asked("probe")
 	if _, ok := aq.q.(gracedQuestion); ok {

@@ -12,7 +12,7 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-// The Asker end to end: a real asker, a real Model, and the answer
+// The Asker end to end: a real asker, a real model, and the answer
 // arriving on the channel a host's Ask call is parked on (issue #255).
 // question_ask_test.go owns the widgets; this file owns the wiring
 // between them and the host.
@@ -38,11 +38,11 @@ type askReply struct {
 	err    error
 }
 
-// askFlowFor puts req to a real asker wired into a real Model, the way
+// askFlowFor puts req to a real asker wired into a real model, the way
 // a host's ask-the-user tool would, and returns the model parked on the
 // question plus the channel Ask answers on. The committing keys are
 // still inside modalInputGrace — call pastGraceFor before pressing one.
-func askFlowFor(t *testing.T, req AskRequest) (Model, chan askReply) {
+func askFlowFor(t *testing.T, req AskRequest) (model, chan askReply) {
 	t.Helper()
 	m, replies, _ := askFlowRaw(t, req)
 	if m.openAsk() == nil {
@@ -55,7 +55,7 @@ func askFlowFor(t *testing.T, req AskRequest) (Model, chan askReply) {
 // for the refusal tests, where not opening one is the behaviour under
 // test. It also hands back the Cmd the branch returned, which is where
 // the re-armed listener and the render kick live.
-func askFlowRaw(t *testing.T, req AskRequest) (Model, chan askReply, tea.Cmd) {
+func askFlowRaw(t *testing.T, req AskRequest) (model, chan askReply, tea.Cmd) {
 	t.Helper()
 	a := NewAsker().(*asker)
 	replies := make(chan askReply, 1)
@@ -67,11 +67,11 @@ func askFlowRaw(t *testing.T, req AskRequest) (Model, chan askReply, tea.Cmd) {
 		t.Fatal("setup: nextRequest returned !ok with a pending request")
 	}
 
-	m := NewModel(Options{Asker: a})
+	m := newModel(Options{Asker: a})
 	out, _ := m.Update(tea.WindowSizeMsg{Width: 100, Height: 40})
-	m = out.(Model)
+	m = out.(model)
 	out, cmd := m.Update(askRequestMsg{req: req})
-	return out.(Model), replies, cmd
+	return out.(model), replies, cmd
 }
 
 // awaitAsk reads what reached the host, or fails.
@@ -94,9 +94,9 @@ func TestAsk_TheOperatorsChoiceReachesTheHost(t *testing.T) {
 	m = pastGraceFor(m, askDialogID)
 
 	out, _ := m.Update(keyPress("down"))
-	m = out.(Model)
+	m = out.(model)
 	out, _ = m.Update(keyPress("enter"))
-	m = out.(Model)
+	m = out.(model)
 
 	if m.openAsk() != nil {
 		t.Error("the question stayed open after it was answered")
@@ -120,10 +120,10 @@ func TestAsk_TypedTextReachesTheHost(t *testing.T) {
 
 	for _, r := range "ada " {
 		out, _ := m.Update(keyPress(string(r)))
-		m = out.(Model)
+		m = out.(model)
 	}
 	out, _ := m.Update(keyPress("enter"))
-	m = out.(Model)
+	m = out.(model)
 	if m.openAsk() != nil {
 		t.Error("the question is still up after it was answered")
 	}
@@ -151,7 +151,7 @@ func TestAsk_DeclineAndCancelAreDifferentAnswers(t *testing.T) {
 			m = pastGraceFor(m, askDialogID)
 
 			out, _ := m.Update(keyPress(tc.stroke))
-			m = out.(Model)
+			m = out.(model)
 			if m.openAsk() != nil {
 				t.Fatalf("%s left the question open", tc.stroke)
 			}
@@ -281,7 +281,7 @@ func TestAskEditor_SavedBufferAnswersTheQuestion(t *testing.T) {
 	m, replies := askFlowFor(t, AskRequest{Kind: AskLongText, Prompt: "Write it up"})
 
 	out, _ := m.Update(askEditorDoneMsg{text: "the long answer"})
-	m = out.(Model)
+	m = out.(model)
 	if m.openAsk() != nil {
 		t.Error("the question stayed open after the editor answered it")
 	}
@@ -310,7 +310,7 @@ func TestAskEditor_AFailedRoundTripLeavesTheQuestionOpen(t *testing.T) {
 			m, replies := askFlowFor(t, AskRequest{Kind: AskLongText, Prompt: "Write it up"})
 
 			out, _ := m.Update(tc.msg)
-			m = out.(Model)
+			m = out.(model)
 
 			q, ok := m.openAsk().(*askEditorQuestion)
 			if !ok {

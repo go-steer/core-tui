@@ -27,7 +27,7 @@ type fakeItem struct {
 func (f *fakeItem) Identity() uint64              { return f.id }
 func (f *fakeItem) Version() uint64               { return f.version }
 func (f *fakeItem) Finished() bool                { return f.finished }
-func (f *fakeItem) Render(_ *Model, _ int) string { return f.content }
+func (f *fakeItem) Render(_ *model, _ int) string { return f.content }
 
 func TestListCache_HitMissInvalidation(t *testing.T) {
 	c := newListCache()

@@ -76,7 +76,7 @@ func (a *attachRowAgent) Sessions() []SessionInfo {
 // action row, and presses Enter — the common prelude for every test
 // below. Asserts the handoff itself so the callers can focus on
 // what happens after.
-func openAttachRow(t *testing.T, m *Model) {
+func openAttachRow(t *testing.T, m *model) {
 	t.Helper()
 	q := readySessionPicker(m)
 	q.idx = 2 // the action row
@@ -88,7 +88,7 @@ func openAttachRow(t *testing.T, m *Model) {
 	// because overlay pops the front dialog after Key returns.
 	for _, msg := range drainBatch(t, cmd) {
 		out, _ := m.Update(msg)
-		*m = out.(Model)
+		*m = out.(model)
 	}
 	if !m.overlayStack.hasID(sessionInputDialogID) {
 		t.Fatalf("action row did not open the text-input dialog")
@@ -99,14 +99,14 @@ func openAttachRow(t *testing.T, m *Model) {
 }
 
 // pressEnter drives Enter through the overlay the way handleKey does.
-func pressEnter(m *Model) (bool, tea.Cmd) {
+func pressEnter(m *model) (bool, tea.Cmd) {
 	return m.overlayStack.handleKeyMsg(tea.KeyPressMsg(tea.Key{Code: tea.KeyEnter}), m)
 }
 
 // commitAttach presses Enter on the text input and drives the commit
 // all the way through: SessionInput.Submit runs off the Update
 // goroutine now (issue #194), so Enter yields only a Cmd, and nothing
-// reaches the Model until that Cmd's reply has been fed back through
+// reaches the model until that Cmd's reply has been fed back through
 // Update. Returns whatever the applied reply produced — the listener
 // batch, on a successful attach.
 //
@@ -114,7 +114,7 @@ func pressEnter(m *Model) (bool, tea.Cmd) {
 // that a second Enter is refused, that a dismissed dialog drops its
 // reply — drive the two halves by hand over in host_async_test.go.
 // This is for the ones that only care where the flow ends up.
-func commitAttach(t *testing.T, m *Model) tea.Cmd {
+func commitAttach(t *testing.T, m *model) tea.Cmd {
 	t.Helper()
 	consumed, cmd := pressEnter(m)
 	if !consumed {
@@ -129,7 +129,7 @@ func commitAttach(t *testing.T, m *Model) tea.Cmd {
 		t.Fatalf("enter produced %T, want sessionInputSubmittedMsg", msg)
 	}
 	out, next := m.Update(sub)
-	*m = out.(Model)
+	*m = out.(model)
 	return next
 }
 
@@ -138,7 +138,7 @@ func commitAttach(t *testing.T, m *Model) tea.Cmd {
 // SwitchToSession never sees the action row's ID.
 func TestSessionPicker_ActionRowOpensTextInput(t *testing.T) {
 	agent := newAttachRowAgent()
-	m := NewModel(Options{Agent: agent})
+	m := newModel(Options{Agent: agent})
 	m.viewport.SetWidth(80)
 
 	openAttachRow(t, &m)
@@ -162,7 +162,7 @@ func TestSessionPicker_ActionRowOpensTextInput(t *testing.T) {
 // and closes BOTH dialogs.
 func TestSessionPicker_ActionRowSubmitAttaches(t *testing.T) {
 	agent := newAttachRowAgent()
-	m := NewModel(Options{Agent: agent})
+	m := newModel(Options{Agent: agent})
 	m.viewport.SetWidth(80)
 
 	openAttachRow(t, &m)
@@ -188,7 +188,7 @@ func TestSessionPicker_ActionRowSubmitAttaches(t *testing.T) {
 func TestSessionPicker_ActionRowSubmitError(t *testing.T) {
 	agent := newAttachRowAgent()
 	agent.attachErr = errors.New("dial tcp: connection refused")
-	m := NewModel(Options{Agent: agent})
+	m := newModel(Options{Agent: agent})
 	m.viewport.SetWidth(80)
 	before := m.opts.Agent
 
@@ -213,7 +213,7 @@ func TestSessionPicker_ActionRowSubmitError(t *testing.T) {
 func TestSessionPicker_ActionRowNilAgent(t *testing.T) {
 	agent := newAttachRowAgent()
 	agent.attachAgent = nil
-	m := NewModel(Options{Agent: agent})
+	m := newModel(Options{Agent: agent})
 	m.viewport.SetWidth(80)
 
 	openAttachRow(t, &m)
@@ -234,7 +234,7 @@ func TestSessionPicker_ActionRowNilAgent(t *testing.T) {
 func TestSessionPicker_ActionRowNilSubmit(t *testing.T) {
 	agent := newAttachRowAgent()
 	agent.nilSubmit = true
-	m := NewModel(Options{Agent: agent})
+	m := newModel(Options{Agent: agent})
 	m.viewport.SetWidth(80)
 
 	openAttachRow(t, &m)
@@ -256,7 +256,7 @@ func TestSessionPicker_ActionRowValidate(t *testing.T) {
 		}
 		return ""
 	}
-	m := NewModel(Options{Agent: agent})
+	m := newModel(Options{Agent: agent})
 	m.viewport.SetWidth(80)
 
 	openAttachRow(t, &m)
@@ -279,14 +279,14 @@ func TestSessionPicker_ActionRowValidate(t *testing.T) {
 // no keystroke leaks into the chat textarea behind the modals.
 func TestSessionPicker_ActionRowEscReturnsToPicker(t *testing.T) {
 	agent := newAttachRowAgent()
-	m := NewModel(Options{Agent: agent})
+	m := newModel(Options{Agent: agent})
 	m.viewport.SetWidth(80)
 
 	openAttachRow(t, &m)
 	typeInto(t, m.overlayStack.front(), &m, "half-typed")
 
 	out, _ := m.Update(tea.KeyPressMsg(tea.Key{Code: tea.KeyEsc}))
-	m = out.(Model)
+	m = out.(model)
 	if m.overlayStack.hasID(sessionInputDialogID) {
 		t.Errorf("esc should pop the text input")
 	}
@@ -299,7 +299,7 @@ func TestSessionPicker_ActionRowEscReturnsToPicker(t *testing.T) {
 
 	// A second esc closes the picker itself.
 	out, _ = m.Update(tea.KeyPressMsg(tea.Key{Code: tea.KeyEsc}))
-	m = out.(Model)
+	m = out.(model)
 	if m.overlayStack.hasDialogs() {
 		t.Errorf("second esc should close the picker")
 	}
@@ -309,7 +309,7 @@ func TestSessionPicker_ActionRowEscReturnsToPicker(t *testing.T) {
 // never the "(id)" / "(current)" session decorations.
 func TestSessionPicker_ActionRowRender(t *testing.T) {
 	agent := newAttachRowAgent()
-	m := NewModel(Options{Agent: agent})
+	m := newModel(Options{Agent: agent})
 	m.viewport.SetWidth(80)
 
 	readySessionPicker(&m)
@@ -338,7 +338,7 @@ func TestSessionPicker_ActionRowRender(t *testing.T) {
 // text input instead of handing the magic ID to SwitchToSession.
 func TestSlashSwitch_ActionRowByID(t *testing.T) {
 	agent := newAttachRowAgent()
-	m := NewModel(Options{Agent: agent})
+	m := newModel(Options{Agent: agent})
 	m.viewport.SetWidth(80)
 
 	m, _ = submitSwitch(t, m, "/switch +attach")
@@ -355,7 +355,7 @@ func TestSlashSwitch_ActionRowByID(t *testing.T) {
 // must not disturb `/switch <real-session-id>`.
 func TestSlashSwitch_PlainIDStillDirectJumps(t *testing.T) {
 	agent := newAttachRowAgent()
-	m := NewModel(Options{Agent: agent})
+	m := newModel(Options{Agent: agent})
 	m.viewport.SetWidth(80)
 
 	m, _ = submitSwitch(t, m, "/switch other")
@@ -373,7 +373,7 @@ func TestSlashSwitch_PlainIDStillDirectJumps(t *testing.T) {
 // actually runs (it was unreachable while esc popped the stack
 // directly).
 func TestOverlay_ThemePickerEscRestores(t *testing.T) {
-	m := NewModel(Options{Agent: &bareAgent{id: "a"}})
+	m := newModel(Options{Agent: &bareAgent{id: "a"}})
 	m.viewport.SetWidth(80)
 	m.applyNamedTheme(BuiltinThemes()[0].Name)
 	original := m.themeName
@@ -385,7 +385,7 @@ func TestOverlay_ThemePickerEscRestores(t *testing.T) {
 	}
 
 	out, _ := m.Update(tea.KeyPressMsg(tea.Key{Code: tea.KeyEsc}))
-	m = out.(Model)
+	m = out.(model)
 	if m.themeName != original {
 		t.Errorf("esc left theme = %q, want the pre-picker %q", m.themeName, original)
 	}

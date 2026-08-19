@@ -45,7 +45,7 @@ import (
 // preview block is shared across all renderers via withPreview;
 // per-tool renderers focus on the call-line layout only.
 //
-// Unexported deliberately (issue #213). Its Model-free signature
+// Unexported deliberately (issue #213). Its model-free signature
 // makes it the one render interface a host could plausibly
 // implement, and toolRendererFor dispatches over package-private
 // values with no way to register another — so exporting it

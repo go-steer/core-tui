@@ -70,7 +70,7 @@ func TestTrimTrailingEllipsis(t *testing.T) {
 func TestSpinnerLine_EndsInExactlyOneEllipsis(t *testing.T) {
 	for _, tc := range spinnerVerbCases {
 		t.Run(tc.name, func(t *testing.T) {
-			m := NewModel(Options{
+			m := newModel(Options{
 				Agent:           stubAgent{},
 				ThinkingPhrases: []string{tc.in},
 			})
@@ -88,7 +88,7 @@ func TestSpinnerLine_EndsInExactlyOneEllipsis(t *testing.T) {
 // and a fix that only touched the thinking path would leave the
 // double punctuation reachable through a tool call.
 func TestSpinnerLine_WorkingPoolIsNormalizedToo(t *testing.T) {
-	m := NewModel(Options{
+	m := newModel(Options{
 		Agent:           stubAgent{},
 		ThinkingPhrases: []string{"Thinking..."},
 		WorkingPhrases:  []string{"Running tools..."},
@@ -104,7 +104,7 @@ func TestSpinnerLine_WorkingPoolIsNormalizedToo(t *testing.T) {
 // entry rather than sampling one: the pools are hand-maintained
 // prose, so the guard has to be against the whole list.
 func TestSpinnerLine_DefaultPoolsAreNormalized(t *testing.T) {
-	m := NewModel(Options{Agent: stubAgent{}})
+	m := newModel(Options{Agent: stubAgent{}})
 	m.viewport.SetWidth(80)
 	m = m.submitTurn("go")
 

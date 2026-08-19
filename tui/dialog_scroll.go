@@ -31,11 +31,11 @@
 //	scrollView /  window a []string body to the visible rows and
 //	listWindow    glue on the scrollbar column.
 //	handleWheel   the wheel vocabulary, routed to the front-most
-//	              dialog (or to Model's inline modals from Update).
+//	              dialog (or to model's inline modals from Update).
 //
 // Dialogs on the overlay stack keep their offset in their own struct
 // (they're pointers — mutations from Render persist). The inline
-// modals (permission / elicit / side-answer) share Model.modalScroll
+// modals (permission / elicit / side-answer) share model.modalScroll
 // because View() has a value receiver and can only write back
 // through a pointer.
 
@@ -155,7 +155,7 @@ func modalMargin(termHeight int) int {
 // height, given how many rows that modal's chrome eats.
 //
 // Returns 0 when the terminal height is unknown — a pre-resize frame
-// or a bare Model{} in a test. Callers read 0 as "don't window",
+// or a bare model{} in a test. Callers read 0 as "don't window",
 // which keeps every unsized render showing its full body exactly as
 // it did before scrolling existed.
 //
@@ -202,7 +202,7 @@ func wrappedRows(s string, width int) int {
 // what lets a keystroke clamp ("End" → bottom, "down" at the bottom
 // → no-op) without re-rendering the body to count its lines.
 //
-// The inline modals hold one of these behind Model.modalScroll (a
+// The inline modals hold one of these behind model.modalScroll (a
 // pointer, so View()'s value receiver can write the measurement
 // back). Dialogs on the overlay stack are already pointers and can
 // embed it directly.
@@ -298,10 +298,10 @@ func (s *scrollState) applyStroke(stroke string) bool {
 
 // scroll returns the inline modals' shared scroll state, allocating
 // it on first use. NewModel primes the field; the lazy branch covers
-// a zero-value Model{} (the tests build those directly), where the
+// a zero-value model{} (the tests build those directly), where the
 // allocation lands in whatever copy asked for it — harmless, since
 // an unsized test model renders unwindowed bodies anyway.
-func (m *Model) scroll() *scrollState {
+func (m *model) scroll() *scrollState {
 	if m.modalScroll == nil {
 		m.modalScroll = &scrollState{}
 	}
@@ -485,7 +485,7 @@ type scrollDialog interface {
 
 	// ScrollBy moves the dialog's body by delta rows — negative is
 	// toward the top. Clamping is the dialog's business.
-	ScrollBy(delta int, m *Model)
+	ScrollBy(delta int, m *model)
 }
 
 // handleWheel routes one wheel gesture to the front-most dialog.
@@ -494,7 +494,7 @@ type scrollDialog interface {
 // modal — always true when anything is open, since a wheel tick that
 // silently scrolls a surface hidden behind a modal is the bug this
 // whole file exists to fix.
-func (o *overlay) handleWheel(delta int, m *Model) (consumed bool, cmd tea.Cmd) {
+func (o *overlay) handleWheel(delta int, m *model) (consumed bool, cmd tea.Cmd) {
 	front := o.front()
 	if front == nil {
 		return false, nil

@@ -21,13 +21,13 @@ import (
 	tea "charm.land/bubbletea/v2"
 )
 
-// modelWithTools builds a minimally-plausible Model that has the
+// modelWithTools builds a minimally-plausible model that has the
 // three RoleTool entries in history so the dialog has something to
 // walk through. Only fields the dialog reads are populated — the
 // rest stay zero-valued.
-func modelWithTools(t *testing.T) *Model {
+func modelWithTools(t *testing.T) *model {
 	t.Helper()
-	m := Model{}
+	m := model{}
 	m.styles = newStyles(true, Branding{})
 	m.width = 120
 	m.height = 40
@@ -162,7 +162,7 @@ func TestToolCallDialog_RendersFailedBadge(t *testing.T) {
 }
 
 func TestToolCallDialog_EmptyHistoryClosesOnKey(t *testing.T) {
-	m := Model{}
+	m := model{}
 	m.styles = newStyles(true, Branding{})
 	m.width = 100
 	m.height = 30
@@ -207,11 +207,11 @@ func TestCollectToolCalls_FiltersNonToolRoles(t *testing.T) {
 // bug that used selIdx directly would pass every assertion; here the
 // three tool calls sit at history 1, 3 and 5 and map to tool indices
 // 0, 1 and 2.
-func interleavedToolModel(t *testing.T) Model {
+func interleavedToolModel(t *testing.T) model {
 	t.Helper()
-	m := NewModel(Options{Agent: &bareAgent{id: "a"}})
+	m := newModel(Options{Agent: &bareAgent{id: "a"}})
 	out, _ := m.Update(tea.WindowSizeMsg{Width: 100, Height: 40})
-	m = out.(Model)
+	m = out.(model)
 	m.history.Append(Message{Role: RoleUser, Text: "read it"})
 	m.history.Append(Message{Role: RoleTool, ToolName: "read_file", ToolCallID: "call-1"})
 	m.history.Append(Message{Role: RoleAssistant, Text: "done", Rendered: "done"})
@@ -224,7 +224,7 @@ func interleavedToolModel(t *testing.T) Model {
 
 // openToolCallOverlay presses ctrl+x through the real Update path and
 // hands back the dialog it opened.
-func openToolCallOverlay(t *testing.T, m Model) *toolCallDialog {
+func openToolCallOverlay(t *testing.T, m model) *toolCallDialog {
 	t.Helper()
 	m = press(m, "ctrl+x")
 	d, ok := m.overlayStack.get(toolCallDialogID).(*toolCallDialog)

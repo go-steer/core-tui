@@ -44,7 +44,7 @@ func (r *remoteInterrupterAgent) Interrupt(_ context.Context) error {
 // short-circuiting the load-bearing local path.
 func TestInterrupt_LocalCancelWinsWhenAvailable(t *testing.T) {
 	agent := &remoteInterrupterAgent{}
-	m := NewModel(Options{Agent: agent})
+	m := newModel(Options{Agent: agent})
 	// Simulate an in-flight local turn: state=streaming AND
 	// cancelTurn set. Both are the gate the slash handler checks.
 	m.state = stateStreaming
@@ -76,7 +76,7 @@ func TestInterrupt_LocalCancelWinsWhenAvailable(t *testing.T) {
 // as a follow-up system row (success) or error row (failure).
 func TestInterrupt_RemoteFallthrough_FiresRemoteAndReportsOutcome(t *testing.T) {
 	agent := &remoteInterrupterAgent{}
-	m := NewModel(Options{Agent: agent})
+	m := newModel(Options{Agent: agent})
 	// No local turn — the state and cancelTurn stay at their
 	// zero values. This mirrors observer-mode reality (LiveAgent
 	// drains events but nothing ever populated cancelTurn).
@@ -89,7 +89,7 @@ func TestInterrupt_RemoteFallthrough_FiresRemoteAndReportsOutcome(t *testing.T) 
 		t.Fatal("remote fallthrough should return a Cmd to invoke Interrupt off the Update loop")
 	}
 	// Placeholder row landed synchronously.
-	nm := next.(Model)
+	nm := next.(model)
 	entries := nm.history.Snapshot()
 	if len(entries) == 0 || !strings.Contains(entries[len(entries)-1].Text, "cancelling remote turn") {
 		t.Errorf("expected 'cancelling remote turn…' placeholder in history, got %+v", entries)
@@ -111,7 +111,7 @@ func TestInterrupt_RemoteFallthrough_FiresRemoteAndReportsOutcome(t *testing.T) 
 	// Feed the done msg through Update — should append the
 	// success row.
 	next2, _ := nm.Update(done)
-	nm2 := next2.(Model)
+	nm2 := next2.(model)
 	entries2 := nm2.history.Snapshot()
 	last := entries2[len(entries2)-1]
 	if last.Role != RoleSystem {
@@ -127,19 +127,19 @@ func TestInterrupt_RemoteFallthrough_FiresRemoteAndReportsOutcome(t *testing.T) 
 // operator knows to escalate (retry, restart daemon, manual kill).
 func TestInterrupt_RemoteFallthrough_ErrorSurfaces(t *testing.T) {
 	agent := &remoteInterrupterAgent{interruptErr: errors.New("endpoint returned 500")}
-	m := NewModel(Options{Agent: agent})
+	m := newModel(Options{Agent: agent})
 
 	handled, next, cmd := m.dispatchBuiltinSlash("interrupt", "")
 	if !handled || cmd == nil {
 		t.Fatalf("expected handled with cmd, got handled=%v cmd=%v", handled, cmd)
 	}
-	nm := next.(Model)
+	nm := next.(model)
 	done := cmd().(remoteInterruptDoneMsg)
 	if done.err == nil {
 		t.Fatal("expected propagated error from Interrupt")
 	}
 	next2, _ := nm.Update(done)
-	nm2 := next2.(Model)
+	nm2 := next2.(model)
 	entries := nm2.history.Snapshot()
 	last := entries[len(entries)-1]
 	if last.Role != RoleError {
@@ -157,7 +157,7 @@ func TestInterrupt_RemoteFallthrough_ErrorSurfaces(t *testing.T) {
 func TestInterrupt_NoLocalNoRemote_FallsBackToNoTurnMessage(t *testing.T) {
 	// stubAgent implements Agent only — no RemoteInterrupter, no
 	// live turn.
-	m := NewModel(Options{Agent: stubAgent{}})
+	m := newModel(Options{Agent: stubAgent{}})
 
 	handled, next, cmd := m.dispatchBuiltinSlash("interrupt", "")
 	if !handled {
@@ -166,7 +166,7 @@ func TestInterrupt_NoLocalNoRemote_FallsBackToNoTurnMessage(t *testing.T) {
 	if cmd != nil {
 		t.Errorf("no-turn path should return nil cmd, got %T", cmd())
 	}
-	nm := next.(Model)
+	nm := next.(model)
 	entries := nm.history.Snapshot()
 	last := entries[len(entries)-1]
 	if !strings.Contains(last.Text, "no turn in flight") {
@@ -191,7 +191,7 @@ func TestInterrupt_RemoteSuccessStopsTheLiveSpinner(t *testing.T) {
 	}
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
-			m := NewModel(Options{Agent: &remoteInterrupterAgent{}})
+			m := newModel(Options{Agent: &remoteInterrupterAgent{}})
 			if !m.liveMode {
 				t.Fatal("setup: expected liveMode for a LiveAgent host")
 			}
@@ -202,7 +202,7 @@ func TestInterrupt_RemoteSuccessStopsTheLiveSpinner(t *testing.T) {
 			}
 
 			out, _ := m.Update(remoteInterruptDoneMsg{err: tc.err})
-			got := out.(Model)
+			got := out.(model)
 
 			if got.spinnerActive != tc.wantSpinner {
 				t.Errorf("spinnerActive = %v after interrupt (err=%v), want %v",

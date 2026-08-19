@@ -91,14 +91,14 @@ func newLiveAgentStub() *liveAgentStub {
 }
 
 func TestNewModel_DetectsLiveAgent(t *testing.T) {
-	m := NewModel(Options{Agent: newLiveAgentStub()})
+	m := newModel(Options{Agent: newLiveAgentStub()})
 	if !m.liveMode {
 		t.Errorf("expected liveMode=true when Agent satisfies LiveAgent")
 	}
 }
 
 func TestNewModel_NoLiveAgentLeavesLiveModeOff(t *testing.T) {
-	m := NewModel(Options{Agent: &slashAgent{}}) // Run-only agent
+	m := newModel(Options{Agent: &slashAgent{}}) // Run-only agent
 	if m.liveMode {
 		t.Errorf("expected liveMode=false for plain Agent")
 	}
@@ -106,7 +106,7 @@ func TestNewModel_NoLiveAgentLeavesLiveModeOff(t *testing.T) {
 
 func TestLiveStream_DrainsEventsIntoChannel(t *testing.T) {
 	agent := newLiveAgentStub()
-	m := NewModel(Options{Agent: agent})
+	m := newModel(Options{Agent: agent})
 	m.viewport.SetWidth(80)
 
 	cancel := m.startLiveStream(agent)
@@ -130,7 +130,7 @@ func TestLiveStream_DrainsEventsIntoChannel(t *testing.T) {
 
 func TestLiveStream_SurfacesErrorAndKeepsDraining(t *testing.T) {
 	agent := newLiveAgentStub()
-	m := NewModel(Options{Agent: agent})
+	m := newModel(Options{Agent: agent})
 
 	cancel := m.startLiveStream(agent)
 	defer cancel()
@@ -151,7 +151,7 @@ func TestLiveStream_SurfacesErrorAndKeepsDraining(t *testing.T) {
 
 func TestLiveStream_EndedSignalOnIteratorClose(t *testing.T) {
 	agent := newLiveAgentStub()
-	m := NewModel(Options{Agent: agent})
+	m := newModel(Options{Agent: agent})
 
 	cancel := m.startLiveStream(agent)
 	defer cancel()
@@ -165,7 +165,7 @@ func TestLiveStream_EndedSignalOnIteratorClose(t *testing.T) {
 
 func TestLiveStream_CtxCancelStopsWithoutFinalError(t *testing.T) {
 	agent := newLiveAgentStub()
-	m := NewModel(Options{Agent: agent})
+	m := newModel(Options{Agent: agent})
 
 	cancel := m.startLiveStream(agent)
 	cancel() // stop the stream
@@ -188,11 +188,11 @@ func TestLiveStream_CtxCancelStopsWithoutFinalError(t *testing.T) {
 }
 
 func TestUpdate_LiveStreamStartedMsg_LogsAttachedNote(t *testing.T) {
-	m := NewModel(Options{Agent: newLiveAgentStub()})
+	m := newModel(Options{Agent: newLiveAgentStub()})
 	m.viewport.SetWidth(80)
 
 	out, _ := m.Update(liveStreamStartedMsg{cancel: func() {}})
-	got := out.(Model)
+	got := out.(model)
 	if got.cancelLiveStream == nil {
 		t.Error("expected cancelLiveStream stashed from message")
 	}
@@ -216,11 +216,11 @@ func TestUpdate_LiveStreamStartedMsg_LogsAttachedNote(t *testing.T) {
 // live-with-inject, without overpromising who drives.
 func TestUpdate_LiveStreamStartedMsg_InjectableAgent_ShowsLiveSessionFraming(t *testing.T) {
 	agent := &injectableLiveAgentStub{liveAgentStub: newLiveAgentStub(), injectsOut: make(chan string, 1)}
-	m := NewModel(Options{Agent: agent})
+	m := newModel(Options{Agent: agent})
 	m.viewport.SetWidth(80)
 
 	out, _ := m.Update(liveStreamStartedMsg{cancel: func() {}})
-	got := out.(Model)
+	got := out.(model)
 	if got.history.Len() == 0 {
 		t.Fatal("expected banner system row")
 	}
@@ -241,11 +241,11 @@ func TestUpdate_LiveStreamStartedMsg_InjectableAgent_ShowsLiveSessionFraming(t *
 }
 
 func TestUpdate_LiveStreamEndedMsg_FlipsDisconnectedAndLogs(t *testing.T) {
-	m := NewModel(Options{Agent: newLiveAgentStub()})
+	m := newModel(Options{Agent: newLiveAgentStub()})
 	m.viewport.SetWidth(80)
 
 	out, _ := m.Update(liveStreamEndedMsg{})
-	got := out.(Model)
+	got := out.(model)
 	if !got.liveDisconnected {
 		t.Error("expected liveDisconnected=true after end signal")
 	}
@@ -256,11 +256,11 @@ func TestUpdate_LiveStreamEndedMsg_FlipsDisconnectedAndLogs(t *testing.T) {
 }
 
 func TestUpdate_LiveStreamErrMsg_RendersErrorRow(t *testing.T) {
-	m := NewModel(Options{Agent: newLiveAgentStub()})
+	m := newModel(Options{Agent: newLiveAgentStub()})
 	m.viewport.SetWidth(80)
 
 	out, cmd := m.Update(liveStreamErrMsg{err: errors.New("boom")})
-	got := out.(Model)
+	got := out.(model)
 	last := got.history.Snapshot()[got.history.Len()-1]
 	if last.Role != RoleError {
 		t.Errorf("expected RoleError, got %v", last.Role)
@@ -294,11 +294,11 @@ func TestUpdate_LiveStreamErrMsg_PermanentStatuses_StopRetrying(t *testing.T) {
 	}
 	for _, tc := range permanent {
 		t.Run(tc.name, func(t *testing.T) {
-			m := NewModel(Options{Agent: newLiveAgentStub()})
+			m := newModel(Options{Agent: newLiveAgentStub()})
 			m.viewport.SetWidth(80)
 
 			out, cmd := m.Update(liveStreamErrMsg{err: tc.err})
-			got := out.(Model)
+			got := out.(model)
 			last := got.history.Snapshot()[got.history.Len()-1]
 			if last.Role != RoleError {
 				t.Errorf("expected RoleError, got %v", last.Role)
@@ -327,11 +327,11 @@ func (e *permErr) Error() string            { return e.msg }
 func (e *permErr) PermanentStreamErr() bool { return true }
 
 func TestUpdate_LiveStreamErrMsg_PermanentStreamErrorInterface(t *testing.T) {
-	m := NewModel(Options{Agent: newLiveAgentStub()})
+	m := newModel(Options{Agent: newLiveAgentStub()})
 	m.viewport.SetWidth(80)
 
 	out, cmd := m.Update(liveStreamErrMsg{err: &permErr{msg: "adapter-specific: session evicted"}})
-	got := out.(Model)
+	got := out.(model)
 	last := got.history.Snapshot()[got.history.Len()-1]
 	if !got.liveDisconnected {
 		t.Error("PermanentStreamError should flip liveDisconnected")
@@ -370,7 +370,7 @@ func TestIsPermanentStreamErr(t *testing.T) {
 }
 
 func TestApplyStreamChunk_LiveMode_PartialFlipsSpinnerAndStamps(t *testing.T) {
-	m := NewModel(Options{Agent: newLiveAgentStub()})
+	m := newModel(Options{Agent: newLiveAgentStub()})
 	m.viewport.SetWidth(80)
 
 	m.applyStreamChunk(streamChunkMsg{text: "tok", partial: true})
@@ -383,7 +383,7 @@ func TestApplyStreamChunk_LiveMode_PartialFlipsSpinnerAndStamps(t *testing.T) {
 }
 
 func TestApplyStreamChunk_LiveMode_NonPartialCommitsAndStopsSpinner(t *testing.T) {
-	m := NewModel(Options{Agent: newLiveAgentStub()})
+	m := newModel(Options{Agent: newLiveAgentStub()})
 	m.viewport.SetWidth(80)
 
 	// Build up some partial text first.
@@ -411,14 +411,14 @@ func TestApplyStreamChunk_LiveMode_NonPartialCommitsAndStopsSpinner(t *testing.T
 }
 
 func TestUpdate_SubmitInLiveMode_NoInjectLogsReadOnlyNoteOnce(t *testing.T) {
-	m := NewModel(Options{Agent: newLiveAgentStub()})
+	m := newModel(Options{Agent: newLiveAgentStub()})
 	m.viewport.SetWidth(80)
 
 	// First submit logs the note.
 	m.input.SetValue("hello")
 	enter := tea.KeyPressMsg(tea.Key{Code: tea.KeyEnter})
 	out, _ := m.Update(enter)
-	m = out.(Model)
+	m = out.(model)
 	if !m.liveReadOnlyNoted {
 		t.Fatal("expected liveReadOnlyNoted=true after first submit")
 	}
@@ -436,7 +436,7 @@ func TestUpdate_SubmitInLiveMode_NoInjectLogsReadOnlyNoteOnce(t *testing.T) {
 	// Second submit must NOT log a duplicate note.
 	m.input.SetValue("again")
 	out, _ = m.Update(enter)
-	m = out.(Model)
+	m = out.(model)
 	second := m.history.Snapshot()
 	noteCount = 0
 	for _, e := range second {
@@ -452,13 +452,13 @@ func TestUpdate_SubmitInLiveMode_NoInjectLogsReadOnlyNoteOnce(t *testing.T) {
 func TestUpdate_SubmitInLiveMode_InjectableHostCallsInjectAndAppendsUserRow(t *testing.T) {
 	inner := newLiveAgentStub()
 	agent := &injectableLiveAgentStub{liveAgentStub: inner, injectsOut: make(chan string, 1)}
-	m := NewModel(Options{Agent: agent})
+	m := newModel(Options{Agent: agent})
 	m.viewport.SetWidth(80)
 
 	m.input.SetValue("hello there")
 	enter := tea.KeyPressMsg(tea.Key{Code: tea.KeyEnter})
 	out, _ := m.Update(enter)
-	got := out.(Model)
+	got := out.(model)
 
 	select {
 	case v := <-agent.injectsOut:

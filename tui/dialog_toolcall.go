@@ -89,7 +89,7 @@ func newToolCallDialog(toolCount int) *toolCallDialog {
 
 func (d *toolCallDialog) ID() string { return toolCallDialogID }
 
-func (d *toolCallDialog) HandleKey(stroke string, m *Model) dialogAction {
+func (d *toolCallDialog) HandleKey(stroke string, m *model) dialogAction {
 	tools := collectToolCalls(m.history.Snapshot())
 	n := len(tools)
 	if n == 0 {
@@ -146,11 +146,11 @@ func (d *toolCallDialog) HandleKey(stroke string, m *Model) dialogAction {
 
 // ScrollBy implements scrollDialog: mouse-wheel ticks move the
 // detail body, clamped against the last render's geometry.
-func (d *toolCallDialog) ScrollBy(delta int, _ *Model) {
+func (d *toolCallDialog) ScrollBy(delta int, _ *model) {
 	d.scroll = min(nonNeg(d.scroll+delta), nonNeg(d.lastBody-d.lastView))
 }
 
-func (d *toolCallDialog) Render(totalWidth int, m *Model) string {
+func (d *toolCallDialog) Render(totalWidth int, m *model) string {
 	width := toolCallDialogPreferredWidth
 	if totalWidth > 0 && width > totalWidth-4 {
 		width = totalWidth - 4

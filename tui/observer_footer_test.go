@@ -33,11 +33,11 @@ import (
 // non-partial commit, then turn-complete (turnSummaryMsg with
 // tokens+model+latency, cost=0 per spec), then usage-update
 // (usageUpdateMsg with LastTurn carrying authoritative cost). After
-// all three land, the tail assistant Message must carry Model,
+// all three land, the tail assistant Message must carry model,
 // Usage, CostUSD, and Elapsed, and renderTurnFooter must return a
 // non-empty footer string.
 func TestObserverFooter_WireOrder_StampsAllFields(t *testing.T) {
-	m := NewModel(Options{Agent: newLiveAgentStub()})
+	m := newModel(Options{Agent: newLiveAgentStub()})
 	m.viewport.SetWidth(80)
 
 	// Stream + commit the assistant text (this is the SSE
@@ -61,7 +61,7 @@ func TestObserverFooter_WireOrder_StampsAllFields(t *testing.T) {
 		// that observer mode used to show $0 forever without the
 		// LastTurn back-annotation from usage-update.
 	}})
-	m = out.(Model)
+	m = out.(model)
 
 	// Post-turnSummary the footer already renders tokens+model+
 	// latency (cost still $0). Confirm.
@@ -92,13 +92,13 @@ func TestObserverFooter_WireOrder_StampsAllFields(t *testing.T) {
 			Model:     "gemini-3.5-flash",
 		},
 	}})
-	m = out.(Model)
+	m = out.(model)
 
 	tail = m.history.Snapshot()[m.history.Len()-1]
 	if tail.CostUSD != 0.045432 {
 		t.Errorf("after usage-update: tail.CostUSD = %f, want 0.045432", tail.CostUSD)
 	}
-	// Model + Usage should remain unchanged (already stamped).
+	// model + Usage should remain unchanged (already stamped).
 	if tail.Model != "gemini-3.5-flash" {
 		t.Errorf("Model lost after usage-update: got %q", tail.Model)
 	}
@@ -130,7 +130,7 @@ func TestObserverFooter_WireOrder_StampsAllFields(t *testing.T) {
 // picks up the current* fields at commit time. Both orderings
 // converge on a stamped footer.
 func TestObserverFooter_TurnCompleteBeforeCommit(t *testing.T) {
-	m := NewModel(Options{Agent: newLiveAgentStub()})
+	m := newModel(Options{Agent: newLiveAgentStub()})
 	m.viewport.SetWidth(80)
 
 	// turn-complete lands first (populates current*).
@@ -140,7 +140,7 @@ func TestObserverFooter_TurnCompleteBeforeCommit(t *testing.T) {
 		TokensOut: 20,
 		LatencyMs: 500,
 	}})
-	m = out.(Model)
+	m = out.(model)
 	if m.currentModel != "gemini-3.5-flash" {
 		t.Fatal("setup: turnSummary should have populated m.currentModel")
 	}
@@ -168,7 +168,7 @@ func TestObserverFooter_TurnCompleteBeforeCommit(t *testing.T) {
 // turnSummary provided" (typically $0) without crashing or clobbering
 // the stamp turnSummary set.
 func TestObserverFooter_UsageUpdateWithoutLastTurn(t *testing.T) {
-	m := NewModel(Options{Agent: newLiveAgentStub()})
+	m := newModel(Options{Agent: newLiveAgentStub()})
 	m.viewport.SetWidth(80)
 
 	m.applyStreamChunk(streamChunkMsg{text: "answer", partial: false})
@@ -178,14 +178,14 @@ func TestObserverFooter_UsageUpdateWithoutLastTurn(t *testing.T) {
 		TokensOut: 5,
 		LatencyMs: 200,
 	}})
-	m = out.(Model)
+	m = out.(model)
 
 	// usage-update WITHOUT LastTurn (pre-#249 server).
 	out, _ = m.Update(usageUpdateMsg{update: UsageUpdate{
 		TokensInTotal: 10,
 		TurnsTotal:    1,
 	}})
-	m = out.(Model)
+	m = out.(model)
 
 	tail := m.history.Snapshot()[m.history.Len()-1]
 	if tail.Model != "gpt-x" {
@@ -195,7 +195,7 @@ func TestObserverFooter_UsageUpdateWithoutLastTurn(t *testing.T) {
 		t.Errorf("Usage should survive nil-LastTurn: got nil")
 	}
 	// Cost stays 0 — no source populated it. Footer still renders
-	// (Model+Usage+Elapsed are enough for a useful footer).
+	// (model+Usage+Elapsed are enough for a useful footer).
 	if tail.CostUSD != 0 {
 		t.Errorf("expected CostUSD 0 when LastTurn omitted, got %f", tail.CostUSD)
 	}

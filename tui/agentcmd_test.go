@@ -61,7 +61,7 @@ func TestEmitEvent_MultiFanOut(t *testing.T) {
 // partial chunks concatenate into the in-progress buffer; a non-
 // partial chunk overwrites (some agents echo the full text at end).
 func TestApplyStreamChunk_AccumulatesPartials(t *testing.T) {
-	m := NewModel(Options{})
+	m := newModel(Options{})
 	m.applyStreamChunk(streamChunkMsg{text: "hel", partial: true})
 	m.applyStreamChunk(streamChunkMsg{text: "lo", partial: true})
 	if m.inProgressText != "hello" {
@@ -77,7 +77,7 @@ func TestApplyStreamChunk_AccumulatesPartials(t *testing.T) {
 // arriving twice (partial + committed echo) renders as one history
 // entry, not two.
 func TestApplyToolCall_DedupsByID(t *testing.T) {
-	m := NewModel(Options{})
+	m := newModel(Options{})
 	m.applyToolCall(toolCallMsg{id: "x", name: "Read"})
 	m.applyToolCall(toolCallMsg{id: "x", name: "Read"})
 	got := 0
@@ -94,7 +94,7 @@ func TestApplyToolCall_DedupsByID(t *testing.T) {
 // TestApplyToolCall_FlipsToolActive pins R-CHAT-3: a ToolCall flips
 // the spinner into the working pool; the next stream chunk flips back.
 func TestApplyToolCall_FlipsToolActive(t *testing.T) {
-	m := NewModel(Options{})
+	m := newModel(Options{})
 	if m.toolActive {
 		t.Fatalf("expected toolActive=false initially")
 	}
@@ -112,7 +112,7 @@ func TestApplyToolCall_FlipsToolActive(t *testing.T) {
 // flushes the in-progress buffer into a finalized assistant Message
 // carrying Usage / Model / Elapsed / Rendered.
 func TestFinalizeTurn_AppendsAssistantWithMetadata(t *testing.T) {
-	m := NewModel(Options{})
+	m := newModel(Options{})
 	m.state = stateStreaming
 	m.inProgressText = "hello"
 	m.currentUsage = &Usage{InputTokens: 10, OutputTokens: 20}
@@ -147,7 +147,7 @@ func TestFinalizeTurn_AppendsAssistantWithMetadata(t *testing.T) {
 // as a system message, not as an error banner — distinct visual
 // treatment per §4.2.
 func TestFinalizeTurn_InterruptedNotice(t *testing.T) {
-	m := NewModel(Options{})
+	m := newModel(Options{})
 	m.state = stateStreaming
 	m.viewport.SetWidth(80)
 	m.finalizeTurn(0, "(interrupted)")
@@ -164,12 +164,12 @@ func TestFinalizeTurn_InterruptedNotice(t *testing.T) {
 // queue is a no-op + the event listener Cmd is re-issued so the
 // stream loop keeps running for the next turn.
 func TestMaybeDrainQueue_EmptyKeepsListener(t *testing.T) {
-	m := NewModel(Options{})
-	model, cmd := m.maybeDrainQueue()
+	m := newModel(Options{})
+	next, cmd := m.maybeDrainQueue()
 	if cmd == nil {
 		t.Errorf("expected non-nil eventListener Cmd")
 	}
-	got := model.(Model)
+	got := next.(model)
 	if got.state != stateIdle {
 		t.Errorf("state = %v, want stateIdle", got.state)
 	}
@@ -184,16 +184,16 @@ func TestMaybeDrainQueue_EmptyKeepsListener(t *testing.T) {
 // new state glyph) instead of being popped — finalizeTurn flips it
 // to Done / Failed when its turn completes.
 func TestMaybeDrainQueue_PopsHeadAndStartsTurn(t *testing.T) {
-	m := NewModel(Options{Agent: stubAgent{}})
+	m := newModel(Options{Agent: stubAgent{}})
 	m.queue = []QueueEntry{
 		{Text: "first queued", State: QueueQueued},
 		{Text: "second queued", State: QueueQueued},
 	}
-	model, cmd := m.maybeDrainQueue()
+	next, cmd := m.maybeDrainQueue()
 	if cmd == nil {
 		t.Errorf("expected non-nil Cmd batch")
 	}
-	got := model.(Model)
+	got := next.(model)
 	if got.state != stateStreaming {
 		t.Errorf("state = %v, want stateStreaming", got.state)
 	}

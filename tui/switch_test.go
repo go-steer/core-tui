@@ -34,10 +34,10 @@ import (
 // id turned out to name a session rather than an action row —
 // SwitchToSession. Returns the model as of the last reply plus the Cmd
 // that reply produced (the listener batch, on a switch that landed).
-func submitSwitch(t *testing.T, m Model, text string) (Model, tea.Cmd) {
+func submitSwitch(t *testing.T, m model, text string) (model, tea.Cmd) {
 	t.Helper()
 	out, cmd := m.dispatchSlash(text)
-	m = out.(Model)
+	m = out.(model)
 	for hop := 0; hop < 2 && cmd != nil; hop++ {
 		msg := cmd()
 		switch msg.(type) {
@@ -46,7 +46,7 @@ func submitSwitch(t *testing.T, m Model, text string) (Model, tea.Cmd) {
 			return m, cmd
 		}
 		out, cmd = m.Update(msg)
-		m = out.(Model)
+		m = out.(model)
 	}
 	return m, cmd
 }
@@ -91,12 +91,12 @@ func (s *switchAgent) SwitchToSession(id string) (SwitchTarget, error) {
 	return SwitchTarget{Agent: next, Note: s.nextTargetNote}, nil
 }
 
-// TestApplySwitchTarget_ResetsState — seed a Model with history +
+// TestApplySwitchTarget_ResetsState — seed a model with history +
 // streaming + modal + queue state; call applySwitchTarget; assert
 // clean slate and swapped Agent.
 func TestApplySwitchTarget_ResetsState(t *testing.T) {
 	old := &bareAgent{id: "old"}
-	m := NewModel(Options{Agent: old})
+	m := newModel(Options{Agent: old})
 	m.viewport.SetWidth(80)
 
 	// Seed heaping state so the reset has something to clear.
@@ -168,7 +168,7 @@ func TestApplySwitchTarget_KeepsNilFields(t *testing.T) {
 	origBranding := Branding{Wordmark: "before"}
 	old := &bareAgent{id: "old"}
 
-	m := NewModel(Options{
+	m := newModel(Options{
 		Agent:    old,
 		Memory:   origMem,
 		Skills:   origSkills,
@@ -199,7 +199,7 @@ func TestApplySwitchTarget_KeepsNilFields(t *testing.T) {
 // TestApplySwitchTarget_ReplacesNonNilFields — non-nil / non-zero
 // SwitchTarget fields MUST overwrite Options.
 func TestApplySwitchTarget_ReplacesNonNilFields(t *testing.T) {
-	m := NewModel(Options{
+	m := newModel(Options{
 		Agent:    &bareAgent{id: "old"},
 		Memory:   []MemoryFile{{Path: "before.md"}},
 		Branding: Branding{Wordmark: "before"},
@@ -225,7 +225,7 @@ func TestApplySwitchTarget_ReplacesNonNilFields(t *testing.T) {
 // straggler turnDoneMsg carrying the old gen MUST NOT trigger
 // finalizeTurn / append rows to the new session.
 func TestStaleTerminalMsg_Dropped(t *testing.T) {
-	m := NewModel(Options{Agent: &bareAgent{}})
+	m := newModel(Options{Agent: &bareAgent{}})
 	m.viewport.SetWidth(80)
 	m.sessionGen = 5
 	// Start in streaming state so a real turnDoneMsg would finalize.
@@ -242,7 +242,7 @@ func TestStaleTerminalMsg_Dropped(t *testing.T) {
 
 	// A matching-gen msg still triggers finalize.
 	out, _ := m.Update(turnDoneMsg{gen: 5, elapsed: 0})
-	got := out.(Model)
+	got := out.(model)
 	if got.state != stateIdle {
 		t.Errorf("matching-gen turnDoneMsg should trigger finalize, state = %v", got.state)
 	}
@@ -251,7 +251,7 @@ func TestStaleTerminalMsg_Dropped(t *testing.T) {
 // TestStaleStreamChunk_Dropped — a straggler streamChunkMsg with
 // an old gen MUST NOT bleed text into the new session buffer.
 func TestStaleStreamChunk_Dropped(t *testing.T) {
-	m := NewModel(Options{Agent: &bareAgent{}})
+	m := newModel(Options{Agent: &bareAgent{}})
 	m.viewport.SetWidth(80)
 	m.sessionGen = 3
 
@@ -262,7 +262,7 @@ func TestStaleStreamChunk_Dropped(t *testing.T) {
 
 	// Matching-gen chunk accumulates as expected.
 	out, _ := m.Update(streamChunkMsg{gen: 3, text: "kept", partial: true})
-	got := out.(Model)
+	got := out.(model)
 	if got.inProgressText != "kept" {
 		t.Errorf("matching-gen chunk lost, inProgressText = %q", got.inProgressText)
 	}
@@ -273,7 +273,7 @@ func TestStaleStreamChunk_Dropped(t *testing.T) {
 func TestApplySlashResult_SwitchTo(t *testing.T) {
 	old := &bareAgent{id: "old"}
 	fresh := &bareAgent{id: "new"}
-	m := NewModel(Options{Agent: old})
+	m := newModel(Options{Agent: old})
 	m.viewport.SetWidth(80)
 	m.history.Append(Message{Role: RoleUser, Text: "prior"})
 	beforeGen := m.sessionGen
@@ -282,7 +282,7 @@ func TestApplySlashResult_SwitchTo(t *testing.T) {
 		SystemMessage: "swapped",
 		SwitchTo:      &SwitchTarget{Agent: fresh, Note: "at new"},
 	}, nil)
-	got := out.(Model)
+	got := out.(model)
 
 	if got.opts.Agent != Agent(fresh) {
 		t.Errorf("Agent not swapped: %v", got.opts.Agent)
@@ -305,13 +305,13 @@ func TestApplySlashResult_SwitchTo(t *testing.T) {
 // MUST NOT swap; instead emit a RoleError row.
 func TestApplySlashResult_SwitchTo_NilAgent(t *testing.T) {
 	old := &bareAgent{id: "old"}
-	m := NewModel(Options{Agent: old})
+	m := newModel(Options{Agent: old})
 	m.viewport.SetWidth(80)
 
 	out, cmd := m.applySlashResult("switch", SlashResult{
 		SwitchTo: &SwitchTarget{Agent: nil},
 	}, nil)
-	got := out.(Model)
+	got := out.(model)
 
 	if got.opts.Agent != Agent(old) {
 		t.Errorf("Agent should not have swapped on nil-Agent SwitchTo")
@@ -338,14 +338,14 @@ func TestSwitchBuiltin_OpensPicker(t *testing.T) {
 			{ID: "b", Display: "other"},
 		},
 	}
-	m := NewModel(Options{Agent: agent})
+	m := newModel(Options{Agent: agent})
 	m.viewport.SetWidth(80)
 
 	handled, out, _ := m.dispatchBuiltinSlash("switch", "")
 	if !handled {
 		t.Fatalf("expected /switch to be handled by builtin dispatcher")
 	}
-	got := out.(Model)
+	got := out.(model)
 	if !got.overlayStack.hasID(sessionPickerDialogID) {
 		t.Errorf("expected session picker dialog opened")
 	}
@@ -364,7 +364,7 @@ func TestSwitchBuiltin_Direct(t *testing.T) {
 		nextAgent:      next,
 		nextTargetNote: "Attached to b",
 	}
-	m := NewModel(Options{Agent: agent})
+	m := newModel(Options{Agent: agent})
 	m.viewport.SetWidth(80)
 	beforeGen := m.sessionGen
 
@@ -394,7 +394,7 @@ func TestSwitchBuiltin_DirectError(t *testing.T) {
 		id:        "cur",
 		switchErr: errors.New("not found"),
 	}
-	m := NewModel(Options{Agent: agent})
+	m := newModel(Options{Agent: agent})
 	m.viewport.SetWidth(80)
 
 	got, _ := submitSwitch(t, m, "/switch bogus")
@@ -413,7 +413,7 @@ func TestSwitchBuiltin_DirectError(t *testing.T) {
 // (handled=false) so a host-provided SlashProvider can pick it up.
 func TestSwitchBuiltin_FallsThroughWhenNoCapability(t *testing.T) {
 	agent := &bareAgent{id: "no-caps"}
-	m := NewModel(Options{Agent: agent})
+	m := newModel(Options{Agent: agent})
 	m.viewport.SetWidth(80)
 
 	handled, _, _ := m.dispatchBuiltinSlash("switch", "b")
@@ -428,14 +428,14 @@ func TestSwitchBuiltin_SessAlias(t *testing.T) {
 		id:       "cur",
 		sessions: []SessionInfo{{ID: "cur", Current: true}},
 	}
-	m := NewModel(Options{Agent: agent})
+	m := newModel(Options{Agent: agent})
 	m.viewport.SetWidth(80)
 
 	handled, out, _ := m.dispatchBuiltinSlash("sess", "")
 	if !handled {
 		t.Fatalf("expected /sess (alias) to be handled")
 	}
-	got := out.(Model)
+	got := out.(model)
 	if !got.overlayStack.hasID(sessionPickerDialogID) {
 		t.Errorf("expected session picker opened via /sess alias")
 	}
@@ -455,7 +455,7 @@ func TestSessionPickerQuestion_EnterCommits(t *testing.T) {
 		},
 		nextAgent: next,
 	}
-	m := NewModel(Options{Agent: agent})
+	m := newModel(Options{Agent: agent})
 	m.viewport.SetWidth(80)
 
 	q := readySessionPicker(&m)
@@ -475,10 +475,10 @@ func TestSessionPickerQuestion_EnterCommits(t *testing.T) {
 	// the call, and its reply is what ends the question.
 	for _, msg := range drainBatch(t, cmd) {
 		out, follow := m.Update(msg)
-		m = out.(Model)
+		m = out.(model)
 		for _, reply := range drainBatch(t, follow) {
 			out, _ = m.Update(reply)
-			m = out.(Model)
+			m = out.(model)
 		}
 	}
 	if m.opts.Agent != Agent(next) {
@@ -493,7 +493,7 @@ func TestSessionPickerQuestion_EnterCommits(t *testing.T) {
 }
 
 // Enter on the attached row, Esc, and the wrapping cursor are all
-// widget behaviour with no Model in them, so they moved out to
+// widget behaviour with no model in them, so they moved out to
 // question_external_test.go with the migration (#164 stage 3) — the
 // in-package half of the picker's coverage is in
 // question_sessionpicker_test.go.
@@ -502,7 +502,7 @@ func TestSessionPickerQuestion_EnterCommits(t *testing.T) {
 // flips m.liveMode and returns a live-stream spawn Cmd; swapping
 // back to a bare Agent flips it off.
 func TestApplySwitchTarget_RedetectsLiveMode(t *testing.T) {
-	m := NewModel(Options{Agent: &bareAgent{id: "one"}})
+	m := newModel(Options{Agent: &bareAgent{id: "one"}})
 	m.viewport.SetWidth(80)
 	if m.liveMode {
 		t.Fatalf("bareAgent should not set liveMode")
@@ -544,7 +544,7 @@ func TestApplySwitchTarget_RedetectsLiveMode(t *testing.T) {
 func TestApplySwitchTarget_AnswersAPendingPrompt(t *testing.T) {
 	t.Run("permission", func(t *testing.T) {
 		p := NewPrompter()
-		m := NewModel(Options{Agent: &bareAgent{id: "old"}, Prompter: p})
+		m := newModel(Options{Agent: &bareAgent{id: "old"}, Prompter: p})
 		m.viewport.SetWidth(80)
 
 		decided := make(chan PermissionDecision, 1)
@@ -557,7 +557,7 @@ func TestApplySwitchTarget_AnswersAPendingPrompt(t *testing.T) {
 			t.Fatal("nextRequest returned !ok with a pending request")
 		}
 		out, _ := m.Update(permissionRequestMsg{req: req})
-		m = out.(Model)
+		m = out.(model)
 		if m.openPermission() == nil {
 			t.Fatal("the permission question was not seeded; the arm proves nothing")
 		}
@@ -579,7 +579,7 @@ func TestApplySwitchTarget_AnswersAPendingPrompt(t *testing.T) {
 
 	t.Run("elicit", func(t *testing.T) {
 		e := NewElicitor()
-		m := NewModel(Options{Agent: &bareAgent{id: "old"}, Elicitor: e})
+		m := newModel(Options{Agent: &bareAgent{id: "old"}, Elicitor: e})
 		m.viewport.SetWidth(80)
 
 		answered := make(chan ElicitResult, 1)
@@ -596,7 +596,7 @@ func TestApplySwitchTarget_AnswersAPendingPrompt(t *testing.T) {
 			t.Fatal("nextRequest returned !ok with a pending request")
 		}
 		out, _ := m.Update(elicitRequestMsg{serverName: flow.serverName, req: flow.req})
-		m = out.(Model)
+		m = out.(model)
 		if m.openElicit() == nil {
 			t.Fatal("the elicit form is not open; the arm proves nothing")
 		}

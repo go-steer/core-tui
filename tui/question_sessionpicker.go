@@ -164,7 +164,7 @@ type sessionPickerQuestion struct {
 }
 
 // newSessionPickerQuestion constructs the picker with no snapshot yet.
-// Prefer Model.openSessionPicker, which pairs the ask with the Cmd that
+// Prefer model.openSessionPicker, which pairs the ask with the Cmd that
 // fills it.
 func newSessionPickerQuestion(wired bool) *sessionPickerQuestion {
 	return &sessionPickerQuestion{wired: wired, filter: newPickerFilter()}
@@ -175,7 +175,7 @@ func newSessionPickerQuestion(wired bool) *sessionPickerQuestion {
 // picker is already open or the capability is unwired — an unwired
 // picker still opens, because "this agent cannot switch sessions" is
 // worth saying on the surface the operator asked for.
-func (m *Model) openSessionPicker() tea.Cmd {
+func (m *model) openSessionPicker() tea.Cmd {
 	if m.overlayStack.hasID(sessionPickerDialogID) {
 		return nil
 	}
@@ -220,7 +220,7 @@ func sessionPickerOn(o *overlay) *sessionPickerQuestion {
 // exactly-once latch, rather than being closed by whichever handler
 // noticed first.
 func sessionPickerResolver(q *sessionPickerQuestion) resolver {
-	return func(a answer, m *Model) tea.Cmd {
+	return func(a answer, m *model) tea.Cmd {
 		switch a := a.(type) {
 		case chosen:
 			return nil
@@ -397,7 +397,7 @@ func requestSessionInputCmd(row SessionInfo) tea.Cmd {
 // with `/switch <id>` and with the action row's SessionInput.Submit
 // reply. Returns the listener-batch Cmd applySwitchTarget produces, or
 // nil on failure. Called only after the sessionGen guard has passed.
-func (m *Model) applySessionSwitch(msg sessionSwitchedMsg) tea.Cmd {
+func (m *model) applySessionSwitch(msg sessionSwitchedMsg) tea.Cmd {
 	if reason := sessionSwitchFailure(msg); reason != "" {
 		m.history.Append(Message{Role: RoleError, Text: "/switch: " + reason})
 		m.refreshViewport()

@@ -29,8 +29,8 @@
 //
 // The live preview is the one thing that could not simply move. It is
 // an effect the widget has to cause BEFORE it has an answer, and the
-// widget has no *Model to cause it with — Model.Update has a value
-// receiver, so any *Model the picker held would be a dead per-Update
+// widget has no *model to cause it with — model.Update has a value
+// receiver, so any *model the picker held would be a dead per-Update
 // copy by the second keystroke. So cursor movement returns a
 // themePreviewMsg for the Update loop to apply. See its declaration
 // for why that is guarded rather than applied blind.
@@ -111,14 +111,14 @@ func newThemePickerQuestion(themes []BuiltinTheme, current string) *themePickerQ
 }
 
 // themePickerResolver is the other half of the picker: everything the
-// widget used to do to a *Model once it knew which row won.
+// widget used to do to a *model once it knew which row won.
 //
 // prev is the theme that was live when the picker opened.
 // applyNamedTheme tolerates an empty string — it falls back to the
 // auto / per-provider path, which is exactly right when the operator
 // never had an explicit pick before opening the picker.
 func themePickerResolver(prev string) resolver {
-	return func(a answer, m *Model) tea.Cmd {
+	return func(a answer, m *model) tea.Cmd {
 		switch a := a.(type) {
 		case chosen:
 			m.applyNamedTheme(a.ID)

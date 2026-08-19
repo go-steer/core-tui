@@ -33,58 +33,58 @@ import (
 // mutation that skipped its re-render shows up on the step after it,
 // naming the step.
 //
-// It runs the mutation through the Model rather than the composer,
+// It runs the mutation through the model rather than the composer,
 // because the composer is not the thing that can get this wrong — the
 // call site is. A method that forgets to re-render is only reachable
-// through a Model that calls it.
+// through a model that calls it.
 func TestComposer_StaysFresh(t *testing.T) {
 	m := benchModel(t, 3, 100, 40)
 
 	steps := []struct {
 		name string
-		do   func(m *Model)
+		do   func(m *model)
 	}{
-		{"initial", func(*Model) {}},
-		{"type a rune", func(m *Model) { keyIntoComposer(m, "h") }},
-		{"type a word", func(m *Model) {
+		{"initial", func(*model) {}},
+		{"type a rune", func(m *model) { keyIntoComposer(m, "h") }},
+		{"type a word", func(m *model) {
 			for _, r := range "ello there" {
 				keyIntoComposer(m, string(r))
 			}
 		}},
-		{"backspace", func(m *Model) { pressIntoComposer(m, "backspace") }},
-		{"newline", func(m *Model) { pressIntoComposer(m, "shift+enter") }},
-		{"second line", func(m *Model) {
+		{"backspace", func(m *model) { pressIntoComposer(m, "backspace") }},
+		{"newline", func(m *model) { pressIntoComposer(m, "shift+enter") }},
+		{"second line", func(m *model) {
 			for _, r := range "and a second line" {
 				keyIntoComposer(m, string(r))
 			}
 		}},
-		{"grow to the line count", func(m *Model) { m.syncInputHeight() }},
-		{"cursor home", func(m *Model) { pressIntoComposer(m, "home") }},
-		{"cursor up", func(m *Model) { pressIntoComposer(m, "up") }},
+		{"grow to the line count", func(m *model) { m.syncInputHeight() }},
+		{"cursor home", func(m *model) { pressIntoComposer(m, "home") }},
+		{"cursor up", func(m *model) { pressIntoComposer(m, "up") }},
 		// A width change re-wraps every line, so a stale block here is
 		// the most visible failure the cache could produce.
-		{"narrow", func(m *Model) { *m = resizeModel(*m, 40, 24) }},
-		{"widen", func(m *Model) { *m = resizeModel(*m, 160, 50) }},
-		{"blur", func(m *Model) { m.input.Blur() }},
-		{"focus", func(m *Model) { _ = m.input.Focus() }},
+		{"narrow", func(m *model) { *m = resizeModel(*m, 40, 24) }},
+		{"widen", func(m *model) { *m = resizeModel(*m, 160, 50) }},
+		{"blur", func(m *model) { m.input.Blur() }},
+		{"focus", func(m *model) { _ = m.input.Focus() }},
 		// Placeholder path: the empty box is the state the cache is
 		// there for, and it renders through different code in bubbles.
-		{"clear to the placeholder", func(m *Model) { m.input.Reset() }},
-		{"resize while empty", func(m *Model) { *m = resizeModel(*m, 100, 40) }},
-		{"blur while empty", func(m *Model) { m.input.Blur() }},
-		{"focus while empty", func(m *Model) { _ = m.input.Focus() }},
-		{"set a value outright", func(m *Model) { m.input.SetValue("a programmatic prompt") }},
+		{"clear to the placeholder", func(m *model) { m.input.Reset() }},
+		{"resize while empty", func(m *model) { *m = resizeModel(*m, 100, 40) }},
+		{"blur while empty", func(m *model) { m.input.Blur() }},
+		{"focus while empty", func(m *model) { _ = m.input.Focus() }},
+		{"set a value outright", func(m *model) { m.input.SetValue("a programmatic prompt") }},
 		// Theme and prompt: both change styling rather than content,
 		// which is the class of change a content-keyed cache would
 		// have missed.
-		{"theme swap", func(m *Model) { m.applyNamedTheme(BuiltinThemes()[1].Name) }},
-		{"theme swap back", func(m *Model) { m.applyNamedTheme(BuiltinThemes()[0].Name) }},
-		{"prompt glyph", func(m *Model) { m.input.SetPrompt("⎈ ") }},
-		{"long value that wraps", func(m *Model) {
+		{"theme swap", func(m *model) { m.applyNamedTheme(BuiltinThemes()[1].Name) }},
+		{"theme swap back", func(m *model) { m.applyNamedTheme(BuiltinThemes()[0].Name) }},
+		{"prompt glyph", func(m *model) { m.input.SetPrompt("⎈ ") }},
+		{"long value that wraps", func(m *model) {
 			m.input.SetValue(strings.Repeat("a long prompt that has to wrap several times over. ", 6))
 		}},
-		{"height clamp", func(m *Model) { m.syncInputHeight() }},
-		{"reset again", func(m *Model) { m.input.Reset() }},
+		{"height clamp", func(m *model) { m.syncInputHeight() }},
+		{"reset again", func(m *model) { m.input.Reset() }},
 	}
 
 	for _, step := range steps {
@@ -99,21 +99,21 @@ func TestComposer_StaysFresh(t *testing.T) {
 
 // TestComposer_ZeroValueDoesNotRender pins the reason `ready` exists.
 //
-// A Model built as a bare literal — which a good number of the dialog
+// A model built as a bare literal — which a good number of the dialog
 // tests do — holds an unconstructed textarea, and bubbles panics both
 // rendering one and resizing one. Neither of those was reachable
-// before, because nothing drew a bare Model's input box. Moving the
+// before, because nothing drew a bare model's input box. Moving the
 // render from draw time to mutation time makes every mutator a
 // potential draw, and SetPrompt a potential resize, so both have to
 // decline on a composer newComposer never built.
 //
-// The bar is what the zero Model could already survive, not more:
+// The bar is what the zero model could already survive, not more:
 // SetValue and Reset panic inside bubbles itself on an unconstructed
 // textarea and did so before this type existed, so they are out of
 // scope. The mutators below are the ones refreshTheme reaches, which
-// is the path a bare Model actually takes.
+// is the path a bare model actually takes.
 func TestComposer_ZeroValueDoesNotRender(t *testing.T) {
-	var m Model
+	var m model
 	m.styles = newStyles(true, Branding{})
 	m.input.SetPrompt("> ")
 	m.input.Blur()
@@ -148,9 +148,9 @@ func TestComposer_RendersOncePerMutation(t *testing.T) {
 // takes rather than through SetValue. Both spellings go through
 // keyPress; the two names are kept apart only so the step table reads
 // as what an operator did.
-func keyIntoComposer(m *Model, s string) { pressIntoComposer(m, s) }
+func keyIntoComposer(m *model, s string) { pressIntoComposer(m, s) }
 
-func pressIntoComposer(m *Model, stroke string) {
+func pressIntoComposer(m *model, stroke string) {
 	out, _ := m.Update(keyPress(stroke))
-	*m = out.(Model)
+	*m = out.(model)
 }

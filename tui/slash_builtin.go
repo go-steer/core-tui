@@ -45,7 +45,7 @@ import (
 // scrolled up reading backlog (refreshViewport alone preserves
 // scroll position by design). The scroll lives in refreshAndScroll
 // — each case calls it explicitly instead of refreshViewport.
-func (m Model) dispatchBuiltinSlash(name, args string) (bool, tea.Model, tea.Cmd) {
+func (m model) dispatchBuiltinSlash(name, args string) (bool, tea.Model, tea.Cmd) {
 	// Alias normalization so internal/tui muscle memory carries
 	// over: /models→/model, /perms→/permissions, /by-the-way→/btw,
 	// /sub→/subagent. /q, /exit, /int are handled in their dispatch
@@ -407,7 +407,7 @@ func (m Model) dispatchBuiltinSlash(name, args string) (bool, tea.Model, tea.Cmd
 // operator has already used one). Operators reach for this when
 // shift+enter / ctrl+j don't work and they want to know what
 // to try.
-func (m *Model) renderKeysDiagnostic() string {
+func (m *model) renderKeysDiagnostic() string {
 	var b strings.Builder
 	b.WriteString("Terminal & keyboard diagnostic:\n\n")
 
@@ -465,7 +465,7 @@ func (m *Model) renderKeysDiagnostic() string {
 // markdown at the current viewport width (ApplyTranscript handles
 // the cache reset). Doesn't restore in-flight turn / queue /
 // modal state — a resumed session starts idle.
-func (m *Model) handleResume(args string) string {
+func (m *model) handleResume(args string) string {
 	args = strings.TrimSpace(args)
 	if m.opts.AgentsDir == "" {
 		return "/resume: no AgentsDir wired (host did not pass Options.AgentsDir)"
@@ -504,7 +504,7 @@ func (m *Model) handleResume(args string) string {
 	if err != nil {
 		return "/resume: " + err.Error()
 	}
-	m.ApplyTranscript(t)
+	m.applyTranscript(t)
 	return fmt.Sprintf("/resume: loaded %s (%d messages, model=%s)", filepath.Base(path), len(t.Messages), t.Model)
 }
 
@@ -522,7 +522,7 @@ func (m *Model) handleResume(args string) string {
 // acknowledgement and the outcome arrives as permissionRuleAddedMsg.
 // A nil Cmd means the text is the whole answer (unwired capability,
 // usage hint, or a malformed bundle name).
-func (m Model) handleAllowDeny(args, op string) (string, tea.Cmd) {
+func (m model) handleAllowDeny(args, op string) (string, tea.Cmd) {
 	ctrl, ok := m.opts.Agent.(PermissionController)
 	if !ok {
 		return "/" + op + ": agent doesn't implement PermissionController", nil
@@ -585,7 +585,7 @@ func renderPermissionRuleResult(msg permissionRuleAddedMsg) string {
 // goroutine, so for those the text is the immediate acknowledgement
 // and the outcome lands later — `refresh` as pricingRefreshedMsg,
 // `set <id> <in> <out>` as pricingSetMsg.
-func (m *Model) handlePricing(ctrl PricingController, args string) (string, tea.Cmd) {
+func (m *model) handlePricing(ctrl PricingController, args string) (string, tea.Cmd) {
 	args = strings.TrimSpace(args)
 	if args == "" || args == "help" {
 		return "/pricing: usage — /pricing refresh OR /pricing set (form) OR /pricing set <model-id> <input-per-mtok> <output-per-mtok>", nil
@@ -642,7 +642,7 @@ func (m *Model) handlePricing(ctrl PricingController, args string) (string, tea.
 // answers off-loop (issue #137). The rendered output is a single
 // block — the renderer will glamour-ify it on the next viewport
 // refresh.
-func (m Model) renderBuiltinHelp() string {
+func (m model) renderBuiltinHelp() string {
 	var b strings.Builder
 	b.WriteString("Built-in commands:\n")
 	b.WriteString("  /help, /?            — show this reference\n")
@@ -697,15 +697,15 @@ func padRight(s string, width int) string {
 // secondary (pink) for tool / server item names. Mirrors the
 // internal/tui look so operators don't see a downgrade switching
 // adapters.
-func (m Model) headingStyle() lipgloss.Style {
+func (m model) headingStyle() lipgloss.Style {
 	return lipgloss.NewStyle().Foreground(brandViolet).Bold(true)
 }
 
-func (m Model) itemNameStyle() lipgloss.Style {
+func (m model) itemNameStyle() lipgloss.Style {
 	return lipgloss.NewStyle().Foreground(brandPink).Bold(true)
 }
 
-func (m Model) renderMemoryList(files []MemoryFile) string {
+func (m model) renderMemoryList(files []MemoryFile) string {
 	if len(files) == 0 {
 		return "No memory files loaded. Drop AGENTS.md / CLAUDE.md / GEMINI.md in the project or user-home tree to surface them here."
 	}
@@ -735,7 +735,7 @@ func (m Model) renderMemoryList(files []MemoryFile) string {
 // header + ▸ pink tool name + indented description) so /mcp shows the
 // full catalog instead of just a per-server tool count. Falls back to
 // the count when the server provides no per-tool detail.
-func (m Model) renderMCPList(servers []MCPServerInfo) string {
+func (m model) renderMCPList(servers []MCPServerInfo) string {
 	if len(servers) == 0 {
 		return "No MCP servers configured. Drop a .agents/mcp.json describing servers (stdio or HTTP transport) to expose external tools to the agent."
 	}
@@ -785,7 +785,7 @@ func (m Model) renderMCPList(servers []MCPServerInfo) string {
 	return strings.TrimRight(b.String(), "\n")
 }
 
-func (m Model) renderSkillList(skills []SkillInfo) string {
+func (m model) renderSkillList(skills []SkillInfo) string {
 	if len(skills) == 0 {
 		return "No skills discovered. Drop SKILL.md bundles under .agents/skills/<name>/ to expose them to the agent."
 	}
@@ -815,7 +815,7 @@ func (m Model) renderSkillList(skills []SkillInfo) string {
 // model name. Each value falls back to "(unknown)" / "(unset)"
 // rather than zero so the operator can tell "we don't know" from
 // "the value is genuinely zero."
-func (m Model) renderStats() string {
+func (m model) renderStats() string {
 	tracker := m.opts.UsageTracker
 	if tracker == nil {
 		return "/stats: no UsageTracker wired (host did not pass Options.UsageTracker)"
@@ -908,7 +908,7 @@ func formatModelBreakdown(breakdown map[string]UsageByModel) string {
 // gate annotation in muted brackets next to it, indented description
 // underneath, blank line between entries — matches internal/tui's
 // /tools layout so the catalog is scannable.
-func (m Model) renderToolList(tools []ToolInfo) string {
+func (m model) renderToolList(tools []ToolInfo) string {
 	if len(tools) == 0 {
 		return "Agent has no tools registered."
 	}
@@ -1014,7 +1014,7 @@ func truncate(s string, n int) string {
 // be replaced inside one session generation (a /model switch does
 // exactly that), and stage two must reach whichever agent is attached
 // now — or nobody, if the replacement dropped the capability.
-func (m *Model) applySwitchLookup(msg switchLookupMsg) tea.Cmd {
+func (m *model) applySwitchLookup(msg switchLookupMsg) tea.Cmd {
 	if msg.row != nil {
 		if !m.overlayStack.hasID(sessionInputDialogID) {
 			m.overlayStack.open(newSessionInputDialog(*msg.row))
@@ -1034,7 +1034,7 @@ func (m *Model) applySwitchLookup(msg switchLookupMsg) tea.Cmd {
 // off-loop /reload path). Called only after the sessionGen guard has
 // passed — like SwitchModel it can replace m.opts.Agent, so a reply
 // that outlived its session must not land.
-func (m *Model) applyReload(msg reloadDoneMsg) {
+func (m *model) applyReload(msg reloadDoneMsg) {
 	if msg.err != nil {
 		m.history.Append(Message{Role: RoleError, Text: "/reload: " + msg.err.Error()})
 		m.refreshAndScroll()

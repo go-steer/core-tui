@@ -29,10 +29,10 @@ import (
 
 // elicitStringForm returns a one-field string form, ready for Key.
 //
-// No Model, no NewModel, no resize. Driving a question to completion
+// No model, no NewModel, no resize. Driving a question to completion
 // without an app model is the property #164 was for, and these four
 // tests are the first to spend it — the predecessor needed a
-// fully-built Model because the form's state lived on one.
+// fully-built model because the form's state lived on one.
 //
 // Keystrokes go through keyMsgFromStroke rather than being handed to
 // the widget as raw strings, because a question reads tea.KeyPressMsg
@@ -142,7 +142,7 @@ func TestElicitKey_SeededDefaultRoundTrips(t *testing.T) {
 // on. The commit keys are still inside modalInputGrace — call
 // pastGrace before pressing one, except in the test that is about the
 // window itself.
-func elicitFlowFor(t *testing.T, req ElicitRequest) (Model, chan ElicitResult) {
+func elicitFlowFor(t *testing.T, req ElicitRequest) (model, chan ElicitResult) {
 	t.Helper()
 	e := NewElicitor().(*elicitor)
 	results := make(chan ElicitResult, 1)
@@ -154,11 +154,11 @@ func elicitFlowFor(t *testing.T, req ElicitRequest) (Model, chan ElicitResult) {
 		t.Fatal("setup: nextRequest returned !ok with a pending request")
 	}
 
-	m := NewModel(Options{Elicitor: e})
+	m := newModel(Options{Elicitor: e})
 	out, _ := m.Update(tea.WindowSizeMsg{Width: 100, Height: 40})
-	m = out.(Model)
+	m = out.(model)
 	out, _ = m.Update(elicitRequestMsg{serverName: "srv", req: req})
-	m = out.(Model)
+	m = out.(model)
 	if m.openElicit() == nil {
 		t.Fatal("setup: elicitRequestMsg did not open the modal")
 	}
@@ -172,12 +172,12 @@ func elicitFlowFor(t *testing.T, req ElicitRequest) (Model, chan ElicitResult) {
 // stamp belongs to the seam, not to the widget, which is what lets
 // every future agent-opened question inherit the window without
 // writing any of it.
-func pastGrace(m Model) Model { return pastGraceFor(m, elicitDialogID) }
+func pastGrace(m model) model { return pastGraceFor(m, elicitDialogID) }
 
 // pastGraceFor is pastGrace for any question on the stack — the same
 // backdating, reached by id, because the window belongs to the seam
 // and every agent-opened question inherits it.
-func pastGraceFor(m Model, id string) Model {
+func pastGraceFor(m model, id string) model {
 	if aq := m.overlayStack.asked(id); aq != nil {
 		aq.shownAt = time.Now().Add(-modalInputGrace - time.Millisecond)
 	}
@@ -209,7 +209,7 @@ func TestElicitForm_DeclinesOnCtrlD(t *testing.T) {
 	m = typeWord(m, "ada")
 
 	out, cmd := m.Update(keyPress("ctrl+d"))
-	m = out.(Model)
+	m = out.(model)
 	if m.openElicit() != nil {
 		t.Fatal("ctrl+d left the modal open — the form still has no reachable decline")
 	}
@@ -249,7 +249,7 @@ func TestElicitForm_DeclineAndCancelAreDifferentAnswers(t *testing.T) {
 			m = pastGrace(m)
 
 			out, _ := m.Update(keyPress(tc.stroke))
-			m = out.(Model)
+			m = out.(model)
 			if m.openElicit() != nil {
 				t.Fatalf("%s left the modal open", tc.stroke)
 			}
@@ -275,7 +275,7 @@ func TestElicitForm_DeclineSkipsRequiredFieldValidation(t *testing.T) {
 	m, results := elicitFlowFor(t, req)
 	m = pastGrace(m)
 	out, _ := m.Update(keyPress("enter"))
-	m = out.(Model)
+	m = out.(model)
 	if m.openElicit() == nil {
 		t.Fatal("precondition: Enter submitted with the required field empty")
 	}
@@ -284,7 +284,7 @@ func TestElicitForm_DeclineSkipsRequiredFieldValidation(t *testing.T) {
 	}
 
 	out, _ = m.Update(keyPress("ctrl+d"))
-	m = out.(Model)
+	m = out.(model)
 	if m.openElicit() != nil {
 		t.Fatal("ctrl+d was refused on a form with an empty required field — " +
 			"validation gates submission, not declining")
@@ -308,7 +308,7 @@ func TestElicitForm_DeclineIsHeldDuringTheGraceWindow(t *testing.T) {
 	}
 
 	out, _ := m.Update(keyPress("ctrl+d"))
-	m = out.(Model)
+	m = out.(model)
 	if m.openElicit() == nil {
 		t.Fatal("ctrl+d declined inside the grace window")
 	}
@@ -320,7 +320,7 @@ func TestElicitForm_DeclineIsHeldDuringTheGraceWindow(t *testing.T) {
 
 	m = pastGrace(m)
 	out, _ = m.Update(keyPress("ctrl+d"))
-	m = out.(Model)
+	m = out.(model)
 	if m.openElicit() != nil {
 		t.Fatal("ctrl+d after the grace window did not decline")
 	}
@@ -375,7 +375,7 @@ func TestElicitModal_AdvertisesTheKeysItHonors(t *testing.T) {
 			}
 
 			out, _ := m.Update(keyPress(tc.stroke))
-			m = out.(Model)
+			m = out.(model)
 			if got := awaitElicit(t, results).Action; got != ElicitActionDecline {
 				t.Errorf("the advertised decline key %q dispatched %v, want Decline",
 					tc.stroke, got)
@@ -404,7 +404,7 @@ func TestElicitURLMode_ActionRow(t *testing.T) {
 			m = pastGrace(m)
 
 			out, _ := m.Update(keyPress(tc.stroke))
-			m = out.(Model)
+			m = out.(model)
 			if m.openElicit() != nil {
 				t.Fatalf("%s left the modal open", tc.stroke)
 			}
@@ -429,7 +429,7 @@ type elicitReply struct {
 // hands it a request the modal cannot draw, the way an MCP server
 // would. It deliberately does NOT use elicitFlowFor, which asserts a
 // modal opened: not opening one is the behaviour under test.
-func unsupportedElicitFlow(t *testing.T, req ElicitRequest, server string) (Model, chan elicitReply, tea.Cmd) {
+func unsupportedElicitFlow(t *testing.T, req ElicitRequest, server string) (model, chan elicitReply, tea.Cmd) {
 	t.Helper()
 	e := NewElicitor().(*elicitor)
 	replies := make(chan elicitReply, 1)
@@ -440,11 +440,11 @@ func unsupportedElicitFlow(t *testing.T, req ElicitRequest, server string) (Mode
 	if _, ok := e.nextRequest(context.Background()); !ok {
 		t.Fatal("setup: nextRequest returned !ok with a pending request")
 	}
-	m := NewModel(Options{Elicitor: e})
+	m := newModel(Options{Elicitor: e})
 	out, _ := m.Update(tea.WindowSizeMsg{Width: 100, Height: 40})
-	m = out.(Model)
+	m = out.(model)
 	out, cmd := m.Update(elicitRequestMsg{serverName: server, req: req})
-	return out.(Model), replies, cmd
+	return out.(model), replies, cmd
 }
 
 // awaitElicitReply is awaitElicit for the unsupported path, where the
@@ -656,7 +656,7 @@ func TestElicit_HostsCanMatchTheUnsupportedSentinel(t *testing.T) {
 
 // lastSystemRow returns the text of the transcript's final RoleSystem
 // message.
-func lastSystemRow(t *testing.T, m Model) string {
+func lastSystemRow(t *testing.T, m model) string {
 	t.Helper()
 	msgs := m.history.Snapshot()
 	for i := len(msgs) - 1; i >= 0; i-- {

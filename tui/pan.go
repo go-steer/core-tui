@@ -77,7 +77,7 @@ const chatPanStep = 8
 // chatPanBy moves the window sideways, clamped at both ends: never
 // left of column zero, never further right than the widest line
 // currently on screen.
-func (m *Model) chatPanBy(cols int) {
+func (m *model) chatPanBy(cols int) {
 	if cols == 0 {
 		return
 	}
@@ -87,7 +87,7 @@ func (m *Model) chatPanBy(cols int) {
 // chatResetPan returns the window to the left edge. Called wherever
 // the thing being panned is no longer the thing that was panned: a
 // selection move, a resize.
-func (m *Model) chatResetPan() { m.chatX = 0 }
+func (m *model) chatResetPan() { m.chatX = 0 }
 
 // chatMaxPan is how far right there is anything to see: the widest
 // line in the window, less the window.
@@ -98,7 +98,7 @@ func (m *Model) chatResetPan() { m.chatX = 0 }
 // lines are measured too, and that is the harmless direction: the
 // operator can pan to a blank column and press the other arrow, which
 // is not true of a limit that stops short of real content.
-func (m *Model) chatMaxPan() int {
+func (m *model) chatMaxPan() int {
 	width := m.viewport.Width()
 	if width <= 0 {
 		return 0

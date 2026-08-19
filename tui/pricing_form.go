@@ -18,7 +18,7 @@
 // (or /pricing set with no args). On submit the form dispatches
 // PricingController.Set; on cancel it closes.
 //
-// The form is held as a top-level Model.pendingForm field rather
+// The form is held as a top-level model.pendingForm field rather
 // than going through the dialog overlay because huh.Form needs
 // every tea.Msg (KeyPressMsg, WindowSizeMsg, ticks). dialog's
 // keystroke-only HandleKey can't carry that. A future PR will
@@ -107,7 +107,7 @@ func validatePositiveFloat(s string) error {
 // individual fields don't bind Esc as an abort. We pre-empt the
 // Esc keystroke so the form behaves like every other TUI modal
 // (Esc cancels).
-func (m *Model) updatePricingForm(msg tea.Msg) tea.Cmd {
+func (m *model) updatePricingForm(msg tea.Msg) tea.Cmd {
 	if m.pendingForm == nil {
 		return nil
 	}
