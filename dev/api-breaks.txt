@@ -36,3 +36,15 @@
 # reasoning in docs/decisions.md D18a.
 ./tui.Model: removed
 ./tui.NewModel: changed from func(Options) Model to func(Options) charm.land/bubbletea/v2.Model
+
+# #260: the toy daemon's interrupt call learned the pause gate. It has to
+# say whether it wants the hold, and its answer has to distinguish "a turn
+# was cancelled" from "the loop is parked" — a bare bool cannot carry both,
+# and at protocol 1.5.0 an interrupt that cancelled nothing but shut the
+# gate is a success rather than the "no turn in flight" error it used to
+# be. Nothing outside examples/core-agent can call this: fakehost is the
+# stand-in that lets the adapter sketch compile without depending on the
+# real core-agent module, and it promises nothing, the same way
+# tui/testagent does. It is in this file only because the apidiff gate
+# walks every package in the module, which is the behaviour we want.
+./examples/core-agent/fakehost.(*Client).Interrupt: changed from func(context.Context, string) (bool, error) to func(context.Context, string, bool) (InterruptResult, error)

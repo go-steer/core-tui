@@ -1836,6 +1836,9 @@ func (m model) handleKey(msg tea.KeyPressMsg) (tea.Model, tea.Cmd) {
 				})
 				m.refreshAndScroll()
 				return m, nil
+			case midTurnQueue:
+				// Fall through to the paused / streaming arms
+				// below, which is where queueing lives.
 			}
 		}
 		// Paused: typed text is a steer, not a new turn (R-HOLD-4).
