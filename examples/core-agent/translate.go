@@ -62,6 +62,21 @@ func translateEvent(ev *fakehost.Event, model string) tui.Event {
 	return te
 }
 
+// translatePause maps a gate transition onto the one tui.Event field
+// core-tui watches for it. It is a whole Event with nothing else set,
+// which is exactly right: a pause is not something the agent SAID, so
+// it must not carry text into the transcript — core-tui writes its
+// own system row off the event.
+func translatePause(pe *fakehost.PauseEvent) tui.Event {
+	return tui.Event{Pause: &tui.PauseEvent{
+		State:       pe.State,
+		Reason:      pe.Reason,
+		Interrupted: pe.Interrupted,
+		Mode:        pe.Mode,
+		At:          pe.At,
+	}}
+}
+
 // translateSubagentTurns maps the host's recorded background-agent
 // turns onto the page tui.SubagentReporter.SubagentEvents returns.
 // Both flavors share it — local reads the turns in process, attach

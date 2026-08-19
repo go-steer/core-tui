@@ -73,12 +73,19 @@ var (
 //     attach flavor is where it earns its keep.
 //   - LiveAgent — the in-process agent is per-turn by construction.
 //     See attach.go for the observer-mode side.
+//   - Pauser — a hold means "no new turn starts until you resume",
+//     and in a per-turn host nothing starts a turn but the operator
+//     pressing enter. There is nothing to hold back, and a steer
+//     would have no loop to redirect. Skipping it here is also what
+//     makes this binary exercise both sides of the capability:
+//     /continue against the local flavor degrades to "the agent
+//     doesn't implement Pauser".
 //   - SessionSwitcher — one process, one session.
 //   - AsyncSlashProvider — the async variant is exercised in
 //     attach.go, where the latency that motivates it is real.
 //
-// This file satisfies 13 interfaces; attach.go adds 4 more it
-// doesn't share, for 17 of the plug-in surface between them. The
+// This file satisfies 13 interfaces; attach.go adds 5 more it
+// doesn't share, for 18 of the plug-in surface between them. The
 // distance between "the required agent surface is tiny" (design.md
 // §1 goal 3) and what a real host ends up writing is the input this
 // example owes issue #77.

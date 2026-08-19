@@ -44,6 +44,7 @@ type attachAdapter struct {
 	lastSeq  int64
 	status   fakehost.StatusInfo
 	usage    fakehost.UsageInfo
+	pause    fakehost.PauseInfo
 	polledAt time.Time
 }
 
@@ -62,6 +63,7 @@ var (
 	_ tui.LiveAgent          = attachObserver{}
 	_ tui.InjectableAgent    = (*attachAdapter)(nil)
 	_ tui.RemoteInterrupter  = (*attachAdapter)(nil)
+	_ tui.Pauser             = (*attachAdapter)(nil)
 	_ tui.ToolLister         = (*attachAdapter)(nil)
 	_ tui.SubagentReporter   = (*attachAdapter)(nil)
 	_ tui.StatusReporter     = (*attachAdapter)(nil)
@@ -104,6 +106,13 @@ func (a *attachAdapter) Run(ctx context.Context, prompt string) iter.Seq2[tui.Ev
 		model := a.Status().ModelName
 		for f := range frames {
 			a.advance(f.Seq)
+			if f.Pause != nil {
+				a.invalidate() // the cached gate state just moved
+				if !yield(translatePause(f.Pause), nil) {
+					return
+				}
+				continue
+			}
 			if f.Event == nil {
 				continue
 			}
@@ -167,6 +176,13 @@ func (o attachObserver) Events(ctx context.Context) iter.Seq2[tui.Event, error] 
 			model := a.Status().ModelName
 			for f := range frames {
 				a.advance(f.Seq)
+				if f.Pause != nil {
+					a.invalidate()
+					if !yield(translatePause(f.Pause), nil) {
+						return
+					}
+					continue
+				}
 				if f.Event == nil {
 					continue
 				}
@@ -194,15 +210,65 @@ func (a *attachAdapter) Inject(message string) error {
 // no local context for core-tui to cancel, so /interrupt has to go
 // over the wire. Note the signature difference from core-agent's own
 // `Agent.Interrupt() bool` — the adapter absorbs it.
+//
+// It asks for the hold as well, which is the 1.5.0 default. Cancel
+// alone is a turn's worth of pause on a daemon that will just start
+// the next one; only the gate gives the operator time to think. So
+// an interrupt that cancelled nothing but parked the loop is a
+// success, not the "no turn in flight" error it used to be.
 func (a *attachAdapter) Interrupt(ctx context.Context) error {
-	cancelled, err := a.client.Interrupt(ctx, a.sessionPath)
+	res, err := a.client.Interrupt(ctx, a.sessionPath, true)
 	if err != nil {
 		return err
 	}
-	if !cancelled {
-		return errors.New("daemon reported no turn in flight")
+	if !res.Cancelled && !res.Held {
+		return errors.New("daemon reported no turn in flight and no hold")
 	}
+	a.invalidate()
 	return nil
+}
+
+// Pause / Resume / PauseState implement tui.Pauser, the operator
+// hold. Attach mode is where it earns its keep: the daemon's loop
+// keeps starting turns whether or not anyone is watching, so
+// cancelling one turn only buys the operator a moment. The gate is
+// what actually stops the next one.
+func (a *attachAdapter) Pause(ctx context.Context, reason string) error {
+	_, err := a.client.Pause(ctx, a.sessionPath, reason)
+	if err == nil {
+		// The gate moved, so the cached poll is stale — and this one
+		// is read by the banner, not just by the status header.
+		a.invalidate()
+	}
+	return err
+}
+
+// Resume carries the disposition through untranslated: core-tui's
+// ResumeMode* constants and the daemon's are the same three strings,
+// which is the point of both sides naming them rather than inventing
+// enums.
+func (a *attachAdapter) Resume(ctx context.Context, req tui.ResumeRequest) error {
+	err := a.client.Resume(ctx, a.sessionPath, req.Mode, req.Steer)
+	if err == nil {
+		a.invalidate()
+	}
+	return err
+}
+
+// PauseState serves the gate off the cached poll for the same reason
+// Status does: core-tui calls it from an off-loop refresh at 1Hz and
+// the contract says cheap and non-blocking, so a round trip here
+// would put the network on the render path's doorstep.
+func (a *attachAdapter) PauseState() tui.PauseInfo {
+	a.poll()
+	a.mu.Lock()
+	defer a.mu.Unlock()
+	return tui.PauseInfo{
+		Paused:      a.pause.Paused,
+		Since:       a.pause.Since,
+		Reason:      a.pause.Reason,
+		Interrupted: a.pause.Interrupted,
+	}
 }
 
 // Tools implements tui.ToolLister over one round trip.
@@ -446,6 +512,7 @@ func (a *attachAdapter) poll() {
 	defer cancel()
 	status, statusErr := a.client.Status(ctx, a.sessionPath)
 	usage, usageErr := a.client.Usage(ctx, a.sessionPath)
+	pause, pauseErr := a.client.PauseState(ctx, a.sessionPath)
 
 	a.mu.Lock()
 	defer a.mu.Unlock()
@@ -454,5 +521,8 @@ func (a *attachAdapter) poll() {
 	}
 	if usageErr == nil {
 		a.usage = usage
+	}
+	if pauseErr == nil {
+		a.pause = pause
 	}
 }

@@ -359,6 +359,91 @@ func TestAttachObserverEventsSeeInjectedTurn(t *testing.T) {
 	}
 }
 
+// TestAttachPauseHoldsTheLoopAndSteers is the operator hold end to
+// end: the gate goes up, the stream says so, a steer opens it, and
+// the turn that follows is the steered one rather than whatever the
+// daemon was about to do.
+//
+// The steer arriving as a turn is the part worth pinning. It is what
+// separates a hold from a cancel — an operator who is told "no new
+// turn starts until you resume" has to be able to make the next turn
+// the one they wanted.
+func TestAttachPauseHoldsTheLoopAndSteers(t *testing.T) {
+	a := startDaemon(t)
+	ctx, cancel := context.WithTimeout(t.Context(), 30*time.Second)
+	defer cancel()
+
+	type seen struct {
+		states []string
+		text   string
+	}
+	done := make(chan seen, 1)
+	go func() {
+		var s seen
+		for ev, err := range (attachObserver{attachAdapter: a}).Events(ctx) {
+			if err != nil {
+				continue
+			}
+			if ev.Pause != nil {
+				s.states = append(s.states, ev.Pause.State)
+				continue
+			}
+			if !ev.Partial && ev.Text != "" {
+				s.text = ev.Text
+				done <- s
+				return
+			}
+		}
+		done <- s
+	}()
+	time.Sleep(200 * time.Millisecond)
+
+	if err := a.Pause(ctx, "operator wants a word"); err != nil {
+		t.Fatalf("Pause: %v", err)
+	}
+	if got := a.PauseState(); !got.Paused || got.Reason != "operator wants a word" {
+		t.Fatalf("PauseState() = %+v, want the gate shut with the reason carried", got)
+	}
+	// A turn started while held must not produce anything: Run blocks
+	// on the gate before it spends a token. This is the hang the TUI
+	// avoids by routing enter to Resume instead of submitting.
+	if err := a.Inject("this should wait"); err != nil {
+		t.Fatalf("Inject while held: %v", err)
+	}
+	time.Sleep(300 * time.Millisecond)
+	if a.SessionTurns() != 0 {
+		t.Errorf("a turn ran while the agent was held: SessionTurns() = %d", a.SessionTurns())
+	}
+
+	if err := a.Resume(ctx, tui.ResumeRequest{
+		Mode:  tui.ResumeModeSteer,
+		Steer: "forget that, check the database instead",
+	}); err != nil {
+		t.Fatalf("Resume(steer): %v", err)
+	}
+
+	select {
+	case s := <-done:
+		if len(s.states) != 2 ||
+			s.states[0] != fakehost.PauseStatePaused ||
+			s.states[1] != fakehost.PauseStateResumed {
+			t.Errorf("observer saw pause states %q, want paused then resumed", s.states)
+		}
+		if !strings.Contains(s.text, "replicas") {
+			t.Errorf("the steered turn never landed: %q", s.text)
+		}
+	case <-ctx.Done():
+		t.Fatal("the steer never produced a turn")
+	}
+
+	// The parked turn adopted the steer; it did not run alongside a
+	// second one started for it.
+	time.Sleep(300 * time.Millisecond)
+	if got := a.SessionTurns(); got != 1 {
+		t.Errorf("SessionTurns() = %d after one steer, want 1", got)
+	}
+}
+
 func TestAttachSubagentEvents(t *testing.T) {
 	a := startDaemon(t)
 
@@ -458,9 +543,24 @@ func TestAttachAsyncSlashAndInterrupt(t *testing.T) {
 		t.Error("an unknown command should still deliver on the channel")
 	}
 
-	// Nothing running: the daemon says so, and the adapter turns
-	// that into an error rather than a silent no-op.
-	if err := a.Interrupt(t.Context()); err == nil {
-		t.Error("Interrupt with no turn in flight should report as much")
+	// Nothing running, and the interrupt still succeeds: it holds
+	// the loop. That is the 1.5.0 behaviour the operator wants —
+	// esc between two daemon-driven turns has to stop the next one,
+	// not report that it was a moment too late.
+	if err := a.Interrupt(t.Context()); err != nil {
+		t.Errorf("Interrupt on an idle session: %v", err)
+	}
+	// Interrupted stays false: nothing was killed, because nothing
+	// was running. That distinction is the whole reason the field
+	// exists — the banner asks a different question in each case.
+	if got := a.PauseState(); !got.Paused || got.Interrupted || got.Reason == "" {
+		t.Errorf("PauseState() = %+v after interrupting an idle session, want the "+
+			"gate shut with a reason and nothing reported killed", got)
+	}
+	if err := a.Resume(t.Context(), tui.ResumeRequest{Mode: tui.ResumeModeAbandon}); err != nil {
+		t.Fatalf("Resume(abandon): %v", err)
+	}
+	if got := a.PauseState(); got.Paused {
+		t.Errorf("PauseState() = %+v after a resume, want the gate open", got)
 	}
 }

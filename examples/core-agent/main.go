@@ -189,7 +189,8 @@ func runAttach(ctx context.Context, observer bool) error {
 			Role: tui.RoleSystem,
 			Text: "core-agent adapter sketch — ATTACH flavor (" + mode + "), talking to a " +
 				"throwaway daemon at " + daemon.URL() + " over real HTTP + SSE. Capabilities " +
-				"wired: /tools /subagents /switch /interrupt /btw /stats. /model /reload " +
+				"wired: /tools /subagents /switch /interrupt /pause /continue /abandon /btw " +
+				"/stats — esc holds the daemon's loop, and typing steers it. /model /reload " +
 				"/permissions /pricing are deliberately absent — the attach API has no RPCs " +
 				"behind them, so they degrade to \"not available\", which is the graceful " +
 				"path the capability design promises.",
