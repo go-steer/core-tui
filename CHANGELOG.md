@@ -25,6 +25,14 @@ The wire protocol in [`docs/sse-event-stream-protocol.md`](./docs/sse-event-stre
 
 ## [Unreleased]
 
+## [0.23.0] — 2026-08-20
+
+Esc means stop and wait. The key has always implied it and never delivered it: against a daemon-driven loop it was a no-op, and every slash typed during a turn — including `/interrupt`, the one that only makes sense during a turn — was swallowed and queued as literal prose. A host that implements the new optional `Pauser` capability now gets the whole reflex. The agent stops, a banner above the input says whether your work was killed or the loop is merely parked and how many background subagents are still going, and there are three ways out: type to steer, `/continue` to carry on, `/abandon` to drop it. Held is not idle — an idle agent picks up the next queued prompt on its own and a held one starts nothing until you say so — and the banner exists because that distinction is invisible otherwise. Hosts without `Pauser` are unchanged.
+
+The feature was hand-tested in a real terminal before it shipped, and that turned up six defects in six sittings, five of them after the first PR had already landed with a green suite. Three belong to one family: a capability implemented, asserted by the example's compile-time canary, and reachable from nothing. `AsyncSlashProvider` alone had no slash surface because every listing path asked for `SlashProvider` by name, so `/btw` had never once worked in attach mode. The slash palette had an Enter of its own that dispatched before the submit path ran, so the mid-turn routing governed a line pasted whole and almost nothing typed by hand. And `Pauser` and `RemoteInterrupter` were treated as alternatives with `Pauser` winning, so on a host implementing both — which the reference host is — the remote cancel was never called, and Esc reported a hold while the daemon kept working. In each case the tests missed it by using a stub shaped the one way that worked. The lesson is written into the tests rather than a comment: the missing host shapes now exist as fixtures, and every one of the new cases fails on the code it replaced.
+
+Two other things settle here. `Model` is unexported and `NewModel` returns `tea.Model` — the last exported type whose fate was a break either way, so it had to be decided before the freeze rather than after it, and the migration recipe is in MIGRATION.md §7. And the wire protocol document, which had sat at 1.4.0 while the reference host shipped three bumps, is caught up to 1.7.0 with `pause` and `wake` specified for the first time. With that, [the v1.0 milestone](https://github.com/go-steer/core-tui/milestone/1) is empty: what remains before the API freezes is the reference host's migration onto this surface.
+
 ### Added
 
 - **A saved session can be resumed at startup, through `Run`** ([#115](https://github.com/go-steer/core-tui/issues/115)). `Options.Transcript` takes a `Transcript` — load one with `LoadTranscript` — and its messages replace the chat history before the first render, with assistant markdown rendered the same way `/resume` renders it mid-session. This is a capability hosts did not have: the only way to apply a loaded transcript used to be `Model.ApplyTranscript`, which meant owning the `tea.Program` yourself, so "core-agent --resume <id>" cost you the program lifecycle to buy the history. `Options.SeedHistory` was never the substitute it looks like — it appends messages raw, and `view.go` word-wraps assistant text that carries no `Rendered` instead of running Glamour, so a resume through it silently loses every heading, list and code fence. Both fields are documented in terms of the other now, and if both are set the transcript is applied first, because applying one resets the history and the other order would have eaten the seed without saying so.
@@ -661,7 +669,8 @@ Initial release: `package tui` extracted from the duplicated `internal/tui` tree
 - **Performance and terminal-fidelity work** — incremental Glamour streaming, an auto-growing textarea, hanging-indent word wrap that preserves source leading whitespace, and the viewport's `h`/`j`/`k`/`l`/arrow bindings disabled with `xOffset` pinned to 0 so a wide line can't shift the whole chat sideways.
 - **The docs that govern all of it** — `docs/requirements.md`, `docs/design.md`, `docs/decisions.md`, `docs/style.md`, `docs/ui-references.md`, and `MIGRATION.md`.
 
-[Unreleased]: https://github.com/go-steer/core-tui/compare/v0.22.0...HEAD
+[Unreleased]: https://github.com/go-steer/core-tui/compare/v0.23.0...HEAD
+[0.23.0]: https://github.com/go-steer/core-tui/compare/v0.22.0...v0.23.0
 [0.22.0]: https://github.com/go-steer/core-tui/compare/v0.21.0...v0.22.0
 [0.21.0]: https://github.com/go-steer/core-tui/compare/v0.20.0...v0.21.0
 [0.20.0]: https://github.com/go-steer/core-tui/compare/v0.19.0...v0.20.0
