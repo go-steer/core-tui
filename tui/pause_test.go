@@ -193,6 +193,25 @@ func TestPausePoll_SettleWindowProtectsAFreshTransition(t *testing.T) {
 	if _, changed := steady.applyPoll(stale, base.Add(time.Hour)); changed {
 		t.Error("an agreeing poll reported a change")
 	}
+
+	// And a poll-applied transition must not arm the window at all.
+	// Only one poll is ever in flight (host_snapshot.go), so there is
+	// no poll-against-poll race to protect — while arming it would
+	// blind a poll-driven host for two seconds after every transition,
+	// which at a one-second cadence is most of them. The operator
+	// symptom is a /abandon whose row never arrives.
+	fresh := pauseInfo{}
+	held, changed := fresh.applyPoll(stale, base)
+	if !changed || !held.Paused {
+		t.Fatalf("first poll did not apply: changed=%v paused=%v", changed, held.Paused)
+	}
+	if !held.appliedAt.IsZero() {
+		t.Error("a poll armed the settle window; only a push may")
+	}
+	released, changed := held.applyPoll(PauseInfo{}, base.Add(time.Second))
+	if !changed || released.Paused {
+		t.Error("the next poll one second later was swallowed by a window a poll had armed")
+	}
 }
 
 // TestPausePoll_AttachToAnAlreadyPausedSession pins why PauseState
@@ -706,5 +725,143 @@ func TestEnterWhilePaused_PerTurnResumeFailureHandsTheTextBack(t *testing.T) {
 	}
 	if _, calls := agent.ran(); calls != 0 {
 		t.Error("a turn started even though the gate never opened")
+	}
+}
+
+// pollGate drives one host-snapshot tick through Update, the way the
+// off-loop cache actually feeds the gate state in.
+func pollGate(t *testing.T, m model, agent Pauser) model {
+	t.Helper()
+	snap := pullHostSnapshot(nil, nil, nil, agent)
+	out, _ := m.Update(hostSnapshotMsg{gen: m.sessionGen, snap: snap})
+	return out.(model)
+}
+
+// systemRows returns the transcript's RoleSystem texts, which is where
+// every gate transition is narrated.
+func systemRows(m model) []string {
+	var out []string
+	for _, row := range m.history.Snapshot() {
+		if row.Role == RoleSystem {
+			out = append(out, row.Text)
+		}
+	}
+	return out
+}
+
+// TestPausePoll_NarratesOnAPerTurnHost. The transcript row used to be
+// appended only from the pause event, which on a per-turn host arrives
+// as part of a backlog replayed into whichever turn opens a
+// subscription next — so an operator who held and abandoned between
+// turns got a banner that came and went with nothing in the
+// transcript, and then the whole history at once under their next
+// prompt. The poll is the only timely source there, so it narrates.
+func TestPausePoll_NarratesOnAPerTurnHost(t *testing.T) {
+	agent := &perTurnPausable{}
+	m := newModel(Options{Agent: agent})
+	m.width, m.height = 100, 40
+	if m.liveMode {
+		t.Fatal("perTurnPausable was detected as a LiveAgent")
+	}
+
+	agent.setState(PauseInfo{Paused: true, Reason: "operator interrupt", Interrupted: true})
+	held := pollGate(t, m, agent)
+	if !held.pause.paused() {
+		t.Fatal("the poll did not apply the hold")
+	}
+	rows := systemRows(held)
+	if len(rows) != 1 || !strings.Contains(rows[0], "Interrupted") {
+		t.Fatalf("system rows after the poll saw a hold = %q, want one interrupted row", rows)
+	}
+
+	// /abandon: the host acks, then the poll observes the open gate.
+	// PauseState carries no mode, so the row can only name the
+	// disposition because resumeDoneMsg remembered what we asked for.
+	out, _ := held.Update(resumeDoneMsg{mode: ResumeModeAbandon})
+	acked := out.(model)
+	if got := len(systemRows(acked)); got != 1 {
+		t.Errorf("the ack itself narrated (%d rows); the host is the source of truth", got)
+	}
+	agent.setState(PauseInfo{})
+	released := pollGate(t, acked, agent)
+	if released.pause.paused() {
+		t.Fatal("the poll did not open the gate")
+	}
+	rows = systemRows(released)
+	if len(rows) != 2 || rows[1] != resumedSystemText(ResumeModeAbandon) {
+		t.Fatalf("system rows after the poll saw the release = %q, want the abandon row", rows)
+	}
+	if released.pause.lastResumeMode != "" {
+		t.Error("lastResumeMode outlived the row it was kept for")
+	}
+}
+
+// TestPausePoll_StaysQuietOnALiveHost. A LiveAgent host has a standing
+// Events stream, so its push frame is both immediate and richer than
+// the poll — it carries the mode. Narrating from both would double
+// every row.
+func TestPausePoll_StaysQuietOnALiveHost(t *testing.T) {
+	agent := &pausableAgent{}
+	m := newModel(Options{Agent: agent})
+	m.width, m.height = 100, 40
+	if !m.liveMode {
+		t.Fatal("pausableAgent should be a LiveAgent")
+	}
+
+	agent.setState(PauseInfo{Paused: true, Reason: "operator interrupt"})
+	held := pollGate(t, m, agent)
+	if !held.pause.paused() {
+		t.Fatal("the poll did not apply the hold")
+	}
+	if rows := systemRows(held); len(rows) != 0 {
+		t.Errorf("the poll narrated on a live host = %q; the push owns that", rows)
+	}
+}
+
+// TestPauseEvent_ReplayedBacklogIsSilentOnAPerTurnHost is the
+// regression net on what the operator actually saw: three Esc /
+// abandon cycles between turns produced nothing, and then six rows
+// arrived at once underneath the next prompt.
+//
+// The replay is correct behaviour on the adapter's part — it resumes
+// from a cursor, and those frames really had reached no listener. But
+// the poll has already said all of it, in order, at the time it
+// happened.
+func TestPauseEvent_ReplayedBacklogIsSilentOnAPerTurnHost(t *testing.T) {
+	agent := &perTurnPausable{}
+	m := newModel(Options{Agent: agent})
+	m.width, m.height = 100, 40
+
+	at := time.Unix(1700000000, 0)
+	for i := range 3 {
+		agent.setState(PauseInfo{Paused: true, Reason: "operator interrupt", Interrupted: true})
+		m = pollGate(t, m, agent)
+		out, _ := m.Update(resumeDoneMsg{mode: ResumeModeAbandon})
+		m = out.(model)
+		agent.setState(PauseInfo{})
+		m = pollGate(t, m, agent)
+		if got := len(systemRows(m)); got != 2*(i+1) {
+			t.Fatalf("after %d hold/abandon cycles the transcript has %d rows, want %d", i+1, got, 2*(i+1))
+		}
+	}
+	live := len(systemRows(m))
+
+	// Now the next turn opens a subscription and the daemon replays
+	// every frame it buffered while nobody was listening.
+	for i := range 3 {
+		for _, ev := range []PauseEvent{
+			{State: PauseStatePaused, Reason: "operator interrupt", Interrupted: true, At: at.Add(time.Duration(i) * time.Minute)},
+			{State: PauseStateResumed, Mode: ResumeModeAbandon, At: at.Add(time.Duration(i)*time.Minute + time.Second)},
+		} {
+			out, _ := m.Update(pauseEventMsg{gen: m.sessionGen, event: ev})
+			m = out.(model)
+		}
+	}
+
+	if got := systemRows(m); len(got) != live {
+		t.Errorf("the replayed backlog added %d rows the poll had already narrated:\n%q", len(got)-live, got)
+	}
+	if m.pause.paused() {
+		t.Error("the replay left the gate shut; the last frame was a resume")
 	}
 }

@@ -767,9 +767,24 @@ listed in `/help`:
   contradicting poll for two seconds — long enough that a poll already
   in flight across a resume cannot flip the banner back on — and after
   that the host's answer wins, because it is the truth and a TUI that
-  ignored it would stay wrong forever after a missed event. A TUI
-  attaching to an already-held session renders the banner from the
-  first poll, without waiting for a transition that already happened.
+  ignored it would stay wrong forever after a missed event. Only a
+  push arms that window; a poll-applied transition must not, or a
+  poll-driven host loses every transition landing within two seconds
+  of the last one. A TUI attaching to an already-held session renders
+  the banner from the first poll, without waiting for a transition
+  that already happened.
+- **R-HOLD-6** Exactly one of those two sources narrates a transition
+  into the transcript, chosen by host shape. On a `LiveAgent` host the
+  push does: it is immediate and it is the only one carrying the
+  host's reason, the `interrupted` bit and the resume mode. On a
+  per-turn host the poll does, because between turns no subscription
+  is open and the push frames arrive only later, replayed as a backlog
+  into whichever turn opens one next — narrating those would print the
+  whole history of a hold underneath the unrelated prompt that
+  happened to reopen the stream. The poll has no `mode` field, so the
+  disposition the host last acked is remembered and named in the row;
+  a gate the host reopened on its own is reported as a bare resume,
+  because nobody here chose a disposition.
 
 ## 4. Non-functional Requirements
 
