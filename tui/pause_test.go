@@ -17,6 +17,7 @@ package tui
 import (
 	"context"
 	"errors"
+	"iter"
 	"strings"
 	"sync"
 	"testing"
@@ -26,12 +27,11 @@ import (
 	"charm.land/lipgloss/v2"
 )
 
-// pausableAgent implements Agent + Pauser. Records every call so the
-// tests can pin which disposition reached the host — the whole point
-// of /continue vs /abandon is that they arrive as different modes.
-type pausableAgent struct {
-	liveAgentStub
-
+// pauseRecorder is the Pauser half on its own, so it can be bolted
+// onto a LiveAgent host and a per-turn one alike — which host shape a
+// Pauser sits on decides what Enter does while held, so both have to
+// be constructible.
+type pauseRecorder struct {
 	mu          sync.Mutex
 	pauseCalls  []string
 	resumeCalls []ResumeRequest
@@ -40,39 +40,48 @@ type pausableAgent struct {
 	resumeErr   error
 }
 
-func (a *pausableAgent) Pause(_ context.Context, reason string) error {
+// pausableAgent implements Agent + LiveAgent + Pauser. Records every
+// call so the tests can pin which disposition reached the host — the
+// whole point of /continue vs /abandon is that they arrive as
+// different modes.
+type pausableAgent struct {
+	liveAgentStub
+	pauseRecorder
+}
+
+func (a *pauseRecorder) Pause(_ context.Context, reason string) error {
 	a.mu.Lock()
 	defer a.mu.Unlock()
 	a.pauseCalls = append(a.pauseCalls, reason)
 	return a.pauseErr
 }
 
-func (a *pausableAgent) Resume(_ context.Context, req ResumeRequest) error {
+func (a *pauseRecorder) Resume(_ context.Context, req ResumeRequest) error {
 	a.mu.Lock()
 	defer a.mu.Unlock()
 	a.resumeCalls = append(a.resumeCalls, req)
 	return a.resumeErr
 }
 
-func (a *pausableAgent) PauseState() PauseInfo {
+func (a *pauseRecorder) PauseState() PauseInfo {
 	a.mu.Lock()
 	defer a.mu.Unlock()
 	return a.state
 }
 
-func (a *pausableAgent) setState(info PauseInfo) {
+func (a *pauseRecorder) setState(info PauseInfo) {
 	a.mu.Lock()
 	defer a.mu.Unlock()
 	a.state = info
 }
 
-func (a *pausableAgent) pauses() []string {
+func (a *pauseRecorder) pauses() []string {
 	a.mu.Lock()
 	defer a.mu.Unlock()
 	return append([]string(nil), a.pauseCalls...)
 }
 
-func (a *pausableAgent) resumes() []ResumeRequest {
+func (a *pauseRecorder) resumes() []ResumeRequest {
 	a.mu.Lock()
 	defer a.mu.Unlock()
 	return append([]ResumeRequest(nil), a.resumeCalls...)
@@ -566,5 +575,136 @@ func TestPauseBanner_IsBudgetedWhenTheGateMoves(t *testing.T) {
 				t.Error("the held footer is missing — the frame overflowed and clipFrame took it")
 			}
 		})
+	}
+}
+
+// perTurnPausable is a Pauser on a host that does NOT drive its own
+// loop: Agent.Run and nothing else. Deliberately no Events method —
+// that is the distinction under test, and adding one would make
+// core-tui bypass Run entirely.
+type perTurnPausable struct {
+	pauseRecorder
+
+	runMu     sync.Mutex
+	runPrompt string
+	runCalls  int
+}
+
+func (a *perTurnPausable) Run(_ context.Context, prompt string) iter.Seq2[Event, error] {
+	a.runMu.Lock()
+	a.runPrompt = prompt
+	a.runCalls++
+	a.runMu.Unlock()
+	return func(_ func(Event, error) bool) {}
+}
+
+func (a *perTurnPausable) ran() (string, int) {
+	a.runMu.Lock()
+	defer a.runMu.Unlock()
+	return a.runPrompt, a.runCalls
+}
+
+// hasOneUserRow reports whether the transcript holds exactly one
+// RoleUser row with this text — "exactly" because one failure mode of
+// the split below is a steer appended twice, once by the held branch
+// and once by submitTurn.
+func hasOneUserRow(m model, text string) bool {
+	n := 0
+	for _, row := range m.history.Snapshot() {
+		if row.Role == RoleUser && row.Text == text {
+			n++
+		}
+	}
+	return n == 1
+}
+
+// TestEnterWhilePaused_PerTurnHostRunsTheSteerItself. On a LiveAgent
+// host the steer goes out as ResumeModeSteer and the host's own loop
+// makes it the next turn, which the standing Events stream shows. A
+// per-turn host has no standing stream: Agent.Run opens a subscription
+// for the turn IT starts and closes it again, so a turn the HOST
+// starts on a steer streams to nobody. The operator sees their prompt
+// land and then silence — which is exactly what `-flavor attach`
+// (per-turn) did, with the daemon's turn counter ticking the whole
+// time.
+//
+// So on a per-turn host the gate opens with ResumeModeAbandon and the
+// client runs the steer itself.
+func TestEnterWhilePaused_PerTurnHostRunsTheSteerItself(t *testing.T) {
+	agent := &perTurnPausable{}
+	m := pausedModel(t, agent, true)
+	if m.liveMode {
+		t.Fatal("perTurnPausable was detected as a LiveAgent — it must not have an Events method")
+	}
+	const steer = "look at the retries instead"
+	m.input.SetValue(steer)
+
+	before := len(m.history.Snapshot())
+	next, cmd := pressKey(m, tea.Key{Code: tea.KeyEnter})
+	if _, calls := agent.ran(); calls != 0 {
+		t.Fatal("the turn started before the gate was open — this is the awaitResume hang")
+	}
+	// No user row yet: submitTurn appends it when the resume lands,
+	// and a row here would double it.
+	if got := len(next.history.Snapshot()); got != before {
+		t.Errorf("history grew by %d before the resume landed, want 0", got-before)
+	}
+	if got := next.input.Value(); got != "" {
+		t.Errorf("input = %q after Enter, want it cleared", got)
+	}
+
+	msg := runCmd(t, cmd)
+	done, ok := msg.(resumeDoneMsg)
+	if !ok {
+		t.Fatalf("Enter while held produced %T, want resumeDoneMsg", msg)
+	}
+	if done.mode != ResumeModeAbandon {
+		t.Errorf("resume mode = %q, want %q — a steer the client will run itself must not "+
+			"ALSO ask the host to run it", done.mode, ResumeModeAbandon)
+	}
+	if done.submit != steer {
+		t.Errorf("resumeDoneMsg.submit = %q, want %q", done.submit, steer)
+	}
+	if calls := agent.resumes(); len(calls) != 1 || calls[0].Steer != "" {
+		t.Errorf("Resume calls = %+v, want one abandon carrying no steer", calls)
+	}
+
+	out, _ := next.Update(done)
+	ran := out.(model)
+	prompt, calls := agent.ran()
+	if calls != 1 || prompt != steer {
+		t.Fatalf("Run called %d time(s) with %q, want once with the steer", calls, prompt)
+	}
+	if ran.state != stateStreaming {
+		t.Errorf("state = %v after the steered turn started, want stateStreaming", ran.state)
+	}
+	if !hasOneUserRow(ran, steer) {
+		t.Errorf("want exactly one user row carrying the steer, got %+v", ran.history.Snapshot())
+	}
+}
+
+// TestEnterWhilePaused_PerTurnResumeFailureHandsTheTextBack. The box
+// was cleared on the keystroke, but a refused resume means no turn is
+// coming to carry the text. Losing it would make the operator retype
+// a steer they already committed to.
+func TestEnterWhilePaused_PerTurnResumeFailureHandsTheTextBack(t *testing.T) {
+	agent := &perTurnPausable{}
+	agent.resumeErr = errors.New("gate already open")
+	m := pausedModel(t, agent, true)
+	const steer = "look at the retries instead"
+	m.input.SetValue(steer)
+
+	next, cmd := pressKey(m, tea.Key{Code: tea.KeyEnter})
+	out, _ := next.Update(runCmd(t, cmd))
+	failed := out.(model)
+
+	if got := failed.input.Value(); got != steer {
+		t.Errorf("input = %q after a refused resume, want the steer back", got)
+	}
+	if got := lastText(failed); !strings.Contains(got, "gate already open") {
+		t.Errorf("failed resume row = %q", got)
+	}
+	if _, calls := agent.ran(); calls != 0 {
+		t.Error("a turn started even though the gate never opened")
 	}
 }

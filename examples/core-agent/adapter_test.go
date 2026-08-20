@@ -564,3 +564,44 @@ func TestAttachAsyncSlashAndInterrupt(t *testing.T) {
 		t.Errorf("PauseState() = %+v after a resume, want the gate open", got)
 	}
 }
+
+// TestAttachPerTurnSteerIsRunByTheClient is the per-turn half of the
+// hold, and the one that shipped broken: this flavor is the bare
+// adapter, so there is no standing Events stream, and Run's
+// subscription only exists for the duration of a turn Run itself
+// started. A steer that asked the DAEMON to run the turn produced a
+// turn nobody was watching — the daemon's counter ticked and the
+// operator's screen stayed empty.
+//
+// So core-tui opens the gate with abandon and calls Run. That is what
+// this walks: hold, resume-with-nothing, run the operator's text, see
+// the whole turn.
+func TestAttachPerTurnSteerIsRunByTheClient(t *testing.T) {
+	a := startDaemon(t)
+	ctx := t.Context()
+
+	if err := a.Pause(ctx, "operator interrupt"); err != nil {
+		t.Fatalf("Pause: %v", err)
+	}
+	if err := a.Resume(ctx, tui.ResumeRequest{Mode: tui.ResumeModeAbandon}); err != nil {
+		t.Fatalf("Resume(abandon): %v", err)
+	}
+
+	// Run has to see an OPEN gate, or it blocks in the daemon's
+	// awaitResume — which is why the resume is a separate round trip
+	// that has to land first, rather than something batched with it.
+	// Drop the pause frames the cursor replays into this
+	// subscription: they are gate transitions, not turn events, and
+	// assertTurnShape speaks for the turn.
+	var evs []tui.Event
+	for _, ev := range turn(t, a.Run(ctx, "look at the retries instead")) {
+		if ev.Pause == nil {
+			evs = append(evs, ev)
+		}
+	}
+	assertTurnShape(t, evs)
+	if got := a.SessionTurns(); got != 1 {
+		t.Errorf("SessionTurns() = %d, want exactly 1 — the client ran the steer and "+
+			"the daemon must not have run one of its own", got)
+	}
+}

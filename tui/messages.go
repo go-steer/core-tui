@@ -319,9 +319,16 @@ type pauseDoneMsg struct{ err error }
 // attempted when err is non-nil. On success the model waits for the
 // host's resumed PauseEvent (or the next PauseState poll) rather than
 // clearing the gate locally — the host owns the state.
+//
+// submit is the steer a PER-TURN host still has to be handed: on such
+// a host the operator's process owns the turn, so the gate is opened
+// with ResumeModeAbandon and the typed text rides back here to go
+// through submitTurn. Empty on a LiveAgent host, where the steer went
+// out as ResumeModeSteer and the host's own loop runs it.
 type resumeDoneMsg struct {
-	mode string
-	err  error
+	mode   string
+	submit string
+	err    error
 }
 
 // noticeMsg carries one host-initiated notice from the

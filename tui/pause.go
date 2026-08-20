@@ -57,6 +57,16 @@ import (
 // Event.Pause still need PauseState — it is what makes a TUI attaching
 // to an already-paused session render the banner without waiting for
 // a transition that already happened.
+//
+// Which host shape this sits on changes what a steer means, and it is
+// worth knowing before implementing Resume. A LiveAgent host owns the
+// loop, so ResumeModeSteer is a real instruction: the host makes the
+// operator's text the next turn and the standing Events stream shows
+// it. A per-turn host does not — Agent.Run opens a subscription for
+// the turn it starts and closes it again — so the TUI never sends
+// ResumeModeSteer there. It opens the gate with ResumeModeAbandon and
+// runs the text through Run itself, which is the only way the turn's
+// events reach the operator who asked for it (R-HOLD-4).
 type Pauser interface {
 	Pause(ctx context.Context, reason string) error
 	Resume(ctx context.Context, req ResumeRequest) error
@@ -94,7 +104,10 @@ type ResumeRequest struct {
 // introducing a named string type.
 const (
 	// ResumeModeSteer resumes with the operator's new instruction
-	// injected under interrupt framing — the Enter-with-text path.
+	// injected under interrupt framing — the Enter-with-text path on a
+	// host that drives its own loop. Sent only to a LiveAgent host: it
+	// asks the HOST to run the instruction, which a per-turn client
+	// would have no stream to watch (see Pauser).
 	ResumeModeSteer = "steer"
 	// ResumeModeContinue resumes with "carry on where you left off"
 	// and no new instruction — /continue.
@@ -204,10 +217,27 @@ func pauseCmd(p Pauser, reason string) tea.Cmd {
 // resumeCmd calls Resume off the Update loop and posts the outcome
 // back, tagged with the mode so a failure row can say what was tried.
 func resumeCmd(p Pauser, req ResumeRequest) tea.Cmd {
+	return resumeThenSubmitCmd(p, req, "")
+}
+
+// resumeThenSubmitCmd is resumeCmd for a per-turn host: it opens the
+// gate and carries the operator's text back on the message so Update
+// can run it as an ordinary turn once the resume lands.
+//
+// Which mode gets sent is the whole point of the split. On a LiveAgent
+// host the steer goes out as ResumeModeSteer and the host's loop makes
+// it the next turn, which the standing Events stream shows. A per-turn
+// host has no such stream: Agent.Run opens a subscription for the turn
+// it starts and closes it again, so a turn the HOST starts on a steer
+// streams to nobody and the operator watches their prompt disappear.
+// There the client owns the turn, so the gate is opened with
+// ResumeModeAbandon — drop whatever was held — and the text is run
+// through Run like any other prompt.
+func resumeThenSubmitCmd(p Pauser, req ResumeRequest, submit string) tea.Cmd {
 	return func() tea.Msg {
 		ctx, cancel := context.WithTimeout(context.Background(), pauseTimeout)
 		defer cancel()
-		return resumeDoneMsg{mode: req.Mode, err: p.Resume(ctx, req)}
+		return resumeDoneMsg{mode: req.Mode, submit: submit, err: p.Resume(ctx, req)}
 	}
 }
 

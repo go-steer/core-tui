@@ -738,14 +738,29 @@ listed in `/help`:
   to interrupt first, matching what the host would do anyway. Any
   other `/word` still queues as literal text, so prose starting with a
   slash is not hijacked.
-- **R-HOLD-4** Enter with text while held resumes with
-  `ResumeModeSteer` carrying that text, never a fresh turn — a new
-  turn would block on the host's gate and spin forever. `/continue`
-  (alias `/cont`) resumes with `ResumeModeContinue` and no new
-  instruction; `/abandon` resumes with `ResumeModeAbandon`, dropping
-  the interrupted work without waking the loop; `/pause` shuts the
-  gate without interrupting anything. Each degrades to the standard
-  "not available in this host" system row when `Pauser` is absent.
+- **R-HOLD-4** Enter with text while held never starts a fresh turn
+  against a shut gate — that turn would block in the host's
+  `awaitResume` and spin forever. What it does instead depends on
+  which side owns the loop:
+  - On a `LiveAgent` host the steer resumes with `ResumeModeSteer`
+    carrying the text. The host's loop makes it the next turn, and the
+    standing `Events` stream shows it.
+  - On a per-turn host the gate is opened with `ResumeModeAbandon` and
+    the TUI runs the text through `Agent.Run` itself. A per-turn client
+    has no standing stream — `Run` opens a subscription for the turn it
+    starts and closes it again — so a turn the HOST starts on a steer
+    would stream to nobody and the operator would watch their prompt
+    vanish. Exactly one user row either way, and a resume the host
+    refuses puts the text back in the input box rather than losing it.
+
+  `/continue` (alias `/cont`) resumes with `ResumeModeContinue` and no
+  new instruction; `/abandon` resumes with `ResumeModeAbandon`,
+  dropping the interrupted work without waking the loop; `/pause`
+  shuts the gate without interrupting anything. Each degrades to the
+  standard "not available in this host" system row when `Pauser` is
+  absent. Whatever a host resumes on its own after `/continue` is
+  visible to an observer and not to a per-turn client; that is a
+  property of the host shape, not of the gate.
 - **R-HOLD-5** The gate's state comes from two sources that can
   disagree: the `pause` push event (SSE spec §2.8) and the polled
   `PauseState()`. A transition the TUI applied wins over a

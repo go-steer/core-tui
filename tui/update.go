@@ -1157,7 +1157,23 @@ func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		// clearing locally would paper over a resume the host refused.
 		if msg.err != nil {
 			m.history.Append(Message{Role: RoleError, Text: "/" + msg.mode + ": " + msg.err.Error()})
+			// The keystroke was accepted and the box cleared, but the
+			// gate never opened and no turn will carry the text. Hand
+			// it back rather than swallowing it — retyping a steer
+			// the operator already committed to is the one thing this
+			// whole feature exists to avoid.
+			if msg.submit != "" && strings.TrimSpace(m.input.Value()) == "" {
+				m.input.SetValue(msg.submit)
+				m.syncInputHeight()
+			}
 			m.refreshAndScroll()
+			return m, nil
+		}
+		if msg.submit != "" {
+			// Per-turn steer: the gate is open, so this is now an
+			// ordinary submission (see resumeThenSubmitCmd).
+			out := m.submitTurn(msg.submit)
+			return out, out.armSpinner()
 		}
 		return m, nil
 	case wakeMsg:
@@ -1863,10 +1879,26 @@ func (m model) handleKey(msg tea.KeyPressMsg) (tea.Model, tea.Cmd) {
 		if m.pause.paused() {
 			if p, ok := m.opts.Agent.(Pauser); ok {
 				m.recordPrompt(text)
+				// Operator-initiated work either way, so the
+				// auto-continue streak starts over (issue #9).
+				m.consecutiveAutoContinues = 0
 				m.input.Reset()
-				m.history.Append(Message{Role: RoleUser, Text: text})
+				if m.liveMode {
+					// The host owns the loop: the steer IS the next
+					// turn, and the standing Events stream shows it.
+					m.history.Append(Message{Role: RoleUser, Text: text})
+					m.refreshAndScroll()
+					return m, resumeCmd(p, ResumeRequest{Mode: ResumeModeSteer, Steer: text})
+				}
+				// Per-turn host: WE own the turn. Open the gate,
+				// drop the held work, and run the steer through
+				// submitTurn when the resume lands — a turn the host
+				// started for us would stream to a subscription
+				// Agent.Run has not opened. No user row here;
+				// submitTurn appends it, so the transcript gets one
+				// copy either way.
 				m.refreshAndScroll()
-				return m, resumeCmd(p, ResumeRequest{Mode: ResumeModeSteer, Steer: text})
+				return m, resumeThenSubmitCmd(p, ResumeRequest{Mode: ResumeModeAbandon}, text)
 			}
 		}
 		if m.state == stateStreaming {

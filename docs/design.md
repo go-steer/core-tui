@@ -377,6 +377,13 @@ type RemoteInterrupter interface {
 // RemoteInterrupter, which parks server-side on hosts new enough to
 // hold) and /pause, /continue and /abandon report themselves as not
 // available in this host.
+//
+// ResumeModeSteer asks the HOST to make the operator's text the next
+// turn, so it goes only to a LiveAgent host, whose standing Events
+// stream can show that turn. A per-turn host gets ResumeModeAbandon
+// and the TUI runs the text through Agent.Run itself — Run's
+// subscription is scoped to the turn it starts, so a turn the host
+// started would stream to nobody (R-HOLD-4).
 type Pauser interface {
     Pause(ctx context.Context, reason string) error
     Resume(ctx context.Context, req ResumeRequest) error

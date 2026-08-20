@@ -107,6 +107,46 @@ with this new instruction), `continue` (carry on where you left off),
 `abandon` (open the gate, drop the interrupted work, do not wake the
 loop).
 
+### What a steer means depends on who owns the loop
+
+`ResumeModeSteer` asks the **host** to make the operator's text the
+next turn. That only works for a client that can watch the host's loop.
+
+A `LiveAgent` host has a standing `Events` stream, so it sees the
+steered turn like any other. A per-turn host does not: `Agent.Run`
+opens a subscription for the turn *it* starts and closes it when that
+turn ends. Send `ResumeModeSteer` there and the host dutifully runs the
+turn against a stream nobody has open — the operator watches their
+prompt land as a user row and then nothing, while the host's turn
+counter ticks. That is a real bug this design shipped with, found by
+running `examples/core-agent -flavor attach` (per-turn) by hand.
+
+So Enter-while-held branches on `m.liveMode`:
+
+| host shape | mode sent | who runs the turn |
+|---|---|---|
+| `LiveAgent` | `ResumeModeSteer` with the text | the host; `Events` shows it |
+| per-turn | `ResumeModeAbandon`, no text | the TUI, via `submitTurn` once the resume acks |
+
+`abandon` rather than `continue` on the per-turn side because the
+client is about to run the operator's instruction itself; asking the
+host to also pick its held work back up would run two turns for one
+keypress.
+
+The per-turn path is the only one that is asynchronous — the gate has
+to be open before `Run` is called, or `Run` blocks in the host's
+`awaitResume`, which is the hang this whole feature exists to prevent.
+So the text rides back on `resumeDoneMsg.submit` and `submitTurn`
+happens in that arm. The user row is appended by `submitTurn` and
+nowhere else, so the transcript gets exactly one copy; and a resume the
+host refuses puts the text back in the input box, because a steer the
+operator already committed to is not something to make them retype.
+
+What a host resumes on its own after `/continue` follows the same rule:
+visible to an observer, invisible to a per-turn client. That is a
+property of the host shape, not of the gate, and it is not something
+the TUI can paper over.
+
 ---
 
 ## 4. Two sources of truth, and how they are reconciled
