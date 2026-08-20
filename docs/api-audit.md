@@ -206,6 +206,21 @@ TUI only asserts against the object the host hands it), but it is worth
 knowing that the narrower an interface is, the less the assertion actually
 proves.
 
+**What this matrix cannot see — added after
+[#275](https://github.com/go-steer/core-tui/issues/275).** Every column here
+answers *is this interface implemented*. None of them answers *does core-tui
+ever ask for it*, and the two come apart: `AsyncSlashProvider` scored as
+implemented by the reference host and was nonetheless unreachable, because
+each path into the host's slash commands asserted `SlashProvider` and found
+the async shape only by narrowing from it. An interface no consumer asserts
+is as dead as one no host implements, and it fails in the more expensive
+direction — the host does the work of implementing it and the feature simply
+does not appear. The canary in `examples/core-agent` does not close this
+either: `_ tui.AsyncSlashProvider = (*attachAdapter)(nil)` is the same
+implemented-side claim in compile-time form. Reachability is a property of
+`package tui`, and the only thing that pins it is a test using a host that
+satisfies **exactly one** of a pair of alternative interfaces.
+
 ---
 
 ## 4. Decision — #79, vestigial paths

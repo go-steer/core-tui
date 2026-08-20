@@ -2623,7 +2623,12 @@ func (m model) dispatchSlash(text string) (tea.Model, tea.Cmd) {
 		return model, cmd
 	}
 
-	provider, ok := m.opts.Agent.(SlashProvider)
+	// A catalog is all it takes to be worth asking. SlashProvider and
+	// AsyncSlashProvider are disjoint apart from SlashCommands(), so
+	// asking for either one by name here would turn a host that
+	// implements only the other into "no slash commands at all"
+	// (issue #275).
+	lister, ok := m.opts.Agent.(slashLister)
 	if !ok {
 		m.history.Append(Message{
 			Role: RoleSystem,
@@ -2643,13 +2648,18 @@ func (m model) dispatchSlash(text string) (tea.Model, tea.Cmd) {
 	// Which of the two provider shapes will run is decided HERE, on
 	// the loop, by type assertion; the closure never asks the model
 	// anything. Only the plain synchronous shape can be driven to
-	// completion off-loop — the async one returns through Update so
-	// applySlashDispatch can arm the cancel func, the in-flight record
-	// and the toast, none of which a goroutine may touch.
-	_, async := provider.(AsyncSlashProvider)
+	// completion off-loop, so it is the one handed to the Cmd — the
+	// async one returns through Update so applySlashDispatch can arm
+	// the cancel func, the in-flight record and the toast, none of
+	// which a goroutine may touch. A host implementing both prefers
+	// async, per AsyncSlashProvider's contract.
+	var sync SlashProvider
+	if _, async := lister.(AsyncSlashProvider); !async {
+		sync, _ = lister.(SlashProvider)
+	}
 	m.input.Reset()
 	m.refreshViewport()
-	return m, slashDispatchCmd(provider, m.sessionGen, m.slashSeq, name, args, !async)
+	return m, slashDispatchCmd(lister, m.sessionGen, m.slashSeq, name, args, sync)
 }
 
 // applySlashDispatch is the Update-side half of a host /cmd (issue
@@ -2659,6 +2669,11 @@ func (m model) dispatchSlash(text string) (tea.Model, tea.Cmd) {
 //
 // The three cases: no match at all, a plain provider already invoked
 // out of line, or an async provider still to be started.
+//
+// Each provider shape is asked for on its own here rather than reached
+// through the other. Narrowing SlashProvider to AsyncSlashProvider
+// read naturally but made the async path conditional on a synchronous
+// InvokeSlash the host has no reason to have (issue #275).
 func (m model) applySlashDispatch(msg slashDispatchedMsg) (tea.Model, tea.Cmd) {
 	if !msg.matched {
 		m.history.Append(Message{
@@ -2670,13 +2685,6 @@ func (m model) applySlashDispatch(msg slashDispatchedMsg) (tea.Model, tea.Cmd) {
 	}
 	if msg.invoked {
 		return m.applySlashResult(msg.name, msg.res, msg.err)
-	}
-	provider, ok := m.opts.Agent.(SlashProvider)
-	if !ok {
-		// The agent was replaced mid-match by one with no slash
-		// surface. Nothing to invoke and nothing worth saying — the
-		// swap itself already wrote its own row.
-		return m, nil
 	}
 	name, args := msg.name, msg.args
 	// Issue #10: hosts that implement AsyncSlashProvider get the
@@ -2692,7 +2700,7 @@ func (m model) applySlashDispatch(msg slashDispatchedMsg) (tea.Model, tea.Cmd) {
 	// easy to miss. It lands as a RoleSystem row BEFORE the goroutine
 	// is launched. An empty preamble skips the row, which is what a
 	// host with nothing to say returns.
-	if asyncProv, ok := provider.(AsyncSlashProvider); ok {
+	if asyncProv, ok := m.opts.Agent.(AsyncSlashProvider); ok {
 		if refusal, refused := m.refuseConcurrentSlash(name); refused {
 			return refusal, nil
 		}
@@ -2713,12 +2721,32 @@ func (m model) applySlashDispatch(msg slashDispatchedMsg) (tea.Model, tea.Cmd) {
 		m.refreshViewport()
 		return m, awaitSlashChannel(name, ch)
 	}
-	// Not the async shape, and the match Cmd didn't invoke: the agent
-	// was swapped for a plain provider while the match was in flight.
-	// Re-issue under the current stamp rather than reaching for
-	// InvokeSlash from here — this is the one path back to the loop,
-	// and it is not going to become an unbounded inline call again.
-	return m, slashDispatchCmd(provider, m.sessionGen, m.slashSeq, name, args, true)
+	if sync, ok := m.opts.Agent.(SlashProvider); ok {
+		// Not the async shape, and the match Cmd didn't invoke: the
+		// agent was swapped for a plain provider while the match was
+		// in flight. Re-issue under the current stamp rather than
+		// reaching for InvokeSlash from here — this is the one path
+		// back to the loop, and it is not going to become an unbounded
+		// inline call again.
+		return m, slashDispatchCmd(sync, m.sessionGen, m.slashSeq, name, args, sync)
+	}
+	if _, ok := m.opts.Agent.(slashLister); ok {
+		// The host published this command in its catalog and
+		// implements neither invoke shape, so there is nothing to run.
+		// Silence would read as "it ran and had nothing to say"; the
+		// operator would retype it. Name the gap instead — it is a
+		// host bug, and an invisible one from the other side.
+		m.history.Append(Message{
+			Role: RoleSystem,
+			Text: "/" + name + " — the agent lists this command but doesn't implement a way to run it",
+		})
+		m.refreshViewport()
+		return m, nil
+	}
+	// The agent was replaced mid-match by one with no slash surface at
+	// all. Nothing to invoke and nothing worth saying — the swap itself
+	// already wrote its own row.
+	return m, nil
 }
 
 // refuseConcurrentSlash applies issue #13's concurrent-slash policy:

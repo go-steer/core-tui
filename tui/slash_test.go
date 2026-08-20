@@ -269,10 +269,10 @@ func (a *asyncSlashAgent) Run(_ context.Context, _ string) iter.Seq2[Event, erro
 }
 func (a *asyncSlashAgent) SlashCommands() []SlashCommandSpec { return a.specs }
 
-// InvokeSlash is the SlashProvider fallback. dispatchSlash requires
-// SlashProvider for command-name lookup before it type-asserts to
-// the async interface; an error here is a tripwire — the async path
-// should always win on an agent satisfying both.
+// InvokeSlash is the SlashProvider fallback, present so this stub
+// satisfies both shapes at once. An error here is a tripwire: the
+// async path always wins on an agent satisfying both, so nothing
+// should ever reach it.
 func (a *asyncSlashAgent) InvokeSlash(_ context.Context, _, _ string) (SlashResult, error) {
 	a.calls++
 	return SlashResult{}, errors.New("should not be called when AsyncSlashProvider is satisfied")
@@ -711,5 +711,143 @@ func TestDispatchSlash_UnknownCommand(t *testing.T) {
 	}
 	if got.history.Snapshot()[0].Role != RoleSystem {
 		t.Errorf("unknown command should render as RoleSystem, got %v", got.history.Snapshot()[0].Role)
+	}
+}
+
+// asyncOnlySlashAgent implements AsyncSlashProvider and NOT
+// SlashProvider — the configuration every other stub in this file
+// skips, and the one issue #275 was about. The reference host in
+// examples/core-agent is shaped exactly like this.
+//
+// Do not give it an InvokeSlash. The tests below all pass against a
+// host that satisfies both interfaces, so adding one would leave them
+// green while re-breaking the thing they exist to hold.
+type asyncOnlySlashAgent struct {
+	specs    []SlashCommandSpec
+	preamble string
+	out      chan SlashResultOrErr
+	calls    int
+}
+
+func (a *asyncOnlySlashAgent) Run(_ context.Context, _ string) iter.Seq2[Event, error] {
+	return func(_ func(Event, error) bool) {}
+}
+func (a *asyncOnlySlashAgent) SlashCommands() []SlashCommandSpec { return a.specs }
+func (a *asyncOnlySlashAgent) InvokeSlashAsync(_ context.Context, _, _ string) (string, <-chan SlashResultOrErr) {
+	a.calls++
+	return a.preamble, a.out
+}
+
+// listOnlySlashAgent publishes a catalog and implements neither invoke
+// shape. A host bug rather than a supported configuration, but one the
+// TUI has to name rather than swallow.
+type listOnlySlashAgent struct{ specs []SlashCommandSpec }
+
+func (l *listOnlySlashAgent) Run(_ context.Context, _ string) iter.Seq2[Event, error] {
+	return func(_ func(Event, error) bool) {}
+}
+func (l *listOnlySlashAgent) SlashCommands() []SlashCommandSpec { return l.specs }
+
+func newAsyncOnlyAgent() *asyncOnlySlashAgent {
+	return &asyncOnlySlashAgent{
+		specs:    []SlashCommandSpec{{Name: "btw", Aliases: []string{"by-the-way"}, Description: "side question"}},
+		preamble: "asking…",
+		out:      make(chan SlashResultOrErr, 1),
+	}
+}
+
+func TestAsyncOnlyHost_IsNotAlsoASlashProvider(t *testing.T) {
+	// The tripwire for the three tests below. Each of them passes
+	// against a host satisfying both interfaces, so they are only
+	// evidence while this stub satisfies exactly one.
+	var a any = newAsyncOnlyAgent()
+	if _, ok := a.(SlashProvider); ok {
+		t.Fatal("asyncOnlySlashAgent grew an InvokeSlash — the async-only tests below no longer test anything")
+	}
+	if _, ok := a.(AsyncSlashProvider); !ok {
+		t.Fatal("asyncOnlySlashAgent does not satisfy AsyncSlashProvider")
+	}
+}
+
+func TestDispatchSlash_AsyncOnlyHostIsReachable(t *testing.T) {
+	// Issue #275: dispatch used to assert SlashProvider before
+	// narrowing to the async shape, so a host with only the async one
+	// was told it had no slash commands at all.
+	agent := newAsyncOnlyAgent()
+	agent.out <- SlashResultOrErr{Res: SlashResult{SystemMessage: "answered"}}
+	m := newModel(Options{Agent: agent})
+	m.viewport.SetWidth(80)
+
+	got, cmd := submitSlash(t, m, "/btw what now")
+	for _, row := range got.history.Snapshot() {
+		if strings.Contains(row.Text, "doesn't expose any slash commands") {
+			t.Fatalf("async-only host reported as having no slash surface: %q", row.Text)
+		}
+	}
+	if agent.calls != 1 {
+		t.Errorf("InvokeSlashAsync calls = %d, want 1", agent.calls)
+	}
+	if cmd == nil {
+		t.Fatal("expected a Cmd draining the host's channel")
+	}
+	last := got.history.Snapshot()[got.history.Len()-1]
+	if last.Text != "asking…" {
+		t.Errorf("preamble row = %q, want %q", last.Text, "asking…")
+	}
+	if _, ok := cmd().(slashResultMsg); !ok {
+		t.Error("the returned Cmd does not drain the host's result channel")
+	}
+}
+
+func TestSlashPalette_AsyncOnlyHostFillsIn(t *testing.T) {
+	m := newModel(Options{Agent: newAsyncOnlyAgent()})
+	cmd := m.slashCommandsCmd(1)
+	if cmd == nil {
+		t.Fatal("no Cmd: the / palette cannot see an async-only host's catalog")
+	}
+	msg, ok := cmd().(slashCommandsMsg)
+	if !ok {
+		t.Fatalf("got %T, want slashCommandsMsg", msg)
+	}
+	if len(msg.items) != 1 || msg.items[0].Name != "btw" {
+		t.Errorf("palette items = %+v, want one /btw row", msg.items)
+	}
+}
+
+func TestHelpSlash_AsyncOnlyHostGetsAHostSection(t *testing.T) {
+	m := newModel(Options{Agent: newAsyncOnlyAgent()})
+	m.viewport.SetWidth(80)
+
+	_, cmd := m.dispatchSlash("/help")
+	if cmd == nil {
+		t.Fatal("no follow-up Cmd: /help skipped an async-only host's section")
+	}
+	msg, ok := cmd().(helpCommandsMsg)
+	if !ok {
+		t.Fatalf("got %T, want helpCommandsMsg", msg)
+	}
+	if len(msg.specs) != 1 || msg.specs[0].Name != "btw" {
+		t.Errorf("help specs = %+v, want one /btw entry", msg.specs)
+	}
+}
+
+func TestDispatchSlash_ListingOnlyHostSaysItCannotRun(t *testing.T) {
+	// A catalog with no invoke behind it. The command matches, so the
+	// "unknown command" row would be a lie and silence would read as a
+	// command that ran with nothing to report.
+	agent := &listOnlySlashAgent{specs: []SlashCommandSpec{{Name: "btw"}}}
+	m := newModel(Options{Agent: agent})
+	m.viewport.SetWidth(80)
+
+	got, cmd := submitSlash(t, m, "/btw hello")
+	if cmd != nil {
+		t.Errorf("nothing to run, but got a follow-up %T", cmd)
+	}
+	if got.history.Len() != 1 {
+		t.Fatalf("expected exactly one system row, got %d", got.history.Len())
+	}
+	last := got.history.Snapshot()[0]
+	if last.Role != RoleSystem || !strings.Contains(last.Text, "doesn't implement a way to run it") {
+		t.Errorf("row = %v %q, want a RoleSystem row naming the gap", last.Role, last.Text)
 	}
 }
