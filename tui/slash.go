@@ -32,6 +32,28 @@ type SlashProvider interface {
 	InvokeSlash(ctx context.Context, name, args string) (SlashResult, error)
 }
 
+// slashLister is the catalog half of the host slash surface, and the
+// only half SlashProvider and AsyncSlashProvider share: the two are
+// otherwise disjoint, one requiring InvokeSlash and the other
+// InvokeSlashAsync, and either may be implemented alone.
+//
+// Everything that only needs to know WHICH commands a host offers —
+// the / palette, /help, the name match ahead of a dispatch — asks for
+// this rather than for a concrete provider shape. Asking for
+// SlashProvider there conflated "can list commands" with "can run them
+// synchronously", which made an async-only host invisible: no palette
+// rows, no /help section, and "unknown command" on dispatch (issue
+// #275). Deciding how to INVOKE is a separate question, asked once in
+// dispatchSlash.
+//
+// Unexported on purpose. It names no capability a host has to know
+// about — implementing either public interface satisfies it — so
+// publishing it would add a third slash interface to the surface for
+// no host-side gain.
+type slashLister interface {
+	SlashCommands() []SlashCommandSpec
+}
+
 // SlashCommandSpec is one entry in the agent's command catalog.
 // Name is the bare identifier (no leading "/"). Aliases are
 // alternative invocations (e.g. {"by-the-way"} for /btw). Description
@@ -175,9 +197,13 @@ type SlashResultOrErr struct {
 //     Ctrl+C / Esc, core-tui cancels it and the host should bail as
 //     fast as the underlying work allows. The eventual sent value is
 //     discarded.
-//   - A host satisfying BOTH SlashProvider and AsyncSlashProvider
-//     prefers the async path. Built-in slash commands are not routed
-//     here — they are synchronous-and-fast by design.
+//   - Either interface may be implemented ALONE. The two declare
+//     SlashCommands() separately and share no other method, and
+//     listing a command needs only the catalog — so an async-only host
+//     gets its palette rows, its /help section and its dispatch. A
+//     host satisfying BOTH prefers the async path. Built-in slash
+//     commands are not routed here — they are synchronous-and-fast by
+//     design.
 //
 // Until v0.21.0 this was two interfaces: a bare variant returning the
 // channel alone and AsyncSlashProviderWithPreamble returning the pair.

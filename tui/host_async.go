@@ -122,18 +122,21 @@ func switchToSessionCmd(switcher SessionSwitcher, gen uint64, id string) tea.Cmd
 	}
 }
 
-// slashCommandsCmd pulls SlashProvider.SlashCommands() off the Update
+// slashCommandsCmd pulls the host's SlashCommands() off the Update
 // goroutine so the `/` keypress opens the palette immediately with the
 // built-ins and merges the host's commands when they arrive. Nil when
-// no SlashProvider is wired — the built-in catalog is the whole
-// palette and nothing needs to land later.
+// the agent has no slash catalog at all — the built-in list is the
+// whole palette and nothing needs to land later.
+//
+// Either provider shape lists (slashLister); which one can run a
+// command is dispatchSlash's question, not the palette's.
 //
 // seq (not gen alone) identifies the palette instance: a palette is
 // opened and closed many times within one session generation, so the
 // handler needs to know the reply belongs to the palette that is open
 // right now.
 func (m model) slashCommandsCmd(seq uint64) tea.Cmd {
-	provider, ok := m.opts.Agent.(SlashProvider)
+	provider, ok := m.opts.Agent.(slashLister)
 	if !ok {
 		return nil
 	}
@@ -362,44 +365,47 @@ func sessionInputSubmitCmd(submit func(string) (SwitchTarget, error), gen, seq u
 }
 
 // slashDispatchCmd runs the host-provider half of a `/cmd` off the
-// Update goroutine: the SlashCommands() name match and, when invoke is
-// set, the InvokeSlash call itself under slashInvokeTimeout.
+// Update goroutine: the SlashCommands() name match and, when sync is
+// non-nil, the InvokeSlash call itself under slashInvokeTimeout.
 //
 // The two travel together because splitting them buys nothing — the
 // match is only ever asked in order to decide whether to invoke — and
 // costs the operator a frame of silence between their Enter and any
 // feedback at all.
 //
-// invoke is resolved by the caller, on the loop, from the provider's
-// concrete shape: only a plain SlashProvider can be driven to
-// completion out here. The async variants come back through Update
-// first, because starting one means arming the model's cancel func,
-// in-flight record and toast.
-func slashDispatchCmd(provider SlashProvider, gen, seq uint64, name, args string, invoke bool) tea.Cmd {
+// The match reads the catalog, so it takes a slashLister and works for
+// either provider shape. Whether this Cmd may also invoke is resolved
+// by the caller, on the loop, and carried as the provider itself
+// rather than as a separate bool: only a plain SlashProvider can be
+// driven to completion out here, so the permission and the thing that
+// grants it are one value and cannot disagree. The async shape comes
+// back through Update first, because starting one means arming the
+// model's cancel func, in-flight record and toast.
+func slashDispatchCmd(lister slashLister, gen, seq uint64, name, args string, sync SlashProvider) tea.Cmd {
 	return func() tea.Msg {
 		out := slashDispatchedMsg{gen: gen, seq: seq, name: name, args: args}
-		for _, spec := range provider.SlashCommands() {
+		for _, spec := range lister.SlashCommands() {
 			if spec.Name == name || sliceContains(spec.Aliases, name) {
 				out.matched = true
 				break
 			}
 		}
-		if !out.matched || !invoke {
+		if !out.matched || sync == nil {
 			return out
 		}
 		ctx, cancel := context.WithTimeout(context.Background(), slashInvokeTimeout)
 		defer cancel()
 		out.invoked = true
-		out.res, out.err = provider.InvokeSlash(ctx, name, args)
+		out.res, out.err = sync.InvokeSlash(ctx, name, args)
 		return out
 	}
 }
 
-// helpCommandsCmd pulls SlashProvider.SlashCommands() for /help off
-// the Update goroutine. The built-in half of the help text needs no
-// host at all, so it renders on the keystroke and the host's section
-// lands as a follow-up row.
-func helpCommandsCmd(provider SlashProvider, gen uint64) tea.Cmd {
+// helpCommandsCmd pulls the host's SlashCommands() for /help off the
+// Update goroutine. The built-in half of the help text needs no host
+// at all, so it renders on the keystroke and the host's section lands
+// as a follow-up row.
+func helpCommandsCmd(provider slashLister, gen uint64) tea.Cmd {
 	return func() tea.Msg {
 		return helpCommandsMsg{gen: gen, specs: provider.SlashCommands()}
 	}

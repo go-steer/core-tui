@@ -147,7 +147,7 @@ func (m model) dispatchBuiltinSlash(name, args string) (bool, tea.Model, tea.Cmd
 		m.history.Append(Message{Role: RoleSystem, Text: m.renderBuiltinHelp()})
 		m.input.Reset()
 		m.refreshAndScroll()
-		if provider, ok := m.opts.Agent.(SlashProvider); ok {
+		if provider, ok := m.opts.Agent.(slashLister); ok {
 			return true, m, helpCommandsCmd(provider, m.sessionGen)
 		}
 		return true, m, nil

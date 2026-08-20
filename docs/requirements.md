@@ -216,6 +216,15 @@ listed in `/help`:
   modals (style.md §6) so the visual language stays uniform. When
   `SystemMessage` is also set, it renders as a chat row after the
   modal is dismissed.
+- **R-CMD-6** `SlashProvider` and `AsyncSlashProvider` are each a
+  complete host slash surface on their own. They share only
+  `SlashCommands()`, and listing a command needs nothing else, so a
+  host implementing **either one alone** gets its palette rows, its
+  `/help` section and its dispatch. A host implementing both prefers
+  the async path. A host that publishes a catalog and implements
+  neither invoke method gets a system row naming that gap on dispatch,
+  rather than silence — the command matched, so "unknown command"
+  would be wrong and saying nothing reads as a command that ran.
 
 ### 3.4 Command palette (must)
 

@@ -270,7 +270,7 @@ func formatFileSize(n int64) string {
 // palette rows. Runs inside slashCommandsCmd's goroutine (off the
 // event loop) — SlashCommands() is a host method like any other and
 // gets no free pass just because it looks like a constant lookup.
-func slashProviderItems(provider SlashProvider) []paletteItem {
+func slashProviderItems(provider slashLister) []paletteItem {
 	specs := provider.SlashCommands()
 	items := make([]paletteItem, 0, len(specs))
 	for _, spec := range specs {
@@ -292,8 +292,9 @@ func slashProviderItems(provider SlashProvider) []paletteItem {
 // current input, seeded with the TUI built-ins (builtinSlashItems),
 // which are a compile-time constant and cost nothing on the keypress.
 //
-// Agent-provided commands from SlashProvider — /btw, /subagent, other
-// host extensions — are merged later by the slashCommandsMsg handler
+// Agent-provided commands from either provider shape — /btw,
+// /subagent, other host extensions — are merged later by the
+// slashCommandsMsg handler
 // so the panel appears on the `/` keystroke rather than after the
 // host has answered (issue #114). pendingHost marks that a merge is
 // expected so the panel doesn't briefly claim to be complete.
