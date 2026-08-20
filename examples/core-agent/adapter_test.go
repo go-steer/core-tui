@@ -19,6 +19,7 @@ import (
 	"errors"
 	"iter"
 	"strings"
+	"sync"
 	"testing"
 	"time"
 
@@ -603,5 +604,79 @@ func TestAttachPerTurnSteerIsRunByTheClient(t *testing.T) {
 	if got := a.SessionTurns(); got != 1 {
 		t.Errorf("SessionTurns() = %d, want exactly 1 — the client ran the steer and "+
 			"the daemon must not have run one of its own", got)
+	}
+}
+
+// TestAttachInterruptStopsTheTurnOverHTTP is the operator's path end
+// to end, and the check whose absence let #280 ship: esc holds, and a
+// hold on its own is a promise about the NEXT turn. Nothing here ever
+// asked whether Interrupt had any effect on the turn already running,
+// so the TUI could stop calling it and every test stayed green while
+// the daemon carried on working under a banner saying it had stopped.
+func TestAttachInterruptStopsTheTurnOverHTTP(t *testing.T) {
+	a := startDaemon(t)
+	ctx, cancel := context.WithTimeout(t.Context(), 30*time.Second)
+	defer cancel()
+
+	type seen struct {
+		texts []string
+	}
+	first := make(chan struct{})
+	done := make(chan seen, 1)
+	go func() {
+		var s seen
+		var once sync.Once
+		for ev, err := range (attachObserver{attachAdapter: a}).Events(ctx) {
+			if err != nil {
+				continue // transport hiccup; the iterator keeps going
+			}
+			if ev.Pause != nil {
+				continue
+			}
+			// Any frame at all means the turn is under way — the
+			// committed text only lands at the end, which is far too
+			// late to interrupt.
+			once.Do(func() { close(first) })
+			if !ev.Partial && ev.Text != "" {
+				s.texts = append(s.texts, ev.Text)
+				if strings.Contains(ev.Text, "interrupted by operator") {
+					done <- s
+					return
+				}
+			}
+		}
+		done <- s
+	}()
+
+	time.Sleep(200 * time.Millisecond)
+	if err := a.Inject("what is prod doing?"); err != nil {
+		t.Fatalf("Inject: %v", err)
+	}
+	select {
+	case <-first:
+	case <-ctx.Done():
+		t.Fatal("the injected turn never streamed anything to interrupt")
+	}
+
+	if err := a.Interrupt(ctx); err != nil {
+		t.Fatalf("Interrupt: %v", err)
+	}
+
+	select {
+	case s := <-done:
+		for _, text := range s.texts {
+			if strings.Contains(text, "replicas") {
+				t.Errorf("the turn reached its committed answer anyway: %q", text)
+			}
+		}
+	case <-ctx.Done():
+		t.Fatal("the daemon ran the turn to completion after the interrupt")
+	}
+
+	// And the gate is shut behind it, with the bit that says work was
+	// killed — the two halves of one gesture, which is what the TUI
+	// now sends as one.
+	if got := a.PauseState(); !got.Paused || !got.Interrupted {
+		t.Errorf("PauseState() = %+v, want the gate shut and the kill reported", got)
 	}
 }

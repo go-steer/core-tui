@@ -1120,6 +1120,17 @@ func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		if msg.gen != m.sessionGen {
 			return m, m.eventListener()
 		}
+		// Only a LiveAgent host learns the gate from these frames. A
+		// per-turn host has no standing stream, so they arrive as a
+		// replayed backlog when the next turn opens a subscription: a
+		// hold that ended minutes ago re-armed the gate here, and the
+		// poll a second later narrated a "Resumed." nobody had asked
+		// for, with lastResumeMode long since spent. There the poll is
+		// the only timely source and it owns the state outright
+		// (issue #280; see narratePauseTransition).
+		if !m.liveMode {
+			return m, m.liveStreamRenderCmd()
+		}
 		next, changed := m.pause.applyEvent(msg.event, m.nowFn())
 		if !changed {
 			return m, m.liveStreamRenderCmd()
@@ -1135,14 +1146,7 @@ func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		// clipFrame takes the difference off the bottom: the footer
 		// and the lower half of the input box.
 		m.resize()
-		// Only a LiveAgent host narrates from here. On a per-turn host
-		// these frames arrive as a replayed backlog when the next turn
-		// opens a subscription, so they are old news by the time they
-		// land and the poll has already said it — see
-		// narratePauseTransition.
-		if m.liveMode {
-			m.narratePauseTransition(wasPaused, next, msg.event.Mode)
-		}
+		m.narratePauseTransition(wasPaused, next, msg.event.Mode)
 		m.refreshAndScroll()
 		return m, m.liveStreamRenderCmd()
 	case pauseDoneMsg:
@@ -1536,13 +1540,14 @@ func (m model) handleKey(msg tea.KeyPressMsg) (tea.Model, tea.Cmd) {
 			m.cancelTurn() // goroutine emits turnCancelledMsg
 			cancelledLocally = true
 		}
-		// Then arm the hold. Deliberately NOT gated on a turn being in
-		// flight: in observer mode the spinner is off between
-		// daemon-driven turns, and that gap is exactly when an
+		// Then arm the hold — which stops the remote work as well, when
+		// the host can do both; see holdCmd. Deliberately NOT gated on
+		// a turn being in flight: in observer mode the spinner is off
+		// between daemon-driven turns, and that gap is exactly when an
 		// operator wants to get ahead of the next one. Parking is
 		// never a dead end — typing un-parks.
 		if p, ok := m.opts.Agent.(Pauser); ok {
-			return m, pauseCmd(p, "operator interrupt")
+			return m, m.holdCmd(p, "operator interrupt")
 		}
 		// No Pauser: fall back to the remote cancel. On a host new
 		// enough to hold (core-agent ≥ protocol 1.5.0) /interrupt
