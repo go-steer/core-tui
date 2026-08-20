@@ -144,6 +144,15 @@ type pauseInfo struct {
 	// paused clears the screen, not the gate. Reset on the next
 	// transition so a subsequent pause renders again.
 	dismissed bool
+
+	// lastResumeMode is the disposition of the last Resume the host
+	// acked, kept so the poll can name it. PauseEvent echoes the mode
+	// back; PauseState has no such field, so on a host the TUI learns
+	// about through the poll this is the only way "Abandoned the held
+	// work" is distinguishable from a bare "Resumed." Empty when the
+	// host reopened the gate on its own, which is the honest answer:
+	// nobody here chose a disposition.
+	lastResumeMode string
 }
 
 // paused reports whether the gate is closed. Independent of
@@ -183,8 +192,15 @@ func (p pauseInfo) applyEvent(ev PauseEvent, now time.Time) (pauseInfo, bool) {
 }
 
 // applyPoll folds a PauseState() reading into the model's pause state.
-// Within pauseSettleWindow of the last applied transition the poll is
+// Within pauseSettleWindow of the last applied PUSH the poll is
 // ignored: it may have been sampled before that transition landed.
+//
+// Only a push arms that window, and deliberately. One refresh plus one
+// pending tick are ever in flight (host_snapshot.go), so there is no
+// poll-against-poll race to protect anything from — and arming it here
+// would mean a poll-driven host, where the poll is the ONLY source,
+// silently dropped every transition that landed within two seconds of
+// the last one. At a one-second cadence that is most of them.
 func (p pauseInfo) applyPoll(info PauseInfo, now time.Time) (pauseInfo, bool) {
 	if info == p.PauseInfo {
 		return p, false
@@ -194,9 +210,44 @@ func (p pauseInfo) applyPoll(info PauseInfo, now time.Time) (pauseInfo, bool) {
 	}
 	next := p
 	next.PauseInfo = info
-	next.appliedAt = now
 	next.dismissed = false
 	return next, true
+}
+
+// narratePauseTransition appends the transcript row for a gate
+// transition the model has just applied. wasPaused is the state before
+// it; mode names the disposition on the way out and may be empty.
+//
+// Exactly one source narrates, and which one depends on the host shape
+// — the same split Enter-while-held makes (see resumeThenSubmitCmd).
+//
+// A LiveAgent host has a standing Events stream, so the push frame is
+// both immediate and the richest description of what happened: it
+// carries the host's reason, the interrupted bit, and the resume mode.
+// The poll stays silent there.
+//
+// A per-turn host has no standing stream. Agent.Run opens a
+// subscription for the turn it starts and closes it again, so a
+// transition between turns reaches no listener at all — and the
+// backlog it accumulates is replayed, all at once and long stale, into
+// whichever subscription opens next. Narrating that replay puts the
+// whole history of the hold on screen underneath the prompt that
+// happened to reopen the stream. So there the poll narrates, within
+// its one-second cadence, and the replay applies state silently.
+func (m *model) narratePauseTransition(wasPaused bool, next pauseInfo, mode string) {
+	switch {
+	case next.Paused:
+		m.history.Append(Message{Role: RoleSystem, Text: pausedSystemText(next.PauseInfo)})
+		// A hold that arrived by cancelling a turn also ends the
+		// stretch this spinner was animating; on the live path
+		// nothing else closes it (same reasoning as
+		// remoteInterruptDoneMsg).
+		if next.Interrupted {
+			m.endLiveStretch()
+		}
+	case wasPaused:
+		m.history.Append(Message{Role: RoleSystem, Text: resumedSystemText(mode)})
+	}
 }
 
 // pauseTimeout bounds a Pause / Resume round trip. Same reasoning as

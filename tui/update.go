@@ -518,13 +518,22 @@ func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		// has no other way back into sync.
 		if msg.snap.hasPause {
 			if next, changed := m.pause.applyPoll(msg.snap.pause, m.nowFn()); changed {
+				wasPaused := m.pause.Paused
 				m.pause = next
 				// The banner is budgeted chrome, so a gate that moves
 				// has to re-run the allocation before anything is
 				// rendered against the old one (same reason as
 				// pauseEventMsg below).
 				m.resize()
-				m.refreshViewport()
+				// On a per-turn host this poll is the only timely
+				// news of the gate; see narratePauseTransition.
+				if !m.liveMode {
+					m.narratePauseTransition(wasPaused, next, m.pause.lastResumeMode)
+					m.pause.lastResumeMode = ""
+					m.refreshAndScroll()
+				} else {
+					m.refreshViewport()
+				}
 			}
 		}
 		// Under AutoProviderTheme the palette follows the provider, which
@@ -1126,18 +1135,13 @@ func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		// clipFrame takes the difference off the bottom: the footer
 		// and the lower half of the input box.
 		m.resize()
-		switch {
-		case next.Paused:
-			m.history.Append(Message{Role: RoleSystem, Text: pausedSystemText(next.PauseInfo)})
-			// A hold that arrived by cancelling a turn also ends the
-			// stretch this spinner was animating; on the live path
-			// nothing else closes it (same reasoning as
-			// remoteInterruptDoneMsg above).
-			if next.Interrupted {
-				m.endLiveStretch()
-			}
-		case wasPaused:
-			m.history.Append(Message{Role: RoleSystem, Text: resumedSystemText(msg.event.Mode)})
+		// Only a LiveAgent host narrates from here. On a per-turn host
+		// these frames arrive as a replayed backlog when the next turn
+		// opens a subscription, so they are old news by the time they
+		// land and the poll has already said it — see
+		// narratePauseTransition.
+		if m.liveMode {
+			m.narratePauseTransition(wasPaused, next, msg.event.Mode)
 		}
 		m.refreshAndScroll()
 		return m, m.liveStreamRenderCmd()
@@ -1169,6 +1173,12 @@ func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			m.refreshAndScroll()
 			return m, nil
 		}
+		// The host acked, so it will report the gate open — by push on
+		// a LiveAgent host, by poll on a per-turn one. PauseState has
+		// no mode field, so remember the disposition we asked for:
+		// without it the poll can only manage a bare "Resumed." where
+		// the operator typed /abandon.
+		m.pause.lastResumeMode = msg.mode
 		if msg.submit != "" {
 			// Per-turn steer: the gate is open, so this is now an
 			// ordinary submission (see resumeThenSubmitCmd).

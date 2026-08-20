@@ -160,9 +160,41 @@ The gate's state arrives two ways, and they can disagree:
 
 A poll already in flight when a resume lands returns the pre-resume
 answer and would flip the banner back on for a tick. So an applied
-transition wins over a contradicting poll for `pauseSettleWindow`
-(2 s), and after that the host's answer wins — it is the truth, and a
-TUI that ignored it would stay wrong forever after a missed event.
+push wins over a contradicting poll for `pauseSettleWindow` (2 s), and
+after that the host's answer wins — it is the truth, and a TUI that
+ignored it would stay wrong forever after a missed event.
+
+Only a **push** arms that window. One refresh plus one pending tick
+are ever in flight, so there is no poll-against-poll race to protect
+from, and arming it on a poll blinds a poll-driven host for two
+seconds after every transition — at a one-second cadence, most of
+them. That shipped, and the operator symptom was a `/abandon` whose
+row never arrived.
+
+### Exactly one source narrates, and which one is the host shape again
+
+Both sources apply state. Only one appends the transcript row, or
+every transition prints twice.
+
+On a `LiveAgent` host the **push** narrates. It is immediate, and it is
+the only source carrying the host's reason, the `interrupted` bit and
+the resume mode; `PauseState` has none of the three.
+
+On a per-turn host the **poll** narrates, for the same reason the
+steer is run locally. Between turns no subscription is open, so a hold
+and its release reach no listener at all — and because the adapter
+resumes from a cursor, they are replayed *later*, all at once, into
+whichever turn opens a subscription next. Narrating that replay puts
+the entire history of a hold on screen underneath the unrelated prompt
+that happened to reopen the stream, minutes after the fact. The replay
+itself is correct and stays: those frames really had reached nobody,
+and the state they carry is applied. It is only silent.
+
+The poll has no `mode` field, so `/abandon` would come out as a bare
+"Resumed." The disposition the host last acked is kept for exactly one
+row and named in it. A gate the host reopened on its own still reads
+as a bare resume, which is the honest answer: nobody here chose a
+disposition.
 
 ---
 
