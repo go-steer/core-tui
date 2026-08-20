@@ -190,20 +190,30 @@ const (
 // adapters in this example are written against these and nothing
 // else.
 type Agent struct {
-	mu          sync.Mutex
-	model       string
-	inbox       []string
-	approvals   []Approval
-	allow       []string
-	deny        []string
-	prices      map[string]TurnUsage
-	turns       int
-	session     TurnUsage
-	last        TurnUsage
-	started     time.Time
-	running     bool
-	interrupted bool
-	wake        chan struct{}
+	mu        sync.Mutex
+	model     string
+	inbox     []string
+	approvals []Approval
+	allow     []string
+	deny      []string
+	prices    map[string]TurnUsage
+	turns     int
+	session   TurnUsage
+	last      TurnUsage
+	started   time.Time
+	wake      chan struct{}
+
+	// Turns in flight, keyed by an id beginTurn hands out, valued by
+	// whether that turn has been interrupted. A single running /
+	// interrupted pair could not tell two turns apart, and beginTurn
+	// cleared the flag — so a turn starting while another's interrupt
+	// was still pending swallowed it, and the interrupted turn ran to
+	// completion. More than one turn at a time is ordinary here: the
+	// TUI's per-turn subscription and an injected steer each start
+	// one. This is the only end-to-end check on the interrupt path, so
+	// it getting the semantics wrong costs more than the toy is worth.
+	turnSeq  int
+	inFlight map[int]bool
 
 	// The pause gate. hold is non-nil and open exactly while the
 	// agent is held; Resume closes it, which is what releases
@@ -222,10 +232,11 @@ func NewAgent(model string) *Agent {
 		model = Models()[0]
 	}
 	return &Agent{
-		model:   model,
-		prices:  map[string]TurnUsage{},
-		started: time.Now(),
-		wake:    make(chan struct{}, 4),
+		model:    model,
+		prices:   map[string]TurnUsage{},
+		started:  time.Now(),
+		wake:     make(chan struct{}, 4),
+		inFlight: map[int]bool{},
 		approvals: []Approval{
 			{Tool: "bash", Key: "go test ./...", Decision: "allow-session"},
 			{Tool: "edit", Key: "internal/auth/session.go", Decision: "allow-once"},
@@ -265,7 +276,7 @@ func (a *Agent) WithModel(modelID string) (*Agent, error) {
 func (a *Agent) State() string {
 	a.mu.Lock()
 	defer a.mu.Unlock()
-	if a.running {
+	if len(a.inFlight) > 0 {
 		return "running"
 	}
 	return "idle"
@@ -279,16 +290,21 @@ func (a *Agent) Provider() string {
 	return "gemini"
 }
 
-// Interrupt cancels the in-flight turn, reporting whether there was
+// Interrupt cancels every turn in flight, reporting whether there was
 // one. Note the signature: it is NOT tui.RemoteInterrupter's
 // `Interrupt(ctx) error` — see the comment on localAdapter.
+//
+// It marks the turns that exist now and no others: a turn started
+// afterwards is new work the operator has not asked to stop.
 func (a *Agent) Interrupt() bool {
 	a.mu.Lock()
 	defer a.mu.Unlock()
-	if !a.running {
+	if len(a.inFlight) == 0 {
 		return false
 	}
-	a.interrupted = true
+	for id := range a.inFlight {
+		a.inFlight[id] = true
+	}
 	return true
 }
 
@@ -607,26 +623,23 @@ func (a *Agent) Run(ctx context.Context, prompt string) iter.Seq2[*Event, error]
 				prompt = steer
 			}
 		}
-		a.beginTurn()
+		id := a.beginTurn()
+		defer a.endTurn(id)
 		script := a.script(prompt)
 		for _, ev := range script {
 			select {
 			case <-ctx.Done():
-				a.endTurn()
 				return
 			case <-time.After(90 * time.Millisecond):
 			}
-			if a.takeInterrupt() {
-				a.endTurn()
+			if a.takeInterrupt(id) {
 				yield(nil, fmt.Errorf("turn interrupted by operator"))
 				return
 			}
 			if !yield(ev, nil) {
-				a.endTurn()
 				return
 			}
 		}
-		a.endTurn()
 	}
 }
 
@@ -652,24 +665,31 @@ func (a *Agent) AppendUsage(u UsageMetadata) TurnUsage {
 	return turn
 }
 
-func (a *Agent) beginTurn() {
+// beginTurn registers a turn and returns the id its caller identifies
+// itself by for the rest of its life.
+func (a *Agent) beginTurn() int {
 	a.mu.Lock()
 	defer a.mu.Unlock()
-	a.running = true
-	a.interrupted = false
+	if a.inFlight == nil {
+		a.inFlight = map[int]bool{}
+	}
+	a.turnSeq++
+	a.inFlight[a.turnSeq] = false
+	return a.turnSeq
 }
 
-func (a *Agent) takeInterrupt() bool {
+// takeInterrupt reports whether this turn in particular has been
+// interrupted.
+func (a *Agent) takeInterrupt(id int) bool {
 	a.mu.Lock()
 	defer a.mu.Unlock()
-	return a.interrupted
+	return a.inFlight[id]
 }
 
-func (a *Agent) endTurn() {
+func (a *Agent) endTurn(id int) {
 	a.mu.Lock()
 	defer a.mu.Unlock()
-	a.running = false
-	a.interrupted = false
+	delete(a.inFlight, id)
 }
 
 // script is the canned turn: streamed prose, a tool call, its

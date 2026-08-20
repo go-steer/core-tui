@@ -224,17 +224,18 @@ func (m model) dispatchBuiltinSlash(name, args string) (bool, tea.Model, tea.Cmd
 			// next one, which is not what an operator hitting
 			// /interrupt means (R-HOLD-1).
 			if p, ok := m.opts.Agent.(Pauser); ok {
-				return true, m, pauseCmd(p, "operator interrupt")
+				return true, m, m.holdCmd(p, "operator interrupt")
 			}
 			return true, m, nil
 		}
-		// Pauser is the richer remote path: it parks the loop rather
-		// than cancelling one turn, so an idle agent stops picking up
-		// work instead of the slash reporting "no turn in flight" and
-		// doing nothing.
+		// Pauser reaches further than a cancel: it parks the loop, so
+		// an idle agent stops picking up work instead of the slash
+		// reporting "no turn in flight" and doing nothing. It does not
+		// reach further into the turn already running, though — that is
+		// what holdCmd adds back, on a host that can do both.
 		if p, ok := m.opts.Agent.(Pauser); ok {
 			m.input.Reset()
-			return true, m, pauseCmd(p, "operator interrupt")
+			return true, m, m.holdCmd(p, "operator interrupt")
 		}
 		// LiveAgent / observer-mode fallthrough: the daemon is running
 		// the turn autonomously (k8s-event injects, runaway tool loops,

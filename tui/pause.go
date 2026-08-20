@@ -29,6 +29,8 @@ package tui
 
 import (
 	"context"
+	"errors"
+	"fmt"
 	"strings"
 	"time"
 
@@ -232,8 +234,8 @@ func (p pauseInfo) applyPoll(info PauseInfo, now time.Time) (pauseInfo, bool) {
 // backlog it accumulates is replayed, all at once and long stale, into
 // whichever subscription opens next. Narrating that replay puts the
 // whole history of the hold on screen underneath the prompt that
-// happened to reopen the stream. So there the poll narrates, within
-// its one-second cadence, and the replay applies state silently.
+// happened to reopen the stream. So there the poll owns the gate
+// outright, within its one-second cadence, and the replay is dropped.
 func (m *model) narratePauseTransition(wasPaused bool, next pauseInfo, mode string) {
 	switch {
 	case next.Paused:
@@ -262,6 +264,63 @@ func pauseCmd(p Pauser, reason string) tea.Cmd {
 		ctx, cancel := context.WithTimeout(context.Background(), pauseTimeout)
 		defer cancel()
 		return pauseDoneMsg{err: p.Pause(ctx, reason)}
+	}
+}
+
+// holdCmd is the command behind every operator hold — esc and
+// /interrupt both end here — against a host that implements Pauser.
+//
+// It picks the shape of the hold from what is actually happening. With
+// work in flight against a host that can also stop it, the hold cancels
+// and then parks; otherwise it just parks.
+//
+// Nothing in flight means nothing to interrupt, and the distinction is
+// load-bearing rather than an optimisation: PauseInfo.Interrupted is
+// what makes the banner read "Interrupted —" instead of "Agent held",
+// which is the first thing an operator wants to know. Esc between turns
+// is getting ahead of the next one, not killing this one, and the
+// banner has to keep saying so.
+func (m model) holdCmd(p Pauser, reason string) tea.Cmd {
+	if ri, ok := m.opts.Agent.(RemoteInterrupter); ok && m.turnInFlight() {
+		return interruptThenPauseCmd(ri, p, reason)
+	}
+	return pauseCmd(p, reason)
+}
+
+// interruptThenPauseCmd is the operator hold against a host that can
+// both stop work and park: cancel the turn, then shut the gate, in that
+// order and off the Update loop.
+//
+// The two calls are halves of one gesture rather than alternatives.
+// Pause means "start no new turn" — it says nothing about the turn
+// already running, and neither core-agent's endpoint nor the example's
+// interrupts on the operator's behalf. Nor does the local cancel cover
+// the gap: a host with a gate runs its loop on the far side of a wire,
+// so cancelTurn ends this client's subscription while the host's own
+// context, which we do not hold, carries the turn through to the end.
+// Treating the two as an either/or left the agent working under a
+// banner saying it had stopped (issue #280).
+//
+// Both run even if the first fails, and both errors are reported: a
+// failed cancel is exactly when shutting the gate matters most, because
+// the scheduler is otherwise free to start another turn on top of the
+// one that would not die.
+//
+// One deadline covers the pair. A hold is one operator gesture and
+// should have one budget; a host that burns all of it on the cancel has
+// already earned an error row.
+func interruptThenPauseCmd(ri RemoteInterrupter, p Pauser, reason string) tea.Cmd {
+	return func() tea.Msg {
+		ctx, cancel := context.WithTimeout(context.Background(), pauseTimeout)
+		defer cancel()
+		var errs []error
+		if err := ri.Interrupt(ctx); err != nil {
+			errs = append(errs, fmt.Errorf("interrupt: %w", err))
+		}
+		if err := p.Pause(ctx, reason); err != nil {
+			errs = append(errs, fmt.Errorf("pause: %w", err))
+		}
+		return pauseDoneMsg{err: errors.Join(errs...)}
 	}
 }
 

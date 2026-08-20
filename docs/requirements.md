@@ -728,6 +728,18 @@ listed in `/help`:
   fires at idle as well as mid-turn: with a daemon-driven agent the
   window between turns is exactly where an operator wants to get
   ahead of the next one.
+
+  `Pauser` and `RemoteInterrupter` are not alternatives. A hold shuts
+  the gate, which stops the *next* turn and says nothing about the one
+  already running; a host that offers both gets both, in that order —
+  stop the work, then keep it stopped. The local cancel does not
+  substitute for the remote one either: a host with a gate runs its
+  loop on the far side of a wire, so cancelling ends this client's
+  subscription while the host's own context carries the turn on. Only
+  a turn actually in flight is cancelled, since whether the operator's
+  work was killed is what R-HOLD-2's banner reports. `/interrupt`
+  resolves identically — the key and the command are one gesture with
+  two spellings.
 - **R-HOLD-2** A held session renders a banner above the input,
   stating whether a turn was killed on the way in ("interrupted") or
   the loop is merely held ("paused"), the host's reason when it gave
@@ -801,10 +813,14 @@ listed in `/help`:
   is open and the push frames arrive only later, replayed as a backlog
   into whichever turn opens one next — narrating those would print the
   whole history of a hold underneath the unrelated prompt that
-  happened to reopen the stream. The poll has no `mode` field, so the
-  disposition the host last acked is remembered and named in the row;
-  a gate the host reopened on its own is reported as a bare resume,
-  because nobody here chose a disposition.
+  happened to reopen the stream. The chosen source owns the state as
+  well as the row: on a per-turn host the replayed frames are dropped
+  outright rather than applied quietly, because a stale frame shutting
+  a gate the host has long since opened is a hold the operator never
+  asked for and a resume they never hear the reason for. The poll has
+  no `mode` field, so the disposition the host last acked is remembered
+  and named in the row; a gate the host reopened on its own is reported
+  as a bare resume, because nobody here chose a disposition.
 
 ## 4. Non-functional Requirements
 
