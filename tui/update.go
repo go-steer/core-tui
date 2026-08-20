@@ -1619,7 +1619,12 @@ func (m model) handleKey(msg tea.KeyPressMsg) (tea.Model, tea.Cmd) {
 			if kind == paletteSlash && !noAuto {
 				text := strings.TrimSpace(m.input.Value())
 				if strings.HasPrefix(text, "/") {
-					return m.dispatchSlash(text)
+					// submitInputLine, not dispatchSlash: the line
+					// still has to clear the mid-turn gate and the
+					// hold arms, and coming in through the palette
+					// is how an operator normally types a slash
+					// (issue #278).
+					return m.submitInputLine(text)
 				}
 			}
 			return m, nil
@@ -1827,161 +1832,7 @@ func (m model) handleKey(msg tea.KeyPressMsg) (tea.Model, tea.Cmd) {
 		}
 
 	case "enter":
-		// Submit (R-CHAT-1). When idle: dispatch as a slash command
-		// if the input begins with `/`, otherwise append the typed
-		// text as a RoleUser message and start an agent turn. When
-		// streaming (R-CHAT-10): append to the prompt queue and clear
-		// the input; the queue drains one entry per turn-end.
-		text := strings.TrimSpace(m.input.Value())
-		// /clear confirmation: the prior /clear submission armed
-		// confirmingClear. The prompt says "press enter for y/yes",
-		// so a bare Enter (empty text) counts as the y/yes answer;
-		// any typed text other than y/yes cancels. This branch
-		// runs BEFORE the empty-input early-return below so the
-		// bare-Enter path doesn't get swallowed.
-		if m.confirmingClear {
-			m.confirmingClear = false
-			m.input.Reset()
-			lower := strings.ToLower(text)
-			if text == "" || lower == "y" || lower == "yes" {
-				m.history.Reset()
-				m.resetChatSelection()
-				m.refreshViewport()
-				return m, nil
-			}
-			m.history.Append(Message{Role: RoleSystem, Text: "clear cancelled"})
-			m.refreshViewport()
-			return m, nil
-		}
-		if text == "" {
-			return m, nil
-		}
-		// Mid-turn slash routing (R-HOLD-3). This runs BEFORE the
-		// stateStreaming branch below because that branch queues the
-		// raw line as prompt text — which swallowed every slash typed
-		// during a turn, including /interrupt and /btw, the two that
-		// only make sense mid-turn. The allowlist is narrow and the
-		// fallthrough is still "queue it": prose beginning with a
-		// slash must not become a command.
-		if m.turnInFlight() && strings.HasPrefix(text, "/") {
-			switch midTurnSlashDisposition(text) {
-			case midTurnDispatch:
-				return m.dispatchSlash(text)
-			case midTurnRefuse:
-				name, _, _ := strings.Cut(strings.TrimPrefix(text, "/"), " ")
-				m.input.Reset()
-				m.history.Append(Message{
-					Role: RoleSystem,
-					Text: "/" + name + ": not while a turn is running — /interrupt first",
-				})
-				m.refreshAndScroll()
-				return m, nil
-			case midTurnQueue:
-				// Fall through to the paused / streaming arms
-				// below, which is where queueing lives.
-			}
-		}
-		// Paused: typed text is a steer, not a new turn (R-HOLD-4).
-		// Routing it through submitTurn would be a hang, not a slow
-		// path — on the local Run path Agent.Run blocks in awaitResume
-		// before it does anything else, so the spinner would spin
-		// against a gate only this keystroke could have opened.
-		if m.pause.paused() {
-			if p, ok := m.opts.Agent.(Pauser); ok {
-				m.recordPrompt(text)
-				// Operator-initiated work either way, so the
-				// auto-continue streak starts over (issue #9).
-				m.consecutiveAutoContinues = 0
-				m.input.Reset()
-				if m.liveMode {
-					// The host owns the loop: the steer IS the next
-					// turn, and the standing Events stream shows it.
-					m.history.Append(Message{Role: RoleUser, Text: text})
-					m.refreshAndScroll()
-					return m, resumeCmd(p, ResumeRequest{Mode: ResumeModeSteer, Steer: text})
-				}
-				// Per-turn host: WE own the turn. Open the gate,
-				// drop the held work, and run the steer through
-				// submitTurn when the resume lands — a turn the host
-				// started for us would stream to a subscription
-				// Agent.Run has not opened. No user row here;
-				// submitTurn appends it, so the transcript gets one
-				// copy either way.
-				m.refreshAndScroll()
-				return m, resumeThenSubmitCmd(p, ResumeRequest{Mode: ResumeModeAbandon}, text)
-			}
-		}
-		if m.state == stateStreaming {
-			m.enqueueDuringStream(text)
-			m.input.Reset()
-			m.refreshViewport()
-			return m, nil
-		}
-		if strings.HasPrefix(text, "/") {
-			return m.dispatchSlash(text)
-		}
-		// Issue #22 — LiveAgent mode bypasses the per-turn Run
-		// path entirely. Operator submissions flow through
-		// InjectableAgent.Inject when available; otherwise the
-		// TUI logs a one-time "read-only view" system note and
-		// discards the typed text (the issue's "no-op" branch,
-		// surfaced explicitly so the operator knows why nothing
-		// happened).
-		if m.liveMode {
-			m.recordPrompt(text)
-			m.input.Reset()
-			if injector, ok := m.opts.Agent.(InjectableAgent); ok {
-				// Inject feeds the host's stream; events flow back
-				// through the same Events(ctx) iterator and land
-				// in scrollback like everything else.
-				if err := injector.Inject(text); err != nil {
-					m.history.Append(Message{Role: RoleError, Text: "inject failed: " + err.Error()})
-					m.refreshViewport()
-					return m, nil
-				}
-				// Render the typed prompt as a normal user row
-				// so the operator sees what they sent — the
-				// host's event stream may not echo it back.
-				m.history.Append(Message{Role: RoleUser, Text: text})
-				// Issue #148: the submit IS the start of the turn,
-				// so it is where the waiting indicator starts.
-				// Waiting for the first partial chunk to open the
-				// stretch leaves the one window the operator most
-				// needs an indicator for — prompt sent, host
-				// thinking, nothing on screen yet — completely
-				// blank, and leaves a host that only ever emits
-				// committed messages with no indicator at all.
-				//
-				// Only the false→true flip arms a tick chain; an
-				// Inject during a stretch that is already running
-				// (the host is mid-answer and the operator adds a
-				// steer) rides the live one.
-				var spin tea.Cmd
-				if m.beginLiveStretch() {
-					spin = m.armSpinner()
-				}
-				m.refreshViewport()
-				return m, spin
-			}
-			if !m.liveReadOnlyNoted {
-				m.liveReadOnlyNoted = true
-				m.history.Append(Message{
-					Role: RoleSystem,
-					Text: "Read-only view — this LiveAgent host doesn't implement Inject(), so typing is disabled. Use Ctrl+C to quit.",
-				})
-				m.refreshViewport()
-			}
-			return m, nil
-		}
-		// Record the non-slash, non-empty prompt in history so
-		// ↑/↓ can recall it next time. recordPrompt dedupes
-		// consecutive duplicates + caps the ring at promptHistoryCap.
-		m.recordPrompt(text)
-		// Operator-initiated turn resets the auto-continue cap so
-		// the next streak gets the full budget. (Issue #9.)
-		m.consecutiveAutoContinues = 0
-		out := m.submitTurn(text)
-		return out, out.armSpinner()
+		return m.submitInputLine(strings.TrimSpace(m.input.Value()))
 
 	case "shift+enter", "ctrl+j", "alt+enter":
 		// Insert a newline (R-CHAT-1). All three forms are accepted
@@ -2210,6 +2061,194 @@ func (m model) paletteComplete() tea.Model {
 // section so the model sees inline content (R-PAL-2 + R-CHAT-13).
 // Failed reads are surfaced as system messages so the operator can
 // fix typos; the prompt still ships with the readable refs.
+// submitInputLine is the one road out of the composer, and where a
+// submitted line is routed (R-CHAT-1). At idle a /-prefixed line is
+// dispatched as a command and anything else starts a turn; mid-turn
+// (R-CHAT-10) it joins the prompt queue; the arms in between are the
+// hold rules.
+//
+// Every Enter carrying a line arrives here — the ordinary key handler
+// and the slash palette, whose own Enter inserts a selection and
+// submits it in one keystroke. Before issue #278 the palette arm
+// called dispatchSlash directly and returned, skipping the mid-turn
+// gate, the paused-steer arm and the queue. Typing / is what opens the
+// palette, so that bypass was the normal path for a slash rather than
+// an edge case, and R-HOLD-3 applied to almost nothing an operator
+// typed by hand.
+//
+// Not reached by falling out of the palette block on purpose: the
+// transcript focus handler sits between the two Enter arms and may
+// claim the key before it gets here.
+//
+// text is the already-trimmed input line.
+func (m model) submitInputLine(text string) (tea.Model, tea.Cmd) {
+	// /clear confirmation: the prior /clear submission armed
+	// confirmingClear. The prompt says "press enter for y/yes",
+	// so a bare Enter (empty text) counts as the y/yes answer;
+	// any typed text other than y/yes cancels. This branch
+	// runs BEFORE the empty-input early-return below so the
+	// bare-Enter path doesn't get swallowed.
+	if m.confirmingClear {
+		m.confirmingClear = false
+		m.input.Reset()
+		lower := strings.ToLower(text)
+		if text == "" || lower == "y" || lower == "yes" {
+			m.history.Reset()
+			m.resetChatSelection()
+			m.refreshViewport()
+			return m, nil
+		}
+		m.history.Append(Message{Role: RoleSystem, Text: "clear cancelled"})
+		m.refreshViewport()
+		return m, nil
+	}
+	if text == "" {
+		return m, nil
+	}
+	// Mid-turn slash routing (R-HOLD-3). This runs BEFORE the
+	// stateStreaming branch below because that branch queues the
+	// raw line as prompt text — which swallowed every slash typed
+	// during a turn, including /interrupt and /btw, the two that
+	// only make sense mid-turn. The allowlist is narrow and the
+	// fallthrough is still "queue it": prose beginning with a
+	// slash must not become a command.
+	if m.turnInFlight() && strings.HasPrefix(text, "/") {
+		switch midTurnSlashDisposition(text) {
+		case midTurnDispatch:
+			return m.dispatchSlash(text)
+		case midTurnRefuse:
+			name, _, _ := strings.Cut(strings.TrimPrefix(text, "/"), " ")
+			m.input.Reset()
+			m.history.Append(Message{
+				Role: RoleSystem,
+				Text: "/" + name + ": not while a turn is running — /interrupt first",
+			})
+			m.refreshAndScroll()
+			return m, nil
+		case midTurnQueue:
+			// Fall through to the paused / streaming arms
+			// below, which is where queueing lives.
+		}
+	}
+	// Held, and the line names a command: run it. The steer arm
+	// below does not look at the leading slash, so without this a
+	// /stats typed while the agent is parked is shipped to the host
+	// as steer prose. Until issue #278 the palette's Enter bypass hid
+	// that — dispatching before the arm was ever consulted — so the
+	// two ways of typing the same line disagreed.
+	//
+	// The test is the same static table the mid-turn gate uses, so
+	// the two states cannot drift apart on what counts as a command.
+	// Both buckets dispatch here: nothing is running to refuse
+	// against, and /clear while held is a reasonable thing to want.
+	// Everything else stays prose, which is the whole point of a
+	// steer field — "/tmp is full, look at it" must reach the host.
+	if m.pause.paused() && midTurnSlashDisposition(text) != midTurnQueue {
+		return m.dispatchSlash(text)
+	}
+	// Paused: typed text is a steer, not a new turn (R-HOLD-4).
+	// Routing it through submitTurn would be a hang, not a slow
+	// path — on the local Run path Agent.Run blocks in awaitResume
+	// before it does anything else, so the spinner would spin
+	// against a gate only this keystroke could have opened.
+	if m.pause.paused() {
+		if p, ok := m.opts.Agent.(Pauser); ok {
+			m.recordPrompt(text)
+			// Operator-initiated work either way, so the
+			// auto-continue streak starts over (issue #9).
+			m.consecutiveAutoContinues = 0
+			m.input.Reset()
+			if m.liveMode {
+				// The host owns the loop: the steer IS the next
+				// turn, and the standing Events stream shows it.
+				m.history.Append(Message{Role: RoleUser, Text: text})
+				m.refreshAndScroll()
+				return m, resumeCmd(p, ResumeRequest{Mode: ResumeModeSteer, Steer: text})
+			}
+			// Per-turn host: WE own the turn. Open the gate,
+			// drop the held work, and run the steer through
+			// submitTurn when the resume lands — a turn the host
+			// started for us would stream to a subscription
+			// Agent.Run has not opened. No user row here;
+			// submitTurn appends it, so the transcript gets one
+			// copy either way.
+			m.refreshAndScroll()
+			return m, resumeThenSubmitCmd(p, ResumeRequest{Mode: ResumeModeAbandon}, text)
+		}
+	}
+	if m.state == stateStreaming {
+		m.enqueueDuringStream(text)
+		m.input.Reset()
+		m.refreshViewport()
+		return m, nil
+	}
+	if strings.HasPrefix(text, "/") {
+		return m.dispatchSlash(text)
+	}
+	// Issue #22 — LiveAgent mode bypasses the per-turn Run
+	// path entirely. Operator submissions flow through
+	// InjectableAgent.Inject when available; otherwise the
+	// TUI logs a one-time "read-only view" system note and
+	// discards the typed text (the issue's "no-op" branch,
+	// surfaced explicitly so the operator knows why nothing
+	// happened).
+	if m.liveMode {
+		m.recordPrompt(text)
+		m.input.Reset()
+		if injector, ok := m.opts.Agent.(InjectableAgent); ok {
+			// Inject feeds the host's stream; events flow back
+			// through the same Events(ctx) iterator and land
+			// in scrollback like everything else.
+			if err := injector.Inject(text); err != nil {
+				m.history.Append(Message{Role: RoleError, Text: "inject failed: " + err.Error()})
+				m.refreshViewport()
+				return m, nil
+			}
+			// Render the typed prompt as a normal user row
+			// so the operator sees what they sent — the
+			// host's event stream may not echo it back.
+			m.history.Append(Message{Role: RoleUser, Text: text})
+			// Issue #148: the submit IS the start of the turn,
+			// so it is where the waiting indicator starts.
+			// Waiting for the first partial chunk to open the
+			// stretch leaves the one window the operator most
+			// needs an indicator for — prompt sent, host
+			// thinking, nothing on screen yet — completely
+			// blank, and leaves a host that only ever emits
+			// committed messages with no indicator at all.
+			//
+			// Only the false→true flip arms a tick chain; an
+			// Inject during a stretch that is already running
+			// (the host is mid-answer and the operator adds a
+			// steer) rides the live one.
+			var spin tea.Cmd
+			if m.beginLiveStretch() {
+				spin = m.armSpinner()
+			}
+			m.refreshViewport()
+			return m, spin
+		}
+		if !m.liveReadOnlyNoted {
+			m.liveReadOnlyNoted = true
+			m.history.Append(Message{
+				Role: RoleSystem,
+				Text: "Read-only view — this LiveAgent host doesn't implement Inject(), so typing is disabled. Use Ctrl+C to quit.",
+			})
+			m.refreshViewport()
+		}
+		return m, nil
+	}
+	// Record the non-slash, non-empty prompt in history so
+	// ↑/↓ can recall it next time. recordPrompt dedupes
+	// consecutive duplicates + caps the ring at promptHistoryCap.
+	m.recordPrompt(text)
+	// Operator-initiated turn resets the auto-continue cap so
+	// the next streak gets the full budget. (Issue #9.)
+	m.consecutiveAutoContinues = 0
+	out := m.submitTurn(text)
+	return out, out.armSpinner()
+}
+
 func (m model) submitTurn(text string) model {
 	m.history.Append(Message{Role: RoleUser, Text: text})
 
