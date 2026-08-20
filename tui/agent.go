@@ -255,7 +255,15 @@ type InboxDrainer interface {
 // emits "I need the operator's attention" signals (typically from
 // background sub-agents reporting completion or asking for input)
 // implement it. WakeRequested returns a receive-only channel; each
-// receive triggers a transient toast banner in the TUI.
+// receive triggers a transient toast banner in the TUI plus a
+// system row in the transcript, so the wake leaves a trace once the
+// toast's TTL expires.
+//
+// The channel element is struct{}: the signal carries no payload and
+// the TUI therefore cannot say what raised it. Hosts must not rely on
+// the rendered copy naming a cause — it deliberately names none, and
+// a host that needs the operator to know why should push the reason
+// through a channel that can carry one (an inbox entry, Notifier).
 //
 // The TUI subscribes once at startup via a goroutine that ranges
 // over the channel; the host owns channel lifecycle (closing the

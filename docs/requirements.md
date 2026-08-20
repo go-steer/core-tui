@@ -617,6 +617,24 @@ listed in `/help`:
   subscription without a goroutine leak. Without the capability,
   no toast affordance renders and the banner row collapses to zero
   height.
+- **R-WAKE-2** The same receive also appends a permanent `system`
+  row to the transcript, because a 4 s toast is not a record: the
+  operator who steps away must still be able to scroll back and see
+  that a wake fired and roughly when. Neither the toast nor the row
+  may state **what** caused the wake. `WakeRequested() <-chan
+  struct{}` carries no payload, so the two producers — a host
+  draining a background sub-agent's alert into the channel, and a
+  bare "look now" request from an operator or scheduler — are
+  indistinguishable to the TUI, and copy asserting an alert is
+  waiting in the inbox is false for the second. The row states that
+  a signal arrived, says the signal carries no detail, and offers
+  the conditional reading plus `/subagents`; it asserts nothing
+  about inbox contents as fact.
+- **R-WAKE-3** A wake that lands while the queue holds a
+  non-terminal entry raises neither toast nor row. `Inject()` fires
+  the same signal, so an operator typing during streaming would
+  otherwise get an attention notice about their own typing — the
+  queue panel is already that confirmation surface.
 
 ### 3.21 System clipboard (should)
 

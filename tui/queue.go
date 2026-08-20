@@ -81,9 +81,9 @@ func (s QueueState) terminalState() bool {
 // hasPendingQueueEntry reports whether the model's queue holds any
 // non-terminal entry (QueueQueued or QueueInFlight). Used by the
 // wakeMsg handler to tell apart "operator just typed during streaming"
-// from "subagent / external alert arrived" — the former produces a
+// from "something out of band woke the agent" — the former produces a
 // queue entry the operator can already see in the panel and doesn't
-// need a redundant system-message about an inbox alert.
+// need a redundant attention notice about their own typing.
 func (m *model) hasPendingQueueEntry() bool {
 	for _, e := range m.queue {
 		if !e.State.terminalState() {
