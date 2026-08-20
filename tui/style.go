@@ -49,6 +49,12 @@ const (
 	glyphExpanded    = "▾"
 	GlyphWarn        = "⚠"
 	GlyphUserPrompt  = "❯"
+	// GlyphPaused anchors the operator-hold banner (issue #260).
+	// Double vertical line rather than the pause emoji (U+23F8):
+	// that one carries emoji presentation by default, so terminals
+	// render it double-width in the system palette and the banner's
+	// padding computation lands a cell short.
+	GlyphPaused = "‖"
 	// GlyphAutoContinue marks RoleUser messages synthesized by the
 	// AutoContinueFromInbox loop (issue #9). Visually distinct
 	// from GlyphUserPrompt so operators can tell at a glance which

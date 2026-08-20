@@ -37,15 +37,38 @@ import (
 // flavor of this example genuinely does its streaming over a socket.
 // What is fake is the agent behind it (the same canned turn as the
 // local flavor) and the API's breadth: core-agent's attach surface
-// has ~30 endpoints, this has seven.
+// has ~30 endpoints, this has thirteen.
 
 // Frame is one sequenced event off the SSE stream. Seq is the
 // resume cursor: a client that drops re-subscribes with ?since=Seq
 // and the daemon replays from there.
+//
+// Exactly one payload field is set. Pause is its own field rather
+// than another Event shape because the real protocol carries it as
+// its own SSE event type (§2.8): a client that predates the pause
+// gate has to be able to ignore the frame, not misread it as prose.
 type Frame struct {
-	Seq   int64  `json:"seq"`
-	Event *Event `json:"event"`
+	Seq   int64       `json:"seq"`
+	Event *Event      `json:"event,omitempty"`
+	Pause *PauseEvent `json:"pause,omitempty"`
 }
+
+// PauseEvent is the gate transition, broadcast to every attached
+// operator — the hold is session state, not one client's UI state,
+// so a second TUI watching the same session sees the banner too.
+type PauseEvent struct {
+	State       string    `json:"state"`
+	Reason      string    `json:"reason,omitempty"`
+	Interrupted bool      `json:"interrupted,omitempty"`
+	Mode        string    `json:"mode,omitempty"`
+	At          time.Time `json:"at"`
+}
+
+// The two states a PauseEvent reports.
+const (
+	PauseStatePaused  = "paused"
+	PauseStateResumed = "resumed"
+)
 
 // StatusInfo is the daemon's answer to GET {session}/status.
 type StatusInfo struct {
@@ -110,6 +133,9 @@ func StartDaemon(agent *Agent) (*Daemon, error) {
 	mux.HandleFunc("GET "+SessionPath+"/usage", d.handleUsage)
 	mux.HandleFunc("POST "+SessionPath+"/inject", d.handleInject)
 	mux.HandleFunc("POST "+SessionPath+"/interrupt", d.handleInterrupt)
+	mux.HandleFunc("GET "+SessionPath+"/pause", d.handlePauseState)
+	mux.HandleFunc("POST "+SessionPath+"/pause", d.handlePause)
+	mux.HandleFunc("POST "+SessionPath+"/resume", d.handleResume)
 	mux.HandleFunc("POST "+SessionPath+"/slash/btw", d.handleBtw)
 	d.srv = &http.Server{Handler: mux, ReadHeaderTimeout: 5 * time.Second}
 	go func() { _ = d.srv.Serve(ln) }()
@@ -132,11 +158,19 @@ func (d *Daemon) Close() error {
 	return d.srv.Shutdown(ctx)
 }
 
-func (d *Daemon) publish(ev *Event) {
+func (d *Daemon) publish(ev *Event) { d.publishFrame(Frame{Event: ev}) }
+
+// publishPause broadcasts a gate transition on the same stream, and
+// through the same history, as everything else: a client that
+// reconnects across a hold has to learn about it from the replay
+// rather than by polling.
+func (d *Daemon) publishPause(pe *PauseEvent) { d.publishFrame(Frame{Pause: pe}) }
+
+func (d *Daemon) publishFrame(f Frame) {
 	d.mu.Lock()
 	defer d.mu.Unlock()
 	d.seq++
-	f := Frame{Seq: d.seq, Event: ev}
+	f.Seq = d.seq
 	d.history = append(d.history, f)
 	for ch := range d.subs {
 		select {
@@ -240,8 +274,92 @@ func (d *Daemon) handleUsage(w http.ResponseWriter, _ *http.Request) {
 	})
 }
 
-func (d *Daemon) handleInterrupt(w http.ResponseWriter, _ *http.Request) {
-	writeJSON(w, map[string]bool{"cancelled": d.agent.Interrupt()})
+// handleInterrupt cancels the in-flight turn AND holds the loop.
+// The hold is the part that matters: cancelling alone just lets the
+// scheduler start the next turn, so the operator's esc buys them
+// one turn's worth of nothing. hold defaults on, which is the
+// default the real endpoint took at protocol 1.5.0; a client that
+// wants the old cancel-only behaviour asks for it.
+func (d *Daemon) handleInterrupt(w http.ResponseWriter, r *http.Request) {
+	body := struct {
+		Hold *bool `json:"hold,omitempty"`
+	}{}
+	// An empty body is legal here — the endpoint predates the field.
+	_ = json.NewDecoder(r.Body).Decode(&body)
+	hold := body.Hold == nil || *body.Hold
+
+	cancelled := d.agent.Interrupt()
+	held := false
+	if hold {
+		info := d.agent.Pause("operator interrupt", cancelled)
+		held = info.Paused
+		d.publishPause(&PauseEvent{
+			State:       PauseStatePaused,
+			Reason:      info.Reason,
+			Interrupted: info.Interrupted,
+			At:          info.Since,
+		})
+	}
+	writeJSON(w, map[string]bool{"cancelled": cancelled, "held": held})
+}
+
+func (d *Daemon) handlePauseState(w http.ResponseWriter, _ *http.Request) {
+	writeJSON(w, d.agent.PauseState())
+}
+
+func (d *Daemon) handlePause(w http.ResponseWriter, r *http.Request) {
+	body := struct {
+		Reason string `json:"reason,omitempty"`
+	}{}
+	_ = json.NewDecoder(r.Body).Decode(&body)
+	info := d.agent.Pause(body.Reason, false)
+	d.publishPause(&PauseEvent{
+		State:  PauseStatePaused,
+		Reason: info.Reason,
+		At:     info.Since,
+	})
+	writeJSON(w, info)
+}
+
+// handleResume opens the gate and, on a steer, starts the turn the
+// operator redirected to. The daemon owns the loop in attach mode,
+// so the steer becoming a turn is the daemon's job — the TUI has
+// already moved on by the time this returns.
+func (d *Daemon) handleResume(w http.ResponseWriter, r *http.Request) {
+	body := struct {
+		Mode  string `json:"mode"`
+		Steer string `json:"steer,omitempty"`
+	}{}
+	if err := json.NewDecoder(r.Body).Decode(&body); err != nil {
+		http.Error(w, err.Error(), http.StatusBadRequest)
+		return
+	}
+	// Read this BEFORE resuming: a turn parked on the gate adopts
+	// the disposition itself (Agent.Run), so starting another one
+	// here would run the operator's steer twice.
+	parked := d.agent.HeldWaiters()
+	if err := d.agent.Resume(body.Mode, body.Steer); err != nil {
+		http.Error(w, err.Error(), http.StatusConflict)
+		return
+	}
+	d.publishPause(&PauseEvent{
+		State: PauseStateResumed,
+		Mode:  body.Mode,
+		At:    time.Now(),
+	})
+	if parked == 0 {
+		switch body.Mode {
+		case ResumeModeSteer:
+			d.startTurn(body.Steer)
+		case ResumeModeContinue:
+			// The real loop picks its held work back up here. The
+			// fake has none to pick up, so it replays the canned
+			// turn — the visible difference from abandon, which
+			// starts nothing.
+			d.startTurn("carry on")
+		}
+	}
+	writeJSON(w, d.agent.PauseState())
 }
 
 func (d *Daemon) handleBtw(w http.ResponseWriter, r *http.Request) {
@@ -271,8 +389,18 @@ func (d *Daemon) handleInject(w http.ResponseWriter, r *http.Request) {
 		http.Error(w, err.Error(), http.StatusBadRequest)
 		return
 	}
+	d.startTurn(body.Message)
+	w.WriteHeader(http.StatusAccepted)
+}
+
+// startTurn runs one turn on the daemon's own goroutine and
+// broadcasts it. Every entry point that starts work goes through
+// here — an inject, and a resume that steers or carries on — so
+// none of them can forget the gate: Agent.Run blocks on it first,
+// which means a turn started while held simply waits.
+func (d *Daemon) startTurn(prompt string) {
 	go func() {
-		for ev, err := range d.agent.Run(context.Background(), body.Message) {
+		for ev, err := range d.agent.Run(context.Background(), prompt) {
 			if err != nil {
 				d.publish(&Event{
 					Author:       "system",
@@ -290,7 +418,6 @@ func (d *Daemon) handleInject(w http.ResponseWriter, r *http.Request) {
 			d.publish(ev)
 		}
 	}()
-	w.WriteHeader(http.StatusAccepted)
 }
 
 func (d *Daemon) handleEvents(w http.ResponseWriter, r *http.Request) {
@@ -460,12 +587,40 @@ func (c *Client) Inject(ctx context.Context, sessionPath, message string) error 
 	return c.post(ctx, sessionPath+"/inject", map[string]string{"message": message}, nil)
 }
 
-// Interrupt asks the daemon to cancel the in-flight turn.
-func (c *Client) Interrupt(ctx context.Context, sessionPath string) (bool, error) {
-	var out struct {
-		Cancelled bool `json:"cancelled"`
-	}
-	return out.Cancelled, c.post(ctx, sessionPath+"/interrupt", nil, &out)
+// InterruptResult is what POST {session}/interrupt reports back:
+// whether there was a turn to cancel, and whether the loop is now
+// held. They are independent — interrupting an idle session cancels
+// nothing and still parks it, which is the point.
+type InterruptResult struct {
+	Cancelled bool `json:"cancelled"`
+	Held      bool `json:"held"`
+}
+
+// Interrupt asks the daemon to cancel the in-flight turn and hold
+// the loop. Passing hold=false asks for the pre-1.5.0 behaviour,
+// cancel with no gate.
+func (c *Client) Interrupt(ctx context.Context, sessionPath string, hold bool) (InterruptResult, error) {
+	var out InterruptResult
+	return out, c.post(ctx, sessionPath+"/interrupt", map[string]bool{"hold": hold}, &out)
+}
+
+// Pause asks the daemon to hold the loop.
+func (c *Client) Pause(ctx context.Context, sessionPath, reason string) (PauseInfo, error) {
+	var out PauseInfo
+	return out, c.post(ctx, sessionPath+"/pause", map[string]string{"reason": reason}, &out)
+}
+
+// Resume opens the gate with one of the three dispositions. A mode
+// the daemon rejects, or a session that is no longer held, comes
+// back as an error — the caller's job is to say so, not to retry.
+func (c *Client) Resume(ctx context.Context, sessionPath, mode, steer string) error {
+	return c.post(ctx, sessionPath+"/resume", map[string]string{"mode": mode, "steer": steer}, nil)
+}
+
+// PauseState polls the gate.
+func (c *Client) PauseState(ctx context.Context, sessionPath string) (PauseInfo, error) {
+	var out PauseInfo
+	return out, c.get(ctx, sessionPath+"/pause", &out)
 }
 
 // Btw forwards a side question to the remote agent.

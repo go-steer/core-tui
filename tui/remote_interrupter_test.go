@@ -20,6 +20,8 @@ import (
 	"strings"
 	"sync/atomic"
 	"testing"
+
+	tea "charm.land/bubbletea/v2"
 )
 
 // remoteInterrupterAgent implements Agent + LiveAgent + RemoteInterrupter
@@ -212,5 +214,58 @@ func TestInterrupt_RemoteSuccessStopsTheLiveSpinner(t *testing.T) {
 				t.Errorf("turnInFlight() = %v, want %v", got.turnInFlight(), tc.wantSpinner)
 			}
 		})
+	}
+}
+
+// TestEsc_RemoteInterruptWithoutAPauser covers the host that predates
+// Pauser: esc against a daemon-driven turn used to do nothing at all,
+// because the cascade's only cancel arm needed a local cancelTurn.
+// It now reaches RemoteInterrupter, which on a host at protocol 1.5.0
+// or later parks the loop server-side.
+func TestEsc_RemoteInterruptWithoutAPauser(t *testing.T) {
+	agent := &remoteInterrupterAgent{}
+	m := newModel(Options{Agent: agent})
+	m.width, m.height = 100, 40
+	if !m.liveMode {
+		t.Fatal("setup: expected liveMode for a LiveAgent host")
+	}
+	// Observer mode mid-turn: the spinner is the only signal, and
+	// m.state stays stateIdle throughout (see turnInFlight).
+	if !m.beginLiveStretch() {
+		t.Fatal("setup: expected to open a stretch on a fresh model")
+	}
+
+	out, cmd := m.Update(tea.KeyPressMsg(tea.Key{Code: tea.KeyEscape}))
+	if cmd == nil {
+		t.Fatal("esc in observer mode dispatched nothing")
+	}
+	if _, ok := cmd().(remoteInterruptDoneMsg); !ok {
+		t.Fatalf("esc dispatched the wrong Cmd for a RemoteInterrupter host")
+	}
+	if got := agent.interruptCalls.Load(); got != 1 {
+		t.Errorf("Interrupt calls = %d, want 1", got)
+	}
+	// The operator needs to know the keypress landed before the
+	// round trip finishes.
+	if got := lastText(out.(model)); !strings.Contains(got, "Interrupting") {
+		t.Errorf("no acknowledgement row; last = %q", got)
+	}
+}
+
+// TestEsc_NoCapabilitiesStaysANoOp. Esc must never quit and must
+// never error — a host with neither capability is the one where the
+// key has nothing to do.
+func TestEsc_NoCapabilitiesStaysANoOp(t *testing.T) {
+	m := newModel(Options{Agent: stubAgent{}})
+	m.width, m.height = 100, 40
+	before := len(m.history.Snapshot())
+
+	out, cmd := m.Update(tea.KeyPressMsg(tea.Key{Code: tea.KeyEscape}))
+	if cmd != nil {
+		t.Errorf("esc dispatched %T on a host with no interrupt capability", cmd())
+	}
+	after := out.(model)
+	if got := len(after.history.Snapshot()); got != before {
+		t.Errorf("esc appended %d rows on a no-op", got-before)
 	}
 }

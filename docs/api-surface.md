@@ -158,7 +158,7 @@ library without these. Frozen at 1.0.
 | `ThemeDark` | const | `options.go:23` | `Options.ForceTheme` vocabulary. |
 | `ThemeLight` | const | `options.go:24` | `Options.ForceTheme` vocabulary. |
 
-#### Agent + Event (38)
+#### Agent + Event (41)
 
 | symbol | kind | declared | reached from |
 |---|---|---|---|
@@ -169,6 +169,9 @@ library without these. Frozen at 1.0.
 | `InboxStateQueued` | const | `remote_events.go:121` | `Event.Inbox` (SSE spec §2.4). |
 | `Message` | type | `history.go:41` | `Options.SeedHistory []Message`. |
 | `Message.Display` | method | `history.go:153` | `Options.SeedHistory []Message`. |
+| `PauseEvent` | type | `remote_events.go:135` | `Event.Pause` (SSE spec §2.8). |
+| `PauseStatePaused` | const | `remote_events.go:146` | `Event.Pause` (SSE spec §2.8). |
+| `PauseStateResumed` | const | `remote_events.go:147` | `Event.Pause` (SSE spec §2.8). |
 | `Role` | type | `history.go:21` | `Options.SeedHistory []Message`. |
 | `RoleAssistant` | const (`Role`) | `history.go:25` | `Options.SeedHistory []Message`. |
 | `RoleError` | const (`Role`) | `history.go:27` | `Options.SeedHistory []Message`. |
@@ -201,7 +204,15 @@ library without these. Frozen at 1.0.
 | `UsageLastTurn` | type | `remote_events.go:89` | `Event.UsageUpdate` (SSE spec §2.3). |
 | `UsageUpdate` | type | `remote_events.go:73` | `Event.UsageUpdate` (SSE spec §2.3). |
 
-#### Optional capability (36)
+#### Optional capability (42)
+
+> **Grew by 6 top-level symbols in v0.23**, in
+> [#260](https://github.com/go-steer/core-tui/issues/260): `Pauser`,
+> `PauseInfo`, `ResumeRequest` and the three `ResumeMode*` constants — the
+> operator hold. Three more (`PauseEvent`, `PauseStatePaused`,
+> `PauseStateResumed`) landed in the Agent + Event table above, since they
+> are the push half of the same feature. The §1 census of 265 is the
+> `102ecb1` snapshot and is not re-derived.
 
 | symbol | kind | declared | reached from |
 |---|---|---|---|
@@ -212,12 +223,18 @@ library without these. Frozen at 1.0.
 | `LiveAgent` | type | `agent.go:203` | §3.3 capability interface. |
 | `ModelInfo` | type | `capabilities.go:42` | Reached from `ModelSwapper`. |
 | `ModelSwapper` | type | `capabilities.go:36` | §3.3 capability interface. |
+| `PauseInfo` | type | `pause.go:74` | Reached from `Pauser`. |
+| `Pauser` | type | `pause.go:60` | §3.3 capability interface. |
 | `PermanentStreamError` | type | `agent.go:219` | Reached from `LiveAgent`. |
 | `PermissionController` | type | `capabilities.go:190` | §3.3 capability interface. |
 | `PricingController` | type | `capabilities.go:208` | §3.3 capability interface. |
 | `ReloadResult` | type | `capabilities.go:143` | Reached from `Reloader`. |
 | `Reloader` | type | `capabilities.go:136` | §3.3 capability interface. |
 | `RemoteInterrupter` | type | `agent.go:288` | §3.3 capability interface. |
+| `ResumeModeAbandon` | const | `pause.go:105` | Reached from `Pauser` (`ResumeRequest.Mode`). |
+| `ResumeModeContinue` | const | `pause.go:101` | Reached from `Pauser` (`ResumeRequest.Mode`). |
+| `ResumeModeSteer` | const | `pause.go:98` | Reached from `Pauser` (`ResumeRequest.Mode`). |
+| `ResumeRequest` | type | `pause.go:86` | Reached from `Pauser`. |
 | `SessionInfo` | type | `capabilities.go:67` | Reached from `SessionSwitcher`. |
 | `SessionInput` | type | `capabilities.go:95` | Reached from `SessionSwitcher`. |
 | `SessionSwitcher` | type | `capabilities.go:61` | §3.3 capability interface. |

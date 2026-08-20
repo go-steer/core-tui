@@ -165,6 +165,26 @@ func Models() []string {
 	}
 }
 
+// PauseInfo is the gate's state, the fake of core-agent's
+// `attach.PauseInfo`. Interrupted is the field an operator reads
+// first: it separates "your turn was killed and the loop is parked"
+// from "the loop is parked and nothing was lost".
+type PauseInfo struct {
+	Paused      bool      `json:"paused"`
+	Since       time.Time `json:"since,omitzero"`
+	Reason      string    `json:"reason,omitempty"`
+	Interrupted bool      `json:"interrupted,omitempty"`
+}
+
+// The dispositions POST {session}/resume accepts. Plain strings with
+// a named-constant vocabulary, matching how the rest of this fake
+// carries wire enums.
+const (
+	ResumeModeSteer    = "steer"
+	ResumeModeContinue = "continue"
+	ResumeModeAbandon  = "abandon"
+)
+
 // Agent is the fake of core-agent's `pkg/agent.Agent`. Every method
 // below exists on the real type with the same signature; the
 // adapters in this example are written against these and nothing
@@ -184,6 +204,16 @@ type Agent struct {
 	running     bool
 	interrupted bool
 	wake        chan struct{}
+
+	// The pause gate. hold is non-nil and open exactly while the
+	// agent is held; Resume closes it, which is what releases
+	// awaitResume. A channel rather than a sync.Cond because the
+	// waiter has to be able to select on ctx.Done as well.
+	pause       PauseInfo
+	hold        chan struct{}
+	waiting     int
+	resumeMode  string
+	resumeSteer string
 }
 
 // NewAgent builds a fake agent on the given model.
@@ -260,6 +290,93 @@ func (a *Agent) Interrupt() bool {
 	}
 	a.interrupted = true
 	return true
+}
+
+// Pause shuts the gate. Idempotent: a second Pause while held keeps
+// the original Since and reason, so a double esc does not restart
+// the clock on the banner.
+func (a *Agent) Pause(reason string, interrupted bool) PauseInfo {
+	a.mu.Lock()
+	defer a.mu.Unlock()
+	if !a.pause.Paused {
+		a.pause = PauseInfo{
+			Paused:      true,
+			Since:       time.Now(),
+			Reason:      reason,
+			Interrupted: interrupted,
+		}
+		a.hold = make(chan struct{})
+	}
+	return a.pause
+}
+
+// Resume opens the gate with a disposition, releasing whoever is
+// blocked in awaitResume. Resuming an agent that is not held is an
+// error rather than a no-op — it means the caller's view of the
+// session is stale, and swallowing it would hide that.
+func (a *Agent) Resume(mode, steer string) error {
+	switch mode {
+	case ResumeModeSteer, ResumeModeContinue, ResumeModeAbandon:
+	default:
+		return fmt.Errorf("unknown resume mode %q", mode)
+	}
+	a.mu.Lock()
+	defer a.mu.Unlock()
+	if !a.pause.Paused {
+		return fmt.Errorf("agent is not held")
+	}
+	a.resumeMode, a.resumeSteer = mode, steer
+	a.pause = PauseInfo{}
+	close(a.hold)
+	a.hold = nil
+	return nil
+}
+
+// PauseState reports the gate's state without blocking. The adapter
+// serves tui.Pauser.PauseState off a cached poll of this.
+func (a *Agent) PauseState() PauseInfo {
+	a.mu.Lock()
+	defer a.mu.Unlock()
+	return a.pause
+}
+
+// awaitResume blocks while the gate is shut and reports the
+// disposition it was opened with. This is what "paused" MEANS: not
+// "the current turn stops" but "no new turn starts until someone
+// resumes". ok is false only when ctx died first.
+func (a *Agent) awaitResume(ctx context.Context) (mode, steer string, ok bool) {
+	a.mu.Lock()
+	hold := a.hold
+	if hold == nil {
+		a.mu.Unlock()
+		return ResumeModeContinue, "", true
+	}
+	a.waiting++
+	a.mu.Unlock()
+
+	defer func() {
+		a.mu.Lock()
+		a.waiting--
+		a.mu.Unlock()
+	}()
+	select {
+	case <-ctx.Done():
+		return "", "", false
+	case <-hold:
+	}
+	a.mu.Lock()
+	defer a.mu.Unlock()
+	return a.resumeMode, a.resumeSteer, true
+}
+
+// HeldWaiters counts the turns currently blocked on the gate. The
+// daemon reads it to decide whether a steer needs a turn started for
+// it or whether there is already one parked that will adopt it —
+// without that, resuming a held session runs the work twice.
+func (a *Agent) HeldWaiters() int {
+	a.mu.Lock()
+	defer a.mu.Unlock()
+	return a.waiting
 }
 
 // Inject feeds a message into the currently-running turn's context.
@@ -473,6 +590,23 @@ func (a *Agent) ContextWindow() (size, used int) {
 // thing the adapter exists to bridge.
 func (a *Agent) Run(ctx context.Context, prompt string) iter.Seq2[*Event, error] {
 	return func(yield func(*Event, error) bool) {
+		// The gate, before anything else — core-agent's Agent.Run
+		// calls awaitResume as its first step for the same reason. A
+		// turn that checked the gate later would already have spent
+		// tokens the operator was trying to stop.
+		mode, steer, ok := a.awaitResume(ctx)
+		if !ok {
+			return
+		}
+		switch mode {
+		case ResumeModeAbandon:
+			// The held work is dropped: no turn, no usage, no events.
+			return
+		case ResumeModeSteer:
+			if steer != "" {
+				prompt = steer
+			}
+		}
 		a.beginTurn()
 		script := a.script(prompt)
 		for _, ev := range script {

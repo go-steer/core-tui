@@ -511,6 +511,22 @@ func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		}
 		providerChanged := m.hostSnap.provider != msg.snap.provider
 		m.hostSnap = msg.snap
+		// The gate state rides the same tick. Reconciliation lives in
+		// applyPoll: a poll sampled before a just-applied transition
+		// must not undo it (pauseSettleWindow), but beyond that window
+		// the host is the truth — a client that missed a pause event
+		// has no other way back into sync.
+		if msg.snap.hasPause {
+			if next, changed := m.pause.applyPoll(msg.snap.pause, m.nowFn()); changed {
+				m.pause = next
+				// The banner is budgeted chrome, so a gate that moves
+				// has to re-run the allocation before anything is
+				// rendered against the old one (same reason as
+				// pauseEventMsg below).
+				m.resize()
+				m.refreshViewport()
+			}
+		}
 		// Under AutoProviderTheme the palette follows the provider, which
 		// now arrives via this cache rather than a synchronous Status()
 		// call. Re-resolve styles when the cached provider changes so the
@@ -1088,6 +1104,78 @@ func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		}
 		m.refreshAndScroll()
 		return m, nil
+	case pauseEventMsg:
+		// Spec §2.8. The host owns the gate; this is the fast path
+		// telling us it moved. The PauseState poll is the slow path
+		// that catches a client which attached after the fact.
+		if msg.gen != m.sessionGen {
+			return m, m.eventListener()
+		}
+		next, changed := m.pause.applyEvent(msg.event, m.nowFn())
+		if !changed {
+			return m, m.liveStreamRenderCmd()
+		}
+		wasPaused := m.pause.Paused
+		m.pause = next
+		// Re-budget before rendering: the banner's rows are charged in
+		// allocateChrome, which only runs from resize(), and nothing
+		// else on this path calls it — refreshAndScroll resizes only
+		// when the textarea's line count changed. Without this the
+		// viewport keeps the rows the banner is now also using, the
+		// composed frame is two or three rows over m.height, and
+		// clipFrame takes the difference off the bottom: the footer
+		// and the lower half of the input box.
+		m.resize()
+		switch {
+		case next.Paused:
+			m.history.Append(Message{Role: RoleSystem, Text: pausedSystemText(next.PauseInfo)})
+			// A hold that arrived by cancelling a turn also ends the
+			// stretch this spinner was animating; on the live path
+			// nothing else closes it (same reasoning as
+			// remoteInterruptDoneMsg above).
+			if next.Interrupted {
+				m.endLiveStretch()
+			}
+		case wasPaused:
+			m.history.Append(Message{Role: RoleSystem, Text: resumedSystemText(msg.event.Mode)})
+		}
+		m.refreshAndScroll()
+		return m, m.liveStreamRenderCmd()
+	case pauseDoneMsg:
+		// Success stays quiet in the transcript: the paused banner is
+		// the confirmation, and the host's pause event appends the
+		// system row. A failure has to be loud — the operator is about
+		// to assume an agent is parked when it isn't.
+		if msg.err != nil {
+			m.history.Append(Message{Role: RoleError, Text: "hold: " + msg.err.Error()})
+			m.refreshAndScroll()
+		}
+		return m, nil
+	case resumeDoneMsg:
+		// Same split. On success the gate stays closed in the model
+		// until the host says otherwise — it owns the state, and
+		// clearing locally would paper over a resume the host refused.
+		if msg.err != nil {
+			m.history.Append(Message{Role: RoleError, Text: "/" + msg.mode + ": " + msg.err.Error()})
+			// The keystroke was accepted and the box cleared, but the
+			// gate never opened and no turn will carry the text. Hand
+			// it back rather than swallowing it — retyping a steer
+			// the operator already committed to is the one thing this
+			// whole feature exists to avoid.
+			if msg.submit != "" && strings.TrimSpace(m.input.Value()) == "" {
+				m.input.SetValue(msg.submit)
+				m.syncInputHeight()
+			}
+			m.refreshAndScroll()
+			return m, nil
+		}
+		if msg.submit != "" {
+			// Per-turn steer: the gate is open, so this is now an
+			// ordinary submission (see resumeThenSubmitCmd).
+			out := m.submitTurn(msg.submit)
+			return out, out.armSpinner()
+		}
+		return m, nil
 	case wakeMsg:
 		// Issue #7: the wake signal also fires whenever Inject() is
 		// called by the queue panel (operator typed during streaming).
@@ -1415,9 +1503,47 @@ func (m model) handleKey(msg tea.KeyPressMsg) (tea.Model, tea.Cmd) {
 			}
 			return m, nil
 		}
+		// Already held: esc dismisses the banner and leaves the gate
+		// shut. Esc is the key that backs out of things, and the
+		// operator who presses it twice means "I've read that, get out
+		// of my way" — not "never mind, carry on". Resuming is an
+		// explicit act (/continue, /abandon, or typing a steer),
+		// because the alternative is a reflexive keypress silently
+		// unleashing an agent the operator just stopped.
+		if m.pause.showBanner() {
+			m.pause.dismissed = true
+			m.resize()
+			m.refreshViewport()
+			return m, nil
+		}
+		// Local cancel first: it's instant and it unwedges the local
+		// call stack. It is not exclusive with the hold below — on a
+		// host that can park, cancelling this turn without closing the
+		// gate just means the scheduler starts the next one, which is
+		// the opposite of what esc means (R-HOLD-1).
+		cancelledLocally := false
 		if m.state == stateStreaming && m.cancelTurn != nil {
 			m.cancelTurn() // goroutine emits turnCancelledMsg
-			return m, nil
+			cancelledLocally = true
+		}
+		// Then arm the hold. Deliberately NOT gated on a turn being in
+		// flight: in observer mode the spinner is off between
+		// daemon-driven turns, and that gap is exactly when an
+		// operator wants to get ahead of the next one. Parking is
+		// never a dead end — typing un-parks.
+		if p, ok := m.opts.Agent.(Pauser); ok {
+			return m, pauseCmd(p, "operator interrupt")
+		}
+		// No Pauser: fall back to the remote cancel. On a host new
+		// enough to hold (core-agent ≥ protocol 1.5.0) /interrupt
+		// parks server-side anyway, and the PauseState poll will
+		// surface it once the adapter grows Pauser.
+		if !cancelledLocally {
+			if ri, ok := m.opts.Agent.(RemoteInterrupter); ok && m.turnInFlight() {
+				m.history.Append(Message{Role: RoleSystem, Text: "Interrupting…"})
+				m.refreshAndScroll()
+				return m, remoteInterruptCmd(ri)
+			}
 		}
 		return m, nil
 	}
@@ -1719,6 +1845,61 @@ func (m model) handleKey(msg tea.KeyPressMsg) (tea.Model, tea.Cmd) {
 		}
 		if text == "" {
 			return m, nil
+		}
+		// Mid-turn slash routing (R-HOLD-3). This runs BEFORE the
+		// stateStreaming branch below because that branch queues the
+		// raw line as prompt text — which swallowed every slash typed
+		// during a turn, including /interrupt and /btw, the two that
+		// only make sense mid-turn. The allowlist is narrow and the
+		// fallthrough is still "queue it": prose beginning with a
+		// slash must not become a command.
+		if m.turnInFlight() && strings.HasPrefix(text, "/") {
+			switch midTurnSlashDisposition(text) {
+			case midTurnDispatch:
+				return m.dispatchSlash(text)
+			case midTurnRefuse:
+				name, _, _ := strings.Cut(strings.TrimPrefix(text, "/"), " ")
+				m.input.Reset()
+				m.history.Append(Message{
+					Role: RoleSystem,
+					Text: "/" + name + ": not while a turn is running — /interrupt first",
+				})
+				m.refreshAndScroll()
+				return m, nil
+			case midTurnQueue:
+				// Fall through to the paused / streaming arms
+				// below, which is where queueing lives.
+			}
+		}
+		// Paused: typed text is a steer, not a new turn (R-HOLD-4).
+		// Routing it through submitTurn would be a hang, not a slow
+		// path — on the local Run path Agent.Run blocks in awaitResume
+		// before it does anything else, so the spinner would spin
+		// against a gate only this keystroke could have opened.
+		if m.pause.paused() {
+			if p, ok := m.opts.Agent.(Pauser); ok {
+				m.recordPrompt(text)
+				// Operator-initiated work either way, so the
+				// auto-continue streak starts over (issue #9).
+				m.consecutiveAutoContinues = 0
+				m.input.Reset()
+				if m.liveMode {
+					// The host owns the loop: the steer IS the next
+					// turn, and the standing Events stream shows it.
+					m.history.Append(Message{Role: RoleUser, Text: text})
+					m.refreshAndScroll()
+					return m, resumeCmd(p, ResumeRequest{Mode: ResumeModeSteer, Steer: text})
+				}
+				// Per-turn host: WE own the turn. Open the gate,
+				// drop the held work, and run the steer through
+				// submitTurn when the resume lands — a turn the host
+				// started for us would stream to a subscription
+				// Agent.Run has not opened. No user row here;
+				// submitTurn appends it, so the transcript gets one
+				// copy either way.
+				m.refreshAndScroll()
+				return m, resumeThenSubmitCmd(p, ResumeRequest{Mode: ResumeModeAbandon}, text)
+			}
 		}
 		if m.state == stateStreaming {
 			m.enqueueDuringStream(text)

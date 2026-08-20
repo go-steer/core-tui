@@ -53,6 +53,13 @@ type hostSnapshot struct {
 	// capability". The sidebar renders a different row for each.
 	hasSubagents bool
 	subagents    []SubagentInfo // SubagentReporter.Subagents()
+
+	// hasPause reports that a Pauser was wired. The poll is the
+	// fallback path for the gate state — it is what makes attaching to
+	// an already-paused session render the banner, since the pause
+	// event that closed the gate fired before this client connected.
+	hasPause bool
+	pause    PauseInfo // Pauser.PauseState()
 }
 
 // hostSnapshotMsg carries a completed off-loop refresh back into Update.
@@ -80,7 +87,7 @@ const hostSnapshotInterval = time.Second
 // pullHostSnapshot reads the host capabilities once. Runs inside the
 // refresh Cmd's goroutine (off the event loop), never from View(). Every
 // argument is nil-safe: a host may implement none, some, or all.
-func pullHostSnapshot(status StatusReporter, tracker UsageTracker, subs SubagentReporter) hostSnapshot {
+func pullHostSnapshot(status StatusReporter, tracker UsageTracker, subs SubagentReporter, pauser Pauser) hostSnapshot {
 	snap := hostSnapshot{valid: true}
 	if status != nil {
 		s := status.Status()
@@ -98,6 +105,10 @@ func pullHostSnapshot(status StatusReporter, tracker UsageTracker, subs Subagent
 		snap.hasSubagents = true
 		snap.subagents = subs.Subagents()
 	}
+	if pauser != nil {
+		snap.hasPause = true
+		snap.pause = pauser.PauseState()
+	}
 	return snap
 }
 
@@ -109,13 +120,14 @@ func pullHostSnapshot(status StatusReporter, tracker UsageTracker, subs Subagent
 func (m model) refreshHostSnapshotCmd() tea.Cmd {
 	status, _ := m.opts.Agent.(StatusReporter)
 	subs, _ := m.opts.Agent.(SubagentReporter)
+	pauser, _ := m.opts.Agent.(Pauser)
 	tracker := m.opts.UsageTracker
-	if status == nil && tracker == nil && subs == nil {
+	if status == nil && tracker == nil && subs == nil && pauser == nil {
 		return nil
 	}
 	gen := m.sessionGen
 	return func() tea.Msg {
-		return hostSnapshotMsg{gen: gen, snap: pullHostSnapshot(status, tracker, subs)}
+		return hostSnapshotMsg{gen: gen, snap: pullHostSnapshot(status, tracker, subs, pauser)}
 	}
 }
 

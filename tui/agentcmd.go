@@ -623,6 +623,9 @@ func emitEvent(ctx context.Context, ch chan<- tea.Msg, gen uint64, ev Event) {
 	if ev.TurnError != nil {
 		send(turnErrorMsg{gen: gen, turnError: *ev.TurnError})
 	}
+	if ev.Pause != nil {
+		send(pauseEventMsg{gen: gen, event: *ev.Pause})
+	}
 }
 
 // permanentStreamStatusMarkers is the fallback substring set the TUI

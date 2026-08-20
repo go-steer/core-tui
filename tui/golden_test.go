@@ -417,6 +417,53 @@ func goldenModel(t *testing.T, w, h int) model {
 	return out.(model)
 }
 
+// TestGolden_PausedFrame pins the composed frame while the agent is
+// held (R-HOLD-2, issue #260).
+//
+// The banner is chrome stacked between the viewport and the input
+// box, which means it moves the input origin and shortens the
+// viewport — exactly the arithmetic the strings.Contains style of
+// assertion cannot see. Two shapes are captured because the header
+// wording and the row count both change: an interrupted hold with a
+// background subagent still running (three banner rows), and a plain
+// /pause hold with nothing left running (two). Both are 24 rows like
+// the rest of the corpus, so they also pin that the banner is charged
+// to the chrome budget: the frame stays 24 rows and the viewport
+// shrinks, rather than clipFrame taking the footer off the bottom.
+func TestGolden_PausedFrame(t *testing.T) {
+	pinChromaStyle(t)
+	pinCwd(t)
+	shapes := []struct {
+		name string
+		fn   func(*model)
+	}{
+		{"interrupted", func(m *model) {
+			m.pause.Paused = true
+			m.pause.Interrupted = true
+			m.pause.Reason = "operator interrupt"
+			m.hostSnap.hasSubagents = true
+			m.hostSnap.subagents = []SubagentInfo{
+				{Name: "watcher", Status: "running"},
+				{Name: "auditor", Status: "done"},
+			}
+		}},
+		{"quiet", func(m *model) {
+			m.pause.Paused = true
+		}},
+	}
+	for _, sh := range shapes {
+		for _, w := range goldenWidths {
+			t.Run(sh.name+"/width-"+strconv.Itoa(w), func(t *testing.T) {
+				m := goldenModel(t, w, 24)
+				sh.fn(&m)
+				m.resize()
+				m.refreshViewport()
+				assertGolden(t, "paused_frame_"+sh.name+"_w"+strconv.Itoa(w), m.View().Content)
+			})
+		}
+	}
+}
+
 // --- model-free renderer goldens -------------------------------
 //
 // These seven take a styleSet, not a *model, which is what makes

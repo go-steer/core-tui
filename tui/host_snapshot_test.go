@@ -135,14 +135,17 @@ func TestHostSnapshotMsg_AdoptsAndReArms(t *testing.T) {
 // that implements neither capability and reports hasUsage correctly.
 func TestPullHostSnapshot_NilSafe(t *testing.T) {
 	// Neither capability wired.
-	snap := pullHostSnapshot(nil, nil, nil)
+	snap := pullHostSnapshot(nil, nil, nil, nil)
 	if !snap.valid {
-		t.Error("pullHostSnapshot(nil, nil).valid = false, want true")
+		t.Error("pullHostSnapshot(nil, nil, nil, nil).valid = false, want true")
 	}
 	if snap.hasUsage {
 		t.Error("pullHostSnapshot with nil tracker set hasUsage = true")
 	}
 	if snap.modelName != "" || snap.provider != "" {
 		t.Errorf("pullHostSnapshot with nil reporter surfaced model/provider: %+v", snap)
+	}
+	if snap.hasPause || snap.pause.Paused {
+		t.Errorf("pullHostSnapshot with nil Pauser reported a gate: %+v", snap.pause)
 	}
 }
