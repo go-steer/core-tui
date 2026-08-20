@@ -746,7 +746,11 @@ listed in `/help`:
   (`/compact`, `/clear`, `/done`, `/replan`) refuse with a row saying
   to interrupt first, matching what the host would do anyway. Any
   other `/word` still queues as literal text, so prose starting with a
-  slash is not hijacked.
+  slash is not hijacked. The routing follows the line, not the way it
+  was typed: submitting from the slash palette — which typing `/` opens,
+  and which has an Enter of its own that inserts a selection and submits
+  it in one keystroke — takes the same road as a line submitted with the
+  palette closed.
 - **R-HOLD-4** Enter with text while held never starts a fresh turn
   against a shut gate — that turn would block in the host's
   `awaitResume` and spin forever. What it does instead depends on
@@ -761,6 +765,13 @@ listed in `/help`:
     would stream to nobody and the operator would watch their prompt
     vanish. Exactly one user row either way, and a resume the host
     refuses puts the text back in the input box rather than losing it.
+
+  A line naming a command is dispatched rather than steered, using the
+  same allowlist R-HOLD-3 applies mid-turn so the two states cannot
+  disagree about what a command is. Both of R-HOLD-3's buckets run
+  here: nothing is in flight to refuse against, so `/clear` while held
+  clears. Anything outside the allowlist is prose and steers, which is
+  what the input box is for while the gate is shut.
 
   `/continue` (alias `/cont`) resumes with `ResumeModeContinue` and no
   new instruction; `/abandon` resumes with `ResumeModeAbandon`,
