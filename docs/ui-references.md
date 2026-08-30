@@ -98,7 +98,7 @@ to contaminate.
 | Agent-initiated `ask_question` multiple-choice modal | **Adopted** — see [R-PROMPT-1](./requirements.md#319-agent-driven-prompts-should) (`Options.Asker`, `tui.NewAsker()`). Shipped in v0.23.0 with five kinds rather than the reference's one: single-select, multi-select, confirm, one-line text, and long text via `$EDITOR`. |
 | Suspend TUI to `$EDITOR` via `tea.ExecProcess` for inspection / editing | **Adopted** — see [R-CHAT-8](./requirements.md#31-core-chat-loop-must). |
 | OSC 52 system clipboard integration | **Adopted** — see [R-CLIP-1](./requirements.md#320-system-clipboard-should). |
-| Auto-expiring "Hold Shift to select text" overlay when mouse capture is on | **Adopted** — see [R-MOUSE-3](./requirements.md#312-mouse-support-must). |
+| Auto-expiring "hold &lt;modifier&gt; to select text" overlay when mouse capture is on | **Adopted, with the modifier derived rather than hardcoded** — Shift is right for the xterm family but wrong in VS Code's terminal, so it is named only where the terminal is recognised and `/mouse` is named always. See [R-MOUSE-3](./requirements.md#312-mouse-support-must). |
 | Subagent details panel with `Ctrl+K` fast approval | Inspiration only — R-SUB-1 stays read-only in v1. |
 | Review-card FSM consolidating multi-file approvals | Inspiration only — single-file modal (R-PERM-1) covers v1; multi-file review is a delta to consider later. |
 | Cached static rendered views during heavy scrolling | Inspiration only — implementation-time optimization. |

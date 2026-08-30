@@ -226,6 +226,14 @@ type model struct {
 	toast      string
 	toastSetAt time.Time
 
+	// mouseHintSetAt is when the mouse-capture hint was last armed
+	// (R-MOUSE-3) — session start, and each /mouse on. Zero means
+	// never armed, which is what a model built without running Init
+	// looks like. The hint's text is derived at render time rather
+	// than stored, so this timestamp is the whole of its state; see
+	// mouse_hint.go.
+	mouseHintSetAt time.Time
+
 	// Streaming-turn state (R-CHAT-3 / R-CHAT-4 / R-CHAT-6).
 	state      turnState
 	cancelTurn context.CancelFunc // non-nil while state == stateStreaming

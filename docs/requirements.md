@@ -467,16 +467,34 @@ listed in `/help`:
 - **R-MOUSE-1** Mouse-wheel scrolling of the viewport works when
   capture is enabled.
 - **R-MOUSE-2** Default is ON; `Options.MouseDefault` overrides;
-  `/mouse [on|off]` toggles at runtime; help text mentions Shift-to-
-  select.
+  `/mouse [on|off]` toggles at runtime; help text says that turning
+  capture off restores text selection. The runtime toggle is
+  persistable: `Options.PersistMouseChoice` is called with the new
+  state so a host can write it to config and seed `Options.Mouse`
+  from it on the next launch. This matters more than the other
+  persistable picks because the default *removes* a capability the
+  operator had before launch — with capture on, the terminal never
+  sees click-drag and native selection is dead — so without it an
+  operator who wants selection back re-types `/mouse` every session.
 - **R-MOUSE-3** When mouse capture is enabled, the TUI surfaces an
-  auto-expiring overlay hint at the bottom of the viewport reading
-  `Hold Shift to select text` for the first few seconds of the
-  session (and after each `/mouse on` toggle). The hint fades on a
-  short timer (~5s) so users discover the modifier without permanent
-  chrome. Hint text and timeout are overridable via
-  `Options.MouseHint` + `Options.MouseHintTTL`. Borrowed from the
-  Antigravity CLI; see [`ui-references.md`](./ui-references.md).
+  auto-expiring overlay hint at the bottom of the viewport for the
+  first few seconds of the session (and after each `/mouse on`
+  toggle). The hint fades on a short timer (~5s) so users discover
+  the escape hatch without permanent chrome. Hint text and timeout
+  are overridable via `Options.MouseHint` + `Options.MouseHintTTL`;
+  a negative TTL disables the hint. Borrowed from the Antigravity
+  CLI; see [`ui-references.md`](./ui-references.md).
+
+  The hint does **not** hardcode `Hold Shift to select text`, which
+  this requirement originally specced. The bypass modifier belongs
+  to the terminal, not to us, and it varies: the xterm family (and
+  tmux) use Shift, while VS Code's integrated terminal is xterm.js
+  and binds Alt/Option — itself conditional on the user's
+  `terminal.integrated.macOptionClickForcesSelection`. So the
+  modifier is named only where `TERM_PROGRAM` identifies the
+  terminal, an unrecognised terminal gets no modifier claim at all,
+  and `/mouse` — the escape hatch core-tui does control, and which
+  is therefore true everywhere — is named in every variant.
 - **R-MOUSE-4** While a modal is on screen the wheel scrolls *that
   modal*, not the chat behind it. Exception: the inline permission
   layout renders inside the chat viewport, so the wheel keeps

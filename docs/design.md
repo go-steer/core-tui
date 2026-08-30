@@ -819,11 +819,19 @@ type Options struct {
     // Mouse default (on if zero-value left).
     MouseDefault MouseSetting
 
-    // MouseHint is the auto-expiring "Hold Shift to select text"
-    // overlay shown when mouse capture is on (R-MOUSE-3). Empty
-    // string uses the default. Zero MouseHintTTL uses 5 seconds.
+    // MouseHint overrides the auto-expiring overlay shown while
+    // mouse capture is on (R-MOUSE-3). Empty string derives the
+    // text from the terminal — the bypass modifier is not portable,
+    // so it is named only where TERM_PROGRAM identifies the
+    // terminal, and /mouse is named always. Zero MouseHintTTL uses
+    // 5 seconds; negative turns the hint off.
     MouseHint    string
     MouseHintTTL time.Duration
+
+    // PersistMouseChoice is called with the new state when the
+    // operator toggles capture with /mouse, so the choice survives
+    // a restart. Mirrors PersistThemeChoice.
+    PersistMouseChoice func(on bool) error
 
     // RenderMode picks alt-screen vs hybrid-scrollback rendering
     // (R-CHAT-9). RenderAltScreen is the default.

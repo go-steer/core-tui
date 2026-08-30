@@ -14,6 +14,8 @@
 
 package tui
 
+import "time"
+
 // ForceTheme values for Options.ForceTheme. "" (the zero value)
 // means "auto" — let core-tui's OSC-11 query decide. The strings
 // match what core-agent's UIConfig writes to JSON so hosts can
@@ -66,6 +68,38 @@ type Options struct {
 	// text-select-without-Shift, flip this off. The /mouse slash
 	// flips it at runtime; this option is the startup default.
 	Mouse *bool
+
+	// MouseHint overrides the text of the transient hint shown at the
+	// bottom of the viewport while mouse capture is on (R-MOUSE-3):
+	// for the first few seconds of the session, and again after each
+	// /mouse on. Empty (the default) derives it from the terminal —
+	// naming the modifier that bypasses capture where core-tui can
+	// recognise the terminal (Shift on the xterm family, Alt/Option in
+	// VS Code's integrated terminal), and naming only /mouse where it
+	// cannot. Set this when the host knows the operator's terminal
+	// better than the TERM_PROGRAM probe does.
+	MouseHint string
+
+	// MouseHintTTL is how long that hint stays up. Zero (the default)
+	// means 5s. NEGATIVE turns the hint off entirely — the supported
+	// way to opt out, since blanking MouseHint only falls back to the
+	// derived text. Ignored when capture is off, which renders no hint
+	// either way.
+	MouseHintTTL time.Duration
+
+	// PersistMouseChoice is called when the operator toggles capture
+	// with /mouse, with the new state (true = capture on). Mirrors
+	// PersistThemeChoice: hosts write it to their config and read it
+	// back into Mouse on the next launch, so the choice survives a
+	// restart. Nil means the toggle stays session-local.
+	//
+	// This one matters more than the other persistence hooks because
+	// the default actively removes a capability the operator had
+	// before launching: with capture on, the terminal never sees
+	// click-drag and native text selection is dead. Without a hook
+	// here an operator who wants selection back re-types /mouse every
+	// single session.
+	PersistMouseChoice func(on bool) error
 
 	// PermissionLayout picks how the permission prompt is rendered
 	// when the gate asks for approval (R-PERM-1). Zero value =
