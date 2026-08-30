@@ -96,16 +96,27 @@ testing them against this example tells you about the fake, not about core-tui.
 
 `/clear` is the strongest mid-turn probe: it's the only refused name that's a
 working command at idle, so you're watching behaviour *change* rather than one
-flavour of nothing become another. The mismatch on the last two rows is
-[#284](https://github.com/go-steer/core-tui/issues/284).
+flavour of nothing become another.
+
+The middle row is where [#284](https://github.com/go-steer/core-tui/issues/284)
+was visible: four names refuse mid-turn and answer `unknown command` at idle,
+and the refusal used to add "— /interrupt first", promising a command this host
+never implements. It now says only "not while a turn is running", which is true
+on both sides of the turn. The refusal set is still static, so the two answers
+still differ — the row no longer claims the second one will be better.
 
 The capability blocks in [`attach.go`](./attach.go) and [`local.go`](./local.go)
 are the authority on what's implemented; the comment under the attach block
 explains what's deliberately left out and why.
 
 Also absent: the fake emits no `turn_error` frame at all, so nothing that depends
-on one — error rows, the retryable label ([#285](https://github.com/go-steer/core-tui/issues/285)) —
-can be reproduced here. That needs a real daemon.
+on one — the structured error rows — can be reproduced here. That needs a real
+daemon. The "↻ retryable" label that used to appear on those rows is gone
+([#285](https://github.com/go-steer/core-tui/issues/285)): core-tui has no retry
+action, so it pointed at nothing, and it was most misleading on an Esc-hold,
+where a host classifying the cancellation as transient made an operator-initiated
+stop look like a failure offering a retry. `TurnError.Retryable` is still parsed
+and still readable by hosts; it just doesn't render.
 
 ## Where the tests already are
 

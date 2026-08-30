@@ -2135,9 +2135,17 @@ func (m model) submitInputLine(text string) (tea.Model, tea.Cmd) {
 		case midTurnRefuse:
 			name, _, _ := strings.Cut(strings.TrimPrefix(text, "/"), " ")
 			m.input.Reset()
+			// States the constraint, and stops there. It used to add
+			// "— /interrupt first", which promises the command works
+			// once the turn ends — untrue on a host with a partial
+			// catalog, where the same name answers "unknown command"
+			// at idle (issue #284). The refusal set is static by
+			// design (see midTurnRefusedSlashes), so this row cannot
+			// know whether the host implements the name; wording that
+			// doesn't claim to is honest at both idle and mid-turn.
 			m.history.Append(Message{
 				Role: RoleSystem,
-				Text: "/" + name + ": not while a turn is running — /interrupt first",
+				Text: "/" + name + ": not while a turn is running",
 			})
 			m.refreshAndScroll()
 			return m, nil

@@ -309,9 +309,14 @@ func TestRemoteEvents_TurnErrorAppendsStyledRow(t *testing.T) {
 	}
 }
 
-// TestRemoteEvents_TurnErrorRetryableShowsAffordance asserts the
-// retryable variant adds the ↻ affordance line.
-func TestRemoteEvents_TurnErrorRetryableShowsAffordance(t *testing.T) {
+// TestRemoteEvents_TurnErrorRetryableRendersNoAffordance. Retryable
+// is parsed off the wire but nothing is drawn for it: core-tui has no
+// retry action, so a "↻ retryable" line advertised one that did not
+// exist. It showed up on an Esc-hold, where a host classifying the
+// cancellation as transient turned an operator-initiated stop into a
+// failure offering a retry (issue #285). The rest of the block —
+// kind, message — still renders.
+func TestRemoteEvents_TurnErrorRetryableRendersNoAffordance(t *testing.T) {
 	m := newModel(Options{ForceTheme: ThemeDark, Agent: &noopAgent{}})
 	m.viewport.SetWidth(80)
 	got, _ := m.Update(turnErrorMsg{turnError: TurnError{
@@ -320,9 +325,19 @@ func TestRemoteEvents_TurnErrorRetryableShowsAffordance(t *testing.T) {
 		Retryable: true,
 	}})
 	m2 := got.(model)
-	rendered := m2.renderMessage(m2.history.entries[len(m2.history.entries)-1])
-	if !strings.Contains(rendered, "retryable") {
-		t.Errorf("retryable turn-error should contain 'retryable' affordance\n  output: %s", rendered)
+	last := m2.history.entries[len(m2.history.entries)-1]
+	rendered := m2.renderMessage(last)
+	for _, banned := range []string{"retryable", "↻"} {
+		if strings.Contains(rendered, banned) {
+			t.Errorf("retryable turn-error should not render %q — there is no retry action behind it\n  output: %s", banned, rendered)
+		}
+	}
+	if !strings.Contains(rendered, "Vertex quota exceeded.") {
+		t.Errorf("suppressing the affordance dropped the rest of the block\n  output: %s", rendered)
+	}
+	// The classification still reaches hosts reading the struct.
+	if last.TurnError == nil || !last.TurnError.Retryable {
+		t.Error("TurnError.Retryable should survive parsing even though nothing renders it")
 	}
 }
 

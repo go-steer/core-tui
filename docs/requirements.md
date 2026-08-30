@@ -774,7 +774,12 @@ listed in `/help`:
   `/help`, `/stats`, `/tools`, `/subagents` and the rest of the
   informational set. Commands that rewrite conversation state
   (`/compact`, `/clear`, `/done`, `/replan`) refuse with a row saying
-  to interrupt first, matching what the host would do anyway. Any
+  the command is not available while a turn is running, matching what
+  the host would do anyway. The row states the constraint and stops
+  there: the refusal set is static, so it cannot know whether the host
+  implements the name, and telling the operator to interrupt first
+  would promise a command that may answer `unknown command` at idle.
+  Any
   other `/word` still queues as literal text, so prose starting with a
   slash is not hijacked. The routing follows the line, not the way it
   was typed: submitting from the slash palette — which typing `/` opens,
