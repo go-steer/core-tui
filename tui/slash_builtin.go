@@ -51,6 +51,10 @@ import (
 // /sub→/subagent. Aliases whose dispatch case lists them directly
 // (/q, /exit, /int, /cont) are left alone — the case handles both.
 //
+// /resume→/transcripts is the one deprecated fold (issue #268). It
+// stays until v1.0 so the old spelling keeps working; the dispatch
+// case notices it was typed and says what the new name is.
+//
 // Shared rather than inlined because the mid-turn allowlist
 // (midTurnSlashDisposition) has to reach the same verdict for /int as
 // for /interrupt. Two copies of this fold would eventually disagree,
@@ -69,6 +73,8 @@ func canonicalSlashName(name string) string {
 		return "subagent"
 	case "sess":
 		return "switch"
+	case "resume":
+		return "transcripts"
 	}
 	return name
 }
@@ -114,14 +120,21 @@ var midTurnSafeSlashes = map[string]bool{
 // server-side anyway — this just makes the client agree out loud
 // instead of silently queueing the text for later.
 //
-// Only "clear" is a core-tui built-in; the other four are names a
-// host may or may not provide. The set stays static deliberately —
-// consulting the host catalog before deciding would reintroduce the
-// frame of silence #137 removed — so the refusal row states the
-// constraint without promising the command exists (issue #284).
+// "clear" and "transcripts" are core-tui built-ins; the other four
+// are names a host may or may not provide. The set stays static
+// deliberately — consulting the host catalog before deciding would
+// reintroduce the frame of silence #137 removed — so the refusal row
+// states the constraint without promising the command exists
+// (issue #284).
+//
+// "transcripts" is here because loading one replaces the history
+// wholesale, which is the same race /clear is refused for. It used to
+// be in neither set, so /resume <name> mid-turn queued as literal
+// prose and reached the agent as the prompt "resume <name>" — the
+// hijack the queue bucket exists to prevent (issue #268).
 var midTurnRefusedSlashes = map[string]bool{
 	"compact": true, "done": true, "replan": true,
-	"clear": true, "subagent": true,
+	"clear": true, "subagent": true, "transcripts": true,
 }
 
 // midTurnSlashDisposition classifies a /-prefixed input line. text is
@@ -143,6 +156,9 @@ func midTurnSlashDisposition(text string) midTurnDisposition {
 }
 
 func (m model) dispatchBuiltinSlash(name, args string) (bool, tea.Model, tea.Cmd) {
+	// Captured before the fold: canonicalSlashName erases which
+	// spelling was typed, and the one deprecated alias has to say so.
+	typed := name
 	name = canonicalSlashName(name)
 
 	switch name {
@@ -297,10 +313,12 @@ func (m model) dispatchBuiltinSlash(name, args string) (bool, tea.Model, tea.Cmd
 		return true, m, pauseCmd(p, strings.TrimSpace(args))
 
 	case "continue", "cont":
-		// NOT /resume: that name is taken by the saved-transcript
-		// loader below, and quietly overloading it would mean an
-		// operator reaching for their session list un-parks an agent
-		// instead. See issue #268 for the naming.
+		// Still /continue, not /resume, now that #268 has freed the
+		// word: reassigning it would mean an operator reaching for
+		// their transcript list silently un-parks an agent instead,
+		// and a name that changes meaning is worse than one that
+		// merely collides. "resume" survives as the API and wire word
+		// — this case is POST /resume with mode=continue.
 		return m.dispatchResumeSlash(ResumeModeContinue)
 
 	case "abandon":
@@ -519,8 +537,11 @@ func (m model) dispatchBuiltinSlash(name, args string) (bool, tea.Model, tea.Cmd
 		m.refreshAndScroll()
 		return true, m, nil
 
-	case "resume":
-		text := m.handleResume(args)
+	case "transcripts":
+		text := m.handleTranscripts(args)
+		if typed == "resume" {
+			text = deprecatedResumeNotice + "\n\n" + text
+		}
 		m.history.Append(Message{Role: RoleSystem, Text: text})
 		m.input.Reset()
 		m.refreshAndScroll()
@@ -593,30 +614,44 @@ func (m *model) renderKeysDiagnostic() string {
 	return strings.TrimRight(b.String(), "\n")
 }
 
-// handleResume implements /resume:
+// deprecatedResumeNotice heads the output when the operator reached
+// this command by its old name. The command still runs — the point is
+// to teach the new spelling, not to make them retype it.
+const deprecatedResumeNotice = "/resume is now /transcripts. The word " +
+	"\"resume\" belongs to the pause API, where /continue and /abandon " +
+	"are its two dispositions; this command loads a saved transcript " +
+	"off disk and never touches the host. The old name works until v1.0."
+
+// handleTranscripts implements /transcripts:
 //
-//	/resume          → list recent transcripts under AgentsDir/sessions
-//	/resume <path>   → load that transcript into the current model
+//	/transcripts          → list recent transcripts under AgentsDir/sessions
+//	/transcripts <path>   → load that transcript into the current model
 //
 // Loading replaces history wholesale + re-renders assistant
 // markdown at the current viewport width (ApplyTranscript handles
 // the cache reset). Doesn't restore in-flight turn / queue /
-// modal state — a resumed session starts idle.
-func (m *model) handleResume(args string) string {
+// modal state — a loaded session starts idle.
+//
+// Named /resume until #268, which found the word already meant
+// something else in both directions: core-agent's POST /resume is the
+// endpoint behind /continue and /abandon, and everything under this
+// command — ListTranscripts, LoadTranscript, Options.Transcript — was
+// already called a transcript in the code. /resume still folds here.
+func (m *model) handleTranscripts(args string) string {
 	args = strings.TrimSpace(args)
 	if m.opts.AgentsDir == "" {
-		return "/resume: no AgentsDir wired (host did not pass Options.AgentsDir)"
+		return "/transcripts: no AgentsDir wired (host did not pass Options.AgentsDir)"
 	}
 	if args == "" {
 		infos, err := ListTranscripts(m.opts.AgentsDir)
 		if err != nil {
-			return "/resume: list failed: " + err.Error()
+			return "/transcripts: list failed: " + err.Error()
 		}
 		if len(infos) == 0 {
-			return "/resume: no saved sessions in " + m.opts.AgentsDir + "/sessions"
+			return "/transcripts: none saved in " + m.opts.AgentsDir + "/sessions"
 		}
 		var b strings.Builder
-		fmt.Fprintf(&b, "Saved sessions (%d) — use /resume <path>:\n\n", len(infos))
+		fmt.Fprintf(&b, "Saved transcripts (%d) — use /transcripts <name>:\n\n", len(infos))
 		for i, info := range infos {
 			if i >= 10 {
 				fmt.Fprintf(&b, "  %s and %d older\n", GlyphTruncate, len(infos)-10)
@@ -639,10 +674,10 @@ func (m *model) handleResume(args string) string {
 	}
 	t, err := LoadTranscript(path)
 	if err != nil {
-		return "/resume: " + err.Error()
+		return "/transcripts: " + err.Error()
 	}
 	m.applyTranscript(t)
-	return fmt.Sprintf("/resume: loaded %s (%d messages, model=%s)", filepath.Base(path), len(t.Messages), t.Model)
+	return fmt.Sprintf("/transcripts: loaded %s (%d messages, model=%s)", filepath.Base(path), len(t.Messages), t.Model)
 }
 
 // handleAllowDeny dispatches /allow + /deny to the PermissionController
@@ -792,6 +827,7 @@ func (m model) renderBuiltinHelp() string {
 	b.WriteString("  /tools [<source>]    — list tools by source; name one for descriptions\n")
 	b.WriteString("  /model [<id>]        — list models or switch to <id>\n")
 	b.WriteString("  /switch [<id>]       — pick another session (in-place)\n")
+	b.WriteString("  /transcripts         — list saved transcripts, or load one by name\n")
 	b.WriteString("  /theme [<name>]      — pick a theme (default, google, gopher, …)\n")
 	b.WriteString("  /reload              — rebuild agent from disk\n")
 	b.WriteString("  /permissions         — review session approvals\n")

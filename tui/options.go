@@ -180,14 +180,14 @@ type Options struct {
 	// Transcript to resume a real session.
 	SeedHistory []Message
 
-	// Transcript resumes a saved session at startup: its messages
+	// Transcript restores a saved session at startup: its messages
 	// replace the chat history before the first render, and assistant
-	// markdown is rendered the same way /resume renders it. Load one
-	// with LoadTranscript, or leave the zero value to start empty.
+	// markdown is rendered the same way /transcripts renders it. Load
+	// one with LoadTranscript, or leave the zero value to start empty.
 	//
-	// This is the startup form of what /resume does mid-session. A host
-	// that wants "core-agent --resume <id>" wires it here rather than
-	// driving the model itself.
+	// This is the startup form of what /transcripts does mid-session. A
+	// host that wants "core-agent --resume <id>" wires it here rather
+	// than driving the model itself.
 	//
 	// Applied before SeedHistory, so the two compose in that order on
 	// the rare occasion both are set.

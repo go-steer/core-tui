@@ -140,13 +140,13 @@ func builtinSlashItems() []paletteItem {
 		{Name: "pricing refresh", Display: "/pricing refresh", Insert: "/pricing refresh", Description: "re-pull the upstream price table", Available: true},
 		{Name: "pricing set", Display: "/pricing set", Insert: "/pricing set", Description: "open form to override per-model rates", Available: true},
 		{Name: "reload", Description: "rebuild agent from disk", Available: true},
-		{Name: "resume", Description: "list / load a saved session transcript", Available: true},
 		{Name: "skills", Description: "loaded skill bundles", Available: true},
 		{Name: "stats", Description: "per-turn + session usage totals", Available: true},
 		{Name: "subagents", Display: "/subagents [<name>]", Description: "list subagents / open one's report + turn log", Available: true},
 		{Name: "switch", Display: "/switch, /sess", Description: "open session picker / attach to <id> in place", Available: true},
 		{Name: "theme", Description: "open theme picker / switch theme", Available: true},
 		{Name: "tools", Description: "list tools and gate state", Available: true},
+		{Name: "transcripts", Display: "/transcripts [<name>]", Description: "list saved transcripts / load one off disk", Available: true},
 	}
 	sort.SliceStable(rest, func(i, j int) bool { return rest[i].Name < rest[j].Name })
 	return append(essentials, rest...)

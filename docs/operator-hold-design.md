@@ -45,12 +45,20 @@ fixes and the paused UI are one change, not three.
 
 ## 2. Settled decisions (do not relitigate)
 
-1. **`/continue` + `/cont`, not `/resume`.** `/resume` already means
-   "load a saved transcript". #260's body says `/resume`;
-   [#268](https://github.com/go-steer/core-tui/issues/268), split out
-   of #260, records that `/continue` was picked to route around the
-   collision. #268's reading stands. Renaming the transcript `/resume`
-   is #268's call and out of scope here.
+1. **`/continue` + `/cont`, not `/resume`.** `/resume` meant "load a
+   saved transcript" when this was written. #260's body says
+   `/resume`; [#268](https://github.com/go-steer/core-tui/issues/268),
+   split out of #260, records that `/continue` was picked to route
+   around the collision.
+
+   #268 has since settled the rest of the vocabulary and this decision
+   survives it. The transcript loader is `/transcripts` now, so the
+   word is free — and `/continue` still keeps its name, because
+   reassigning `/resume` to mean un-park would leave an operator
+   reaching for their transcript list silently un-parking an agent
+   instead. A name that changes meaning is worse than one that merely
+   collides. `resume` lives on as the API and wire word, where
+   `/continue` and `/abandon` are two of its three dispositions.
 2. **Held is a field, not a third `turnState`.** `docs/decisions.md`
    D30 has the argument: `m.state == stateStreaming` is paired with a
    non-nil `m.cancelTurn`, the two conditions are not mutually
@@ -303,7 +311,8 @@ nothing ever reports a hold.
 
 ## 9. Out of scope
 
-- **Renaming the transcript `/resume`** — #268.
+- **Renaming the transcript `/resume`** — #268. Done there: it is
+  `/transcripts`, and `/continue` was left alone.
 - **The REST half of the 1.5.0 protocol revision**, and the 1.6.0
   `title` field — [#270](https://github.com/go-steer/core-tui/issues/270).
   This change takes `docs/sse-event-stream-protocol.md` to 1.5.0 by
