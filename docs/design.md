@@ -533,6 +533,11 @@ type ApprovalLog struct {
     Tool     string
     Key      string
     Decision string // "allow-once" | "allow-session" | "deny" | ...
+    // By is the principal that answered, when the host verified one.
+    // Optional: empty renders the row exactly as it did before the
+    // field existed, because a placeholder in an audit line reads
+    // like an attribution rather than the absence of one.
+    By string
 }
 
 // PricingController backs /pricing.

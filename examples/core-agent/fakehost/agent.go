@@ -139,10 +139,16 @@ func (e *UnknownSubagentError) Error() string {
 }
 
 // Approval is one row from the permission gate's session log.
+//
+// By mirrors core-agent's optional attribution: the daemon fills it
+// from the caller its auth middleware verified, and leaves it empty
+// when it verified nobody. The seeded log below has one of each so
+// /permissions exercises both render branches.
 type Approval struct {
 	Tool     string `json:"tool"`
 	Key      string `json:"key"`
 	Decision string `json:"decision"`
+	By       string `json:"by,omitempty"`
 }
 
 // TurnUsage is the host's own per-turn accounting, the thing
@@ -238,9 +244,9 @@ func NewAgent(model string) *Agent {
 		wake:     make(chan struct{}, 4),
 		inFlight: map[int]bool{},
 		approvals: []Approval{
-			{Tool: "bash", Key: "go test ./...", Decision: "allow-session"},
+			{Tool: "bash", Key: "go test ./...", Decision: "allow-session", By: "ops@example.com"},
 			{Tool: "edit", Key: "internal/auth/session.go", Decision: "allow-once"},
-			{Tool: "fetch", Key: "https://internal.example/admin", Decision: "deny"},
+			{Tool: "fetch", Key: "https://internal.example/admin", Decision: "deny", By: "sre-oncall"},
 		},
 	}
 }

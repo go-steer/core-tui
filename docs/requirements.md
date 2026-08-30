@@ -306,6 +306,14 @@ listed in `/help`:
   populated from the session approval log (sourced from a
   `PermissionController` capability). Toggleable recommendations;
   Space to toggle, Enter to persist, Esc to cancel.
+- **R-PERM-4a** A row carries the approver — `ApprovalLog.By` — when
+  the host supplies one, rendered as a ` by <who>` suffix. The field
+  is optional and a row without it MUST render exactly as it did
+  before the field existed: no `by <unknown>`, no empty `by`. The
+  distinction is the point of the log in a multi-operator attach
+  session, where the gate deliberately records nothing when it
+  verified nobody, and a placeholder would be indistinguishable from
+  a verified name.
 - **R-PERM-5** `/allow`, `/allow bundle:<name>`, `/deny` apply
   changes to the live gate **and** persist in one operation —
   `/reload` must not be required for the new rule to take effect.

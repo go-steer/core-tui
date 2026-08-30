@@ -177,7 +177,7 @@ func (a *localAdapter) SessionApprovals() []tui.ApprovalLog {
 	logs := a.inner.Approvals()
 	out := make([]tui.ApprovalLog, 0, len(logs))
 	for _, l := range logs {
-		out = append(out, tui.ApprovalLog{Tool: l.Tool, Key: l.Key, Decision: l.Decision})
+		out = append(out, tui.ApprovalLog{Tool: l.Tool, Key: l.Key, Decision: l.Decision, By: l.By})
 	}
 	return out
 }
