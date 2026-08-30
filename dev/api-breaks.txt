@@ -17,6 +17,11 @@
 # sit behind the new baseline, and a leftover entry would silently permit
 # a second, unrelated removal of a symbol that no longer exists.
 #
+# Nothing to empty at v0.24.0: that cycle broke no exported Go symbol,
+# so the file went into the tag empty and came out of it empty. The one
+# commit marked breaking there (#268) renames an operator-facing slash
+# command, which this gate does not watch and could not see.
+#
 # Emptied at v0.23.0. The three entries that were here are behind that
 # tag now: #115's Model / NewModel pair, the last exported type whose
 # fate was a break either way, with the recipe in MIGRATION.md §7 and
@@ -31,4 +36,4 @@
 # clearing them any earlier would leave verify-apidiff reporting the
 # same removals with nothing to match them against.
 
-# Entries since v0.23.0 follow.
+# Entries since v0.24.0 follow.
