@@ -86,7 +86,7 @@ testing them against this example tells you about the fake, not about core-tui.
 | `/pause`, `/continue`, `/cont`, `/abandon` | dispatch | ✅ `Pauser` |
 | `/btw <text>` | dispatch | ✅ the only host-side slash it advertises |
 | `/stats` | dispatch | ✅ `UsageTracker` |
-| `/tools` | dispatch | ✅ `ToolLister` |
+| `/tools [<source>]` | dispatch | ✅ `ToolLister` — the fake catalog spans `builtin` and two `mcp:*` servers, so it exercises the grouped listing |
 | `/subagents` | dispatch | ✅ `SubagentReporter` |
 | `/memory`, `/mcp`, `/skills` | dispatch | ✅ static feeds (`main.go`) |
 | `/help`, `/?`, `/keys` | dispatch | ✅ always |

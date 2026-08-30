@@ -471,9 +471,15 @@ type clipboardWrittenMsg struct {
 }
 
 // toolsListedMsg carries the ToolLister.Tools() catalog for /tools.
+//
+// filter is the argument the operator typed after the command
+// (`/tools gke`), carried along rather than read back off the input
+// line because the input has been reset by the time the catalog
+// arrives — Tools() is a round trip on a remote host.
 type toolsListedMsg struct {
-	gen   uint64
-	tools []ToolInfo
+	gen    uint64
+	tools  []ToolInfo
+	filter string
 }
 
 // approvalsListedMsg carries PermissionController.SessionApprovals()

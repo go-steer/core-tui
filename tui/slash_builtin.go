@@ -320,7 +320,7 @@ func (m model) dispatchBuiltinSlash(name, args string) (bool, tea.Model, tea.Cmd
 		m.history.Append(Message{Role: RoleSystem, Text: "/tools: reading the tool catalog…"})
 		m.input.Reset()
 		m.refreshAndScroll()
-		return true, m, toolsCmd(lister, m.sessionGen)
+		return true, m, toolsCmd(lister, m.sessionGen, strings.TrimSpace(args))
 
 	case "model":
 		swapper, ok := m.opts.Agent.(ModelSwapper)
@@ -789,7 +789,7 @@ func (m model) renderBuiltinHelp() string {
 	b.WriteString("  /mcp                 — configured MCP servers\n")
 	b.WriteString("  /skills              — loaded skill bundles\n")
 	b.WriteString("  /stats               — per-turn + session usage totals\n")
-	b.WriteString("  /tools               — list tools and gate state\n")
+	b.WriteString("  /tools [<source>]    — list tools by source; name one for descriptions\n")
 	b.WriteString("  /model [<id>]        — list models or switch to <id>\n")
 	b.WriteString("  /switch [<id>]       — pick another session (in-place)\n")
 	b.WriteString("  /theme [<name>]      — pick a theme (default, google, gopher, …)\n")
@@ -1043,21 +1043,155 @@ func formatModelBreakdown(breakdown map[string]UsageByModel) string {
 	return b.String()
 }
 
-// renderToolList renders the agent's tool catalog in alphabetical
-// order: bold pink name on its own line with a ▸ marker, source +
-// gate annotation in muted brackets next to it, indented description
-// underneath, blank line between entries — matches internal/tui's
-// /tools layout so the catalog is scannable.
-func (m model) renderToolList(tools []ToolInfo) string {
+// toolSourceGroup folds a ToolInfo.Source into the key /tools groups
+// on. Sources are "builtin", an MCP server's own name, "skill:<name>"
+// or "subagent" — core-agent flattens its Source/Server pair into that
+// one column so an MCP tool shows its server rather than the bare word
+// "mcp". Everything before a colon is the family, so the several
+// skills a session has collapse to one "skill" heading instead of one
+// heading each; the row keeps the full source in its annotation, so
+// nothing is lost by folding.
+//
+// An empty source groups under "other" rather than under "", which
+// would render a heading with no name.
+func toolSourceGroup(source string) string {
+	if source == "" {
+		return "other"
+	}
+	if family, _, found := strings.Cut(source, ":"); found && family != "" {
+		return family
+	}
+	return source
+}
+
+// toolGroupOrder sorts the group headings: builtin first because it is
+// the set the operator already knows, "other" last because it is the
+// leftovers, everything else alphabetical. Within a group the sort
+// stays alphabetical — the flat interleave ACROSS sources is what cost
+// the operator, not the sort (issue #289).
+func toolGroupOrder(a, b string) bool {
+	rank := func(g string) int {
+		switch g {
+		case "builtin":
+			return 0
+		case "other":
+			return 2
+		default:
+			return 1
+		}
+	}
+	if ra, rb := rank(a), rank(b); ra != rb {
+		return ra < rb
+	}
+	return a < b
+}
+
+// renderToolList renders the agent's tool catalog for /tools.
+//
+// It used to be one flat alphabetical list with a description under
+// every row. That was fine for the ~14 built-ins a host reported when
+// it was written, and it stopped being fine when hosts started
+// reporting their MCP and skill tools too (core-agent#827): the
+// operator's built-ins end up interleaved into a wall of MCP rows, the
+// one tool they were looking for is buried, and the descriptions —
+// most of the vertical space — are what buries it.
+//
+// So there are two modes, and the split is about how much the operator
+// already knows:
+//
+//   - Grouped (the default, and only when there is more than one
+//     source). A summary line with per-source counts, then a heading
+//     per source, then bare names. No descriptions: the operator is
+//     scanning for a name, and the descriptions are what makes 59
+//     tools unscannable.
+//   - Detailed, with descriptions, for `/tools <source>` and for a
+//     catalog that has only one source anyway. Here the operator has
+//     already narrowed to a set small enough to read, which is the
+//     point at which the description earns its rows. A single-source
+//     catalog therefore renders exactly as it did before this change.
+//
+// filter is the argument after the command; it matches a group key
+// ("skill") or a full source ("skill:review", "gke"), case-insensitive.
+func (m model) renderToolList(tools []ToolInfo, filter string) string {
 	if len(tools) == 0 {
 		return "Agent has no tools registered."
 	}
 	sorted := make([]ToolInfo, len(tools))
 	copy(sorted, tools)
 	sort.Slice(sorted, func(i, j int) bool { return sorted[i].Name < sorted[j].Name })
+
+	// Group, preserving the alphabetical order within each bucket.
+	groups := map[string][]ToolInfo{}
+	for _, t := range sorted {
+		g := toolSourceGroup(t.Source)
+		groups[g] = append(groups[g], t)
+	}
+	keys := make([]string, 0, len(groups))
+	for g := range groups {
+		keys = append(keys, g)
+	}
+	sort.Slice(keys, func(i, j int) bool { return toolGroupOrder(keys[i], keys[j]) })
+
+	if filter != "" {
+		return m.renderFilteredToolList(sorted, keys, filter)
+	}
+	// One source is not a grouping problem — a heading over the whole
+	// catalog says nothing the summary line didn't.
+	if len(keys) == 1 {
+		return m.renderToolDetail(fmt.Sprintf("Tools (%d):", len(sorted)), sorted)
+	}
+
 	var b strings.Builder
-	fmt.Fprintf(&b, "Tools (%d):\n\n", len(sorted))
-	for i, t := range sorted {
+	summary := make([]string, 0, len(keys))
+	for _, g := range keys {
+		summary = append(summary, fmt.Sprintf("%s %d", g, len(groups[g])))
+	}
+	fmt.Fprintf(&b, "Tools (%d): %s\n", len(sorted), strings.Join(summary, " "+GlyphSeparator+" "))
+	fmt.Fprintf(&b, "%s\n", m.styles.Muted.Render("  /tools <source> for descriptions"))
+	for _, g := range keys {
+		fmt.Fprintf(&b, "\n%s %s\n", m.itemNameStyle().Render(g), m.styles.Muted.Render(fmt.Sprintf("(%d)", len(groups[g]))))
+		for _, t := range groups[g] {
+			fmt.Fprintf(&b, "  %s %s", glyphCollapsed, t.Name)
+			// The gate is the one annotation that survives grouped
+			// mode: "this tool will stop and ask" changes what the
+			// operator does next, where the description only tells
+			// them what they already came here knowing.
+			if t.GateState != "" {
+				fmt.Fprintf(&b, "  %s", m.styles.Muted.Render("["+t.GateState+"]"))
+			}
+			b.WriteByte('\n')
+		}
+	}
+	return strings.TrimRight(b.String(), "\n")
+}
+
+// renderFilteredToolList is `/tools <source>`: the matching rows in
+// full detail, or a miss that names what the operator could have
+// asked for instead. A miss listing the available sources is the
+// difference between a dead end and a discovery — the operator
+// filtering by source has no other way to learn the source names.
+func (m model) renderFilteredToolList(sorted []ToolInfo, keys []string, filter string) string {
+	want := strings.ToLower(filter)
+	var hits []ToolInfo
+	for _, t := range sorted {
+		if strings.ToLower(toolSourceGroup(t.Source)) == want || strings.ToLower(t.Source) == want {
+			hits = append(hits, t)
+		}
+	}
+	if len(hits) == 0 {
+		return fmt.Sprintf("/tools: no tools from %q. Sources: %s", filter, strings.Join(keys, ", "))
+	}
+	return m.renderToolDetail(fmt.Sprintf("Tools from %s (%d):", filter, len(hits)), hits)
+}
+
+// renderToolDetail is the pre-#289 layout, now reached two ways: a
+// single-source catalog and a filtered view. Bold name on its own line
+// with a ▸ marker, source + gate annotation in muted brackets, indented
+// description underneath, blank line between entries.
+func (m model) renderToolDetail(header string, tools []ToolInfo) string {
+	var b strings.Builder
+	fmt.Fprintf(&b, "%s\n\n", header)
+	for i, t := range tools {
 		fmt.Fprintf(&b, "  %s %s", glyphCollapsed, m.itemNameStyle().Render(t.Name))
 		annotation := ""
 		if t.Source != "" {
@@ -1076,7 +1210,7 @@ func (m model) renderToolList(tools []ToolInfo) string {
 		if t.Description != "" {
 			fmt.Fprintf(&b, "      %s\n", strings.ReplaceAll(t.Description, "\n", " "))
 		}
-		if i < len(sorted)-1 {
+		if i < len(tools)-1 {
 			b.WriteByte('\n')
 		}
 	}

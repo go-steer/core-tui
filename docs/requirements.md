@@ -178,7 +178,7 @@ listed in `/help`:
 | `/stats` | Display per-turn + session usage totals | — |
 | `/mcp` | Display configured MCP servers | — (display-only) |
 | `/skills` | Display loaded skill bundles | — (display-only) |
-| `/tools` | List tools the agent has registered | `ToolLister` |
+| `/tools [<source>]` | List tools the agent has registered, grouped by source with per-source counts; an argument filters to one source and adds descriptions | `ToolLister` |
 | `/model` | Pick a model interactively or `/model <id>` to switch | `ModelSwapper` |
 | `/reload` | Re-read `.agents/` from disk and rebuild agent | `Reloader` |
 | `/permissions` | Open interactive review of session approvals | `PermissionController` |

@@ -238,9 +238,9 @@ func persistChoiceCmd[T any](gen uint64, what string, fn func(T) error, v T) tea
 // toolsCmd pulls ToolLister.Tools() for /tools off the Update
 // goroutine. The catalog can be large and, on a remote host, is a
 // round trip.
-func toolsCmd(lister ToolLister, gen uint64) tea.Cmd {
+func toolsCmd(lister ToolLister, gen uint64, filter string) tea.Cmd {
 	return func() tea.Msg {
-		return toolsListedMsg{gen: gen, tools: lister.Tools()}
+		return toolsListedMsg{gen: gen, tools: lister.Tools(), filter: filter}
 	}
 }
 
