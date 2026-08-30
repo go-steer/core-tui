@@ -201,6 +201,15 @@ type ApprovalLog struct {
 	Tool     string
 	Key      string
 	Decision string // "allow-once" / "allow-session" / "deny" / etc.
+	// By names the principal that answered the prompt. Optional:
+	// empty means the host could not attribute the answer — an
+	// unauthenticated listener, or a local terminal where the
+	// answerer is whoever is at the keyboard — and the row then
+	// renders exactly as it did before this field existed. A
+	// placeholder would be worse than silence here: "by <unknown>"
+	// in an audit line is indistinguishable at a glance from a name
+	// somebody actually verified (issue #277).
+	By string
 }
 
 // PricingController backs /pricing refresh + /pricing set

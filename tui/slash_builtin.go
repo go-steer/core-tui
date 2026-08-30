@@ -1253,6 +1253,14 @@ func (m model) renderToolDetail(header string, tools []ToolInfo) string {
 	return strings.TrimRight(b.String(), "\n")
 }
 
+// renderApprovalLog lists the session's approval-shaped decisions.
+//
+// The approver is a suffix rather than a column: ApprovalLog.By is
+// optional, and a host that never fills it must produce the same bytes
+// it did before the field existed (issue #277). A column would have to
+// print something for the empty case, and an audit line that says "by
+// <unknown>" reads like an attribution the gate made rather than one it
+// declined to make.
 func renderApprovalLog(logs []ApprovalLog) string {
 	if len(logs) == 0 {
 		return "/permissions: no approvals recorded this session"
@@ -1260,7 +1268,11 @@ func renderApprovalLog(logs []ApprovalLog) string {
 	var b strings.Builder
 	fmt.Fprintf(&b, "/permissions: %d decision(s) this session\n", len(logs))
 	for _, l := range logs {
-		fmt.Fprintf(&b, "  • %s — %s [%s]\n", l.Tool, l.Key, l.Decision)
+		fmt.Fprintf(&b, "  • %s — %s [%s]", l.Tool, l.Key, l.Decision)
+		if l.By != "" {
+			fmt.Fprintf(&b, " by %s", l.By)
+		}
+		b.WriteByte('\n')
 	}
 	return strings.TrimRight(b.String(), "\n")
 }
