@@ -25,6 +25,14 @@ The wire protocol in [`docs/sse-event-stream-protocol.md`](./docs/sse-event-stre
 
 ## [Unreleased]
 
+## [0.24.0] — 2026-08-30
+
+Six items, and five of them are the TUI having told the operator something that was not so. A cancelled turn offered a `↻ retryable` label against a retry action core-tui has never had. A slash refused mid-turn said "`/interrupt` first" on hosts where `/interrupt` was never coming. Turning on mouse capture silently took away text selection, which reads as a broken terminal rather than as something an application did. `/permissions` listed the decisions of a shared attach session without being able to say who made any of them. And `/resume` was named for an operation it does not perform: the word belongs to core-agent's `POST /resume`, the endpoint behind `/continue` and `/abandon`, while the command wearing it lists transcript files off local disk and never touches the host. It is `/transcripts` now, with `/resume` folding to it until v1.0.
+
+The sixth is `/tools`, which was not wrong so much as outgrown. One flat alphabetical run with a description under every row is the right shape for the ~14 built-ins hosts reported when it was written, and the wrong one the moment they started reporting their MCP servers and skills too: the operator's own tools end up interleaved into a wall of server rows, and the descriptions — most of the vertical space — are what buries them. It groups by source now, counts each group in the header, and takes a source as an argument to bring the descriptions back for one server. A host reporting a single source sees no change.
+
+The rename came with a bug underneath it. `resume` was in neither mid-turn bucket — not dispatch-now, not refuse — so it fell to the default, which is "this is prose, queue it": `/resume old.json` typed while the agent was streaming reached the agent as the literal instruction `resume old.json`. That is the prose hijack in reverse, same family as [#278](https://github.com/go-steer/core-tui/issues/278) last release, and it is fixed by putting the command in the refused set where it belongs, since loading a transcript replaces the history wholesale — the race `/clear` is already refused for.
+
 ### Added
 
 - **`/permissions` can say who approved a call** ([#277](https://github.com/go-steer/core-tui/issues/277)). `tui.ApprovalLog` carried `Tool` / `Key` / `Decision` and nothing about the answerer, so the review listing could report that `bash — kubectl rollout restart deploy/api` was allowed once and not by whom. That is exactly the question the log exists to answer in the deployment the remote TUI serves: several operators attached to one daemon. core-agent's gate started attributing approvals in v2.9.0-dev (core-agent#830) — its history rows carry an optional `by` and both of its adapters had the identity in hand — and dropped it at the `tui.ApprovalLog{…}` literal, because there was nowhere to put it. There is now: `ApprovalLog.By`, rendered as a ` by <who>` suffix.
@@ -697,7 +705,8 @@ Initial release: `package tui` extracted from the duplicated `internal/tui` tree
 - **Performance and terminal-fidelity work** — incremental Glamour streaming, an auto-growing textarea, hanging-indent word wrap that preserves source leading whitespace, and the viewport's `h`/`j`/`k`/`l`/arrow bindings disabled with `xOffset` pinned to 0 so a wide line can't shift the whole chat sideways.
 - **The docs that govern all of it** — `docs/requirements.md`, `docs/design.md`, `docs/decisions.md`, `docs/style.md`, `docs/ui-references.md`, and `MIGRATION.md`.
 
-[Unreleased]: https://github.com/go-steer/core-tui/compare/v0.23.0...HEAD
+[Unreleased]: https://github.com/go-steer/core-tui/compare/v0.24.0...HEAD
+[0.24.0]: https://github.com/go-steer/core-tui/compare/v0.23.0...v0.24.0
 [0.23.0]: https://github.com/go-steer/core-tui/compare/v0.22.0...v0.23.0
 [0.22.0]: https://github.com/go-steer/core-tui/compare/v0.21.0...v0.22.0
 [0.21.0]: https://github.com/go-steer/core-tui/compare/v0.20.0...v0.21.0
