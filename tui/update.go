@@ -837,7 +837,7 @@ func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		if msg.gen != m.sessionGen {
 			return m, nil
 		}
-		m.history.Append(Message{Role: RoleSystem, Text: m.renderToolList(msg.tools)})
+		m.history.Append(Message{Role: RoleSystem, Text: m.renderToolList(msg.tools, msg.filter)})
 		m.refreshAndScroll()
 		return m, nil
 	case approvalsListedMsg:

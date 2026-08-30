@@ -546,6 +546,10 @@ type ToolLister interface {
     Tools() []ToolInfo
 }
 type ToolInfo struct {
+    // Source is what /tools groups and filters on: "builtin", an MCP
+    // server's name, "skill:<name>", "subagent". Everything before a
+    // colon is the family, so several skills collapse under one
+    // heading; an empty Source groups under "other".
     Name, Description, Source, GateState string
 }
 
