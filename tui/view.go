@@ -289,6 +289,9 @@ func (m model) View() tea.View {
 		if t := m.renderToast(chatWidth); t != "" {
 			leftParts = append(leftParts, t)
 		}
+		if h := m.renderMouseHint(chatWidth); h != "" {
+			leftParts = append(leftParts, h)
+		}
 		leftParts = append(leftParts, footer)
 		left := stackColumn(leftParts, chatWidth)
 		sidebar := m.renderSidebar()
@@ -319,6 +322,9 @@ func (m model) View() tea.View {
 		parts = append(parts, input)
 		if t := m.renderToast(m.width); t != "" {
 			parts = append(parts, t)
+		}
+		if h := m.renderMouseHint(m.width); h != "" {
+			parts = append(parts, h)
 		}
 		parts = append(parts, footer)
 		body = lipgloss.JoinVertical(lipgloss.Left, parts...)

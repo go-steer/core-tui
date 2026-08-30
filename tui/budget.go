@@ -119,14 +119,15 @@ type chromeBudget struct {
 	// Measured heights of what View composes, in stacking order.
 	// They sum to frameRows(), which is m.height whenever the
 	// terminal can hold the chrome at all.
-	header  int
-	chat    int
-	palette int
-	help    int
-	input   int
-	banner  int
-	toast   int
-	footer  int
+	header    int
+	chat      int
+	palette   int
+	help      int
+	input     int
+	banner    int
+	toast     int
+	mouseHint int
+	footer    int
 
 	// helpCap / paletteCap are the ceilings handed to the two
 	// collapsible panels. The renderers clamp themselves to these,
@@ -150,7 +151,7 @@ type chromeBudget struct {
 
 // frameRows is the height of the frame this budget describes.
 func (b chromeBudget) frameRows() int {
-	return b.header + b.chat + b.palette + b.help + b.banner + b.input + b.toast + b.footer
+	return b.header + b.chat + b.palette + b.help + b.banner + b.input + b.toast + b.mouseHint + b.footer
 }
 
 // allocateChrome hands out m.height's rows in the priority order
@@ -190,6 +191,15 @@ func (m *model) allocateChrome(layout StatusLayout, chromeWidth int) chromeBudge
 	if toast := m.renderToast(chromeWidth); toast != "" {
 		b.toast = lipgloss.Height(toast)
 	}
+	// R-MOUSE-3's hint takes the row below the toast, on the same
+	// terms: guarded on the renderer returning non-empty rather than
+	// on the timestamp, because the renderer is where the TTL, the
+	// capture state and the yield-to-toast rule live. Left unbudgeted
+	// its row would push the footer off the bottom through clipFrame
+	// for the first few seconds of every session.
+	if hint := m.renderMouseHint(chromeWidth); hint != "" {
+		b.mouseHint = lipgloss.Height(hint)
+	}
 	// Same guard, same reason: View stacks the pause banner above the
 	// input box whenever renderPauseBanner returns non-empty, and that
 	// renderer applies the dismissed bit as well as the gate. Charging
@@ -200,7 +210,7 @@ func (m *model) allocateChrome(layout StatusLayout, chromeWidth int) chromeBudge
 		b.banner = lipgloss.Height(banner)
 	}
 
-	free := m.height - b.header - b.footer - b.toast - b.banner
+	free := m.height - b.header - b.footer - b.toast - b.mouseHint - b.banner
 
 	// --- Priority 4: the chat floor and the open panels' one row ---
 	//

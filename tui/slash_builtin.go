@@ -202,11 +202,7 @@ func (m model) dispatchBuiltinSlash(name, args string) (bool, tea.Model, tea.Cmd
 		// flipping the pointer + refreshing is enough — bubble-tea
 		// picks up the new MouseMode on the next render. Initial
 		// state comes from Options.Mouse (default: enabled).
-		on := true
-		if m.opts.Mouse != nil {
-			on = *m.opts.Mouse
-		}
-		on = !on
+		on := !m.mouseCaptureOn()
 		m.opts.Mouse = &on
 		state := "off"
 		if on {
@@ -215,7 +211,21 @@ func (m model) dispatchBuiltinSlash(name, args string) (bool, tea.Model, tea.Cmd
 		m.history.Append(Message{Role: RoleSystem, Text: "/mouse: capture " + state})
 		m.input.Reset()
 		m.refreshAndScroll()
-		return true, m, nil
+		cmds := []tea.Cmd{
+			// Off the Update goroutine: the callback writes the host's
+			// config file, so this is disk I/O reached from a
+			// keystroke, exactly like the theme and model picks.
+			persistChoiceCmd(m.sessionGen, "/mouse", m.opts.PersistMouseChoice, on),
+		}
+		// Re-show the hint on the way back ON (R-MOUSE-3), because
+		// that is the transition that takes text selection away again.
+		// armMouseHintCmd reads the flag we just flipped, so turning
+		// capture off returns nil here — and renderMouseHint already
+		// drops a hint still inside its TTL on the same keystroke.
+		if c := m.armMouseHintCmd(); c != nil {
+			cmds = append(cmds, c)
+		}
+		return true, m, tea.Batch(cmds...)
 
 	case "interrupt", "int":
 		// Local Run-path cancel wins when we have it — that's the
@@ -791,7 +801,7 @@ func (m model) renderBuiltinHelp() string {
 	b.WriteString("  /pause               — hold: no new turn starts until you resume\n")
 	b.WriteString("  /continue, /cont     — release a hold and carry on\n")
 	b.WriteString("  /abandon             — release a hold and drop the held work\n")
-	b.WriteString("  /mouse               — toggle terminal mouse capture\n")
+	b.WriteString("  /mouse               — toggle terminal mouse capture (off restores text selection)\n")
 
 	return strings.TrimRight(b.String(), "\n")
 }

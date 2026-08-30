@@ -42,6 +42,15 @@ func (m model) Init() tea.Cmd {
 		m.askListener(),
 		m.notifyListener(),
 	}
+	// R-MOUSE-3: arm the mouse-capture hint for the start of the
+	// session, but only when capture is actually on — the hint exists
+	// to explain why click-drag stopped selecting text, which hasn't
+	// happened on a host that launched with Mouse=false. Armed through
+	// a msg so the TTL starts with the program rather than with
+	// NewModel.
+	if c := m.armMouseHintCmd(); c != nil {
+		cmds = append(cmds, c)
+	}
 	// Startup wordmark wipe (issue #165). nil unless the banner is
 	// actually going to animate — a host that has turned it off, or an
 	// environment asking for reduced motion, gets no tick chain at all
@@ -1358,6 +1367,27 @@ func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			m.toast = ""
 			m.refreshViewport()
 		}
+		return m, nil
+	case mouseHintArmMsg:
+		// R-MOUSE-3. Restarting the clock is the whole of the state
+		// change: renderMouseHint derives visibility and text from
+		// this timestamp, so a second arm during a live hint simply
+		// extends it rather than stacking a second row.
+		ttl := m.mouseHintTTL()
+		if ttl <= 0 {
+			return m, nil
+		}
+		m.mouseHintSetAt = time.Now()
+		// The hint occupies a chrome row, so the frame has to be
+		// re-measured, not just repainted — resize() is what charges
+		// it to the budget and hands the viewport what's left.
+		m.resize()
+		return m, mouseHintTick(ttl)
+	case mouseHintExpiredMsg:
+		// Nothing to clear: the renderer already reports the hint
+		// gone once the TTL is past. This exists to make the frame
+		// notice on time instead of at the next unrelated keystroke.
+		m.resize()
 		return m, nil
 	case pendingExitClearMsg:
 		// Quiet disarm of the warn-then-exit one-shot. We don't
