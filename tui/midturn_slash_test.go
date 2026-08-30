@@ -129,8 +129,13 @@ func TestEnterMidTurn_RefusesStateRewrites(t *testing.T) {
 	if !strings.Contains(got, "not while a turn is running") {
 		t.Errorf("refusal row = %q, want the explanation", got)
 	}
-	if !strings.Contains(got, "/interrupt") {
-		t.Errorf("refusal row = %q, want it to name the way out", got)
+	// The row must not promise that interrupting makes the command
+	// work. Four of the five refused names are host-provided, so on a
+	// host with a partial catalog the same name answers "unknown
+	// command" at idle — and the refusal is decided from a static set
+	// that cannot tell the difference (issue #284).
+	if strings.Contains(got, "/interrupt") {
+		t.Errorf("refusal row = %q, want no /interrupt promise: the command may not exist on this host", got)
 	}
 	if next.input.Value() != "" {
 		t.Errorf("input not cleared after a refusal; got %q", next.input.Value())

@@ -113,6 +113,12 @@ var midTurnSafeSlashes = map[string]bool{
 // race the operator can't see, and the host refuses most of them
 // server-side anyway — this just makes the client agree out loud
 // instead of silently queueing the text for later.
+//
+// Only "clear" is a core-tui built-in; the other four are names a
+// host may or may not provide. The set stays static deliberately —
+// consulting the host catalog before deciding would reintroduce the
+// frame of silence #137 removed — so the refusal row states the
+// constraint without promising the command exists (issue #284).
 var midTurnRefusedSlashes = map[string]bool{
 	"compact": true, "done": true, "replan": true,
 	"clear": true, "subagent": true,

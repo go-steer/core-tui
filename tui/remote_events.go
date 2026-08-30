@@ -163,16 +163,21 @@ type TurnSummary struct {
 }
 
 // TurnError matches the spec §2.6 turn-error payload — structured
-// error info that should be surfaced inline in the chat. Kind
-// drives client rendering decisions (e.g. retry affordance only
-// when Retryable=true). Consumers tolerate unknown Kind values by
-// treating them as TurnErrorUnknown.
+// error info that should be surfaced inline in the chat. Consumers
+// tolerate unknown Kind values by treating them as TurnErrorUnknown.
 type TurnError struct {
-	Kind      string `json:"kind"`
-	Code      string `json:"code,omitempty"`
-	Message   string `json:"message"`
-	Retryable bool   `json:"retryable"`
-	Hint      string `json:"hint,omitempty"`
+	Kind    string `json:"kind"`
+	Code    string `json:"code,omitempty"`
+	Message string `json:"message"`
+
+	// Retryable carries the host's classification of the failure as
+	// transient. core-tui parses it and exposes it to hosts, but
+	// renders nothing for it: there is no retry action in the TUI to
+	// put behind a retry affordance (issue #285, and see
+	// renderTurnErrorBlock).
+	Retryable bool `json:"retryable"`
+
+	Hint string `json:"hint,omitempty"`
 }
 
 // TurnError kind constants from spec §2.6. Hosts MAY emit unknown

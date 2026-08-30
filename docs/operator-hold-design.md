@@ -261,7 +261,7 @@ buckets:
 | bucket | names | behaviour |
 |---|---|---|
 | safe | `help`/`?`, `stats`, `tools`, `subagents`, `mcp`, `memory`, `skills`, `keys`, `interrupt`/`int`, `pause`, `continue`/`cont`, `abandon`, plus the host-side `btw`, `status`, `context`, `agents` | dispatch now |
-| refused | `compact`, `done`, `replan`, `clear`, `subagent` | "not while a turn is running — /interrupt first" |
+| refused | `compact`, `done`, `replan`, `clear`, `subagent` | "not while a turn is running" |
 | everything else, including any unknown `/word` | | queue as a literal prompt, exactly as today |
 
 The third bucket is the default on purpose: `/foo bar` typed as prose
@@ -270,6 +270,17 @@ is the one that mutates conversation state or writes a boundary;
 `Agent.Compact` and `Checkpoint` already refuse mid-turn server-side,
 so this makes the client agree with the server rather than silently
 queueing text that will be rejected.
+
+The refusal names the constraint and nothing else. It used to append
+"— /interrupt first", which reads as a promise that the command works
+once the turn ends. Only `clear` is a core-tui built-in; the other
+four are host-provided names, so on a host with a partial catalog the
+same name answers `unknown command` at idle and the promise is false.
+Consulting the host catalog before refusing would fix the wording at
+the cost of the property the bucket exists for — the decision is made
+synchronously on the keystroke, and a round-trip reintroduces the
+frame of silence #137 removed. Wording that claims less is the cheaper
+half of that trade ([#284](https://github.com/go-steer/core-tui/issues/284)).
 
 ---
 

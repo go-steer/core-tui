@@ -1666,10 +1666,18 @@ func nonNeg(x int) int {
 //	⚠ <kind> · <code-if-present>
 //	   <message>
 //	   hint: <hint-if-present>
-//	   ↻ retryable
 //
 // Header (kind line) is bold-error. Body lines indented to match
 // other multi-line block renders (RoleSystem, RoleNotice).
+//
+// TurnError.Retryable is parsed but deliberately not rendered. It
+// used to add a "↻ retryable" line, which reads as an affordance —
+// but core-tui has no retry action anywhere, so the glyph pointed at
+// nothing. It was most visible on an Esc-hold, where a host that
+// classifies the cancellation as transient (core-agent's
+// ClassifyTurnError maps context.Canceled into transient_network)
+// made an operator-initiated stop look like a failure offering a
+// retry (issue #285). Re-render it if a retry action ever lands.
 func (m model) renderTurnErrorBlock(te TurnError, width int) string {
 	kind := te.Kind
 	if kind == "" {
@@ -1687,9 +1695,6 @@ func (m model) renderTurnErrorBlock(te TurnError, width int) string {
 	}
 	if te.Hint != "" {
 		lines = append(lines, m.styles.Muted.Render(wordWrapIndent("   hint: "+te.Hint, width, "         ")))
-	}
-	if te.Retryable {
-		lines = append(lines, m.styles.Muted.Render("   ↻ retryable"))
 	}
 	return strings.Join(lines, "\n")
 }
