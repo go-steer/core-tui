@@ -179,6 +179,7 @@ listed in `/help`:
 | `/mcp` | Display configured MCP servers | — (display-only) |
 | `/skills` | Display loaded skill bundles | — (display-only) |
 | `/tools [<source>]` | List tools the agent has registered, grouped by source with per-source counts; an argument filters to one source and adds descriptions | `ToolLister` |
+| `/transcripts [<name>]` | List saved transcripts under `AgentsDir/sessions`, or load one into the current session | — (needs `Options.AgentsDir`) |
 | `/model` | Pick a model interactively or `/model <id>` to switch | `ModelSwapper` |
 | `/reload` | Re-read `.agents/` from disk and rebuild agent | `Reloader` |
 | `/permissions` | Open interactive review of session approvals | `PermissionController` |
@@ -530,6 +531,21 @@ listed in `/help`:
   new fields empty (no data to recover).
 - **R-TR-3** Transcript save failures are non-fatal and reported to
   stderr after the alt-screen is torn down.
+- **R-TR-4** `/transcripts` lists what R-TR-1 wrote, most recent
+  first, capped at 10 rows with an "and N older" tail;
+  `/transcripts <name>` loads one, resolving an absolute path, a
+  relative one, or a bare file name against `<AgentsDir>/sessions`.
+  Loading replaces the history wholesale and re-renders assistant
+  markdown at the current width; in-flight turn, queue and modal state
+  are not restored, so a loaded session starts idle. Needs no host
+  capability — with no `AgentsDir` the command says so rather than
+  reporting a missing capability.
+- **R-TR-5** `/transcripts` is **refused mid-turn** (R-HOLD-3), for
+  R-TR-4's reason: it replaces the history the running turn is still
+  appending to. Named `/resume` until issue #268; that spelling folds
+  to this command until v1.0 and prints a row naming the new one.
+  The word `resume` is reserved for the pause API, where `/continue`
+  and `/abandon` are two of `POST /resume`'s three dispositions.
 
 ### 3.15 Status bar / footer (should)
 
@@ -791,9 +807,9 @@ listed in `/help`:
   end a turn — `/interrupt`, `/pause`, `/continue`, `/abandon`,
   `/help`, `/stats`, `/tools`, `/subagents` and the rest of the
   informational set. Commands that rewrite conversation state
-  (`/compact`, `/clear`, `/done`, `/replan`) refuse with a row saying
-  the command is not available while a turn is running, matching what
-  the host would do anyway. The row states the constraint and stops
+  (`/compact`, `/clear`, `/done`, `/replan`, `/transcripts`) refuse
+  with a row saying the command is not available while a turn is
+  running, matching what the host would do anyway. The row states the constraint and stops
   there: the refusal set is static, so it cannot know whether the host
   implements the name, and telling the operator to interrupt first
   would promise a command that may answer `unknown command` at idle.

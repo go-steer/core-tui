@@ -321,18 +321,22 @@ func TestSlashContinue_And_Abandon_CarryDistinctModes(t *testing.T) {
 	}
 }
 
-// TestSlashResume_StillLoadsTranscripts guards the collision that
-// named /continue in the first place (issue #268): /resume belongs to
-// the saved-session loader and must not have been quietly repurposed.
-func TestSlashResume_StillLoadsTranscripts(t *testing.T) {
-	agent := &pausableAgent{}
-	m := pausedModel(t, agent, true)
-	handled, _, _ := m.dispatchBuiltinSlash("resume", "")
-	if !handled {
-		t.Fatal("/resume not handled")
-	}
-	if got := agent.resumes(); len(got) != 0 {
-		t.Fatalf("/resume reached the pause gate: %+v", got)
+// TestSlashResume_NeverReachesThePauseGate guards the reassignment
+// #268 deliberately did not make. The word "resume" is now free — the
+// transcript loader is /transcripts — but /continue keeps its name and
+// the old spelling keeps folding to the loader. An operator typing
+// /resume for their transcript list must not un-park a held agent.
+func TestSlashResume_NeverReachesThePauseGate(t *testing.T) {
+	for _, name := range []string{"resume", "transcripts"} {
+		agent := &pausableAgent{}
+		m := pausedModel(t, agent, true)
+		handled, _, _ := m.dispatchBuiltinSlash(name, "")
+		if !handled {
+			t.Fatalf("/%s not handled", name)
+		}
+		if got := agent.resumes(); len(got) != 0 {
+			t.Fatalf("/%s reached the pause gate: %+v", name, got)
+		}
 	}
 }
 

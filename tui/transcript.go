@@ -308,7 +308,7 @@ func ListTranscripts(agentsDir string) ([]TranscriptInfo, error) {
 	return out, nil
 }
 
-// TranscriptInfo is one entry in the /resume picker.
+// TranscriptInfo is one entry in the /transcripts listing.
 type TranscriptInfo struct {
 	Path    string
 	Name    string
