@@ -25,6 +25,20 @@ The wire protocol in [`docs/sse-event-stream-protocol.md`](./docs/sse-event-stre
 
 ## [Unreleased]
 
+### Fixed
+
+- **Slash commands typed at a held agent are commands again** ([#299](https://github.com/go-steer/core-tui/issues/299)). Typing `/mouse` while the agent was parked did not toggle mouse capture. It resumed the agent and handed it `/mouse` as its new instruction, which the agent then ran two web searches trying to understand.
+
+  The held input box is a steer field, so something has to decide whether a line beginning with `/` is a command or is prose. It was asking `midTurnSlashDisposition`, which answers a different question — is this slash safe to run against a **running** turn? — from two deliberately narrow allowlists. Nothing is running while held, so safety is not the question there; recognition is. Every command missing from those tables fell to their "this is prose" default: `mouse`, `theme`, `model`, `switch`, `reload`, `permissions`, `pricing`, `transcripts`, `allow`, `deny`, and `quit` / `exit` / `q`.
+
+  `/quit` is the one that matters. An operator who parks a misbehaving agent and then types `/quit` was opening the gate and handing it "/quit" to act on — the command's effect exactly inverted, at the moment an operator is most likely to reach for it.
+
+  This is the same family as the `/resume` hijack fixed in 0.24.0 and [#278](https://github.com/go-steer/core-tui/issues/278) before it, and it is the third time one name has been added to one table. So the fix is the class rather than the instance: the held arm now dispatches whatever the TUI itself owns, `builtinSlashNames` is that list and is not a subset of anything, and a test holds it to both the dispatch switch and the palette catalog in both directions. It found `/transcripts` missing while being written. The mid-turn gate is unchanged — its allowlist is right for the question it asks.
+
+  Prose still steers. `"/tmp is full, look at it"` has no built-in named `tmp`.
+
+  Introduced by [#279](https://github.com/go-steer/core-tui/issues/279): before it, typing `/` opened the palette and the palette's Enter called the dispatcher directly, so a hand-typed `/mouse` never reached the hold arm at all. Found on core-agent's #799 operator-hold smoke run against a live GKE daemon.
+
 ## [0.24.0] — 2026-08-30
 
 Six items, and five of them are the TUI having told the operator something that was not so. A cancelled turn offered a `↻ retryable` label against a retry action core-tui has never had. A slash refused mid-turn said "`/interrupt` first" on hosts where `/interrupt` was never coming. Turning on mouse capture silently took away text selection, which reads as a broken terminal rather than as something an application did. `/permissions` listed the decisions of a shared attach session without being able to say who made any of them. And `/resume` was named for an operation it does not perform: the word belongs to core-agent's `POST /resume`, the endpoint behind `/continue` and `/abandon`, while the command wearing it lists transcript files off local disk and never touches the host. It is `/transcripts` now, with `/resume` folding to it until v1.0.
