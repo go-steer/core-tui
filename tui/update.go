@@ -2191,13 +2191,23 @@ func (m model) submitInputLine(text string) (tea.Model, tea.Cmd) {
 	// that — dispatching before the arm was ever consulted — so the
 	// two ways of typing the same line disagreed.
 	//
-	// The test is the same static table the mid-turn gate uses, so
-	// the two states cannot drift apart on what counts as a command.
-	// Both buckets dispatch here: nothing is running to refuse
-	// against, and /clear while held is a reasonable thing to want.
+	// The question here is recognition, not safety (#299). Nothing is
+	// running to be unsafe against, so anything the TUI dispatches
+	// itself qualifies, and both mid-turn buckets come along for the
+	// host-side names they cover (btw, status, context, agents) plus
+	// /clear, which is a reasonable thing to want while parked.
+	//
+	// Answering it with the mid-turn table alone was the bug: that
+	// table is a deliberately narrow allowlist of what may run against
+	// a LIVE turn, so every client-local command missing from it —
+	// /mouse, /theme, /model, /quit and seven more — went to the host
+	// as steer prose. /quit was the sharp end: an operator parking a
+	// misbehaving agent and then typing /quit opened the gate and
+	// handed it "/quit" as its next instruction.
+	//
 	// Everything else stays prose, which is the whole point of a
 	// steer field — "/tmp is full, look at it" must reach the host.
-	if m.pause.paused() && midTurnSlashDisposition(text) != midTurnQueue {
+	if m.pause.paused() && (namesABuiltinSlash(text) || midTurnSlashDisposition(text) != midTurnQueue) {
 		return m.dispatchSlash(text)
 	}
 	// Paused: typed text is a steer, not a new turn (R-HOLD-4).

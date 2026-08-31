@@ -137,6 +137,46 @@ var midTurnRefusedSlashes = map[string]bool{
 	"clear": true, "subagent": true, "transcripts": true,
 }
 
+// builtinSlashNames is every name dispatchBuiltinSlash answers to.
+// Unlike the two tables above it is not a curated subset of anything:
+// adding a case to that switch means adding its name here, and
+// TestBuiltinSlashNames_MatchesDispatcher fails both ways round if the
+// two drift.
+//
+// Keyed post-canonicalization, so only the aliases canonicalSlashName
+// leaves alone (?, exit, q, int, cont) appear — /resume, which now
+// folds to /transcripts, is recognized without being listed.
+//
+// It exists because "is this line a command?" and "is this command
+// safe to run right now?" are different questions, and only the second
+// has any reason to answer no for a command the client owns. The held
+// input box asks the first one (#299): nothing is running, so the only
+// thing to decide is whether the operator typed a command or typed
+// prose that happens to start with a slash.
+var builtinSlashNames = map[string]bool{
+	"help": true, "?": true,
+	"clear": true,
+	"quit":  true, "exit": true, "q": true,
+	"memory": true, "mcp": true, "skills": true, "stats": true,
+	"mouse": true, "keys": true, "tools": true, "subagents": true,
+	"interrupt": true, "int": true,
+	"pause": true, "continue": true, "cont": true, "abandon": true,
+	"model": true, "switch": true, "theme": true, "reload": true,
+	"permissions": true, "pricing": true, "transcripts": true,
+	"allow": true, "deny": true,
+}
+
+// namesABuiltinSlash reports whether text's command word is one the
+// TUI dispatches itself. text is the raw line including the leading
+// slash.
+func namesABuiltinSlash(text string) bool {
+	if !strings.HasPrefix(text, "/") {
+		return false
+	}
+	name, _, _ := strings.Cut(strings.TrimPrefix(text, "/"), " ")
+	return builtinSlashNames[canonicalSlashName(strings.ToLower(name))]
+}
+
 // midTurnSlashDisposition classifies a /-prefixed input line. text is
 // the raw line including the leading slash.
 func midTurnSlashDisposition(text string) midTurnDisposition {
