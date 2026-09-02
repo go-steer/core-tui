@@ -2738,7 +2738,7 @@ func (m model) dispatchSlash(text string) (tea.Model, tea.Cmd) {
 			Text: "unknown command /" + name + " — the agent doesn't expose any slash commands",
 		})
 		m.input.Reset()
-		m.refreshViewport()
+		m.refreshAndScroll()
 		return m, nil
 	}
 
@@ -2783,7 +2783,7 @@ func (m model) applySlashDispatch(msg slashDispatchedMsg) (tea.Model, tea.Cmd) {
 			Role: RoleSystem,
 			Text: "unknown command /" + msg.name + " — type / to see what's available",
 		})
-		m.refreshViewport()
+		m.refreshAndScroll()
 		return m, nil
 	}
 	if msg.invoked {
@@ -2820,8 +2820,10 @@ func (m model) applySlashDispatch(msg slashDispatchedMsg) (tea.Model, tea.Cmd) {
 		preamble, ch := asyncProv.InvokeSlashAsync(ctx, name, args)
 		if preamble != "" {
 			m.history.Append(Message{Role: RoleSystem, Text: preamble})
+			m.refreshAndScroll()
+		} else {
+			m.refreshViewport()
 		}
-		m.refreshViewport()
 		return m, awaitSlashChannel(name, ch)
 	}
 	if sync, ok := m.opts.Agent.(SlashProvider); ok {
@@ -2843,7 +2845,7 @@ func (m model) applySlashDispatch(msg slashDispatchedMsg) (tea.Model, tea.Cmd) {
 			Role: RoleSystem,
 			Text: "/" + name + " — the agent lists this command but doesn't implement a way to run it",
 		})
-		m.refreshViewport()
+		m.refreshAndScroll()
 		return m, nil
 	}
 	// The agent was replaced mid-match by one with no slash surface at
@@ -2863,7 +2865,7 @@ func (m model) refuseConcurrentSlash(name string) (model, bool) {
 		Role: RoleSystem,
 		Text: "/" + name + " refused — /" + m.inFlightSlash.name + " is still running. Wait for it (or press Esc to cancel) then retry.",
 	})
-	m.refreshViewport()
+	m.refreshAndScroll()
 	return m, true
 }
 
@@ -2891,18 +2893,34 @@ func (m model) applySlashResult(name string, res SlashResult, err error) (tea.Mo
 			Role: RoleError,
 			Text: "/" + name + " failed: " + err.Error(),
 		})
-		m.refreshViewport()
+		m.refreshAndScroll()
 		return m, nil
 	}
 	if res.ModalAnswer != nil {
 		m.sideAnswer = res.ModalAnswer
 		m.scroll().reset()
 	}
-	if res.SystemMessage != "" {
+	// Issue #303: a host /cmd is as operator-initiated as a built-in,
+	// so its reply gets the same tail pin the built-ins take through
+	// refreshAndScroll (slash_builtin.go's header states the policy).
+	// refreshViewport alone re-pins only while follow is armed, so an
+	// operator who had scrolled up to read backlog watched a long
+	// /usage table land silently below the fold.
+	//
+	// Pinned only when a row was actually appended. A ModalAnswer with
+	// no SystemMessage puts nothing in the transcript, and yanking the
+	// chat to the tail behind an open modal is a jump nothing on
+	// screen accounts for.
+	appended := res.SystemMessage != ""
+	if appended {
 		m.history.Append(Message{Role: RoleSystem, Text: res.SystemMessage})
 	}
 	m.resize()
-	m.refreshViewport()
+	if appended {
+		m.refreshAndScroll()
+	} else {
+		m.refreshViewport()
+	}
 
 	// Issue #48: SwitchTo requests a mid-run detach + attach. Any
 	// SystemMessage / ModalAnswer above has already landed against
@@ -2915,7 +2933,7 @@ func (m model) applySlashResult(name string, res SlashResult, err error) (tea.Mo
 				Role: RoleError,
 				Text: "/" + name + ": SwitchTo has nil Agent — ignored",
 			})
-			m.refreshViewport()
+			m.refreshAndScroll()
 			return m, nil
 		}
 		return m, m.applySwitchTarget(res.SwitchTo)

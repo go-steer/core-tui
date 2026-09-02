@@ -27,6 +27,16 @@ The wire protocol in [`docs/sse-event-stream-protocol.md`](./docs/sse-event-stre
 
 ### Fixed
 
+- **A host slash command's reply scrolls into view** ([#303](https://github.com/go-steer/core-tui/issues/303)). Running `/usage` after scrolling up to read backlog appended a twenty-line table below the fold and left the window exactly where it was. From the operator's side the command did nothing.
+
+  Two dispatch paths, two scroll policies. Built-ins go through `refreshAndScroll`, which arms follow and pins the tail — `slash_builtin.go`'s header has stated that policy since the file was written, on the grounds that a slash is operator-initiated and its answer should be visible even to someone who had scrolled away. Host-provided commands went through plain `refreshViewport`, which re-pins only while follow is still armed, and follow is exactly what scrolling up drops.
+
+  Nothing about `/usage` is special; it is just the tallest thing the reference host returns. `/context`, `/replan`, `/title`, `/new`, `/attach`, `/compact`, `/done`, `/btw` and `/subagent` were all landing the same way. `/pricing`, `/perms`, `/reload`, `/tools` and `/model` were fine, because capability-checked built-ins shadow the host's registrations for those names — which is why this reads as one command misbehaving rather than a whole class.
+
+  The host path now takes the built-in policy: the reply row, the error row, the async preamble, the concurrent-slash refusal, and both "no such command" rows. Pinned only when a row was actually appended — a `ModalAnswer` with no `SystemMessage` puts nothing in the transcript, and moving the chat behind an open modal would be a jump nothing on screen accounts for.
+
+  Reported against core-agent's `/usage`.
+
 - **Slash commands typed at a held agent are commands again** ([#299](https://github.com/go-steer/core-tui/issues/299)). Typing `/mouse` while the agent was parked did not toggle mouse capture. It resumed the agent and handed it `/mouse` as its new instruction, which the agent then ran two web searches trying to understand.
 
   The held input box is a steer field, so something has to decide whether a line beginning with `/` is a command or is prose. It was asking `midTurnSlashDisposition`, which answers a different question — is this slash safe to run against a **running** turn? — from two deliberately narrow allowlists. Nothing is running while held, so safety is not the question there; recognition is. Every command missing from those tables fell to their "this is prose" default: `mouse`, `theme`, `model`, `switch`, `reload`, `permissions`, `pricing`, `transcripts`, `allow`, `deny`, and `quit` / `exit` / `q`.
