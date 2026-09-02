@@ -281,6 +281,7 @@ type model struct {
 	// existing StatusReporter / per-turn snapshot paths).
 	pushedProvider   string       // most recent push-status provider tag
 	pushedContextPct *int         // most recent push-status context-pct (pointer so 0 ≠ absent)
+	pushedTurnState  string       // most recent push-status turn_state; see turnRunning
 	sessionUsage     *UsageUpdate // most recent cumulative usage snapshot from a usage-update event
 
 	// hostSnap caches the StatusReporter + UsageTracker reads that the

@@ -112,6 +112,7 @@ func TestApplySwitchTarget_ResetsState(t *testing.T) {
 	m.queue = []QueueEntry{{Text: "queued", State: QueueQueued}}
 	m.toast = "leftover"
 	m.pushedProvider = "old-provider"
+	m.pushedTurnState = TurnStateStreaming
 	beforeGen := m.sessionGen
 
 	fresh := &bareAgent{id: "new"}
@@ -149,6 +150,11 @@ func TestApplySwitchTarget_ResetsState(t *testing.T) {
 	}
 	if m.pushedProvider != "" {
 		t.Errorf("pushedProvider should be cleared, got %q", m.pushedProvider)
+	}
+	// Carrying it over would arm esc's cancel (turnRunning) against a
+	// session that has not reported a turn at all.
+	if m.pushedTurnState != "" {
+		t.Errorf("pushedTurnState should be cleared, got %q", m.pushedTurnState)
 	}
 	snap := m.history.Snapshot()
 	if len(snap) != 1 || snap[0].Role != RoleSystem || snap[0].Text != "Attached to session new" {

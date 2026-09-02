@@ -803,10 +803,14 @@ listed in `/help`:
   substitute for the remote one either: a host with a gate runs its
   loop on the far side of a wire, so cancelling ends this client's
   subscription while the host's own context carries the turn on. Only
-  a turn actually in flight is cancelled, since whether the operator's
-  work was killed is what R-HOLD-2's banner reports. `/interrupt`
-  resolves identically — the key and the command are one gesture with
-  two spellings.
+  a turn actually running is cancelled — and "running" is the host's
+  `turn_state`, not the render gate, which reports nothing in flight
+  through every silent stretch of a daemon-driven turn and so cost the
+  cancel exactly when it was most needed (#302). It is not the banner
+  that needs the guard: whether R-HOLD-2 reads "interrupted" or
+  "paused" comes from the host's own `PauseInfo`, never from a client
+  guess. `/interrupt` resolves identically — the key and the command
+  are one gesture with two spellings.
 - **R-HOLD-2** A held session renders a banner above the input,
   stating whether a turn was killed on the way in ("interrupted") or
   the loop is merely held ("paused"), the host's reason when it gave
