@@ -25,6 +25,12 @@ The wire protocol in [`docs/sse-event-stream-protocol.md`](./docs/sse-event-stre
 
 ## [Unreleased]
 
+## [0.24.1] — 2026-09-02
+
+Three fixes, no API change. Two of them came out of one live smoke run — core-agent's [#799](https://github.com/go-steer/core-agent/issues/799), an operator parking and steering a real daemon on GKE — and both are the same shape: a control that reported success and did not do the thing. Esc raised the hold banner over a turn that kept running for another 226 seconds, and `/quit` typed at a held agent opened the gate and handed the agent the word "quit" to act on. The third is quieter: a host slash command's answer appended below the fold and left the window where it was, so from the operator's side `/usage` did nothing.
+
+Underneath the first two is one recurring cause worth naming, because it has now produced three bugs across two releases: **a predicate answering a question next to the one being asked.** `turnInFlight` answers "is there output to paint" and was asked "is a turn running". `midTurnSlashDisposition` answers "is this slash safe against a running turn" and was asked "is this line a command". Both are right about their own question and wrong here, and in both cases the fix is a second predicate rather than a widened first one.
+
 ### Fixed
 
 - **Esc cancels a daemon turn that isn't printing anything** ([#302](https://github.com/go-steer/core-tui/issues/302)). Pressing Esc while a remote agent worked put the hold banner up — "Agent held, no new turn will start" — and the turn carried on behind it. Measured on a live GKE daemon: 226 seconds of further work past the keystroke, ending in a completed report. The banner said stopped and the agent was not stopped, which is worse than not offering the key at all, because the operator stops watching.
@@ -741,7 +747,8 @@ Initial release: `package tui` extracted from the duplicated `internal/tui` tree
 - **Performance and terminal-fidelity work** — incremental Glamour streaming, an auto-growing textarea, hanging-indent word wrap that preserves source leading whitespace, and the viewport's `h`/`j`/`k`/`l`/arrow bindings disabled with `xOffset` pinned to 0 so a wide line can't shift the whole chat sideways.
 - **The docs that govern all of it** — `docs/requirements.md`, `docs/design.md`, `docs/decisions.md`, `docs/style.md`, `docs/ui-references.md`, and `MIGRATION.md`.
 
-[Unreleased]: https://github.com/go-steer/core-tui/compare/v0.24.0...HEAD
+[Unreleased]: https://github.com/go-steer/core-tui/compare/v0.24.1...HEAD
+[0.24.1]: https://github.com/go-steer/core-tui/compare/v0.24.0...v0.24.1
 [0.24.0]: https://github.com/go-steer/core-tui/compare/v0.23.0...v0.24.0
 [0.23.0]: https://github.com/go-steer/core-tui/compare/v0.22.0...v0.23.0
 [0.22.0]: https://github.com/go-steer/core-tui/compare/v0.21.0...v0.22.0
