@@ -17,6 +17,10 @@
 # sit behind the new baseline, and a leftover entry would silently permit
 # a second, unrelated removal of a symbol that no longer exists.
 #
+# Nothing to empty at v0.24.1 either: a fix-only patch release, and
+# verify-apidiff reported no change to the exported API across the whole
+# cycle. #305 added a model field and a method, both unexported.
+#
 # Nothing to empty at v0.24.0: that cycle broke no exported Go symbol,
 # so the file went into the tag empty and came out of it empty. The one
 # commit marked breaking there (#268) renames an operator-facing slash
@@ -36,4 +40,4 @@
 # clearing them any earlier would leave verify-apidiff reporting the
 # same removals with nothing to match them against.
 
-# Entries since v0.24.0 follow.
+# Entries since v0.24.1 follow.
