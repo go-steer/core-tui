@@ -469,11 +469,24 @@ func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			v := *msg.status.ContextPct
 			m.pushedContextPct = &v
 		}
-		// PermMode + TurnState fields land here too but don't
-		// drive any v1 rendering — the existing in-band turn
-		// lifecycle (state field, spinnerActive flag) is the
-		// source of truth for those today. Reserved for follow-up
-		// work that unifies push + in-band turn state.
+		// TurnState is the host's own answer to "is a turn running",
+		// and it is the only source that stays right through a
+		// stretch with no output — a parent blocked on a subagent,
+		// or the gap before a turn's first token. The in-band
+		// spinnerActive flag cannot see either, which is what made
+		// esc degrade to a bare pause (issue #302). Kept separate
+		// from the render gate: see turnRunning vs turnInFlight.
+		//
+		// Only non-empty applies, per the merge semantics above.
+		// Spec §2.2 makes turn_state the one required field, so an
+		// empty one is a host off-spec — and the last value standing
+		// is the safer reading of that than a silent "idle", which
+		// would quietly disarm the cancel below.
+		if msg.status.TurnState != "" {
+			m.pushedTurnState = msg.status.TurnState
+		}
+		// PermMode lands here too but doesn't drive any v1
+		// rendering. Reserved for follow-up work.
 		return m, m.liveStreamRenderCmd()
 	case usageUpdateMsg:
 		if msg.gen != m.sessionGen {
@@ -1595,7 +1608,11 @@ func (m model) handleKey(msg tea.KeyPressMsg) (tea.Model, tea.Cmd) {
 		// parks server-side anyway, and the PauseState poll will
 		// surface it once the adapter grows Pauser.
 		if !cancelledLocally {
-			if ri, ok := m.opts.Agent.(RemoteInterrupter); ok && m.turnInFlight() {
+			// turnRunning, not the turnInFlight render gate — same
+			// reason as holdCmd (#302). A Pauser-less host was the
+			// worse case of the two: with no gate to shut, esc did
+			// nothing whatsoever through a silent daemon turn.
+			if ri, ok := m.opts.Agent.(RemoteInterrupter); ok && m.turnRunning() {
 				m.history.Append(Message{Role: RoleSystem, Text: "Interrupting…"})
 				m.refreshAndScroll()
 				return m, remoteInterruptCmd(ri)
@@ -3028,6 +3045,10 @@ func (m *model) applySwitchTarget(tgt *SwitchTarget) tea.Cmd {
 	m.sessionUsage = nil
 	m.pushedProvider = ""
 	m.pushedContextPct = nil
+	// The outgoing session's turn state says nothing about the
+	// incoming one, and leaving it set would arm esc's cancel against
+	// a session that never reported a turn (see turnRunning).
+	m.pushedTurnState = ""
 	m.hostSnap = hostSnapshot{}
 	m.liveDisconnected = false
 	m.liveReadOnlyNoted = false

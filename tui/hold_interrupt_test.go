@@ -196,6 +196,141 @@ func TestSlashInterrupt_ObserverModeStopsAndHolds(t *testing.T) {
 	}
 }
 
+// TestEsc_MidDaemonTurnWithNothingStreamingStillCancels is issue #302.
+//
+// The gap #280 left. It fixed the case where the client can see the
+// turn; this is the case where it cannot. A daemon-driven turn sitting
+// in a tool call emits no partial chunks, so beginLiveStretch never
+// fires and spinnerActive stays false — and the render gate the hold
+// used to consult, turnInFlight, therefore reported nothing in flight
+// while a turn was running. Esc took the pause-only arm and the
+// operator got a hold banner over work that carried on.
+//
+// Measured on GKE before the fix: 226 seconds of continued work past
+// the keystroke, against a parent blocked in spawn_agent{wait:true} —
+// the runaway-subagent case the hold exists to stop.
+//
+// The host's own turn_state is the signal that survives the gap, which
+// is why turnRunning consults it and this test pushes it.
+//
+// Every non-idle state the spec defines is a live turn, so every one of
+// them arms the cancel. awaiting_permission and awaiting_elicit are the
+// interesting ones: in observer mode the question was put to another
+// client, so this operator has no modal to escape and esc's only
+// available meaning is stop.
+func TestEsc_MidDaemonTurnWithNothingStreamingStillCancels(t *testing.T) {
+	for _, state := range []string{
+		TurnStateStreaming,
+		TurnStateAwaitingPermission,
+		TurnStateAwaitingElicit,
+	} {
+		t.Run(state, func(t *testing.T) {
+			agent := &liveHoldAgent{}
+			m := newModel(Options{Agent: agent})
+			m.width, m.height = 100, 40
+			if !m.liveMode {
+				t.Fatal("setup: expected liveMode for a LiveAgent host")
+			}
+
+			// The host says a turn is running. Nothing is painting
+			// it: no partial chunk has arrived, so no live stretch
+			// was ever opened.
+			got, _ := m.Update(statusUpdateMsg{status: StatusUpdate{TurnState: state}})
+			m = got.(model)
+
+			if m.turnInFlight() {
+				t.Fatal("setup: the render gate must read idle here — that is the condition under test")
+			}
+			if !m.turnRunning() {
+				t.Fatalf("setup: turnRunning must see the host's %q turn_state", state)
+			}
+
+			_, cmd := m.Update(tea.KeyPressMsg(tea.Key{Code: tea.KeyEscape}))
+			runCmd(t, cmd)
+
+			if got := agent.interruptCalls.Load(); got != 1 {
+				t.Errorf("Interrupt calls = %d, want 1 — the daemon's turn was left running under a banner saying it had stopped", got)
+			}
+			if got := agent.pauses(); len(got) != 1 {
+				t.Errorf("Pause calls = %v, want exactly one hold", got)
+			}
+		})
+	}
+}
+
+// liveInterrupterOnly is LiveAgent + RemoteInterrupter and no Pauser:
+// the host that has a cancel and no gate, which esc's cascade reaches
+// only after the Pauser arm declines.
+type liveInterrupterOnly struct {
+	liveAgentStub
+	interruptCalls atomic.Int32
+}
+
+func (a *liveInterrupterOnly) Interrupt(_ context.Context) error {
+	a.interruptCalls.Add(1)
+	return nil
+}
+
+// TestEsc_MidDaemonTurnOnAGatelessHostStillCancels is #302 on the arm
+// below the hold. A host with RemoteInterrupter and no Pauser has no
+// gate to shut, so the render gate reading "nothing in flight" did not
+// downgrade esc to a pause — it dropped the keystroke entirely. Same
+// cause, and the worse symptom of the two: no banner, no row, nothing.
+func TestEsc_MidDaemonTurnOnAGatelessHostStillCancels(t *testing.T) {
+	agent := &liveInterrupterOnly{}
+	m := newModel(Options{Agent: agent})
+	m.width, m.height = 100, 40
+	if _, ok := m.opts.Agent.(Pauser); ok {
+		t.Fatal("setup: this host must NOT be a Pauser — the arm under test is the fallback")
+	}
+
+	got, _ := m.Update(statusUpdateMsg{status: StatusUpdate{TurnState: TurnStateStreaming}})
+	m = got.(model)
+	if m.turnInFlight() {
+		t.Fatal("setup: the render gate must read idle here — that is the condition under test")
+	}
+
+	out, cmd := m.Update(tea.KeyPressMsg(tea.Key{Code: tea.KeyEscape}))
+	runCmd(t, cmd)
+
+	if got := agent.interruptCalls.Load(); got != 1 {
+		t.Errorf("Interrupt calls = %d, want 1 — esc did nothing at all against a running turn", got)
+	}
+	after := out.(model)
+	last := after.history.Snapshot()[after.history.Len()-1]
+	if !strings.Contains(last.Text, "Interrupting") {
+		t.Errorf("last row = %q, want the Interrupting… row — an esc with no visible effect reads as a dead key", last.Text)
+	}
+}
+
+// TestEsc_AfterTheHostReportsIdleHoldsWithoutInterrupting is the other
+// side of #302: turn_state going back to idle has to un-arm the cancel,
+// or every subsequent esc claims to have killed something. Guards
+// against fixing the mid-turn case by simply always interrupting.
+func TestEsc_AfterTheHostReportsIdleHoldsWithoutInterrupting(t *testing.T) {
+	agent := &liveHoldAgent{}
+	m := newModel(Options{Agent: agent})
+	m.width, m.height = 100, 40
+
+	got, _ := m.Update(statusUpdateMsg{status: StatusUpdate{TurnState: TurnStateStreaming}})
+	got, _ = got.(model).Update(statusUpdateMsg{status: StatusUpdate{TurnState: TurnStateIdle}})
+	m = got.(model)
+
+	if m.turnRunning() {
+		t.Fatal("setup: turnRunning must clear once the host reports idle")
+	}
+
+	_, cmd := m.Update(tea.KeyPressMsg(tea.Key{Code: tea.KeyEscape}))
+	runCmd(t, cmd)
+
+	if got := agent.interruptCalls.Load(); got != 0 {
+		t.Errorf("Interrupt calls = %d after the host went idle, want 0 — there is no turn to cancel", got)
+	}
+	if got := agent.pauses(); len(got) != 1 {
+		t.Errorf("Pause calls = %v, want exactly one hold", got)
+	}
+}
+
 // TestHold_InterruptFailureStillShutsTheGate. A failed cancel is when
 // the gate matters most — the turn that would not die is still running,
 // and an open gate lets the scheduler stack another one on top of it.

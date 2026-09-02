@@ -713,6 +713,46 @@ func (m model) turnInFlight() bool {
 	return m.state == stateStreaming || (m.liveMode && m.spinnerActive)
 }
 
+// turnRunning reports whether a turn is in flight at all — locally or
+// on the host — whether or not it currently has anything to paint.
+//
+// That is a different question from turnInFlight, and issue #302 is
+// what the difference costs. turnInFlight is a render gate: it asks
+// whether there is output for the in-progress block, so on the live
+// path it rests on spinnerActive, which beginLiveStretch arms from an
+// arriving partial chunk or the operator's own inject. A daemon-driven
+// turn produces neither while it sits in a tool call — most visibly a
+// parent blocked in spawn_agent{wait:true}, and equally the window
+// before any turn's first token. Through both, turnInFlight answers
+// "nothing in flight" while a turn is very much running.
+//
+// Nothing to paint is the right answer for the renderer and the wrong
+// answer for an operator pressing esc, so the two questions get two
+// methods rather than one widened gate. Widening turnInFlight would
+// also start painting a spinner through tool-only stretches — arguably
+// an improvement, but a visible change with its own blast radius and
+// not this fix's to make.
+//
+// The host's turn_state is authoritative here: core-agent emits
+// streaming before the turn's first content and idle when it commits
+// (pkg/agent/agent.go). The one gap left is the seed — a client that
+// attaches mid-turn is told idle until the next transition, because
+// AttachStatus never reports running (core-agent#896).
+//
+// Anything the host reports that is not idle counts, not streaming
+// alone: awaiting_permission and awaiting_elicit are a live turn
+// blocked on an answer, and in observer mode the prompt belongs to
+// another client, so this one has no modal to dismiss and esc has to
+// mean cancel. A state this build does not know reads as running for
+// the same reason — a spurious interrupt against an idle host is a
+// no-op that still shuts the gate, and a missed one is the bug.
+func (m model) turnRunning() bool {
+	if m.turnInFlight() {
+		return true
+	}
+	return m.liveMode && m.pushedTurnState != "" && m.pushedTurnState != TurnStateIdle
+}
+
 // renderInProgress returns the live block at the bottom of the chat
 // while a turn is streaming: the accumulated assistant text rendered
 // through Glamour (R-CHAT-4), followed by the spinner verb line

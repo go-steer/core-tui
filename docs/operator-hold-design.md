@@ -216,13 +216,41 @@ The cascade, in order, stopping at the first arm that fires:
    explicit disposition.
 3. **A locally driven turn?** Cancel it first. That is instant and it
    unwedges the local stack before any network call.
-4. **`Pauser` wired?** Hold, off-loop, with a bounded context.
+4. **`Pauser` wired?** Hold, off-loop, with a bounded context — and
+   on a host that is also a `RemoteInterrupter`, cancel the running
+   turn first, since a gate shut over work already in progress stops
+   the next turn and not this one.
 5. **`RemoteInterrupter` wired, nothing cancelled locally, and a turn
-   in flight?** Interrupt — which parks server-side on hosts new
+   running?** Interrupt — which parks server-side on hosts new
    enough to hold, and which the `PauseState` poll will surface once
    that host's adapter grows `Pauser`.
 6. Otherwise nothing: no row, no error. A host that granted neither
    capability gets the Esc it has today.
+
+**"A turn running" is `turnRunning`, not the `turnInFlight` render
+gate.** The render gate asks whether there is output to paint, so on
+the live path it reduces to `spinnerActive`, and a daemon-driven turn
+sitting in a tool call paints nothing — most visibly a parent blocked
+in `spawn_agent{wait:true}`. Asking the render gate cost both arms
+([#302](https://github.com/go-steer/core-tui/issues/302)): arm 4
+degraded to a bare hold, putting a banner reading "no new turn will
+start" over a turn that ran on to completion — 226 seconds of it,
+measured on a live GKE daemon — and arm 5, on a host with no gate to
+shut, dropped the keystroke entirely. `turnRunning` is the render gate
+OR the host's own `turn_state` from the push-status frame, which stays
+right through a silent stretch. Any non-idle state counts, not
+`streaming` alone: `awaiting_permission` and `awaiting_elicit` are a
+live turn blocked on an answer, and in observer mode that question went
+to another client, so this operator has no modal to escape.
+
+`turnInFlight` keeps its own meaning. Widening it would also start
+painting a spinner through tool-only stretches, which is a separate
+change with its own blast radius.
+
+One gap is upstream: a client attaching *mid-turn* is seeded `idle`,
+because core-agent's status snapshot never reports a running turn
+(core-agent#896). Until that lands, Esc pressed before the first frame
+of a turn the client did not see start still takes arm 4's bare hold.
 
 ---
 

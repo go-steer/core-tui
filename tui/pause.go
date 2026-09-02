@@ -280,8 +280,18 @@ func pauseCmd(p Pauser, reason string) tea.Cmd {
 // which is the first thing an operator wants to know. Esc between turns
 // is getting ahead of the next one, not killing this one, and the
 // banner has to keep saying so.
+//
+// Which turn it asks about is turnRunning, not turnInFlight (issue
+// #302). turnInFlight is a render gate and answers "nothing in flight"
+// through any stretch of a daemon-driven turn that isn't emitting
+// partials — a parent blocked on a subagent, or the gap before the
+// first token. Asking it here sent esc down the pause-only arm mid-turn,
+// so the operator got a hold banner over a turn that ran on to
+// completion: 226 seconds of it, measured on GKE against
+// spawn_agent{wait:true}, which is the runaway-subagent case the hold
+// exists to stop.
 func (m model) holdCmd(p Pauser, reason string) tea.Cmd {
-	if ri, ok := m.opts.Agent.(RemoteInterrupter); ok && m.turnInFlight() {
+	if ri, ok := m.opts.Agent.(RemoteInterrupter); ok && m.turnRunning() {
 		return interruptThenPauseCmd(ri, p, reason)
 	}
 	return pauseCmd(p, reason)
