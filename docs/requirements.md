@@ -101,6 +101,13 @@ documented Go interface set (see `design.md` for the shape).
 - **R-CHAT-7** Auto-scroll the viewport to bottom when new content
   arrives **only if the user was already at the bottom**. Preserve
   scroll position when the user has scrolled up.
+
+  The exception is content the operator asked for by name: a slash
+  command's reply pins the tail unconditionally, built-in and
+  host-provided alike, because a reply the operator cannot see reads
+  as a command that did nothing. Nothing is pinned when the command
+  put no row in the transcript — a modal answer leaves the chat
+  where it was (issue #303).
 - **R-CHAT-8** A bound key (default `Ctrl+E`) suspends the TUI via
   `tea.ExecProcess`, opens the focused code block / system message /
   diff payload in `$EDITOR` (falling back to `vi` when unset), and
