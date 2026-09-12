@@ -627,6 +627,25 @@ func (a *perTurnPausable) ran() (string, int) {
 	return a.runPrompt, a.runCalls
 }
 
+// waitRan is ran() for the assertion that a turn DID start. startAgentTurn
+// calls Agent.Run from a goroutine, so a bare ran() straight after Update
+// races the scheduler rather than reading a settled result — on a loaded
+// macOS runner that race was lost often enough to fail CI. Polls until the
+// call lands, then returns what ran() would have.
+//
+// On timeout it returns the zero result rather than failing here, so the
+// caller still reports the mismatch in its own terms.
+func (a *perTurnPausable) waitRan(t *testing.T) (string, int) {
+	t.Helper()
+	for deadline := time.Now().Add(2 * time.Second); ; {
+		prompt, calls := a.ran()
+		if calls > 0 || time.Now().After(deadline) {
+			return prompt, calls
+		}
+		time.Sleep(time.Millisecond)
+	}
+}
+
 // hasOneUserRow reports whether the transcript holds exactly one
 // RoleUser row with this text — "exactly" because one failure mode of
 // the split below is a steer appended twice, once by the held branch
@@ -694,7 +713,7 @@ func TestEnterWhilePaused_PerTurnHostRunsTheSteerItself(t *testing.T) {
 
 	out, _ := next.Update(done)
 	ran := out.(model)
-	prompt, calls := agent.ran()
+	prompt, calls := agent.waitRan(t)
 	if calls != 1 || prompt != steer {
 		t.Fatalf("Run called %d time(s) with %q, want once with the steer", calls, prompt)
 	}
