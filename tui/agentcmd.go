@@ -620,6 +620,15 @@ func emitEvent(ctx context.Context, ch chan<- tea.Msg, gen uint64, ev Event) {
 	if ev.TurnComplete != nil {
 		send(turnSummaryMsg{gen: gen, summary: *ev.TurnComplete})
 	}
+	// Before TurnError deliberately. When a trip cuts a turn short the
+	// two arrive as separate Events and the ordering is the producer's,
+	// but a host that folds both onto one Event must not have the
+	// cancel handled before the trip that explains it — the turnErrorMsg
+	// handler decides what to do with a cancel by looking at whether a
+	// halting trip just landed.
+	if ev.GuardrailTrip != nil {
+		send(guardrailTripMsg{gen: gen, trip: *ev.GuardrailTrip})
+	}
 	if ev.TurnError != nil {
 		send(turnErrorMsg{gen: gen, turnError: *ev.TurnError})
 	}

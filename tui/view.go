@@ -1033,6 +1033,9 @@ func (m model) renderMessage(msg Message) string {
 		if msg.TurnError != nil {
 			return m.renderTurnErrorBlock(*msg.TurnError, width)
 		}
+		if msg.GuardrailTrip != nil {
+			return m.renderGuardrailTripBlock(*msg.GuardrailTrip, width)
+		}
 		return m.styles.ErrorText.Render(wordWrapIndent(GlyphWarn+"  "+msg.Display(), width, "   "))
 	case RoleTool:
 		// Per-tool rendering strategy (toolrender.go). The factory
@@ -1741,6 +1744,38 @@ func (m model) renderTurnErrorBlock(te TurnError, width int) string {
 	}
 	if te.Hint != "" {
 		lines = append(lines, m.styles.Muted.Render(wordWrapIndent("   hint: "+te.Hint, width, "         ")))
+	}
+	return strings.Join(lines, "\n")
+}
+
+// renderGuardrailTripBlock paints a guardrail halt from a push-mode
+// guardrail-trip event (spec §2.10 / v1.13.0). Same two-part shape as
+// renderTurnErrorBlock so the two read as siblings:
+//
+//	⚠ guardrail halted · <guardrail>
+//	   <reason>
+//
+// The header says "halted" rather than naming the turn, because the
+// halt outlives the turn: what it means is that every turn from here
+// is refused until an operator resets it, and at a turn boundary no
+// turn was harmed at all. HaltedTurn is not rendered for the same
+// reason — it tells this consumer whether to expect a cancel next
+// (see absorbNextCancel), which is a wire-handling detail and not
+// something an operator can act on.
+//
+// The reason is rendered verbatim: producers put the reset affordance
+// in it (an operator-reachable one — a slash command and an endpoint,
+// not a Go method), so appending our own advice would either
+// duplicate or contradict it.
+func (m model) renderGuardrailTripBlock(gt GuardrailTrip, width int) string {
+	name := gt.Guardrail
+	if name == "" {
+		name = "unknown"
+	}
+	header := m.styles.ErrorText.Render(GlyphWarn + "  guardrail halted " + GlyphSeparator + " " + name)
+	lines := []string{header}
+	if gt.Reason != "" {
+		lines = append(lines, m.styles.ErrorText.Render(wordWrapIndent("   "+gt.Reason, width, "   ")))
 	}
 	return strings.Join(lines, "\n")
 }

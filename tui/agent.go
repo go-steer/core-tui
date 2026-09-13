@@ -95,6 +95,14 @@ type Event struct {
 	// a transition render immediately, PauseState is what makes a
 	// TUI attaching to an already-paused session render at all.
 	Pause *PauseEvent
+
+	// GuardrailTrip carries the spec §2.10 guardrail-trip payload
+	// (v1.13.0) — a watchdog or cost-ceiling halt. Like Pause it is a
+	// session-state transition rather than a turn outcome, and like
+	// Pause it only makes a *transition* render: a TUI attaching to an
+	// already-halted session learns that from the host's own state
+	// (core-agent's GET /guardrails), not from the stream.
+	GuardrailTrip *GuardrailTrip
 }
 
 // ToolCall describes a single tool invocation.

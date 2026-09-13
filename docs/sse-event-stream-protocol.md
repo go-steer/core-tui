@@ -4,7 +4,9 @@ The wire-format contract between core-tui (consumer) and any server (producer �
 
 **Status:** Phase 1 — additive-only. See [core-tui #40](https://github.com/go-steer/core-tui/issues/40) and [core-agent #115](https://github.com/go-steer/core-agent/issues/115) for the phased-rollout context.
 
-**Protocol version:** `1.7.0`. Bumped on changes per the [Versioning](#versioning) rules below.
+**Protocol version:** `1.13.0`. Bumped on changes per the [Versioning](#versioning) rules below.
+
+**Coverage gap:** revisions 1.8.0 through 1.12.0 shipped on the producer without a section or a change-log row here, so this document specifies 1.7.0 plus 1.13.0's `guardrail-trip` (§2.10) and is silent on what landed in between. Nothing written here is wrong — the gap is omission, not drift — but a consumer implementing against this file should read core-agent's `docs/site/src/content/docs/reference/attach-http.md` for the intervening revisions. Backfilling them is its own piece of work and is deliberately not done in passing.
 
 ---
 
@@ -27,7 +29,7 @@ data: {"model":"gemini-2.5-pro","provider":"vertex","perm_mode":"default","turn_
 
 ## 2. Event types
 
-Nine event types are defined in this protocol version. Each section specifies: when the server emits the event, the payload schema (snake_case JSON), and a representative example.
+Ten event types are defined in this document. Each section specifies: when the server emits the event, the payload schema (snake_case JSON), and a representative example.
 
 ### 2.1 `capabilities`
 
@@ -79,8 +81,8 @@ Example:
 
 ```json
 {
-  "protocol_version": "1.7.0",
-  "event_types": ["status-update", "usage-update", "inbox", "turn-complete", "turn-error", "pause", "wake", "stream-chunk", "tool-call", "tool-result"],
+  "protocol_version": "1.13.0",
+  "event_types": ["status-update", "usage-update", "inbox", "turn-complete", "turn-error", "pause", "wake", "guardrail-trip", "stream-chunk", "tool-call", "tool-result"],
   "server": "core-agent/2.9.0-dev",
   "features": {
     "multi_session": true,
@@ -108,7 +110,9 @@ Example:
 
 (`stream-chunk`, `tool-call`, `tool-result` are pre-existing event types that predate this protocol document; listed here so the example reflects real server output.)
 
-`event_types` is also how a client detects the two event types added after v1.4.0. `pause` and `wake` are both purely additive, and a pre-v1.5.0 / pre-v1.7.0 producer omits the name and never sends the frame — so a client written against the newer version degrades to silence on that surface rather than to an error.
+`event_types` is also how a client detects the event types added after v1.4.0. `pause`, `wake` and `guardrail-trip` are all purely additive, and a pre-v1.5.0 / pre-v1.7.0 / pre-v1.13.0 producer omits the name and never sends the frame — so a client written against the newer version degrades to silence on that surface rather than to an error.
+
+`guardrail-trip` is the one place where degrading to silence costs something, and §2.10 spells out why: the 1.13.0 producer stopped suppressing the `canceled` turn-error that accompanies a halt, so a client that doesn't know the new frame renders a contentless cancellation where it used to render nothing at all.
 
 Note what `event_types` does and does not tell you. It is the list of frames the **server** knows how to emit, not a claim about the **agent** behind it: a v1.5.0 server lists `pause` whether or not the agent it is serving can actually hold its loop. `features` is the runtime-capability half. So a client offering a pause control gates it on `features.pause`, and a client rendering pause *state* it receives gates that on `"pause"` in `event_types`. `wake` has no paired feature key, because there is no capability to decline — a wake either fires or it doesn't.
 
@@ -287,6 +291,8 @@ Example (server that defers cost to the following `usage-update`):
 
 Clients SHOULD render any unknown `kind` value as if it were `unknown` (forward-compat). Clients MUST NOT crash on unknown kinds.
 
+This table stops at 1.7.0 and the producer does not: `canceled` has been emitted since producer revision 1.8.0, and §2.10 depends on it. It is named here so that section is readable, not specified — the kinds added across the coverage gap noted at the top of this document belong to the backfill, and adding one row for the one kind a later section happens to reference would make the table look complete when it isn't.
+
 Example:
 
 ```json
@@ -457,6 +463,54 @@ Example:
 {"at": "2026-08-19T14:32:05.117Z"}
 ```
 
+### 2.10 `guardrail-trip` (v1.13.0+)
+
+**When emitted:** when a guardrail on the producer trips — a cost ceiling is crossed, a watchdog decides the agent is looping. One frame per trip, emitted from the agent so an in-process halt reaches remote watchers, and emitted whether or not a turn was running at the time.
+
+**Payload:**
+
+| Field | Type | Required | Description |
+|---|---|---|---|
+| `guardrail` | string | yes | Which guardrail tripped. Known values: `cost_ceiling`, `watchdog`. Clients MUST tolerate unknown values (render the name, don't branch on it). |
+| `reason` | string | yes | Human-readable explanation, including the operator-reachable way to clear the halt. Producers put the reset affordance here; consumers SHOULD render it verbatim rather than appending advice of their own. |
+| `halted_turn` | bool | yes | Whether the trip cut a turn short. See below — this is the field the event exists for. |
+
+**This is not a `turn-error`, and that is the whole design.** A guardrail trip is a statement about the *session*: from here until an operator resets it, turns are refused. It outlives the turn it interrupted, and at a turn boundary it interrupts nothing. Modelling it as a turn outcome forced a choice between two wrong things — emit the trip as the turn's terminal frame and the turn's real outcome goes unreported, or emit both and the turn appears to end twice. As a non-terminal frame it is neither: it is an announcement that sits alongside whatever the turn does next. It does not participate in the terminal barrier, and it MUST NOT be counted as one by consumers reconciling turn state.
+
+**`halted_turn` tells the consumer what follows.**
+
+- `true` — a turn was in flight and has been cut. Exactly one turn-error of kind `canceled` follows, and it carries no reason, because a cancellation looks the same whoever caused it. Consumers SHOULD suppress that one frame: the trip already said what happened, and rendering both puts a contentless warning under a meaningful one. Suppression is one-shot and scoped to the turn — it is spent on the next turn-error whatever its kind, and the arming MUST be dropped at the turn boundary, or a halt will swallow an operator's own cancellation on a later turn.
+- `false` — the trip landed at a turn boundary (a post-turn watchdog check, say). No turn was harmed; the turn's ordinary `turn-complete` follows and MUST render.
+
+The field is always present on the wire — it is not omitted when false. A consumer that inferred `false` from absence would silently stop suppressing the cancel against a producer that changed its serialisation, which is the exact defect this field was added to close.
+
+**Behaviour change for existing clients.** Before 1.13.0 the producer suppressed the guardrail-caused `canceled` frame itself, and surfaced the halt as a `turn-error` of kind `cost_ceiling` or `watchdog`. At 1.13.0 both of those stopped: the cancel is no longer withheld (the turn's terminal frame is not the producer's to withhold), and core-agent no longer puts `cost_ceiling` or `watchdog` on the stream at all — a turn refused by an already-tripped guardrail short-circuits above the emit site, so the refusal reaches the caller as a returned error and a metric label, not a frame. So a pre-1.13.0 client against a 1.13.0 producer both goes blind to halts *and* gains a bare `⚠ canceled` block under each one. That makes producer and consumer a matched pair for this revision in a way `pause` and `wake` were not.
+
+Detection is the ordinary mechanism: look for `"guardrail-trip"` in the `capabilities` frame's `event_types`. A client that finds it absent, and that used to watch for the `cost_ceiling` / `watchdog` turn-error kinds, SHOULD keep that code — it is how halts are reported by every producer older than this revision.
+
+The event name matches the durable row the producer already writes to its event log for the same trip, deliberately: one name for one occurrence, whether it is read live or replayed.
+
+Example, a watchdog trip at a turn boundary:
+
+```json
+{
+  "guardrail": "watchdog",
+  "reason": "watchdog halted the agent (repeated-tool-call): looping on read_file with identical args. Clear it with /guardrail reset watchdog, or POST /sessions/{app}/{sid}/guardrails/reset.",
+  "halted_turn": false
+}
+```
+
+And a cost ceiling cutting a turn short, with the cancel that follows it:
+
+```
+event: guardrail-trip
+data: {"guardrail":"cost_ceiling","reason":"turn cost $0.61 exceeded the $0.50 per-turn ceiling. Clear it with /guardrail reset cost_ceiling.","halted_turn":true}
+
+event: turn-error
+data: {"kind":"canceled","message":"turn canceled","retryable":true}
+
+```
+
 ---
 
 ## 3. Versioning
@@ -495,6 +549,8 @@ Outcomes for every combination of old/new client and old/new server during Phase
 | New TUI, `RemoteTransport: Auto` (Phase 2) | New server | Reads `capabilities`, sees push support, uses push. |
 | New TUI, `RemoteTransport: Auto` (Phase 2) | Old server | Reads `capabilities` (missing) or sees no push event types, falls back to poll. |
 | Pre-1.5.0 client | 1.5.0 server | `pause` frames arrive under an event name the client doesn't know and are dropped. The gate is still real, and that is the sharp edge of this revision: the server parks on `POST /interrupt`, the client that asked to cancel sees only a cancel, and nothing on its screen says a resume is owed. Producers MUST therefore honour `hold=false` on `/interrupt` for callers that ask for it, so a client written against 1.4.0 semantics can keep getting them. |
+| Pre-1.13.0 client | 1.13.0 server | Guardrail halts go unreported and each one leaves a bare `canceled` turn-error on screen with no explanation above it. Both halves are regressions from 1.12.0, where the producer both named the halt (as a `cost_ceiling` / `watchdog` turn-error) and suppressed the cancel. There is no producer-side mitigation available — the suppression is exactly what the revision removed — so this is the one row in this table that asks operators to upgrade the client rather than asking the producer to stay compatible. |
+| 1.13.0 client | Pre-1.13.0 server | `guardrail-trip` is absent from `event_types` and no frame arrives. The client's cancel-suppression never arms, which is correct: the old producer is already suppressing on its side. Halts still surface as `cost_ceiling` / `watchdog` turn-errors, so a client that kept its pre-1.13.0 handling loses nothing. |
 | 1.5.0 client | Pre-1.5.0 server | `features.pause` is absent and `pause` is not in `event_types`, so the client hides its hold affordances: Esc falls back to plain cancel, and resume commands report themselves unavailable. No banner ever renders, because nothing ever reports a hold. Consumers SHOULD gate on the advertisement rather than probing `POST /pause` for a 404. |
 
 ---
@@ -505,7 +561,7 @@ A complete representative session, viewed from the client side reading the SSE s
 
 ```
 event: capabilities
-data: {"protocol_version":"1.7.0","event_types":["status-update","usage-update","inbox","turn-complete","turn-error","pause","wake","stream-chunk","tool-call","tool-result"],"server":"core-agent/2.9.0-dev","features":{"multi_session":true,"perms_stream":true,"mcp":true,"specialists":true,"cross_daemon":false,"interrupt":true,"pause":true,"guardrails":true,"cost_ceiling":false,"observer_mode":false},"slash_commands":["btw","compact","done","replan","subagent"],"agent":{"name":"core-agent","version":"v2.9.0-dev","model":"gemini-3.1-pro"},"caller_id":"alice@example.com"}
+data: {"protocol_version":"1.13.0","event_types":["status-update","usage-update","inbox","turn-complete","turn-error","pause","wake","guardrail-trip","stream-chunk","tool-call","tool-result"],"server":"core-agent/2.9.0-dev","features":{"multi_session":true,"perms_stream":true,"mcp":true,"specialists":true,"cross_daemon":false,"interrupt":true,"pause":true,"guardrails":true,"cost_ceiling":false,"observer_mode":false},"slash_commands":["btw","compact","done","replan","subagent"],"agent":{"name":"core-agent","version":"v2.9.0-dev","model":"gemini-3.1-pro"},"caller_id":"alice@example.com"}
 
 event: status-update
 data: {"model":"gemini-2.5-pro","provider":"vertex","perm_mode":"default","turn_state":"idle","context_pct":3}
@@ -597,6 +653,21 @@ data: {"at":"2026-08-19T14:32:05.117Z"}
 
 There is nothing else in it, and the client should not infer anything else from it. If a host-side alert was what fired the signal, that alert announces itself separately — as an `inbox` frame, since something had to put it where the model will read it — and the two frames are the producer's to order and pair, not this spec's. If a bare "look now" fired it, the wake is the only frame there will be. A client that renders "an alert is waiting" off this event is right in the first case and wrong in the second, which is the defect go-steer/core-agent#802 surfaced.
 
+And a guardrail halt cutting a turn short (v1.13.0+), which is the only sequence in this document where a client is told to drop a frame it received:
+
+```
+event: guardrail-trip
+data: {"guardrail":"cost_ceiling","reason":"turn cost $0.61 exceeded the $0.50 per-turn ceiling. Clear it with /guardrail reset cost_ceiling.","halted_turn":true}
+
+event: turn-error
+data: {"kind":"canceled","message":"turn canceled","retryable":true}
+
+event: status-update
+data: {"turn_state":"idle"}
+```
+
+Compare it with the interrupt sequence further up. There the `pause` frame and the terminal frame come from different points in the producer, so their relative order is explicitly not promised and a client cannot pair them. Here the order is promised: both frames are published by the same agent on the same path, trip first. That is what makes "suppress the next `canceled`" a rule a client can follow rather than a race it has to guess at.
+
 ---
 
 ## 6. Slash-response conventions
@@ -631,6 +702,7 @@ The following are deliberately NOT specified here:
 
 | Version | Date | Change |
 |---|---|---|
+| 1.13.0 | 2026-09-13 | **MINOR.** New `guardrail-trip` event type (§2.10) reporting that a guardrail halted the session, with `guardrail` / `reason` / `halted_turn`. A trip was previously reported as a `turn-error` of kind `cost_ceiling` or `watchdog`, which mis-modelled it: a halt is a statement about the session (turns are refused until an operator resets it), not a turn outcome, and at a turn boundary there is no turn for it to be the outcome of. As a non-terminal frame it sits alongside the turn's real terminal frame instead of replacing or duplicating it, and it does not participate in the terminal barrier. `halted_turn` is the part consumers must implement: `true` means one `canceled` turn-error follows and SHOULD be suppressed (one-shot, dropped at the turn boundary), `false` means the turn completes normally. **This revision is not silently backward-compatible in the usual way.** The producer also stopped suppressing the guardrail-caused cancel — the turn's terminal frame is not the producer's to withhold — and stopped putting `cost_ceiling` and `watchdog` on the stream at all, since a turn refused by an already-tripped guardrail short-circuits above the emit site and survives only as a returned error and a metric label. So a pre-1.13.0 client against a 1.13.0 producer goes blind to halts and grows a bare `⚠ canceled` block under each one; see the two new rows in §4. Shipped in go-steer/core-agent#891 with core-tui's consumer half in the same release, which is the pairing that keeps the regression theoretical. **Revisions 1.8.0 through 1.12.0 are missing from this table**, and this row does not backfill them — the producer shipped them without a section here, closing that gap is its own piece of work, and writing five rows from memory while landing a sixth is how a spec acquires confident fiction. See the coverage note at the top of this document. |
 | 1.7.0 | 2026-08-19 | **MINOR.** New `wake` event type (§2.9) reporting that the agent's wake signal fired — an operator asked the loop to look now, or a host wired its own out-of-band trigger (a background subagent's alert) into the same signal. Payload is a single `at` timestamp and deliberately no `reason`: the thing that did the waking reports itself through its own frames, and no producer can fill a reason field today. Emitted from the agent rather than a request handler so an in-process wake reaches remote watchers. Shipped in go-steer/core-agent#814, closing go-steer/core-agent#802 — where the defect being fixed was that the remote adapter's wake method never satisfied `WakeRequester` and there was no frame for it to receive either way. Fully backward-compatible — a pre-1.7.0 producer omits `"wake"` from `event_types` and sends nothing, and a pre-1.7.0 consumer drops the unknown event name per §3. |
 | 1.6.0 | 2026-08-19 | **MINOR — no SSE change.** The version namespace covers the whole attach contract, not only the event stream, and 1.6.0 is entirely on the REST side: `GET /sessions` rows carry an optional `title`, a short operator-facing label derived from the session's first prompt, so a session picker lists work rather than IDs. No frame in §2 changes. Recorded here so the numbering doesn't appear to skip and so a client negotiating a version knows what it is negotiating. Producer-side shape is pinned by [core-agent's `rest-sessions-list-v2` conformance fixture](https://github.com/go-steer/core-agent/blob/main/pkg/attach/testdata/conformance/rest-sessions-list-v2.json); endpoint semantics live in the producer's own reference doc per §7. `title` is omitted for pre-1.6.0 producers, for sessions whose first turn hasn't landed, and where titling is off, so every client needs the fall-back-to-session-ID path regardless of the version it negotiated. Shipped in go-steer/core-agent#809. |
 | 1.5.0 | 2026-08-19 | **MINOR.** New `pause` event type (§2.8) reporting the session's pause gate closing and opening, with `state` / `reason` / `interrupted` / `mode` / `at`. New `pause` feature key (§2.1) advertising that the producer can hold its loop — `POST /pause` and `POST /resume` (`steer` / `continue` / `abandon`) work, and `POST /interrupt` parks by default instead of only cancelling the turn. Emitted for every transition and from the agent rather than the handler, so a park driven in-process reaches remote watchers. Also backfills the `guardrails` feature key, which producers have advertised since go-steer/core-agent#670 without a bump — feature keys are additive by the §2.1 rule, so this row records it rather than claiming it as new. §4 gains the two rows that matter: a pre-1.5.0 client against a 1.5.0 server gets a hold it cannot see, so producers MUST keep honouring `hold=false` on `/interrupt`. Shipped in go-steer/core-agent#794 (design: `docs/operator-interrupt-design.md` in that repo) and consumed by core-tui's `Pauser` capability ([#260](https://github.com/go-steer/core-tui/issues/260)). The REST half of the revision (the `/pause`, `/resume` and `/interrupt` request and response schemas, and `GET /status`'s `paused_since` / `pause_reason` / `interrupted`) is not written down here yet — this document has never specified REST, and [#270](https://github.com/go-steer/core-tui/issues/270) is where that gap gets closed. Fully backward-compatible — a 1.4.0 consumer sees every pre-existing shape unchanged and drops the unknown event name. |

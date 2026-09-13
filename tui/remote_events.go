@@ -189,4 +189,50 @@ const (
 	TurnErrorRateLimited   = "rate_limited"
 	TurnErrorTransientNet  = "transient_network"
 	TurnErrorUnknown       = "unknown"
+
+	// TurnErrorCanceled (producer protocol 1.8.0) is a turn stopped on
+	// purpose — an operator's interrupt, a shutdown, or a guardrail
+	// cutting the turn short. Declared here because GuardrailTrip's
+	// handling has to recognise it: a cancel a trip caused carries no
+	// reason of its own, so rendering it beside the trip that explains
+	// it stacks a contentless warning under a meaningful one.
+	TurnErrorCanceled = "canceled"
+)
+
+// GuardrailTrip matches the spec §2.10 guardrail-trip payload
+// (v1.13.0) — the watchdog or the cost ceiling deciding the session
+// must stop. The agent refuses every turn from here until an operator
+// resets it, which makes this the most consequential thing a host can
+// be told and the reason it is worth a frame of its own.
+//
+// Non-terminal: it reports a session state change, not a turn's
+// outcome. Through 1.12.0 a trip arrived as a TurnError, which meant
+// a trip at a turn boundary produced a turn-error AND a turn-complete
+// for one turn.
+type GuardrailTrip struct {
+	// Guardrail is GuardrailWatchdog or GuardrailCostCeiling. Hosts
+	// MAY emit unknown values; consumers render the string.
+	Guardrail string `json:"guardrail"`
+
+	// Reason is the operator-facing explanation, and by convention it
+	// already names the affordance that clears the halt, so it is
+	// renderable verbatim rather than something to prefix advice onto.
+	Reason string `json:"reason"`
+
+	// HaltedTurn is true when the trip cut the in-flight turn short —
+	// a turn-error of kind TurnErrorCanceled follows and this payload
+	// is its only explanation. False means the turn was not cut: it
+	// finished and turn-complete follows, or none was running.
+	//
+	// Always present on the wire, false included. A consumer must not
+	// read absence as false; absence means a pre-1.13.0 producer,
+	// which sends no guardrail-trip at all.
+	HaltedTurn bool `json:"halted_turn"`
+}
+
+// Guardrail names from spec §2.10, shared with the producer's
+// guardrail-reset endpoint so a host has one vocabulary.
+const (
+	GuardrailWatchdog    = "watchdog"
+	GuardrailCostCeiling = "cost_ceiling"
 )
