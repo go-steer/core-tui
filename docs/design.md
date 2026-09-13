@@ -168,11 +168,12 @@ found a gap in the list, which is a bug in this document.
 Two properties of the surface are easy to miss and are promises too:
 
 - **Untyped vocabularies.** `Options.ForceTheme`, `StatusUpdate.TurnState`,
-  `TurnError.Kind`, `InboxEvent.State` and `ToolSavings.Path` are plain
+  `TurnError.Kind`, `InboxEvent.State`, `GuardrailTrip.Guardrail` and
+  `ToolSavings.Path` are plain
   `string` fields whose legal values are exported constants
   (`ThemeAuto`, `TurnStateIdle`, `TurnErrorConfig`, `InboxStateQueued`,
-  `SavingsPathAgentic`, …). Those constants are contract even though no
-  type-level walk reaches them.
+  `GuardrailWatchdog`, `SavingsPathAgentic`, …). Those constants are
+  contract even though no type-level walk reaches them.
 - **`errors.As` targets.** `SubagentNotFoundError` is returned as a bare
   `error` from `SubagentReporter.SubagentEvents`; hosts match it with
   `errors.As`.

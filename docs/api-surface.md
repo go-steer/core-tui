@@ -57,7 +57,7 @@ Issue #78's headline figure of **174** is 107 types + 29 functions + 39
 methods, computed at the time the issue was filed against 51 files. That
 arithmetic still holds — it is 175 today, one function having been added —
 but it silently omits the 85 constants and 5 variables, which are promises
-too. Six of the untyped string constants (`TurnError*`) are a documented wire
+too. The untyped string constants (`TurnError*`) are a documented wire
 vocabulary that a host will pattern-match against; freezing them by accident
 is exactly the failure mode #78 exists to prevent. The number to reason about
 is 265, not 174.
@@ -160,10 +160,22 @@ library without these. Frozen at 1.0.
 
 #### Agent + Event (41)
 
+> **Grew by 4 top-level symbols in v0.25**: `GuardrailTrip`,
+> `GuardrailCostCeiling`, `GuardrailWatchdog` and `TurnErrorCanceled` — the
+> consumer half of SSE spec §2.10, go-steer/core-agent#891. All four are
+> contract, not incidental: a host that renders guardrail halts names the
+> payload type directly, and `TurnErrorCanceled` is the kind the suppression
+> rule keys on, so a host implementing the rule itself needs the constant
+> rather than a literal. The §1 census of 265 is the `102ecb1` snapshot and
+> is not re-derived.
+
 | symbol | kind | declared | reached from |
 |---|---|---|---|
 | `Agent` | type | `agent.go:28` | §3.1 / §3.2 root. |
 | `Event` | type | `agent.go:35` | §3.1 / §3.2 root. |
+| `GuardrailCostCeiling` | const | `remote_events.go:237` | `Event.GuardrailTrip` (SSE spec §2.10). |
+| `GuardrailTrip` | type | `remote_events.go:212` | `Event.GuardrailTrip` (SSE spec §2.10). |
+| `GuardrailWatchdog` | const | `remote_events.go:236` | `Event.GuardrailTrip` (SSE spec §2.10). |
 | `InboxEvent` | type | `remote_events.go:111` | `Event.Inbox` (SSE spec §2.4). |
 | `InboxStateDequeued` | const | `remote_events.go:122` | `Event.Inbox` (SSE spec §2.4). |
 | `InboxStateQueued` | const | `remote_events.go:121` | `Event.Inbox` (SSE spec §2.4). |
@@ -189,6 +201,7 @@ library without these. Frozen at 1.0.
 | `ToolSavings.SavedTokens` | method | `tool_savings.go:72` | `ToolResult.Savings` (SSE spec v1.3.0). |
 | `TurnError` | type | `remote_events.go:145` | `Event.TurnError` (SSE spec §2.6). |
 | `TurnErrorAuth` | const | `remote_events.go:157` | `Event.TurnError` (SSE spec §2.6). |
+| `TurnErrorCanceled` | const | `remote_events.go:199` | `Event.TurnError` (producer 1.8.0; the kind SSE spec §2.10's suppression rule keys on). |
 | `TurnErrorConfig` | const | `remote_events.go:156` | `Event.TurnError` (SSE spec §2.6). |
 | `TurnErrorModelNotFound` | const | `remote_events.go:158` | `Event.TurnError` (SSE spec §2.6). |
 | `TurnErrorRateLimited` | const | `remote_events.go:159` | `Event.TurnError` (SSE spec §2.6). |

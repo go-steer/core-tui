@@ -110,6 +110,24 @@ func TestRemoteEvents_JSONShapeMatchesSpec(t *testing.T) {
 	if te.Kind != "model_not_found" || te.Code != "NOT_FOUND" || te.Retryable || te.Hint == "" {
 		t.Errorf("turn-error decode mismatch: %+v", te)
 	}
+
+	// Sample from spec §2.10 guardrail-trip, turn-boundary shape.
+	// halted_turn is decoded explicitly rather than inferred from
+	// absence: the producer always writes it, and a consumer that
+	// treated missing-as-false would silently stop absorbing the
+	// cancel if a future producer ever omitted it.
+	const tripJSON = `{
+		"guardrail": "cost_ceiling",
+		"reason": "turn cost $0.61 exceeded the $0.50 per-turn ceiling.",
+		"halted_turn": true
+	}`
+	var gt GuardrailTrip
+	if err := json.Unmarshal([]byte(tripJSON), &gt); err != nil {
+		t.Fatalf("unmarshal guardrail-trip: %v", err)
+	}
+	if gt.Guardrail != GuardrailCostCeiling || gt.Reason == "" || !gt.HaltedTurn {
+		t.Errorf("guardrail-trip decode mismatch: %+v", gt)
+	}
 }
 
 // TestRemoteEvents_StatusUpdateMerge asserts the statusUpdateMsg

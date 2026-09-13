@@ -608,6 +608,20 @@ type model struct {
 	// session's assistant buffer during the race window.
 	sessionGen uint64
 
+	// absorbNextCancel is armed by a guardrail-trip that reports
+	// halted_turn (spec §2.10 / v1.13.0) and disarmed by the very
+	// next turn-error or turn end. While armed, a turn-error of kind
+	// `canceled` renders nothing: the trip row directly above it
+	// already says what happened, and the cancel adds a second
+	// warning block with no content of its own.
+	//
+	// Deliberately not a queue or a counter. A halt cuts at most one
+	// turn, the trip and its cancel are adjacent on the wire, and a
+	// flag that can only ever swallow the next frame fails safe —
+	// the worst case is one extra `canceled` row, not a silently
+	// eaten operator interrupt.
+	absorbNextCancel bool
+
 	// paletteSeq identifies the CURRENT palette instance (issue
 	// #114). Palette items are now fetched off the Update goroutine
 	// — the @ directory walk and the host's SlashCommands() — and a

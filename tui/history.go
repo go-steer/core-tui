@@ -146,6 +146,14 @@ type Message struct {
 	// messages produced by the turnErrorMsg handler in Update;
 	// legacy error rows leave it nil and render as plain text.
 	TurnError *TurnError
+
+	// GuardrailTrip, when non-nil, carries the structured payload
+	// from a push-mode guardrail-trip event (spec §2.10 / v1.13.0).
+	// Set only on RoleError messages produced by the guardrailTripMsg
+	// handler in Update. Mutually exclusive with TurnError — the two
+	// describe different things and the renderer checks TurnError
+	// first only because it is the older field.
+	GuardrailTrip *GuardrailTrip
 }
 
 // Display returns the renderable string for this message, preferring

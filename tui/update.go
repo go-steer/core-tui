@@ -980,6 +980,34 @@ func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		elapsed := time.Duration(msg.summary.LatencyMs) * time.Millisecond
 		m.history.StampLatestAssistantFooter(msg.summary.Model, m.currentUsage, msg.summary.CostUSD, elapsed)
 		return m, m.liveStreamRenderCmd()
+	case guardrailTripMsg:
+		if msg.gen != m.sessionGen {
+			return m, m.eventListener()
+		}
+		// Append a styled halt row carrying the structured payload.
+		// Renderer (renderMessage) picks the guardrail block off a
+		// non-nil Message.GuardrailTrip.
+		trip := msg.trip
+		m.history.Append(Message{
+			Role:          RoleError,
+			Text:          trip.Reason,
+			GuardrailTrip: &trip,
+		})
+		// A trip that cut the turn short is immediately followed by a
+		// turn-error of kind `canceled`. That frame is accurate and
+		// the producer is right to send it — the turn WAS cancelled —
+		// but it carries no reason, because a cancel looks identical
+		// whoever caused it. Rendering it under the row that just
+		// explained the halt puts a contentless warning beneath a
+		// meaningful one, which is the presentation defect core-agent
+		// #818 fixed on the producer side by suppressing the cancel
+		// outright. Protocol 1.13.0 stopped suppressing it (the turn's
+		// terminal frame is not the producer's to withhold) and
+		// handed consumers `halted_turn` so the decision lands here,
+		// where it is a rendering question.
+		m.absorbNextCancel = trip.HaltedTurn
+		m.refreshAndScroll()
+		return m, m.liveStreamRenderCmd()
 	case turnErrorMsg:
 		if msg.gen != m.sessionGen {
 			return m, m.eventListener()
@@ -989,6 +1017,15 @@ func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		// non-nil Message.TurnError and renders the richer
 		// "kind · message · hint" block instead of bare text.
 		te := msg.turnError
+		// One-shot, and consumed whatever the kind is: a halting trip
+		// promises exactly one following turn-error, so if the next
+		// one is not the cancel it promised, the promise is spent and
+		// that error is something else that deserves rendering.
+		absorb := m.absorbNextCancel && te.Kind == TurnErrorCanceled
+		m.absorbNextCancel = false
+		if absorb {
+			return m, m.liveStreamRenderCmd()
+		}
 		m.history.Append(Message{
 			Role:      RoleError,
 			Text:      te.Message,
@@ -2673,6 +2710,12 @@ func (m *model) finalizeTurn(elapsed time.Duration, notice string) {
 	}
 	m.state = stateIdle
 	m.spinnerActive = false
+	// A halting trip's cancel arrives inside the turn it cut, so by
+	// the time the turn is finalized the arming is spent whether or
+	// not the cancel came. Leaving it armed across the boundary would
+	// let a guardrail halt swallow the operator's Esc on a LATER turn,
+	// which is the one cancel that must always be visible.
+	m.absorbNextCancel = false
 	// The turn's animation is over, so its elapsed origin goes with
 	// it (issue #111). Clearing state, spinnerActive and turnStarted
 	// together is what keeps turnInFlight and the readout agreeing:
@@ -2996,6 +3039,13 @@ func (m *model) applySwitchTarget(tgt *SwitchTarget) tea.Cmd {
 	// itself normally after returning the switch Cmd.
 	m.state = stateIdle
 	m.spinnerActive = false
+	// A halt armed on the outgoing session must not be spent on the
+	// incoming one. The sessionGen guard alone does not cover this:
+	// it drops the OLD session's cancel, which is exactly the frame
+	// the arming was waiting for, and leaves the arming to meet the
+	// NEW session's first cancel — an operator's Esc — with the
+	// guard waving it through.
+	m.absorbNextCancel = false
 	m.turnStarted = time.Time{}
 	m.inProgressText = ""
 	m.inProgressStablePrefix = ""

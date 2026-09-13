@@ -300,6 +300,16 @@ type turnErrorMsg struct {
 	turnError TurnError
 }
 
+// guardrailTripMsg carries the spec §2.10 guardrail-trip payload
+// (v1.13.0) — the session's watchdog or cost ceiling halting it. The
+// handler appends a RoleError row with the payload attached, and when
+// the trip cut a turn short it also arms the suppression of the
+// contentless `canceled` turn-error that follows.
+type guardrailTripMsg struct {
+	gen  uint64
+	trip GuardrailTrip
+}
+
 // pauseEventMsg carries the spec §2.8 pause payload (v1.5.0) — the
 // session's pause gate closing or opening. Handler folds it into
 // m.pause; the banner and footer read from there.
