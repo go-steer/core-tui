@@ -25,6 +25,12 @@ The wire protocol in [`docs/sse-event-stream-protocol.md`](./docs/sse-event-stre
 
 ## [Unreleased]
 
+## [0.25.0] — 2026-09-13
+
+One feature, and it is a release that has to be taken together with its producer. Protocol 1.13.0 moves a guardrail halt out of the turn-error frame it never fitted into and gives it one of its own — and in the same revision the producer stops suppressing the cancellation a halt causes, on the grounds that a turn's terminal frame is not the producer's to withhold. That suppression has to happen somewhere, and this release is where it moved to. Minor rather than patch because six symbols join the exported surface; no break, and `dev/api-breaks.txt` goes into the tag empty.
+
+The thing to carry away if you maintain a host: against a 1.13.0 daemon, an older core-tui does not degrade to silence the way it did for `pause` and `wake`. It loses the halt *and* gains a contentless `⚠ canceled` block where the explanation used to be, and there is nothing the producer can do about it from its side.
+
 ### Added
 
 - **A guardrail halt is its own event, and the cancellation it causes stops being noise** (protocol 1.13.0, [`docs/sse-event-stream-protocol.md`](./docs/sse-event-stream-protocol.md) §2.10; producer side is core-agent#891). A cost ceiling crossing or a watchdog deciding the agent is looping used to arrive as a `turn-error` of kind `cost_ceiling` or `watchdog`, which put a session-level fact in a turn-level frame: a halt means every turn from here is refused until an operator resets it, it outlives the turn it interrupted, and at a turn boundary it interrupts nothing at all. `Event.GuardrailTrip` takes the new non-terminal frame — `Guardrail` (`GuardrailWatchdog` / `GuardrailCostCeiling`, and tolerate anything else), `Reason`, and `HaltedTurn` — and the TUI paints it as its own `⚠ guardrail halted · watchdog` block with the producer's reason under it, verbatim, because the producer is the side that knows which reset command clears the thing it just tripped. The reason there is no hint line and no reset button is the same reason: an affordance invented on this side would be one release away from naming a command the daemon no longer has.
