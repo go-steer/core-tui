@@ -74,8 +74,9 @@ type Options struct {
 	// for the first few seconds of the session, and again after each
 	// /mouse on. Empty (the default) derives it from the terminal —
 	// naming the modifier that bypasses capture where core-tui can
-	// recognise the terminal (Shift on the xterm family, Alt/Option in
-	// VS Code's integrated terminal), and naming only /mouse where it
+	// recognise the terminal (Shift on the xterm family; in VS Code's
+	// integrated terminal, Option on macOS and Shift elsewhere), and
+	// naming only /mouse where it
 	// cannot. Set this when the host knows the operator's terminal
 	// better than the TERM_PROGRAM probe does.
 	MouseHint string

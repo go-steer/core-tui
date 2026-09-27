@@ -482,7 +482,7 @@ listed in `/help`:
 
 - **R-MOUSE-1** Mouse-wheel scrolling of the viewport works when
   capture is enabled.
-- **R-MOUSE-2** Default is ON; `Options.MouseDefault` overrides;
+- **R-MOUSE-2** Default is ON; `Options.Mouse` overrides;
   `/mouse [on|off]` toggles at runtime; help text says that turning
   capture off restores text selection. The runtime toggle is
   persistable: `Options.PersistMouseChoice` is called with the new
@@ -505,12 +505,17 @@ listed in `/help`:
   this requirement originally specced. The bypass modifier belongs
   to the terminal, not to us, and it varies: the xterm family (and
   tmux) use Shift, while VS Code's integrated terminal is xterm.js
-  and binds Alt/Option — itself conditional on the user's
-  `terminal.integrated.macOptionClickForcesSelection`. So the
+  and binds Option on macOS — itself conditional on the user's
+  `terminal.integrated.macOptionClickForcesSelection` — and Shift
+  everywhere else, judged by the client's platform rather than the
+  host's. So the
   modifier is named only where `TERM_PROGRAM` identifies the
   terminal, an unrecognised terminal gets no modifier claim at all,
   and `/mouse` — the escape hatch core-tui does control, and which
-  is therefore true everywhere — is named in every variant.
+  is therefore true everywhere — is named in every variant. Where
+  the chat pane is too narrow for the full text, the hint shortens
+  to `/mouse restores text selection` rather than letting the
+  right-hand clip cut `/mouse` off.
 - **R-MOUSE-4** While a modal is on screen the wheel scrolls *that
   modal*, not the chat behind it. Exception: the inline permission
   layout renders inside the chat viewport, so the wheel keeps

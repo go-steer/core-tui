@@ -108,11 +108,20 @@ func (m model) mouseHintTTL() time.Duration {
 //
 // Shift is the xterm-family convention and holds for every terminal
 // termProgram() identifies except one. VS Code's integrated terminal
-// is xterm.js, which binds Alt (Option on macOS) instead — and even
-// that is conditional on the user's
-// terminal.integrated.macOptionClickForcesSelection, which is why the
-// hint always names /mouse as well. The bypass is the terminal's to
-// offer; /mouse is ours, so it is the half we can promise.
+// is xterm.js, which uses Shift everywhere except macOS, where it is
+// Option — and even that only with the user's
+// terminal.integrated.macOptionClickForcesSelection on, which is why
+// the hint always names /mouse as well. The bypass is the terminal's
+// to offer; /mouse is ours, so it is the half we can promise.
+//
+// xterm.js decides Mac-or-not from the platform of the machine
+// rendering the terminal, not the one running us, and under VS Code
+// those are often different machines: Remote-SSH, Codespaces, Cloud
+// Workstations in a browser. A Linux host tells us nothing about
+// the keyboard in front of the operator, so off darwin both keys are
+// named. A darwin host is taken as a Mac client; the reverse (a Mac
+// served to a non-Mac client) is rare enough not to cost every local
+// Mac user a longer hint.
 //
 // prog is a termProgram() value; goos is a runtime.GOOS value. Both
 // are parameters rather than reads so the mapping is testable without
@@ -126,24 +135,34 @@ func mouseSelectModifier(prog, goos string) string {
 		if goos == "darwin" {
 			return "Option"
 		}
-		return "Alt"
+		return "Shift (Option on macOS)"
 	default:
 		return "Shift"
 	}
 }
 
-// mouseHintText is the row the operator reads. Host override wins
-// verbatim; otherwise it is derived from the terminal.
-func (m model) mouseHintText() string {
+// mouseHintText is the row the operator reads, for a row avail
+// columns wide. Host override wins verbatim; otherwise it is derived
+// from the terminal. The row is hard-clipped from the right, and
+// the right is where /mouse sits, so a derived text that won't fit
+// gives way to a shorter one that keeps /mouse over one that keeps
+// the modifier.
+func (m model) mouseHintText(avail int) string {
 	if m.opts.MouseHint != "" {
 		return m.opts.MouseHint
 	}
+	var full string
 	if mod := mouseSelectModifier(termProgram(), runtime.GOOS); mod != "" {
-		return "hold " + mod + " to select text " + GlyphSeparator + " /mouse turns capture off"
+		full = "hold " + mod + " to select text " + GlyphSeparator + " /mouse turns capture off"
+	} else {
+		// Unrecognised terminal: name only the escape hatch we control,
+		// which is true everywhere.
+		full = "mouse capture on " + GlyphSeparator + " /mouse turns it off and restores text selection"
 	}
-	// Unrecognised terminal: name only the escape hatch we control,
-	// which is true everywhere.
-	return "mouse capture on " + GlyphSeparator + " /mouse turns it off and restores text selection"
+	if lipgloss.Width(full) <= avail {
+		return full
+	}
+	return "/mouse restores text selection"
 }
 
 // renderMouseHint draws the hint into the same slot as the wake toast
@@ -169,7 +188,7 @@ func (m model) renderMouseHint(width int) string {
 	if m.renderToast(width) != "" {
 		return ""
 	}
-	body := "  " + m.mouseHintText()
+	body := "  " + m.mouseHintText(width-2)
 	if w := lipgloss.Width(body); w < width {
 		body += strings.Repeat(" ", width-w)
 	}
