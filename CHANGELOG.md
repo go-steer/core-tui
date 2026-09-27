@@ -25,6 +25,10 @@ The wire protocol in [`docs/sse-event-stream-protocol.md`](./docs/sse-event-stre
 
 ## [Unreleased]
 
+## [0.25.1] — 2026-09-27
+
+Two fixes to the mouse-capture hint, no API change. Both come from one operator in VS Code's integrated terminal, served to a Mac browser from a Linux Cloud Workstation. The hint told them to hold Alt, which xterm.js has never bound on any platform. VS Code bypasses capture with Shift, or with Option when the machine rendering the terminal is a Mac — and core-tui, running on the host, can't see that machine. The hint now names what xterm.js actually checks. It also keeps `/mouse`, the half of the hint that works in every terminal, visible in panes too narrow for the full text, where the right-hand clip used to cut it off.
+
 ### Fixed
 
 - **The mouse-capture hint no longer tells VS Code users off macOS to hold Alt.** xterm.js has no Alt bypass on any platform: it is Option on macOS (behind `terminal.integrated.macOptionClickForcesSelection`) and Shift everywhere else, so on Linux and Windows the hint named a key that did nothing. It also judges "macOS" by the machine rendering the terminal, not the one running core-tui — and under VS Code those are routinely different machines (Remote-SSH, Codespaces, Cloud Workstations in a browser), so a Linux host can't tell which applies. Off darwin the hint now reads `hold Shift (Option on macOS) to select text`; on a darwin host it still says `Option`.
@@ -766,7 +770,9 @@ Initial release: `package tui` extracted from the duplicated `internal/tui` tree
 - **Performance and terminal-fidelity work** — incremental Glamour streaming, an auto-growing textarea, hanging-indent word wrap that preserves source leading whitespace, and the viewport's `h`/`j`/`k`/`l`/arrow bindings disabled with `xOffset` pinned to 0 so a wide line can't shift the whole chat sideways.
 - **The docs that govern all of it** — `docs/requirements.md`, `docs/design.md`, `docs/decisions.md`, `docs/style.md`, `docs/ui-references.md`, and `MIGRATION.md`.
 
-[Unreleased]: https://github.com/go-steer/core-tui/compare/v0.24.1...HEAD
+[Unreleased]: https://github.com/go-steer/core-tui/compare/v0.25.1...HEAD
+[0.25.1]: https://github.com/go-steer/core-tui/compare/v0.25.0...v0.25.1
+[0.25.0]: https://github.com/go-steer/core-tui/compare/v0.24.1...v0.25.0
 [0.24.1]: https://github.com/go-steer/core-tui/compare/v0.24.0...v0.24.1
 [0.24.0]: https://github.com/go-steer/core-tui/compare/v0.23.0...v0.24.0
 [0.23.0]: https://github.com/go-steer/core-tui/compare/v0.22.0...v0.23.0
