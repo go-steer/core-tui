@@ -25,7 +25,7 @@ import (
 // TestMouseSelectModifier_NamesOnlyWhatItRecognises. The whole reason
 // the hint is not the specced literal "Hold Shift to select text" is
 // that Shift is wrong in VS Code's integrated terminal, which is
-// xterm.js and binds Alt/Option. An unrecognised terminal gets no
+// xterm.js and binds Option on macOS. An unrecognised terminal gets no
 // modifier at all rather than a guess.
 func TestMouseSelectModifier_NamesOnlyWhatItRecognises(t *testing.T) {
 	cases := []struct {
@@ -42,10 +42,13 @@ func TestMouseSelectModifier_NamesOnlyWhatItRecognises(t *testing.T) {
 		{"wezterm", "linux", "Shift"},
 		{"ghostty", "darwin", "Shift"},
 		{"tmux", "linux", "Shift"},
-		// The exception, and it is platform-dependent on top.
+		// The exception. xterm.js keys off the client's platform, which
+		// a non-darwin host can't see (Remote-SSH, browser workstations),
+		// so off darwin both keys are named. Never Alt: xterm.js has no
+		// Alt bypass on any platform.
 		{"vscode", "darwin", "Option"},
-		{"vscode", "linux", "Alt"},
-		{"vscode", "windows", "Alt"},
+		{"vscode", "linux", "Shift (Option on macOS)"},
+		{"vscode", "windows", "Shift (Option on macOS)"},
 	}
 	for _, tc := range cases {
 		if got := mouseSelectModifier(tc.prog, tc.goos); got != tc.want {

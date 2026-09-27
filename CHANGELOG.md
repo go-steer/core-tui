@@ -25,6 +25,10 @@ The wire protocol in [`docs/sse-event-stream-protocol.md`](./docs/sse-event-stre
 
 ## [Unreleased]
 
+### Fixed
+
+- **The mouse-capture hint no longer tells VS Code users off macOS to hold Alt.** xterm.js has no Alt bypass on any platform: it is Option on macOS (behind `terminal.integrated.macOptionClickForcesSelection`) and Shift everywhere else, so on Linux and Windows the hint named a key that did nothing. It also judges "macOS" by the machine rendering the terminal, not the one running core-tui — and under VS Code those are routinely different machines (Remote-SSH, Codespaces, Cloud Workstations in a browser), so a Linux host can't tell which applies. Off darwin the hint now reads `hold Shift (Option on macOS) to select text`; on a darwin host it still says `Option`.
+
 ## [0.25.0] — 2026-09-13
 
 One feature, and it is a release that has to be taken together with its producer. Protocol 1.13.0 moves a guardrail halt out of the turn-error frame it never fitted into and gives it one of its own — and in the same revision the producer stops suppressing the cancellation a halt causes, on the grounds that a turn's terminal frame is not the producer's to withhold. That suppression has to happen somewhere, and this release is where it moved to. Minor rather than patch because six symbols join the exported surface; no break, and `dev/api-breaks.txt` goes into the tag empty.

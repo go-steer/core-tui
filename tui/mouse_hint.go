@@ -108,11 +108,20 @@ func (m model) mouseHintTTL() time.Duration {
 //
 // Shift is the xterm-family convention and holds for every terminal
 // termProgram() identifies except one. VS Code's integrated terminal
-// is xterm.js, which binds Alt (Option on macOS) instead — and even
-// that is conditional on the user's
-// terminal.integrated.macOptionClickForcesSelection, which is why the
-// hint always names /mouse as well. The bypass is the terminal's to
-// offer; /mouse is ours, so it is the half we can promise.
+// is xterm.js, which uses Shift everywhere except macOS, where it is
+// Option — and even that only with the user's
+// terminal.integrated.macOptionClickForcesSelection on, which is why
+// the hint always names /mouse as well. The bypass is the terminal's
+// to offer; /mouse is ours, so it is the half we can promise.
+//
+// xterm.js decides Mac-or-not from the platform of the machine
+// rendering the terminal, not the one running us, and under VS Code
+// those are often different machines: Remote-SSH, Codespaces, Cloud
+// Workstations in a browser. A Linux host tells us nothing about
+// the keyboard in front of the operator, so off darwin both keys are
+// named. A darwin host is taken as a Mac client; the reverse (a Mac
+// served to a non-Mac client) is rare enough not to cost every local
+// Mac user a longer hint.
 //
 // prog is a termProgram() value; goos is a runtime.GOOS value. Both
 // are parameters rather than reads so the mapping is testable without
@@ -126,7 +135,7 @@ func mouseSelectModifier(prog, goos string) string {
 		if goos == "darwin" {
 			return "Option"
 		}
-		return "Alt"
+		return "Shift (Option on macOS)"
 	default:
 		return "Shift"
 	}
