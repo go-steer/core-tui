@@ -141,18 +141,28 @@ func mouseSelectModifier(prog, goos string) string {
 	}
 }
 
-// mouseHintText is the row the operator reads. Host override wins
-// verbatim; otherwise it is derived from the terminal.
-func (m model) mouseHintText() string {
+// mouseHintText is the row the operator reads, for a row avail
+// columns wide. Host override wins verbatim; otherwise it is derived
+// from the terminal. The row is hard-clipped from the right, and
+// the right is where /mouse sits, so a derived text that won't fit
+// gives way to a shorter one that keeps /mouse over one that keeps
+// the modifier.
+func (m model) mouseHintText(avail int) string {
 	if m.opts.MouseHint != "" {
 		return m.opts.MouseHint
 	}
+	var full string
 	if mod := mouseSelectModifier(termProgram(), runtime.GOOS); mod != "" {
-		return "hold " + mod + " to select text " + GlyphSeparator + " /mouse turns capture off"
+		full = "hold " + mod + " to select text " + GlyphSeparator + " /mouse turns capture off"
+	} else {
+		// Unrecognised terminal: name only the escape hatch we control,
+		// which is true everywhere.
+		full = "mouse capture on " + GlyphSeparator + " /mouse turns it off and restores text selection"
 	}
-	// Unrecognised terminal: name only the escape hatch we control,
-	// which is true everywhere.
-	return "mouse capture on " + GlyphSeparator + " /mouse turns it off and restores text selection"
+	if lipgloss.Width(full) <= avail {
+		return full
+	}
+	return "/mouse restores text selection"
 }
 
 // renderMouseHint draws the hint into the same slot as the wake toast
@@ -178,7 +188,7 @@ func (m model) renderMouseHint(width int) string {
 	if m.renderToast(width) != "" {
 		return ""
 	}
-	body := "  " + m.mouseHintText()
+	body := "  " + m.mouseHintText(width-2)
 	if w := lipgloss.Width(body); w < width {
 		body += strings.Repeat(" ", width-w)
 	}

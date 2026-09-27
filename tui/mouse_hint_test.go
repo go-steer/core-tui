@@ -20,6 +20,7 @@ import (
 	"time"
 
 	tea "charm.land/bubbletea/v2"
+	"charm.land/lipgloss/v2"
 )
 
 // TestMouseSelectModifier_NamesOnlyWhatItRecognises. The whole reason
@@ -63,8 +64,27 @@ func TestMouseSelectModifier_NamesOnlyWhatItRecognises(t *testing.T) {
 // behind a user setting), while /mouse is ours and always does.
 func TestMouseHintText_AlwaysNamesTheEscapeHatchWeControl(t *testing.T) {
 	m := newModel(Options{Agent: &noopAgent{}})
-	if got := m.mouseHintText(); !strings.Contains(got, "/mouse") {
+	if got := m.mouseHintText(80); !strings.Contains(got, "/mouse") {
 		t.Errorf("derived hint = %q, want it to name /mouse", got)
+	}
+}
+
+// TestMouseHintText_NarrowRowKeepsTheEscapeHatch. The row is clipped
+// from the right and /mouse is at the right, so at chat widths the
+// full text doesn't fit (a split VS Code pane, or the sidebar layout
+// under ~110 columns) the clip would cut the one half that always
+// works. Below that width the short form is used instead.
+func TestMouseHintText_NarrowRowKeepsTheEscapeHatch(t *testing.T) {
+	m := newModel(Options{Agent: &noopAgent{}})
+	full := m.mouseHintText(200)
+	if got := m.mouseHintText(lipgloss.Width(full)); got != full {
+		t.Errorf("hint at exactly its own width = %q, want the full text %q", got, full)
+	}
+	for _, avail := range []int{lipgloss.Width(full) - 1, 50, 30} {
+		got := m.mouseHintText(avail)
+		if lipgloss.Width(got) > avail || !strings.Contains(got, "/mouse") {
+			t.Errorf("hint for %d columns = %q (%d wide), want it to fit and name /mouse", avail, got, lipgloss.Width(got))
+		}
 	}
 }
 
@@ -73,7 +93,7 @@ func TestMouseHintText_AlwaysNamesTheEscapeHatchWeControl(t *testing.T) {
 // than the TERM_PROGRAM probe replaces the string outright.
 func TestMouseHintText_HostOverrideWins(t *testing.T) {
 	m := newModel(Options{Agent: &noopAgent{}, MouseHint: "hold Cmd, this is a weird terminal"})
-	if got := m.mouseHintText(); got != "hold Cmd, this is a weird terminal" {
+	if got := m.mouseHintText(10); got != "hold Cmd, this is a weird terminal" {
 		t.Errorf("hint = %q, want the host's override verbatim", got)
 	}
 }

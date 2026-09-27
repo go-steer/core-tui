@@ -23,11 +23,13 @@ import (
 // suite runs with all of them cleared so it sees the same terminal
 // in CI as in a developer's shell: without this, running `go test`
 // from VS Code's integrated terminal flips per-terminal behavior
-// (the capture hint's modifier, the newline hint, capability
-// detection) out from under tests written against the no-signal
-// case. A test
-// that wants a terminal passes the program name to the function
-// under test rather than setting these.
+// (the capture hint's modifier, the newline hint) out from under
+// tests written against the no-signal case. The color and motion
+// variables detectCapabilities() also reads (TERM, COLORTERM,
+// NO_COLOR, NO_MOTION, ACCESSIBLE) are not cleared: no test depends
+// on them, and the golden tests pin caps themselves. A test that
+// wants a terminal passes the program name to the function under
+// test rather than setting these.
 var terminalIdentityEnv = []string{
 	"TERM_PROGRAM",
 	"KITTY_WINDOW_ID",

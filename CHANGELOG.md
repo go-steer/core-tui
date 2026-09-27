@@ -28,6 +28,7 @@ The wire protocol in [`docs/sse-event-stream-protocol.md`](./docs/sse-event-stre
 ### Fixed
 
 - **The mouse-capture hint no longer tells VS Code users off macOS to hold Alt.** xterm.js has no Alt bypass on any platform: it is Option on macOS (behind `terminal.integrated.macOptionClickForcesSelection`) and Shift everywhere else, so on Linux and Windows the hint named a key that did nothing. It also judges "macOS" by the machine rendering the terminal, not the one running core-tui — and under VS Code those are routinely different machines (Remote-SSH, Codespaces, Cloud Workstations in a browser), so a Linux host can't tell which applies. Off darwin the hint now reads `hold Shift (Option on macOS) to select text`; on a darwin host it still says `Option`.
+- **The mouse-capture hint no longer loses `/mouse` in a narrow chat pane.** The row is clipped from the right, and `/mouse` — the half of the hint that works in every terminal — is at the right, so below the full text's width (about 70 columns of chat: a split VS Code pane, or the sidebar layout under roughly 105 columns) the clip cut exactly that. The longer VS Code text above made it more common, and the unrecognised-terminal text already had it. Where the full text doesn't fit, the hint now reads `/mouse restores text selection`; a host `Options.MouseHint` is still shown verbatim.
 
 ## [0.25.0] — 2026-09-13
 

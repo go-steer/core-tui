@@ -827,7 +827,7 @@ type Options struct {
     MarkdownStyle string
 
     // Mouse default (on if zero-value left).
-    MouseDefault MouseSetting
+    Mouse MouseSetting
 
     // MouseHint overrides the auto-expiring overlay shown while
     // mouse capture is on (R-MOUSE-3). Empty string derives the

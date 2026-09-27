@@ -512,7 +512,10 @@ listed in `/help`:
   modifier is named only where `TERM_PROGRAM` identifies the
   terminal, an unrecognised terminal gets no modifier claim at all,
   and `/mouse` — the escape hatch core-tui does control, and which
-  is therefore true everywhere — is named in every variant.
+  is therefore true everywhere — is named in every variant. Where
+  the chat pane is too narrow for the full text, the hint shortens
+  to `/mouse restores text selection` rather than letting the
+  right-hand clip cut `/mouse` off.
 - **R-MOUSE-4** While a modal is on screen the wheel scrolls *that
   modal*, not the chat behind it. Exception: the inline permission
   layout renders inside the chat viewport, so the wheel keeps
