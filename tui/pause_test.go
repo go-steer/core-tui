@@ -89,7 +89,7 @@ func (a *pauseRecorder) resumes() []ResumeRequest {
 
 // pausedModel returns a model wired to agent and already holding, as
 // if a pause event had landed.
-func pausedModel(t *testing.T, agent Agent, interrupted bool) model {
+func pausedModel(t *testing.T, agent Agent, interrupted bool) *model {
 	t.Helper()
 	m := newModel(Options{Agent: agent})
 	m.width, m.height = 100, 40
@@ -126,7 +126,7 @@ func TestPauseEvent_EntersAndLeavesTheHeldState(t *testing.T) {
 		Reason:      "operator interrupt",
 		Interrupted: true,
 	}})
-	held := out.(model)
+	held := out.(*model)
 	if !held.pause.paused() {
 		t.Fatal("pause event did not close the gate")
 	}
@@ -144,7 +144,7 @@ func TestPauseEvent_EntersAndLeavesTheHeldState(t *testing.T) {
 		State: PauseStateResumed,
 		Mode:  ResumeModeContinue,
 	}})
-	free := out.(model)
+	free := out.(*model)
 	if free.pause.paused() {
 		t.Fatal("resumed event did not open the gate")
 	}
@@ -163,7 +163,7 @@ func TestPauseEvent_UnknownStateIsTolerated(t *testing.T) {
 	m := pausedModel(t, &pausableAgent{}, true)
 	before := m.pause
 	out, _ := m.Update(pauseEventMsg{gen: m.sessionGen, event: PauseEvent{State: "hibernating"}})
-	if got := out.(model).pause; got.PauseInfo != before.PauseInfo {
+	if got := out.(*model).pause; got.PauseInfo != before.PauseInfo {
 		t.Errorf("unknown pause state changed the gate: %+v → %+v", before.PauseInfo, got.PauseInfo)
 	}
 }
@@ -229,7 +229,7 @@ func TestPausePoll_AttachToAnAlreadyPausedSession(t *testing.T) {
 		t.Fatalf("pull did not carry the gate: %+v", snap)
 	}
 	out, _ := m.Update(hostSnapshotMsg{gen: m.sessionGen, snap: snap})
-	if !out.(model).pause.paused() {
+	if !out.(*model).pause.paused() {
 		t.Fatal("host snapshot did not apply the already-paused state")
 	}
 }
@@ -305,7 +305,7 @@ func TestSlashContinue_And_Abandon_CarryDistinctModes(t *testing.T) {
 		t.Run(tc.slash, func(t *testing.T) {
 			agent := &pausableAgent{}
 			m := pausedModel(t, agent, true)
-			handled, _, cmd := m.dispatchBuiltinSlash(tc.slash, "")
+			handled, cmd := m.dispatchBuiltinSlash(tc.slash, "")
 			if !handled {
 				t.Fatalf("/%s not handled by the built-in dispatcher", tc.slash)
 			}
@@ -330,7 +330,7 @@ func TestSlashResume_NeverReachesThePauseGate(t *testing.T) {
 	for _, name := range []string{"resume", "transcripts"} {
 		agent := &pausableAgent{}
 		m := pausedModel(t, agent, true)
-		handled, _, _ := m.dispatchBuiltinSlash(name, "")
+		handled, _ := m.dispatchBuiltinSlash(name, "")
 		if !handled {
 			t.Fatalf("/%s not handled", name)
 		}
@@ -350,7 +350,7 @@ func TestSlashPause_HoldsWithoutCancelling(t *testing.T) {
 	cancelled := false
 	m.cancelTurn = func() { cancelled = true }
 
-	handled, _, cmd := m.dispatchBuiltinSlash("pause", "reviewing the plan")
+	handled, cmd := m.dispatchBuiltinSlash("pause", "reviewing the plan")
 	if !handled {
 		t.Fatal("/pause not handled")
 	}
@@ -369,14 +369,14 @@ func TestPauseSlashes_DegradeWithoutTheCapability(t *testing.T) {
 	for _, slash := range []string{"pause", "continue", "abandon"} {
 		t.Run(slash, func(t *testing.T) {
 			m := newModel(Options{Agent: &liveAgentStub{}})
-			handled, next, cmd := m.dispatchBuiltinSlash(slash, "")
+			handled, cmd := m.dispatchBuiltinSlash(slash, "")
 			if !handled {
 				t.Fatalf("/%s not handled", slash)
 			}
 			if cmd != nil {
 				t.Errorf("/%s dispatched a Cmd without a Pauser", slash)
 			}
-			if got := lastText(next.(model)); !strings.Contains(got, "Pauser") {
+			if got := lastText(m); !strings.Contains(got, "Pauser") {
 				t.Errorf("/%s degrade row = %q, want it to name the missing capability", slash, got)
 			}
 		})
@@ -389,14 +389,14 @@ func TestPauseSlashes_DegradeWithoutTheCapability(t *testing.T) {
 func TestResumeSlashes_RefuseWhenNotHeld(t *testing.T) {
 	agent := &pausableAgent{}
 	m := newModel(Options{Agent: agent})
-	handled, next, cmd := m.dispatchBuiltinSlash("continue", "")
+	handled, cmd := m.dispatchBuiltinSlash("continue", "")
 	if !handled {
 		t.Fatal("/continue not handled")
 	}
 	if cmd != nil {
 		t.Error("/continue dispatched a Resume against an agent that isn't held")
 	}
-	if got := lastText(next.(model)); !strings.Contains(got, "isn't held") {
+	if got := lastText(m); !strings.Contains(got, "isn't held") {
 		t.Errorf("row = %q, want the not-held explanation", got)
 	}
 }
@@ -496,12 +496,12 @@ func TestPauseAndResumeErrors_SurfaceLoudly(t *testing.T) {
 	m := newModel(Options{Agent: &pausableAgent{}})
 
 	out, _ := m.Update(pauseDoneMsg{err: errors.New("connection refused")})
-	if got := lastText(out.(model)); !strings.Contains(got, "connection refused") {
+	if got := lastText(out.(*model)); !strings.Contains(got, "connection refused") {
 		t.Errorf("failed hold row = %q", got)
 	}
 
 	out, _ = m.Update(resumeDoneMsg{mode: ResumeModeContinue, err: errors.New("gate already open")})
-	got := lastText(out.(model))
+	got := lastText(out.(*model))
 	if !strings.Contains(got, "gate already open") || !strings.Contains(got, ResumeModeContinue) {
 		t.Errorf("failed resume row = %q, want the error and the mode", got)
 	}
@@ -517,7 +517,7 @@ func TestPauseSuccess_StaysQuiet(t *testing.T) {
 	if cmd != nil {
 		t.Error("a successful hold dispatched a follow-up Cmd")
 	}
-	after := out.(model)
+	after := out.(*model)
 	if got := len(after.history.Snapshot()); got != before {
 		t.Errorf("history grew by %d on a successful hold", got-before)
 	}
@@ -540,22 +540,22 @@ func TestPauseBanner_IsBudgetedWhenTheGateMoves(t *testing.T) {
 
 	for _, tc := range []struct {
 		name string
-		hold func(model) model
+		hold func(*model) *model
 	}{
 		{
 			name: "push event",
-			hold: func(m model) model {
+			hold: func(m *model) *model {
 				out, _ := m.Update(pauseEventMsg{gen: m.sessionGen, event: PauseEvent{
 					State:       PauseStatePaused,
 					Reason:      "operator interrupt",
 					Interrupted: true,
 				}})
-				return out.(model)
+				return out.(*model)
 			},
 		},
 		{
 			name: "poll",
-			hold: func(m model) model {
+			hold: func(m *model) *model {
 				out, _ := m.Update(hostSnapshotMsg{gen: m.sessionGen, snap: hostSnapshot{
 					hasPause: true,
 					pause: PauseInfo{
@@ -564,14 +564,14 @@ func TestPauseBanner_IsBudgetedWhenTheGateMoves(t *testing.T) {
 						Interrupted: true,
 					},
 				}})
-				return out.(model)
+				return out.(*model)
 			},
 		},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			m := newModel(Options{Agent: &pausableAgent{}})
 			out, _ := m.Update(tea.WindowSizeMsg{Width: w, Height: h})
-			sized := out.(model)
+			sized := out.(*model)
 			assertBudgetExact(t, sized)
 
 			held := tc.hold(sized)
@@ -650,7 +650,7 @@ func (a *perTurnPausable) waitRan(t *testing.T) (string, int) {
 // RoleUser row with this text — "exactly" because one failure mode of
 // the split below is a steer appended twice, once by the held branch
 // and once by submitTurn.
-func hasOneUserRow(m model, text string) bool {
+func hasOneUserRow(m *model, text string) bool {
 	n := 0
 	for _, row := range m.history.Snapshot() {
 		if row.Role == RoleUser && row.Text == text {
@@ -712,7 +712,7 @@ func TestEnterWhilePaused_PerTurnHostRunsTheSteerItself(t *testing.T) {
 	}
 
 	out, _ := next.Update(done)
-	ran := out.(model)
+	ran := out.(*model)
 	prompt, calls := agent.waitRan(t)
 	if calls != 1 || prompt != steer {
 		t.Fatalf("Run called %d time(s) with %q, want once with the steer", calls, prompt)
@@ -738,7 +738,7 @@ func TestEnterWhilePaused_PerTurnResumeFailureHandsTheTextBack(t *testing.T) {
 
 	next, cmd := pressKey(m, tea.Key{Code: tea.KeyEnter})
 	out, _ := next.Update(runCmd(t, cmd))
-	failed := out.(model)
+	failed := out.(*model)
 
 	if got := failed.input.Value(); got != steer {
 		t.Errorf("input = %q after a refused resume, want the steer back", got)
@@ -753,16 +753,16 @@ func TestEnterWhilePaused_PerTurnResumeFailureHandsTheTextBack(t *testing.T) {
 
 // pollGate drives one host-snapshot tick through Update, the way the
 // off-loop cache actually feeds the gate state in.
-func pollGate(t *testing.T, m model, agent Pauser) model {
+func pollGate(t *testing.T, m *model, agent Pauser) *model {
 	t.Helper()
 	snap := pullHostSnapshot(nil, nil, nil, agent)
 	out, _ := m.Update(hostSnapshotMsg{gen: m.sessionGen, snap: snap})
-	return out.(model)
+	return out.(*model)
 }
 
 // systemRows returns the transcript's RoleSystem texts, which is where
 // every gate transition is narrated.
-func systemRows(m model) []string {
+func systemRows(m *model) []string {
 	var out []string
 	for _, row := range m.history.Snapshot() {
 		if row.Role == RoleSystem {
@@ -801,7 +801,7 @@ func TestPausePoll_NarratesOnAPerTurnHost(t *testing.T) {
 	// PauseState carries no mode, so the row can only name the
 	// disposition because resumeDoneMsg remembered what we asked for.
 	out, _ := held.Update(resumeDoneMsg{mode: ResumeModeAbandon})
-	acked := out.(model)
+	acked := out.(*model)
 	if got := len(systemRows(acked)); got != 1 {
 		t.Errorf("the ack itself narrated (%d rows); the host is the source of truth", got)
 	}
@@ -860,7 +860,7 @@ func TestPauseEvent_ReplayedBacklogIsSilentOnAPerTurnHost(t *testing.T) {
 		agent.setState(PauseInfo{Paused: true, Reason: "operator interrupt", Interrupted: true})
 		m = pollGate(t, m, agent)
 		out, _ := m.Update(resumeDoneMsg{mode: ResumeModeAbandon})
-		m = out.(model)
+		m = out.(*model)
 		agent.setState(PauseInfo{})
 		m = pollGate(t, m, agent)
 		if got := len(systemRows(m)); got != 2*(i+1) {
@@ -877,7 +877,7 @@ func TestPauseEvent_ReplayedBacklogIsSilentOnAPerTurnHost(t *testing.T) {
 			{State: PauseStateResumed, Mode: ResumeModeAbandon, At: at.Add(time.Duration(i)*time.Minute + time.Second)},
 		} {
 			out, _ := m.Update(pauseEventMsg{gen: m.sessionGen, event: ev})
-			m = out.(model)
+			m = out.(*model)
 		}
 	}
 

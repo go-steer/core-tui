@@ -75,7 +75,7 @@ func mouseHintTick(ttl time.Duration) tea.Cmd {
 // Separate from Init so it is reachable in a test: Init's batch is
 // mostly blocking channel listeners, and running it to see what it
 // armed would hang.
-func (m model) armMouseHintCmd() tea.Cmd {
+func (m *model) armMouseHintCmd() tea.Cmd {
 	if !m.mouseCaptureOn() || m.mouseHintTTL() <= 0 {
 		return nil
 	}
@@ -85,7 +85,7 @@ func (m model) armMouseHintCmd() tea.Cmd {
 // mouseCaptureOn reports whether cell-motion capture is currently on.
 // Mirrors View's read of Options.Mouse: nil means the default, which
 // is enabled.
-func (m model) mouseCaptureOn() bool {
+func (m *model) mouseCaptureOn() bool {
 	return m.opts.Mouse == nil || *m.opts.Mouse
 }
 
@@ -93,7 +93,7 @@ func (m model) mouseCaptureOn() bool {
 // the host said nothing) means the default; negative turns the hint
 // off entirely, which is the supported way for a host to opt out
 // without also having to blank Options.MouseHint.
-func (m model) mouseHintTTL() time.Duration {
+func (m *model) mouseHintTTL() time.Duration {
 	if m.opts.MouseHintTTL == 0 {
 		return defaultMouseHintTTL
 	}
@@ -147,7 +147,7 @@ func mouseSelectModifier(prog, goos string) string {
 // the right is where /mouse sits, so a derived text that won't fit
 // gives way to a shorter one that keeps /mouse over one that keeps
 // the modifier.
-func (m model) mouseHintText(avail int) string {
+func (m *model) mouseHintText(avail int) string {
 	if m.opts.MouseHint != "" {
 		return m.opts.MouseHint
 	}
@@ -169,7 +169,7 @@ func (m model) mouseHintText(avail int) string {
 // — between the input box and the footer. Empty string means no row,
 // and every caller (View and allocateChrome both) keys off that, so
 // the budget and the frame can't disagree about whether it is there.
-func (m model) renderMouseHint(width int) string {
+func (m *model) renderMouseHint(width int) string {
 	if width <= 0 || m.mouseHintSetAt.IsZero() {
 		return ""
 	}

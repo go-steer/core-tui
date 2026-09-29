@@ -128,7 +128,7 @@ func TestPermissionQuestion_EscIsADismissal(t *testing.T) {
 // permissionRig delivers a request through the normal path with a live
 // Prompter behind it, so a dispatch is observable as the blocked
 // AskApproval call returning.
-func permissionRig(t *testing.T, layout PermissionLayout) (model, <-chan PermissionDecision) {
+func permissionRig(t *testing.T, layout PermissionLayout) (*model, <-chan PermissionDecision) {
 	t.Helper()
 	p := NewPrompter()
 	decided := make(chan PermissionDecision, 1)
@@ -143,9 +143,9 @@ func permissionRig(t *testing.T, layout PermissionLayout) (model, <-chan Permiss
 
 	m := newModel(Options{Agent: &bareAgent{id: "a"}, Prompter: p, PermissionLayout: layout})
 	out, _ := m.Update(tea.WindowSizeMsg{Width: 100, Height: 30})
-	m = out.(model)
+	m = out.(*model)
 	out, _ = m.Update(permissionRequestMsg{req: req})
-	m = out.(model)
+	m = out.(*model)
 	if m.openPermission() == nil {
 		t.Fatal("setup: the permission question is not on the overlay stack")
 	}
@@ -162,7 +162,7 @@ func TestPermissionQuestion_DecisionDispatchesAndEchoes(t *testing.T) {
 	before := m.history.Len()
 
 	out, _ := m.Update(keyPress("s"))
-	m = out.(model)
+	m = out.(*model)
 
 	if m.openPermission() != nil {
 		t.Error("the question is still on the stack after a decision")
@@ -191,7 +191,7 @@ func TestPermissionQuestion_EscDeniesThroughTheResolver(t *testing.T) {
 	m, decided := permissionRig(t, PermissionOverlay)
 
 	out, _ := m.Update(keyPress("esc"))
-	m = out.(model)
+	m = out.(*model)
 
 	if m.openPermission() != nil {
 		t.Error("esc left the question on the stack")
@@ -251,7 +251,7 @@ func TestPermissionQuestion_OverlayIsAModal(t *testing.T) {
 // what #164 is about.
 func TestPermissionQuestion_InlinePromptSuppressesTheStackBehindIt(t *testing.T) {
 	m, _ := permissionRig(t, PermissionInline)
-	askThemePicker(&m)
+	askThemePicker(m)
 	// The picker went on FIRST in this fixture's terms — the prompt was
 	// already open — so it is now the front one and does draw.
 	if _, ok := m.modalFrame(); !ok {
@@ -281,9 +281,9 @@ func TestPermissionQuestion_DiffRendersAtTheModalWidth(t *testing.T) {
 	m := newModel(Options{Agent: &bareAgent{id: "a"}, PermissionLayout: PermissionOverlay})
 	m.styles = newStylesWithTheme(true, goldenTheme())
 	out, _ := m.Update(tea.WindowSizeMsg{Width: 160, Height: 40})
-	m = out.(model)
+	m = out.(*model)
 	out, _ = m.Update(permissionRequestMsg{req: req})
-	m = out.(model)
+	m = out.(*model)
 
 	frame, ok := m.modalFrame()
 	if !ok {

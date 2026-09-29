@@ -205,7 +205,7 @@ func hostSlashNameSet(specs []SlashCommandSpec) map[string]bool {
 // host catalog. text is the raw line including the leading slash. A
 // cold cache answers false, which leaves the caller on the static
 // tables alone — never a reason to wait.
-func (m model) hostNamesASlash(text string) bool {
+func (m *model) hostNamesASlash(text string) bool {
 	if !strings.HasPrefix(text, "/") {
 		return false
 	}
@@ -231,7 +231,7 @@ func midTurnSlashDisposition(text string) midTurnDisposition {
 	}
 }
 
-func (m model) dispatchBuiltinSlash(name, args string) (bool, tea.Model, tea.Cmd) {
+func (m *model) dispatchBuiltinSlash(name, args string) (bool, tea.Cmd) {
 	// Captured before the fold: canonicalSlashName erases which
 	// spelling was typed, and the one deprecated alias has to say so.
 	typed := name
@@ -246,9 +246,9 @@ func (m model) dispatchBuiltinSlash(name, args string) (bool, tea.Model, tea.Cmd
 		m.input.Reset()
 		m.refreshAndScroll()
 		if provider, ok := m.opts.Agent.(slashLister); ok {
-			return true, m, helpCommandsCmd(provider, m.sessionGen)
+			return true, helpCommandsCmd(provider, m.sessionGen)
 		}
-		return true, m, nil
+		return true, nil
 
 	case "clear":
 		// Two-step confirmation: arming sets confirmingClear so the
@@ -259,35 +259,35 @@ func (m model) dispatchBuiltinSlash(name, args string) (bool, tea.Model, tea.Cmd
 		m.input.Reset()
 		m.history.Append(Message{Role: RoleSystem, Text: "clear chat history? press enter for y/yes — anything else cancels"})
 		m.refreshAndScroll()
-		return true, m, nil
+		return true, nil
 
 	case "quit", "exit", "q":
 		m.input.Reset()
-		return true, m, m.quitCmd()
+		return true, m.quitCmd()
 
 	case "memory":
 		m.history.Append(Message{Role: RoleSystem, Text: m.renderMemoryList(m.opts.Memory)})
 		m.input.Reset()
 		m.refreshAndScroll()
-		return true, m, nil
+		return true, nil
 
 	case "mcp":
 		m.history.Append(Message{Role: RoleSystem, Text: m.renderMCPList(m.opts.MCPServers)})
 		m.input.Reset()
 		m.refreshAndScroll()
-		return true, m, nil
+		return true, nil
 
 	case "skills":
 		m.history.Append(Message{Role: RoleSystem, Text: m.renderSkillList(m.opts.Skills)})
 		m.input.Reset()
 		m.refreshAndScroll()
-		return true, m, nil
+		return true, nil
 
 	case "stats":
 		m.history.Append(Message{Role: RoleSystem, Text: m.renderStats()})
 		m.input.Reset()
 		m.refreshAndScroll()
-		return true, m, nil
+		return true, nil
 
 	case "mouse":
 		// Runtime toggle. View() reads m.opts.Mouse every frame so
@@ -317,7 +317,7 @@ func (m model) dispatchBuiltinSlash(name, args string) (bool, tea.Model, tea.Cmd
 		if c := m.armMouseHintCmd(); c != nil {
 			cmds = append(cmds, c)
 		}
-		return true, m, tea.Batch(cmds...)
+		return true, tea.Batch(cmds...)
 
 	case "interrupt", "int":
 		// Local Run-path cancel wins when we have it — that's the
@@ -332,9 +332,9 @@ func (m model) dispatchBuiltinSlash(name, args string) (bool, tea.Model, tea.Cmd
 			// next one, which is not what an operator hitting
 			// /interrupt means (R-HOLD-1).
 			if p, ok := m.opts.Agent.(Pauser); ok {
-				return true, m, m.holdCmd(p, "operator interrupt")
+				return true, m.holdCmd(p, "operator interrupt")
 			}
-			return true, m, nil
+			return true, nil
 		}
 		// Pauser reaches further than a cancel: it parks the loop, so
 		// an idle agent stops picking up work instead of the slash
@@ -343,7 +343,7 @@ func (m model) dispatchBuiltinSlash(name, args string) (bool, tea.Model, tea.Cmd
 		// what holdCmd adds back, on a host that can do both.
 		if p, ok := m.opts.Agent.(Pauser); ok {
 			m.input.Reset()
-			return true, m, m.holdCmd(p, "operator interrupt")
+			return true, m.holdCmd(p, "operator interrupt")
 		}
 		// LiveAgent / observer-mode fallthrough: the daemon is running
 		// the turn autonomously (k8s-event injects, runaway tool loops,
@@ -358,14 +358,14 @@ func (m model) dispatchBuiltinSlash(name, args string) (bool, tea.Model, tea.Cmd
 			m.history.Append(Message{Role: RoleSystem, Text: "/interrupt: cancelling remote turn…"})
 			m.input.Reset()
 			m.refreshAndScroll()
-			return true, m, remoteInterruptCmd(ri)
+			return true, remoteInterruptCmd(ri)
 		}
 		// Neither path available. Original message preserved so
 		// operators used to it don't see a behavior regression.
 		m.history.Append(Message{Role: RoleSystem, Text: "/interrupt: no turn in flight"})
 		m.input.Reset()
 		m.refreshAndScroll()
-		return true, m, nil
+		return true, nil
 
 	case "pause":
 		// Unlike /interrupt this does not cancel: it shuts the gate
@@ -377,16 +377,16 @@ func (m model) dispatchBuiltinSlash(name, args string) (bool, tea.Model, tea.Cmd
 			m.history.Append(Message{Role: RoleSystem, Text: "/pause: agent doesn't implement Pauser"})
 			m.input.Reset()
 			m.refreshAndScroll()
-			return true, m, nil
+			return true, nil
 		}
 		if m.pause.paused() {
 			m.history.Append(Message{Role: RoleSystem, Text: "/pause: already held"})
 			m.input.Reset()
 			m.refreshAndScroll()
-			return true, m, nil
+			return true, nil
 		}
 		m.input.Reset()
-		return true, m, pauseCmd(p, strings.TrimSpace(args))
+		return true, pauseCmd(p, strings.TrimSpace(args))
 
 	case "continue", "cont":
 		// Still /continue, not /resume, now that #268 has freed the
@@ -406,7 +406,7 @@ func (m model) dispatchBuiltinSlash(name, args string) (bool, tea.Model, tea.Cmd
 			m.history.Append(Message{Role: RoleSystem, Text: "/tools: agent doesn't implement ToolLister"})
 			m.input.Reset()
 			m.refreshAndScroll()
-			return true, m, nil
+			return true, nil
 		}
 		// Tools() is host code — on a remote host it is a round trip,
 		// and the catalog can be large (issue #137). Acknowledge now,
@@ -414,7 +414,7 @@ func (m model) dispatchBuiltinSlash(name, args string) (bool, tea.Model, tea.Cmd
 		m.history.Append(Message{Role: RoleSystem, Text: "/tools: reading the tool catalog…"})
 		m.input.Reset()
 		m.refreshAndScroll()
-		return true, m, toolsCmd(lister, m.sessionGen, strings.TrimSpace(args))
+		return true, toolsCmd(lister, m.sessionGen, strings.TrimSpace(args))
 
 	case "model":
 		swapper, ok := m.opts.Agent.(ModelSwapper)
@@ -422,7 +422,7 @@ func (m model) dispatchBuiltinSlash(name, args string) (bool, tea.Model, tea.Cmd
 			m.history.Append(Message{Role: RoleSystem, Text: "/model: agent doesn't implement ModelSwapper"})
 			m.input.Reset()
 			m.refreshAndScroll()
-			return true, m, nil
+			return true, nil
 		}
 		if args == "" {
 			// No-arg form opens the interactive picker dialog
@@ -431,7 +431,7 @@ func (m model) dispatchBuiltinSlash(name, args string) (bool, tea.Model, tea.Cmd
 			// the returned Cmd, off the Update loop (issue #114).
 			cmd := m.openModelPicker()
 			m.input.Reset()
-			return true, m, cmd
+			return true, cmd
 		}
 		// `/model <id>` switches without opening a picker — useful for
 		// scripted/replay flows and as a fallback while the picker
@@ -439,7 +439,7 @@ func (m model) dispatchBuiltinSlash(name, args string) (bool, tea.Model, tea.Cmd
 		// Cmd the picker uses; modelSwitchedMsg does the attach.
 		m.input.Reset()
 		m.refreshAndScroll()
-		return true, m, switchModelCmd(swapper, m.sessionGen, args)
+		return true, switchModelCmd(swapper, m.sessionGen, args)
 
 	case "switch":
 		// SessionSwitcher (issues #48 / #53) is optional. When
@@ -450,14 +450,14 @@ func (m model) dispatchBuiltinSlash(name, args string) (bool, tea.Model, tea.Cmd
 		// enumeration shape.
 		switcher, ok := m.opts.Agent.(SessionSwitcher)
 		if !ok {
-			return false, m, nil
+			return false, nil
 		}
 		if args == "" {
 			// Same shape as /model: open instantly, pull
 			// Sessions() off-loop (issue #114).
 			cmd := m.openSessionPicker()
 			m.input.Reset()
-			return true, m, cmd
+			return true, cmd
 		}
 		// `/switch <id>` is two dependent host calls, which is why it
 		// didn't ride along with the picker in #114: Sessions() first,
@@ -475,7 +475,7 @@ func (m model) dispatchBuiltinSlash(name, args string) (bool, tea.Model, tea.Cmd
 		m.history.Append(Message{Role: RoleSystem, Text: "/switch: looking up " + args + "…"})
 		m.input.Reset()
 		m.refreshAndScroll()
-		return true, m, switchLookupCmd(switcher, m.sessionGen, m.slashSeq, args)
+		return true, switchLookupCmd(switcher, m.sessionGen, m.slashSeq, args)
 
 	case "theme":
 		if args == "" {
@@ -490,7 +490,7 @@ func (m model) dispatchBuiltinSlash(name, args string) (bool, tea.Model, tea.Cmd
 				)
 			}
 			m.input.Reset()
-			return true, m, nil
+			return true, nil
 		}
 		// `/theme <name>` switches without opening a picker —
 		// useful for scripted / replay flows. Unknown names fall
@@ -526,9 +526,9 @@ func (m model) dispatchBuiltinSlash(name, args string) (bool, tea.Model, tea.Cmd
 		// callback OR observe the msg.
 		if known {
 			canonical := name
-			return true, m, func() tea.Msg { return ThemeChangedMsg{Name: canonical} }
+			return true, func() tea.Msg { return ThemeChangedMsg{Name: canonical} }
 		}
-		return true, m, nil
+		return true, nil
 
 	case "reload":
 		reloader, ok := m.opts.Agent.(Reloader)
@@ -536,7 +536,7 @@ func (m model) dispatchBuiltinSlash(name, args string) (bool, tea.Model, tea.Cmd
 			m.history.Append(Message{Role: RoleSystem, Text: "/reload: agent doesn't implement Reloader"})
 			m.input.Reset()
 			m.refreshAndScroll()
-			return true, m, nil
+			return true, nil
 		}
 		// Reload rebuilds the agent from disk — Reloader takes a ctx
 		// precisely because it may be slow, and it used to be handed
@@ -547,7 +547,7 @@ func (m model) dispatchBuiltinSlash(name, args string) (bool, tea.Model, tea.Cmd
 		m.history.Append(Message{Role: RoleSystem, Text: "/reload: rebuilding agent…"})
 		m.input.Reset()
 		m.refreshAndScroll()
-		return true, m, reloadCmd(reloader, m.sessionGen)
+		return true, reloadCmd(reloader, m.sessionGen)
 
 	case "permissions":
 		ctrl, ok := m.opts.Agent.(PermissionController)
@@ -555,14 +555,14 @@ func (m model) dispatchBuiltinSlash(name, args string) (bool, tea.Model, tea.Cmd
 			m.history.Append(Message{Role: RoleSystem, Text: "/permissions: agent doesn't implement PermissionController"})
 			m.input.Reset()
 			m.refreshAndScroll()
-			return true, m, nil
+			return true, nil
 		}
 		// SessionApprovals() reads the host's gate, which on a remote
 		// host means a round trip (issue #137).
 		m.history.Append(Message{Role: RoleSystem, Text: "/permissions: reading the session approval log…"})
 		m.input.Reset()
 		m.refreshAndScroll()
-		return true, m, sessionApprovalsCmd(ctrl, m.sessionGen)
+		return true, sessionApprovalsCmd(ctrl, m.sessionGen)
 
 	case "pricing":
 		ctrl, ok := m.opts.Agent.(PricingController)
@@ -570,7 +570,7 @@ func (m model) dispatchBuiltinSlash(name, args string) (bool, tea.Model, tea.Cmd
 			m.history.Append(Message{Role: RoleSystem, Text: "/pricing: agent doesn't implement PricingController"})
 			m.input.Reset()
 			m.refreshAndScroll()
-			return true, m, nil
+			return true, nil
 		}
 		text, cmd := m.handlePricing(ctrl, args)
 		if text != "" {
@@ -578,7 +578,7 @@ func (m model) dispatchBuiltinSlash(name, args string) (bool, tea.Model, tea.Cmd
 		}
 		m.input.Reset()
 		m.refreshAndScroll()
-		return true, m, cmd
+		return true, cmd
 
 	case "subagents":
 		// Bare `/subagents` lists the roster; `/subagents <name>`
@@ -591,27 +591,27 @@ func (m model) dispatchBuiltinSlash(name, args string) (bool, tea.Model, tea.Cmd
 			}
 			m.input.Reset()
 			m.refreshAndScroll()
-			return true, m, cmd
+			return true, cmd
 		}
 		reporter, ok := m.opts.Agent.(SubagentReporter)
 		if !ok {
 			m.history.Append(Message{Role: RoleSystem, Text: "/subagents: agent doesn't implement SubagentReporter"})
 			m.input.Reset()
 			m.refreshAndScroll()
-			return true, m, nil
+			return true, nil
 		}
 		// The sidebar's copy of this read comes from hostSnapshot; the
 		// slash path wants a fresh pull, and gets it off-loop (#137).
 		m.history.Append(Message{Role: RoleSystem, Text: "/subagents: reading the roster…"})
 		m.input.Reset()
 		m.refreshAndScroll()
-		return true, m, subagentRosterCmd(reporter, m.sessionGen)
+		return true, subagentRosterCmd(reporter, m.sessionGen)
 
 	case "keys":
 		m.history.Append(Message{Role: RoleSystem, Text: m.renderKeysDiagnostic()})
 		m.input.Reset()
 		m.refreshAndScroll()
-		return true, m, nil
+		return true, nil
 
 	case "transcripts":
 		text := m.handleTranscripts(args)
@@ -621,17 +621,17 @@ func (m model) dispatchBuiltinSlash(name, args string) (bool, tea.Model, tea.Cmd
 		m.history.Append(Message{Role: RoleSystem, Text: text})
 		m.input.Reset()
 		m.refreshAndScroll()
-		return true, m, nil
+		return true, nil
 
 	case "allow", "deny":
 		text, cmd := m.handleAllowDeny(args, name)
 		m.history.Append(Message{Role: RoleSystem, Text: text})
 		m.input.Reset()
 		m.refreshAndScroll()
-		return true, m, cmd
+		return true, cmd
 	}
 
-	return false, m, nil
+	return false, nil
 }
 
 // renderKeysDiagnostic prints what the TUI knows about the
@@ -770,7 +770,7 @@ func (m *model) handleTranscripts(args string) string {
 // acknowledgement and the outcome arrives as permissionRuleAddedMsg.
 // A nil Cmd means the text is the whole answer (unwired capability,
 // usage hint, or a malformed bundle name).
-func (m model) handleAllowDeny(args, op string) (string, tea.Cmd) {
+func (m *model) handleAllowDeny(args, op string) (string, tea.Cmd) {
 	ctrl, ok := m.opts.Agent.(PermissionController)
 	if !ok {
 		return "/" + op + ": agent doesn't implement PermissionController", nil
@@ -890,7 +890,7 @@ func (m *model) handlePricing(ctrl PricingController, args string) (string, tea.
 // answers off-loop (issue #137). The rendered output is a single
 // block — the renderer will glamour-ify it on the next viewport
 // refresh.
-func (m model) renderBuiltinHelp() string {
+func (m *model) renderBuiltinHelp() string {
 	var b strings.Builder
 	b.WriteString("Built-in commands:\n")
 	b.WriteString("  /help, /?            — show this reference\n")
@@ -949,15 +949,15 @@ func padRight(s string, width int) string {
 // secondary (pink) for tool / server item names. Mirrors the
 // internal/tui look so operators don't see a downgrade switching
 // adapters.
-func (m model) headingStyle() lipgloss.Style {
+func (m *model) headingStyle() lipgloss.Style {
 	return lipgloss.NewStyle().Foreground(brandViolet).Bold(true)
 }
 
-func (m model) itemNameStyle() lipgloss.Style {
+func (m *model) itemNameStyle() lipgloss.Style {
 	return lipgloss.NewStyle().Foreground(brandPink).Bold(true)
 }
 
-func (m model) renderMemoryList(files []MemoryFile) string {
+func (m *model) renderMemoryList(files []MemoryFile) string {
 	if len(files) == 0 {
 		return "No memory files loaded. Drop AGENTS.md / CLAUDE.md / GEMINI.md in the project or user-home tree to surface them here."
 	}
@@ -987,7 +987,7 @@ func (m model) renderMemoryList(files []MemoryFile) string {
 // header + ▸ pink tool name + indented description) so /mcp shows the
 // full catalog instead of just a per-server tool count. Falls back to
 // the count when the server provides no per-tool detail.
-func (m model) renderMCPList(servers []MCPServerInfo) string {
+func (m *model) renderMCPList(servers []MCPServerInfo) string {
 	if len(servers) == 0 {
 		return "No MCP servers configured. Drop a .agents/mcp.json describing servers (stdio or HTTP transport) to expose external tools to the agent."
 	}
@@ -1037,7 +1037,7 @@ func (m model) renderMCPList(servers []MCPServerInfo) string {
 	return strings.TrimRight(b.String(), "\n")
 }
 
-func (m model) renderSkillList(skills []SkillInfo) string {
+func (m *model) renderSkillList(skills []SkillInfo) string {
 	if len(skills) == 0 {
 		return "No skills discovered. Drop SKILL.md bundles under .agents/skills/<name>/ to expose them to the agent."
 	}
@@ -1067,7 +1067,7 @@ func (m model) renderSkillList(skills []SkillInfo) string {
 // model name. Each value falls back to "(unknown)" / "(unset)"
 // rather than zero so the operator can tell "we don't know" from
 // "the value is genuinely zero."
-func (m model) renderStats() string {
+func (m *model) renderStats() string {
 	tracker := m.opts.UsageTracker
 	if tracker == nil {
 		return "/stats: no UsageTracker wired (host did not pass Options.UsageTracker)"
@@ -1224,7 +1224,7 @@ func toolGroupOrder(a, b string) bool {
 //
 // filter is the argument after the command; it matches a group key
 // ("skill") or a full source ("skill:review", "gke"), case-insensitive.
-func (m model) renderToolList(tools []ToolInfo, filter string) string {
+func (m *model) renderToolList(tools []ToolInfo, filter string) string {
 	if len(tools) == 0 {
 		return "Agent has no tools registered."
 	}
@@ -1282,7 +1282,7 @@ func (m model) renderToolList(tools []ToolInfo, filter string) string {
 // asked for instead. A miss listing the available sources is the
 // difference between a dead end and a discovery — the operator
 // filtering by source has no other way to learn the source names.
-func (m model) renderFilteredToolList(sorted []ToolInfo, keys []string, filter string) string {
+func (m *model) renderFilteredToolList(sorted []ToolInfo, keys []string, filter string) string {
 	want := strings.ToLower(filter)
 	var hits []ToolInfo
 	for _, t := range sorted {
@@ -1300,7 +1300,7 @@ func (m model) renderFilteredToolList(sorted []ToolInfo, keys []string, filter s
 // single-source catalog and a filtered view. Bold name on its own line
 // with a ▸ marker, source + gate annotation in muted brackets, indented
 // description underneath, blank line between entries.
-func (m model) renderToolDetail(header string, tools []ToolInfo) string {
+func (m *model) renderToolDetail(header string, tools []ToolInfo) string {
 	var b strings.Builder
 	fmt.Fprintf(&b, "%s\n\n", header)
 	for i, t := range tools {

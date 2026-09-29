@@ -110,7 +110,7 @@ func TestBuiltinSlashNames_MatchesDispatcher(t *testing.T) {
 	for name := range builtinSlashNames {
 		m := newModel(Options{Agent: &switchAgent{}})
 		m.width, m.height = 100, 40
-		if handled, _, _ := m.dispatchBuiltinSlash(name, ""); !handled {
+		if handled, _ := m.dispatchBuiltinSlash(name, ""); !handled {
 			t.Errorf("builtinSlashNames has %q but dispatchBuiltinSlash does not handle it", name)
 		}
 	}

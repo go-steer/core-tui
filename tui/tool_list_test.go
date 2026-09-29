@@ -218,7 +218,7 @@ func TestToolsSlash_CarriesTheFilterThroughTheRoundTrip(t *testing.T) {
 	}
 
 	out, _ := next.Update(msg)
-	if got := lastText(out.(model)); !strings.Contains(got, "Tools from gke (3):") {
+	if got := lastText(out.(*model)); !strings.Contains(got, "Tools from gke (3):") {
 		t.Errorf("filtered listing did not render\n  output:\n%s", got)
 	}
 }

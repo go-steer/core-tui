@@ -41,14 +41,14 @@ import (
 // bannerModel is an idle, empty-transcript model at a size the banner
 // comfortably fits, with the corpus theme so colour assertions do not
 // depend on which theme NewModel happened to seed.
-func bannerModel(t *testing.T, w, h int) model {
+func bannerModel(t *testing.T, w, h int) *model {
 	t.Helper()
 	m := newModel(Options{Agent: stubAgent{}})
 	m.styles = goldenStyles()
 	m.caps = terminalCapabilities{}
 	m.bannerFrame = 0
 	out, _ := m.Update(tea.WindowSizeMsg{Width: w, Height: h})
-	return out.(model)
+	return out.(*model)
 }
 
 func TestBannerFace_EveryGlyphIsWellFormed(t *testing.T) {
@@ -194,9 +194,9 @@ func TestBanner_DeclinesRatherThanRenderingAPartialWordmark(t *testing.T) {
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
 			m := bannerModel(t, tc.w, tc.h)
-			tc.mutate(&m)
+			tc.mutate(m)
 			out, _ := m.Update(tea.WindowSizeMsg{Width: tc.w, Height: tc.h})
-			m = out.(model)
+			m = out.(*model)
 			if got := m.renderBanner(m.viewport.Width(), m.viewport.Height()); got != "" {
 				t.Errorf("renderBanner drew %d rows; it should have stood down and left the hint alone",
 					strings.Count(got, "\n")+1)
@@ -260,7 +260,7 @@ func TestBanner_TickChainStopsOnItsOwn(t *testing.T) {
 			t.Fatalf("still arming after %d ticks — the chain does not terminate", ticks)
 		}
 		out, _ := m.Update(bannerTickMsg{})
-		m = out.(model)
+		m = out.(*model)
 	}
 	if ticks != bannerFrames {
 		t.Errorf("the wipe took %d ticks, want %d — bannerFrames is not the length of the animation",
@@ -274,7 +274,7 @@ func TestBanner_TickChainStopsOnItsOwn(t *testing.T) {
 	if cmd != nil {
 		t.Error("a stray tick past the end re-armed the chain")
 	}
-	if out.(model).bannerFrame != bannerFrames {
+	if out.(*model).bannerFrame != bannerFrames {
 		t.Error("a stray tick past the end advanced the counter")
 	}
 }
@@ -352,7 +352,7 @@ func TestGolden_BannerWipeFrame(t *testing.T) {
 // goldenEmptyModel is goldenModel with no seeded history and the wipe
 // settled — the screen an operator sees on startup once the animation
 // is over.
-func goldenEmptyModel(t *testing.T, w, h int) model {
+func goldenEmptyModel(t *testing.T, w, h int) *model {
 	t.Helper()
 	m := newModel(Options{Agent: &bareAgent{id: "golden"}})
 	m.styles = goldenStyles()
@@ -360,5 +360,5 @@ func goldenEmptyModel(t *testing.T, w, h int) model {
 	m.newlineHint = defaultNewlineHint("")
 	m.bannerFrame = bannerFrames
 	out, _ := m.Update(tea.WindowSizeMsg{Width: w, Height: h})
-	return out.(model)
+	return out.(*model)
 }

@@ -82,13 +82,13 @@ func askModelPicker(m *model, wired bool) *modelPickerQuestion {
 
 // openModelPickerFixture returns a sized model with a loaded picker on
 // the stack, and the picker itself.
-func openModelPickerFixture(t *testing.T) (model, *modelPickerQuestion) {
+func openModelPickerFixture(t *testing.T) (*model, *modelPickerQuestion) {
 	t.Helper()
 	m := newModel(Options{Agent: &swapAgent{id: "cur", models: pickerModels()}})
 	m.styles = newStylesWithTheme(true, goldenTheme())
 	out, _ := m.Update(tea.WindowSizeMsg{Width: 100, Height: 30})
-	m = out.(model)
-	q := askModelPicker(&m, true)
+	m = out.(*model)
+	q := askModelPicker(m, true)
 	q.applyModels(pickerModels(), "openai/gpt-4o")
 	return m, q
 }
@@ -110,9 +110,9 @@ func typeIntoPicker(m *model, text string) {
 // as the host takes reads as a hang.
 func TestModelPicker_EnterDoesNotAnswer(t *testing.T) {
 	m, q := openModelPickerFixture(t)
-	typeIntoPicker(&m, "llama")
+	typeIntoPicker(m, "llama")
 
-	consumed, cmd := m.overlayStack.handleKeyMsg(keyMsgFromStroke("enter"), &m)
+	consumed, cmd := m.overlayStack.handleKeyMsg(keyMsgFromStroke("enter"), m)
 	if !consumed {
 		t.Error("enter was not consumed")
 	}
@@ -133,7 +133,7 @@ func TestModelPicker_EnterDoesNotAnswer(t *testing.T) {
 	if req.ID != "meta/llama-4" {
 		t.Errorf("requested %q, want meta/llama-4", req.ID)
 	}
-	if body := ansi.Strip(m.overlayStack.render(100, &m)); !strings.Contains(body, "switching to meta/llama-4") {
+	if body := ansi.Strip(m.overlayStack.render(100, m)); !strings.Contains(body, "switching to meta/llama-4") {
 		t.Errorf("in-flight render missing the progress line:\n%s", body)
 	}
 }
@@ -146,12 +146,11 @@ func TestModelPicker_EnterDoesNotAnswer(t *testing.T) {
 func TestModelPicker_RequestReadsTheLiveSwapperAndGen(t *testing.T) {
 	m := newModel(Options{Agent: &swapAgent{id: "cur", models: pickerModels()}})
 	m.viewport.SetWidth(80)
-	q := readyModelPicker(&m)
+	q := readyModelPicker(m)
 	q.switching = "meta/llama-4"
 
 	m.sessionGen = 42
-	out, cmd := m.Update(modelSwitchRequestedMsg{ID: "meta/llama-4"})
-	m = out.(model)
+	_, cmd := m.Update(modelSwitchRequestedMsg{ID: "meta/llama-4"})
 	if cmd == nil {
 		t.Fatal("the request scheduled no SwitchModel call")
 	}
@@ -183,9 +182,8 @@ func TestModelPicker_StaleRequestIsDropped(t *testing.T) {
 	}
 
 	// A picker that is not switching to that model.
-	q := readyModelPicker(&m)
-	out, cmd := m.Update(modelSwitchRequestedMsg{ID: "meta/llama-4"})
-	m = out.(model)
+	q := readyModelPicker(m)
+	_, cmd := m.Update(modelSwitchRequestedMsg{ID: "meta/llama-4"})
 	if cmd != nil {
 		t.Error("a request the open picker did not issue still scheduled a host call")
 	}
@@ -206,11 +204,11 @@ func TestModelPicker_SwitchLandingAnswersThePicker(t *testing.T) {
 	next := &bareAgent{id: "next"}
 	m := newModel(Options{Agent: &swapAgent{id: "cur", models: pickerModels()}})
 	m.viewport.SetWidth(80)
-	q := readyModelPicker(&m)
+	q := readyModelPicker(m)
 	q.switching = "meta/llama-4"
 
 	out, _ := m.Update(modelSwitchedMsg{gen: m.sessionGen, id: "meta/llama-4", agent: next})
-	m = out.(model)
+	m = out.(*model)
 
 	if m.overlayStack.hasID(modelPickerDialogID) {
 		t.Error("the picker survived the switch it was waiting on")
@@ -246,13 +244,13 @@ func TestModelPicker_FailedSwitchKeepsTheListUp(t *testing.T) {
 		t.Run(tc.name, func(t *testing.T) {
 			m := newModel(Options{Agent: &swapAgent{id: "cur", models: pickerModels()}})
 			m.viewport.SetWidth(80)
-			q := readyModelPicker(&m)
+			q := readyModelPicker(m)
 			q.switching = "meta/llama-4"
 
 			msg := tc.msg
 			msg.gen = m.sessionGen
 			out, _ := m.Update(msg)
-			m = out.(model)
+			m = out.(*model)
 
 			if !m.overlayStack.hasID(modelPickerDialogID) {
 				t.Fatal("a failed switch closed the picker")
@@ -266,7 +264,7 @@ func TestModelPicker_FailedSwitchKeepsTheListUp(t *testing.T) {
 			}
 			// And the list is usable again rather than stuck behind the
 			// in-flight guard, which swallows every stroke but esc.
-			if _, cmd := m.overlayStack.handleKeyMsg(keyMsgFromStroke("enter"), &m); cmd == nil {
+			if _, cmd := m.overlayStack.handleKeyMsg(keyMsgFromStroke("enter"), m); cmd == nil {
 				t.Error("the picker is inert after a failed switch")
 			}
 		})
@@ -303,9 +301,9 @@ func TestModelPicker_FailedSwitchSaysWhyOnThePicker(t *testing.T) {
 			msg.gen = m.sessionGen
 
 			out, _ := m.Update(msg)
-			m = out.(model)
+			m = out.(*model)
 
-			lines := modalContentLines(m.overlayStack.render(100, &m))
+			lines := modalContentLines(m.overlayStack.render(100, m))
 			at := lineWith(lines, tc.want)
 			if at < 0 {
 				t.Fatalf("the frame does not say why the switch failed:\n%s",
@@ -335,14 +333,14 @@ func TestModelPicker_FailedSwitchSaysWhyOnThePicker(t *testing.T) {
 // whose cursor has moved three rows on, reading as a fact about
 // whatever is selected now.
 func TestModelPicker_FailureRowClearsOnTheNextMove(t *testing.T) {
-	fail := func(t *testing.T) (model, *modelPickerQuestion) {
+	fail := func(t *testing.T) (*model, *modelPickerQuestion) {
 		t.Helper()
 		m, q := openModelPickerFixture(t)
 		q.switching = "meta/llama-4"
 		out, _ := m.Update(modelSwitchedMsg{
 			gen: m.sessionGen, id: "meta/llama-4", err: errors.New("provider unreachable"),
 		})
-		m = out.(model)
+		m = out.(*model)
 		if q.fail.rows() != 1 {
 			t.Fatal("the failed switch left no reason to clear")
 		}
@@ -351,7 +349,7 @@ func TestModelPicker_FailureRowClearsOnTheNextMove(t *testing.T) {
 
 	t.Run("a cursor step", func(t *testing.T) {
 		m, q := fail(t)
-		m.overlayStack.handleKeyMsg(keyMsgFromStroke("down"), &m)
+		m.overlayStack.handleKeyMsg(keyMsgFromStroke("down"), m)
 		if q.fail.rows() != 0 {
 			t.Error("the reason survived a cursor move")
 		}
@@ -359,7 +357,7 @@ func TestModelPicker_FailureRowClearsOnTheNextMove(t *testing.T) {
 
 	t.Run("a filter edit", func(t *testing.T) {
 		m, q := fail(t)
-		typeIntoPicker(&m, "g")
+		typeIntoPicker(m, "g")
 		if q.fail.rows() != 0 {
 			t.Error("the reason survived the list being narrowed under it")
 		}
@@ -367,7 +365,7 @@ func TestModelPicker_FailureRowClearsOnTheNextMove(t *testing.T) {
 
 	t.Run("esc does not, because the picker is going away", func(t *testing.T) {
 		m, q := fail(t)
-		m.overlayStack.handleKeyMsg(keyMsgFromStroke("esc"), &m)
+		m.overlayStack.handleKeyMsg(keyMsgFromStroke("esc"), m)
 		if m.overlayStack.hasDialogs() {
 			t.Fatal("esc did not close the picker")
 		}
@@ -386,10 +384,10 @@ func TestModelPicker_ReplyForSomeoneElsesSwitchLeavesThePicker(t *testing.T) {
 	next := &bareAgent{id: "next"}
 	m := newModel(Options{Agent: &swapAgent{id: "cur", models: pickerModels()}})
 	m.viewport.SetWidth(80)
-	readyModelPicker(&m) // a fresh picker, in flight to nothing
+	readyModelPicker(m) // a fresh picker, in flight to nothing
 
 	out, _ := m.Update(modelSwitchedMsg{gen: m.sessionGen, id: "meta/llama-4", agent: next})
-	m = out.(model)
+	m = out.(*model)
 
 	if !m.overlayStack.hasID(modelPickerDialogID) {
 		t.Error("a reply the open picker did not issue closed it anyway")
@@ -413,10 +411,10 @@ func TestModelPicker_ResolverTellsTheTwoUnrenderableStatesApart(t *testing.T) {
 	t.Run("the host advertised nothing", func(t *testing.T) {
 		m := newModel(Options{Agent: &swapAgent{id: "cur"}})
 		m.viewport.SetWidth(80)
-		q := askModelPicker(&m, true)
+		q := askModelPicker(m, true)
 		q.applyModels(nil, "")
 
-		m.overlayStack.handleKeyMsg(keyMsgFromStroke("down"), &m)
+		m.overlayStack.handleKeyMsg(keyMsgFromStroke("down"), m)
 		if m.overlayStack.hasDialogs() {
 			t.Error("an empty host list left the picker open")
 		}
@@ -429,9 +427,9 @@ func TestModelPicker_ResolverTellsTheTwoUnrenderableStatesApart(t *testing.T) {
 	t.Run("the agent is not a ModelSwapper", func(t *testing.T) {
 		m := newModel(Options{Agent: &bareAgent{id: "bare"}})
 		m.viewport.SetWidth(80)
-		askModelPicker(&m, false)
+		askModelPicker(m, false)
 
-		m.overlayStack.handleKeyMsg(keyMsgFromStroke("down"), &m)
+		m.overlayStack.handleKeyMsg(keyMsgFromStroke("down"), m)
 		if m.overlayStack.hasDialogs() {
 			t.Error("an unwired agent left the picker open")
 		}
@@ -449,10 +447,10 @@ func TestModelPicker_EscNeverStartsASwitch(t *testing.T) {
 	agent := &swapAgent{id: "cur", models: pickerModels()}
 	m := newModel(Options{Agent: agent})
 	m.viewport.SetWidth(80)
-	q := readyModelPicker(&m)
+	q := readyModelPicker(m)
 	q.switching = "meta/llama-4"
 
-	m.overlayStack.handleKeyMsg(keyMsgFromStroke("esc"), &m)
+	m.overlayStack.handleKeyMsg(keyMsgFromStroke("esc"), m)
 	if m.overlayStack.hasDialogs() {
 		t.Error("esc left the picker open")
 	}
@@ -475,7 +473,7 @@ func TestModelPicker_CursorSitsInTheFilterRow(t *testing.T) {
 	for _, typed := range []string{"gpt", "日本語", "a日b"} {
 		t.Run(typed, func(t *testing.T) {
 			m, _ := openModelPickerFixture(t)
-			typeIntoPicker(&m, typed)
+			typeIntoPicker(m, typed)
 			assertCursorFollows(t, m.View(), filterPromptRail+typed)
 		})
 	}
@@ -487,8 +485,8 @@ func TestModelPicker_CursorSitsInTheFilterRow(t *testing.T) {
 // palette, hence a model.
 func TestModelPicker_HighlightsTheMatchedSpan(t *testing.T) {
 	m, _ := openModelPickerFixture(t)
-	typeIntoPicker(&m, "opus")
-	rendered := m.overlayStack.render(100, &m)
+	typeIntoPicker(m, "opus")
+	rendered := m.overlayStack.render(100, m)
 	if !strings.Contains(ansi.Strip(rendered), "Claude Opus 5") {
 		t.Fatalf("filtered row missing from the body:\n%s", ansi.Strip(rendered))
 	}
@@ -521,7 +519,7 @@ func TestModelPicker_BodyFitsTheTerminal(t *testing.T) {
 	for _, h := range []int{3, 4, 6, 8, 9, 10, 12, 13, 14, 24, 50} {
 		m, _ := openModelPickerFixture(t)
 		m.height = h
-		rendered := ansi.Strip(m.overlayStack.render(100, &m))
+		rendered := ansi.Strip(m.overlayStack.render(100, m))
 		if got := strings.Count(rendered, "\n") + 1; got > h {
 			t.Errorf("height %d: picker is %d rows tall\n%s", h, got, rendered)
 		}

@@ -37,13 +37,13 @@ import (
 // doesn't satisfy InboxDrainer, the inbox is empty, or the soft
 // cap has been hit — caller should fall through to the regular
 // maybeDrainQueue path in those cases.
-func (m model) maybeAutoContinue() (model, tea.Cmd, bool) {
+func (m *model) maybeAutoContinue() (tea.Cmd, bool) {
 	if m.opts.MidTurnInjectionMode != AutoContinueFromInbox {
-		return m, nil, false
+		return nil, false
 	}
 	drainer, ok := m.opts.Agent.(InboxDrainer)
 	if !ok {
-		return m, nil, false
+		return nil, false
 	}
 	cap := m.opts.AutoContinueCap
 	if cap == 0 {
@@ -61,11 +61,11 @@ func (m model) maybeAutoContinue() (model, tea.Cmd, bool) {
 			Text: "auto-continue cap reached (" + itoa(cap) + " consecutive). Pending inbox messages will land on your next prompt.",
 		})
 		m.refreshViewport()
-		return m, nil, false
+		return nil, false
 	}
 	drained := compactNonEmpty(drainer.DrainInbox())
 	if len(drained) == 0 {
-		return m, nil, false
+		return nil, false
 	}
 
 	formatter := m.opts.AutoContinueFormatter
@@ -74,7 +74,7 @@ func (m model) maybeAutoContinue() (model, tea.Cmd, bool) {
 	}
 	prompt := formatter(drained)
 	if strings.TrimSpace(prompt) == "" {
-		return m, nil, false
+		return nil, false
 	}
 
 	// Mark any matching Queued entries as Done — the operator's
@@ -86,9 +86,9 @@ func (m model) maybeAutoContinue() (model, tea.Cmd, bool) {
 	// the normal turn lifecycle); MarkLastUserAutoContinue then
 	// flips the AutoContinue bit so the renderer picks ↻ + muted
 	// on the next paint. Avoids a double-append.
-	out := m.submitTurn(prompt)
-	out.history.MarkLastUserAutoContinue()
-	return out, tea.Batch(out.armSpinner(), out.eventListener()), true
+	m.submitTurn(prompt)
+	m.history.MarkLastUserAutoContinue()
+	return tea.Batch(m.armSpinner(), m.eventListener()), true
 }
 
 // defaultAutoContinueFormatter is the fallback formatting Options.

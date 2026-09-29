@@ -57,10 +57,10 @@ func recordAnswers(into *[]answer) resolver {
 // in one keystroke — consumed, popped, resolved.
 func TestOverlayAsk_KeystrokeAnswersAndPops(t *testing.T) {
 	var got []answer
-	m := model{}
+	m := &model{}
 	m.overlayStack.ask(&probeQuestion{id: "probe", ans: chosen{ID: "x", Index: 3}}, askOperator, recordAnswers(&got))
 
-	consumed, _ := m.overlayStack.handleKeyMsg(keyMsgFromStroke("enter"), &m)
+	consumed, _ := m.overlayStack.handleKeyMsg(keyMsgFromStroke("enter"), m)
 	if !consumed {
 		t.Error("an open question did not consume the keystroke")
 	}
@@ -80,10 +80,10 @@ func TestOverlayAsk_KeystrokeAnswersAndPops(t *testing.T) {
 // an open modal is exclusive.
 func TestOverlayAsk_StillAskingKeepsTheQuestion(t *testing.T) {
 	var got []answer
-	m := model{}
+	m := &model{}
 	m.overlayStack.ask(&probeQuestion{id: "probe"}, askOperator, recordAnswers(&got))
 
-	consumed, _ := m.overlayStack.handleKeyMsg(keyMsgFromStroke("x"), &m)
+	consumed, _ := m.overlayStack.handleKeyMsg(keyMsgFromStroke("x"), m)
 	if !consumed {
 		t.Error("an open question did not consume the keystroke")
 	}
@@ -104,14 +104,14 @@ func TestOverlayResolveAll_TellsEveryQuestionWhy(t *testing.T) {
 		dismissEscape, dismissSuperseded, dismissShutdown, dismissUnrenderable,
 	} {
 		var first, second []answer
-		m := model{}
+		m := &model{}
 		m.overlayStack.ask(&probeQuestion{id: "one"}, askOperator, recordAnswers(&first))
 		// A viewer with nothing to answer, in the middle of the
 		// stack, to prove it is dropped rather than skipped over.
 		m.overlayStack.open(newToolCallDialog(0))
 		m.overlayStack.ask(&probeQuestion{id: "two"}, askOperator, recordAnswers(&second))
 
-		m.overlayStack.resolveAll(reason, &m)
+		m.overlayStack.resolveAll(reason, m)
 
 		if m.overlayStack.hasDialogs() {
 			t.Errorf("reason %d: resolveAll left the stack populated", reason)
@@ -142,8 +142,8 @@ type toldMsg struct{ id string }
 // one, so dropping them would reintroduce the stranded-flow bug in a
 // new place.
 func TestOverlayResolveAll_ReturnsWhatTheResolversScheduled(t *testing.T) {
-	m := model{}
-	if cmd := m.overlayStack.resolveAll(dismissShutdown, &m); cmd != nil {
+	m := &model{}
+	if cmd := m.overlayStack.resolveAll(dismissShutdown, m); cmd != nil {
 		t.Errorf("resolveAll on an empty stack returned %v, want nil", cmd)
 	}
 
@@ -158,7 +158,7 @@ func TestOverlayResolveAll_ReturnsWhatTheResolversScheduled(t *testing.T) {
 	// nil Cmd in the batch.
 	m.overlayStack.ask(&probeQuestion{id: "three"}, askOperator, nil)
 
-	cmd := m.overlayStack.resolveAll(dismissShutdown, &m)
+	cmd := m.overlayStack.resolveAll(dismissShutdown, m)
 	if cmd == nil {
 		t.Fatal("resolveAll dropped both resolvers' Cmds")
 	}
@@ -182,17 +182,17 @@ func TestOverlayResolveAll_ReturnsWhatTheResolversScheduled(t *testing.T) {
 // operator just committed.
 func TestOverlayResolveAll_NeverResolvesTwice(t *testing.T) {
 	var got []answer
-	m := model{}
+	m := &model{}
 	q := &probeQuestion{id: "probe", ans: chosen{ID: "kept"}}
 	m.overlayStack.ask(q, askOperator, recordAnswers(&got))
 
 	// Answer it, but put it back on the stack as if a teardown were
 	// racing the pop.
 	front := m.overlayStack.front().(*askedQuestion)
-	m.overlayStack.handleKeyMsg(keyMsgFromStroke("enter"), &m)
+	m.overlayStack.handleKeyMsg(keyMsgFromStroke("enter"), m)
 	m.overlayStack.open(front)
 
-	m.overlayStack.resolveAll(dismissSuperseded, &m)
+	m.overlayStack.resolveAll(dismissSuperseded, m)
 	if len(got) != 1 {
 		t.Fatalf("resolver ran %d times, want exactly 1: %#v", len(got), got)
 	}
@@ -207,18 +207,18 @@ func TestOverlayResolveAll_NeverResolvesTwice(t *testing.T) {
 // nil, which is what a dialog that did not implement cursorDialog at
 // all used to produce.
 func TestAskedQuestion_CaretOnlyWhenTheQuestionHasOne(t *testing.T) {
-	m := model{}
+	m := &model{}
 	m.styles = newStyles(true, Branding{})
 
 	m.overlayStack.ask(&probeQuestion{id: "probe"}, askOperator, nil)
-	if c := m.overlayStack.cursor(100, &m); c != nil {
+	if c := m.overlayStack.cursor(100, m); c != nil {
 		t.Errorf("a question with no text surface reported a caret at %+v", c)
 	}
 
 	m.overlayStack.close("probe")
 	m.themeName = "default"
-	askThemePicker(&m)
-	if c := m.overlayStack.cursor(100, &m); c == nil {
+	askThemePicker(m)
+	if c := m.overlayStack.cursor(100, m); c == nil {
 		t.Error("the theme picker's filter row reported no caret")
 	}
 }
@@ -228,13 +228,13 @@ func TestAskedQuestion_CaretOnlyWhenTheQuestionHasOne(t *testing.T) {
 // through to synthesizing one up/down keystroke — which is what a
 // list wants and what a scrolling body does not.
 func TestAskedQuestion_WheelStepsTheListByOne(t *testing.T) {
-	m := model{}
+	m := &model{}
 	m.styles = newStyles(true, Branding{})
 	m.themeName = "default"
-	q := askThemePicker(&m)
+	q := askThemePicker(m)
 	start := q.idx
 
-	if consumed, _ := m.overlayStack.handleWheel(wheelScrollLines, &m); !consumed {
+	if consumed, _ := m.overlayStack.handleWheel(wheelScrollLines, m); !consumed {
 		t.Fatal("the question did not consume the wheel")
 	}
 	if q.idx != start+1 {

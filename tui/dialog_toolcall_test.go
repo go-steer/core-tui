@@ -27,7 +27,7 @@ import (
 // rest stay zero-valued.
 func modelWithTools(t *testing.T) *model {
 	t.Helper()
-	m := model{}
+	m := &model{}
 	m.styles = newStyles(true, Branding{})
 	m.width = 120
 	m.height = 40
@@ -52,7 +52,7 @@ func modelWithTools(t *testing.T) *model {
 		ToolArgsMap: map[string]any{"pattern": "TODO"},
 		ToolError:   "regex compile failed",
 	})
-	return &m
+	return m
 }
 
 func TestToolCallDialog_OpensOnMostRecent(t *testing.T) {
@@ -184,19 +184,19 @@ func TestToolCallDialog_RendersFailedBadge(t *testing.T) {
 }
 
 func TestToolCallDialog_EmptyHistoryClosesOnKey(t *testing.T) {
-	m := model{}
+	m := &model{}
 	m.styles = newStyles(true, Branding{})
 	m.width = 100
 	m.height = 30
 	d := newToolCallDialog(0)
 	// Any key should close cleanly when there's nothing to show.
-	act := d.HandleKey("left", &m)
+	act := d.HandleKey("left", m)
 	if !act.Close {
 		t.Errorf("HandleKey on empty history should close the dialog, got %+v", act)
 	}
 	// Render on empty history should be safe and produce a
 	// user-visible "no tool calls" message rather than panic.
-	out := d.Render(m.width, &m)
+	out := d.Render(m.width, m)
 	if !strings.Contains(out, "no tool calls") {
 		t.Errorf("expected empty-state hint, got:\n%s", out)
 	}
@@ -229,11 +229,11 @@ func TestCollectToolCalls_FiltersNonToolRoles(t *testing.T) {
 // bug that used selIdx directly would pass every assertion; here the
 // three tool calls sit at history 1, 3 and 5 and map to tool indices
 // 0, 1 and 2.
-func interleavedToolModel(t *testing.T) model {
+func interleavedToolModel(t *testing.T) *model {
 	t.Helper()
 	m := newModel(Options{Agent: &bareAgent{id: "a"}})
 	out, _ := m.Update(tea.WindowSizeMsg{Width: 100, Height: 40})
-	m = out.(model)
+	m = out.(*model)
 	m.history.Append(Message{Role: RoleUser, Text: "read it"})
 	m.history.Append(Message{Role: RoleTool, ToolName: "read_file", ToolCallID: "call-1"})
 	m.history.Append(Message{Role: RoleAssistant, Text: "done", Rendered: "done"})
@@ -246,7 +246,7 @@ func interleavedToolModel(t *testing.T) model {
 
 // openToolCallOverlay presses ctrl+x through the real Update path and
 // hands back the dialog it opened.
-func openToolCallOverlay(t *testing.T, m model) *toolCallDialog {
+func openToolCallOverlay(t *testing.T, m *model) *toolCallDialog {
 	t.Helper()
 	m = press(m, "ctrl+x")
 	d, ok := m.overlayStack.get(toolCallDialogID).(*toolCallDialog)
@@ -269,12 +269,15 @@ func TestToolCallOverlay_OpensOnTheSelectedRow(t *testing.T) {
 	if d.idx != 0 {
 		t.Fatalf("overlay opened on tool %d, want 0 (the selected read_file row)", d.idx)
 	}
-	if out := d.Render(m.width, &m); !strings.Contains(out, "1/3") || !strings.Contains(out, "read_file") {
+	if out := d.Render(m.width, m); !strings.Contains(out, "1/3") || !strings.Contains(out, "read_file") {
 		t.Errorf("expected the header to show read_file as 1/3, got:\n%s", out)
 	}
 
 	// The middle row too, so the assertion above isn't satisfied by
-	// "always opens on the first call".
+	// "always opens on the first call". A fresh model: the first
+	// overlay is still open on m, and ctrl+x would land on it.
+	m = interleavedToolModel(t)
+	m.setFocus(focusTranscript)
 	m.selIdx = 3 // bash: history 3, tool 1
 	if d := openToolCallOverlay(t, m); d.idx != 1 {
 		t.Errorf("overlay opened on tool %d, want 1 (the selected bash row)", d.idx)

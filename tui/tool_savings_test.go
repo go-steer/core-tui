@@ -295,7 +295,7 @@ func TestApplyToolResult_SavingsBadgeAppendedToPreview(t *testing.T) {
 // future refactor drops the chip from the header rendering path.
 func TestToolCallDialog_HeaderShowsSavingsChip(t *testing.T) {
 	styles := newStyles(true, Branding{})
-	m := model{}
+	m := &model{}
 	m.styles = styles
 	m.width = 120
 	m.height = 40
@@ -313,7 +313,7 @@ func TestToolCallDialog_HeaderShowsSavingsChip(t *testing.T) {
 		},
 	})
 	d := newToolCallDialog(1)
-	out := d.Render(m.width, &m)
+	out := d.Render(m.width, m)
 	if !strings.Contains(out, "12k→2.1k tok · struct") {
 		t.Errorf("expected savings chip in dialog header, got:\n%s", out)
 	}

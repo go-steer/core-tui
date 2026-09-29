@@ -87,8 +87,7 @@ func openAttachRow(t *testing.T, m *model) {
 	// The widget only NAMES the row; Update is what opens the input,
 	// because overlay pops the front dialog after Key returns.
 	for _, msg := range drainBatch(t, cmd) {
-		out, _ := m.Update(msg)
-		*m = out.(model)
+		m.Update(msg)
 	}
 	if !m.overlayStack.hasID(sessionInputDialogID) {
 		t.Fatalf("action row did not open the text-input dialog")
@@ -128,8 +127,7 @@ func commitAttach(t *testing.T, m *model) tea.Cmd {
 	if !ok {
 		t.Fatalf("enter produced %T, want sessionInputSubmittedMsg", msg)
 	}
-	out, next := m.Update(sub)
-	*m = out.(model)
+	_, next := m.Update(sub)
 	return next
 }
 
@@ -141,7 +139,7 @@ func TestSessionPicker_ActionRowOpensTextInput(t *testing.T) {
 	m := newModel(Options{Agent: agent})
 	m.viewport.SetWidth(80)
 
-	openAttachRow(t, &m)
+	openAttachRow(t, m)
 	if len(agent.switchCalls) != 0 {
 		t.Errorf("SwitchToSession called for an action row: %v", agent.switchCalls)
 	}
@@ -149,7 +147,7 @@ func TestSessionPicker_ActionRowOpensTextInput(t *testing.T) {
 	if front.ID() != sessionInputDialogID {
 		t.Fatalf("front dialog = %q, want %q", front.ID(), sessionInputDialogID)
 	}
-	out := renderPlain(front, &m)
+	out := renderPlain(front, m)
 	for _, want := range []string{"Attach to Endpoint", "Daemon URL:", "http://host:7778", "esc back"} {
 		if !strings.Contains(out, want) {
 			t.Errorf("text input render missing %q:\n%s", want, out)
@@ -165,9 +163,9 @@ func TestSessionPicker_ActionRowSubmitAttaches(t *testing.T) {
 	m := newModel(Options{Agent: agent})
 	m.viewport.SetWidth(80)
 
-	openAttachRow(t, &m)
-	typeInto(t, m.overlayStack.front(), &m, "http://otherhost:7778")
-	cmd := commitAttach(t, &m)
+	openAttachRow(t, m)
+	typeInto(t, m.overlayStack.front(), m, "http://otherhost:7778")
+	cmd := commitAttach(t, m)
 
 	if cmd == nil {
 		t.Errorf("expected the applySwitchTarget listener batch as a Cmd")
@@ -192,9 +190,9 @@ func TestSessionPicker_ActionRowSubmitError(t *testing.T) {
 	m.viewport.SetWidth(80)
 	before := m.opts.Agent
 
-	openAttachRow(t, &m)
-	typeInto(t, m.overlayStack.front(), &m, "http://dead:1")
-	commitAttach(t, &m)
+	openAttachRow(t, m)
+	typeInto(t, m.overlayStack.front(), m, "http://dead:1")
+	commitAttach(t, m)
 
 	if m.opts.Agent != before {
 		t.Errorf("Agent must not swap when Submit fails")
@@ -216,9 +214,9 @@ func TestSessionPicker_ActionRowNilAgent(t *testing.T) {
 	m := newModel(Options{Agent: agent})
 	m.viewport.SetWidth(80)
 
-	openAttachRow(t, &m)
-	typeInto(t, m.overlayStack.front(), &m, "x")
-	commitAttach(t, &m)
+	openAttachRow(t, m)
+	typeInto(t, m.overlayStack.front(), m, "x")
+	commitAttach(t, m)
 
 	last := m.history.Snapshot()[m.history.Len()-1]
 	if last.Role != RoleError || !strings.Contains(last.Text, "nil Agent") {
@@ -237,8 +235,8 @@ func TestSessionPicker_ActionRowNilSubmit(t *testing.T) {
 	m := newModel(Options{Agent: agent})
 	m.viewport.SetWidth(80)
 
-	openAttachRow(t, &m)
-	pressEnter(&m)
+	openAttachRow(t, m)
+	pressEnter(m)
 
 	last := m.history.Snapshot()[m.history.Len()-1]
 	if last.Role != RoleError || !strings.Contains(last.Text, "no Submit closure") {
@@ -259,9 +257,9 @@ func TestSessionPicker_ActionRowValidate(t *testing.T) {
 	m := newModel(Options{Agent: agent})
 	m.viewport.SetWidth(80)
 
-	openAttachRow(t, &m)
-	typeInto(t, m.overlayStack.front(), &m, "otherhost")
-	pressEnter(&m)
+	openAttachRow(t, m)
+	typeInto(t, m.overlayStack.front(), m, "otherhost")
+	pressEnter(m)
 
 	if len(agent.attachCalls) != 0 {
 		t.Errorf("Submit ran despite validation failure: %v", agent.attachCalls)
@@ -269,7 +267,7 @@ func TestSessionPicker_ActionRowValidate(t *testing.T) {
 	if !m.overlayStack.hasID(sessionInputDialogID) {
 		t.Fatalf("text input should stay open on validation failure")
 	}
-	if out := renderPlain(m.overlayStack.front(), &m); !strings.Contains(out, "endpoint must be an http(s) URL") {
+	if out := renderPlain(m.overlayStack.front(), m); !strings.Contains(out, "endpoint must be an http(s) URL") {
 		t.Errorf("validation error not rendered:\n%s", out)
 	}
 }
@@ -282,11 +280,11 @@ func TestSessionPicker_ActionRowEscReturnsToPicker(t *testing.T) {
 	m := newModel(Options{Agent: agent})
 	m.viewport.SetWidth(80)
 
-	openAttachRow(t, &m)
-	typeInto(t, m.overlayStack.front(), &m, "half-typed")
+	openAttachRow(t, m)
+	typeInto(t, m.overlayStack.front(), m, "half-typed")
 
 	out, _ := m.Update(tea.KeyPressMsg(tea.Key{Code: tea.KeyEsc}))
-	m = out.(model)
+	m = out.(*model)
 	if m.overlayStack.hasID(sessionInputDialogID) {
 		t.Errorf("esc should pop the text input")
 	}
@@ -299,7 +297,7 @@ func TestSessionPicker_ActionRowEscReturnsToPicker(t *testing.T) {
 
 	// A second esc closes the picker itself.
 	out, _ = m.Update(tea.KeyPressMsg(tea.Key{Code: tea.KeyEsc}))
-	m = out.(model)
+	m = out.(*model)
 	if m.overlayStack.hasDialogs() {
 		t.Errorf("second esc should close the picker")
 	}
@@ -312,8 +310,8 @@ func TestSessionPicker_ActionRowRender(t *testing.T) {
 	m := newModel(Options{Agent: agent})
 	m.viewport.SetWidth(80)
 
-	readySessionPicker(&m)
-	lines := sessionPickerLines(&m)
+	readySessionPicker(m)
+	lines := sessionPickerLines(m)
 	var row string
 	for _, l := range lines {
 		if strings.Contains(l, "Attach to endpoint") {
@@ -378,14 +376,14 @@ func TestOverlay_ThemePickerEscRestores(t *testing.T) {
 	m.applyNamedTheme(BuiltinThemes()[0].Name)
 	original := m.themeName
 
-	askThemePicker(&m)
-	pressPicker(t, &m, "down") // live-previews the next theme
+	askThemePicker(m)
+	pressPicker(t, m, "down") // live-previews the next theme
 	if m.themeName == original {
 		t.Fatalf("cursor move should have previewed a different theme")
 	}
 
 	out, _ := m.Update(tea.KeyPressMsg(tea.Key{Code: tea.KeyEsc}))
-	m = out.(model)
+	m = out.(*model)
 	if m.themeName != original {
 		t.Errorf("esc left theme = %q, want the pre-picker %q", m.themeName, original)
 	}

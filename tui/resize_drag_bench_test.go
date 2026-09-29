@@ -33,7 +33,7 @@ import (
 
 // benchSink keeps the benchmarked model reachable past the timed
 // region so nothing measured can be optimized away.
-var benchSink model
+var benchSink *model
 
 // dragBurst is how many WindowSizeMsg events one benchmarked drag
 // delivers — ~30 is what a half-second mouse drag across 15 columns
@@ -91,10 +91,10 @@ The fix is to **debounce** the pass and key the cache by width.`
 // user+assistant exchanges, each assistant row already Glamour-
 // rendered at the starting width — the steady state a drag
 // actually starts from.
-func newBenchDragModel(turns int) model {
+func newBenchDragModel(turns int) *model {
 	m := newModel(Options{})
 	out, _ := m.Update(tea.WindowSizeMsg{Width: benchDragBaseWidth, Height: 40})
-	m = out.(model)
+	m = out.(*model)
 	mr := m.ensureMarkdown()
 	for i := range turns {
 		m.history.Append(Message{Role: RoleUser, Text: "question number " + strconv.Itoa(i)})
@@ -111,7 +111,7 @@ func newBenchDragModel(turns int) model {
 	m = deliverResizeVisibleTick(m)
 	for m.reflowPending {
 		out, _ = m.Update(resizeReflowMsg{gen: m.resizeGen})
-		m = out.(model)
+		m = out.(*model)
 	}
 	return m
 }
@@ -121,9 +121,9 @@ func newBenchDragModel(turns int) model {
 // a drag (issue #247). Delivering the msg directly rather than
 // running the returned tea.Tick Cmd keeps the debounce interval out
 // of tests and benchmarks that are measuring the work, not the wait.
-func deliverResizeVisibleTick(m model) model {
+func deliverResizeVisibleTick(m *model) *model {
 	out, _ := m.Update(resizeReflowMsg{gen: m.resizeGen, visible: true})
-	return out.(model)
+	return out.(*model)
 }
 
 // benchmarkResizeDrag measures a whole drag: dragBurst consecutive
@@ -138,7 +138,7 @@ func benchmarkResizeDrag(b *testing.B, turns int) {
 		b.StartTimer()
 		for i := range dragBurst {
 			out, _ := m.Update(tea.WindowSizeMsg{Width: dragWidthAt(i), Height: 40})
-			m = out.(model)
+			m = out.(*model)
 		}
 	}
 }
@@ -155,7 +155,7 @@ func benchmarkResizeEvent(b *testing.B, turns int) {
 		m := newBenchDragModel(turns)
 		b.StartTimer()
 		out, _ := m.Update(tea.WindowSizeMsg{Width: benchDragBaseWidth - 7, Height: 40})
-		benchSink = out.(model)
+		benchSink = out.(*model)
 	}
 }
 
@@ -167,16 +167,16 @@ func BenchmarkResizeEvent400(b *testing.B) { benchmarkResizeEvent(b, 400) }
 // the msgs directly rather than running the returned tea.Tick Cmds
 // keeps the sleeps out of the measurement — what's being measured is
 // the work the ticks do, not the debounce interval itself.
-func drainResizeSettle(b *testing.B, m model) model {
+func drainResizeSettle(b *testing.B, m *model) *model {
 	m = deliverResizeVisibleTick(m)
 	for i := 0; m.reflowPending; i++ {
 		if i > 100000 {
 			b.Fatal("resize reflow never retired")
 		}
 		out, _ := m.Update(resizeReflowMsg{gen: m.resizeGen})
-		m = out.(model)
+		m = out.(*model)
 		out, _ = m.Update(coalescedRefreshMsg{})
-		m = out.(model)
+		m = out.(*model)
 	}
 	return m
 }
@@ -192,7 +192,7 @@ func benchmarkResizeSettle(b *testing.B, turns int) {
 		m := newBenchDragModel(turns)
 		for i := range dragBurst {
 			out, _ := m.Update(tea.WindowSizeMsg{Width: dragWidthAt(i), Height: 40})
-			m = out.(model)
+			m = out.(*model)
 		}
 		b.StartTimer()
 		benchSink = drainResizeSettle(b, m)

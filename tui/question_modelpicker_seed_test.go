@@ -83,13 +83,13 @@ func TestApplyModels_SeedsCursorOnCurrent(t *testing.T) {
 func TestModelsLoadedMsg_CursorLandsOnTheCurrentRow(t *testing.T) {
 	m := newModel(Options{})
 	out, _ := m.Update(tea.WindowSizeMsg{Width: 100, Height: 30})
-	m = out.(model)
+	m = out.(*model)
 	m.currentModel = "beta-2"
 
-	q := askModelPicker(&m, true)
+	q := askModelPicker(m, true)
 
 	out, _ = m.Update(modelsLoadedMsg{gen: m.sessionGen, models: seedModels})
-	m = out.(model)
+	m = out.(*model)
 
 	if q.idx != 1 {
 		t.Fatalf("cursor at %d, want 1 (beta-2)", q.idx)
@@ -99,7 +99,7 @@ func TestModelsLoadedMsg_CursorLandsOnTheCurrentRow(t *testing.T) {
 	// that is the whole point, and asserting the index alone would
 	// not catch the two drifting apart.
 	var tagged bool
-	for _, line := range strings.Split(ansi.Strip(m.overlayStack.render(100, &m)), "\n") {
+	for _, line := range strings.Split(ansi.Strip(m.overlayStack.render(100, m)), "\n") {
 		if !strings.Contains(line, "(current)") {
 			continue
 		}

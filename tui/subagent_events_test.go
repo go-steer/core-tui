@@ -88,7 +88,7 @@ func turn(seq int64, author, text string) SubagentEvent {
 
 func subagentModel(t *testing.T, a Agent) *model {
 	t.Helper()
-	m := model{}
+	m := &model{}
 	m.styles = newStyles(true, Branding{})
 	m.width, m.height = 120, 40
 	m.opts.Agent = a
@@ -103,7 +103,7 @@ func subagentModel(t *testing.T, a Agent) *model {
 			m.hostSnap = snap.snap
 		}
 	}
-	return &m
+	return m
 }
 
 func TestResolveSubagentName(t *testing.T) {
@@ -636,7 +636,7 @@ func TestSubagentUpdate_DropsStaleGeneration(t *testing.T) {
 	m.overlayStack.open(newSubagentDialog("auditor"))
 	next, _ := m.Update(subagentEventsMsg{gen: 1, name: "auditor",
 		page: SubagentEventPage{Events: []SubagentEvent{turn(1, "model", "stale")}}})
-	got := next.(model)
+	got := next.(*model)
 	d := got.overlayStack.get(subagentDialogID).(*subagentDialog)
 	if len(d.events) != 0 {
 		t.Errorf("a retired generation's page must not paint, got %d events", len(d.events))

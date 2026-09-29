@@ -53,9 +53,8 @@ func Run(ctx context.Context, opts Options) error {
 	// model.Update first, so after the fact is the earliest the
 	// library can learn about them.
 	//
-	// Calling it on the local copy of the model works because the
-	// cancel closure is shared with every copy bubbletea made; see
-	// the lifeCtx field comment in model.go.
+	// m is the same *model the program runs; see the lifeCtx field
+	// comment in model.go.
 	defer m.endListeners()
 	// Mouse mode is set declaratively on the View (see view.go); no
 	// Program-level option needed in bubbletea v2.
@@ -82,8 +81,8 @@ func Run(ctx context.Context, opts Options) error {
 	// the final model rather than holding onto our pre-Run handle so
 	// the snapshot reflects every history mutation up to quit.
 	if opts.AgentsDir != "" {
-		if fm, ok := finalModel.(model); ok {
-			t := buildTranscript(&fm)
+		if fm, ok := finalModel.(*model); ok {
+			t := buildTranscript(fm)
 			if path, terr := saveTranscriptFile(opts.AgentsDir, t); terr != nil {
 				fmt.Fprintf(os.Stderr, "core-tui: transcript save: %v\n", terr)
 			} else if path != "" {

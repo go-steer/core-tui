@@ -48,7 +48,7 @@ const turnElapsedFloor = spinnerCadence
 // the elapsed readout deterministic; everything else gets time.Now.
 // Nil-safe so a zero-value model{} — how a lot of the render-path
 // tests build their fixture — still works.
-func (m model) nowFn() time.Time {
+func (m *model) nowFn() time.Time {
 	if m.now != nil {
 		return m.now()
 	}
@@ -64,7 +64,7 @@ func (m model) nowFn() time.Time {
 // otherwise measure from the zero time and report a fifty-five-year
 // turn. A backwards clock (NTP step, suspend/resume) clamps to 0 for
 // the same reason — the readout degrades to absent, never to garbage.
-func (m model) turnElapsed() time.Duration {
+func (m *model) turnElapsed() time.Duration {
 	if m.turnStarted.IsZero() {
 		return 0
 	}
@@ -109,7 +109,7 @@ func formatTurnElapsed(d time.Duration) string {
 // renderTurnElapsed returns the styled suffix for the thinking line
 // — a leading space plus the muted duration — or "" when the turn is
 // younger than turnElapsedFloor or no turn is in flight.
-func (m model) renderTurnElapsed() string {
+func (m *model) renderTurnElapsed() string {
 	d := m.turnElapsed()
 	if d < turnElapsedFloor {
 		return ""

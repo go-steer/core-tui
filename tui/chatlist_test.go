@@ -38,7 +38,7 @@ import (
 // Cut to the window's width the way chatView cuts, since #154 moved
 // that from the cache to the draw: a cached row is now as wide as its
 // content, and the oracle has to be what reaches the frame.
-func chatAllLines(m model) []string {
+func chatAllLines(m *model) []string {
 	var out []string
 	for i := range m.chatRowCount() {
 		for _, ln := range m.chatRowLines(i) {
@@ -67,7 +67,7 @@ func chatViewLines(view string) []string {
 // chatEntriesAtWidth counts the rows the cache holds an exact render
 // for at the current width — i.e. how many rows the model has
 // actually assembled since the cache was dropped.
-func chatEntriesAtWidth(m model) int {
+func chatEntriesAtWidth(m *model) int {
 	n := 0
 	for key := range m.listCache.entries {
 		if key.width == m.viewport.Width() {

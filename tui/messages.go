@@ -202,7 +202,8 @@ type remoteInterruptDoneMsg struct{ err error }
 // liveStreamStartedMsg fires once at startup after the LiveAgent
 // drain goroutine launches; carries the cancel func so the
 // Update handler can stash it on the model's cancelLiveStream
-// field (Init has a value receiver and can't mutate). Also
+// field (the Cmd that launches it runs off the event loop and
+// must not write the model). Also
 // triggers the one-time "Attached as observer" system row so the
 // operator knows they're in LiveAgent mode.
 type liveStreamStartedMsg struct {

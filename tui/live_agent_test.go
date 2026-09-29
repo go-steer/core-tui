@@ -192,7 +192,7 @@ func TestUpdate_LiveStreamStartedMsg_LogsAttachedNote(t *testing.T) {
 	m.viewport.SetWidth(80)
 
 	out, _ := m.Update(liveStreamStartedMsg{cancel: func() {}})
-	got := out.(model)
+	got := out.(*model)
 	if got.cancelLiveStream == nil {
 		t.Error("expected cancelLiveStream stashed from message")
 	}
@@ -220,7 +220,7 @@ func TestUpdate_LiveStreamStartedMsg_InjectableAgent_ShowsLiveSessionFraming(t *
 	m.viewport.SetWidth(80)
 
 	out, _ := m.Update(liveStreamStartedMsg{cancel: func() {}})
-	got := out.(model)
+	got := out.(*model)
 	if got.history.Len() == 0 {
 		t.Fatal("expected banner system row")
 	}
@@ -245,7 +245,7 @@ func TestUpdate_LiveStreamEndedMsg_FlipsDisconnectedAndLogs(t *testing.T) {
 	m.viewport.SetWidth(80)
 
 	out, _ := m.Update(liveStreamEndedMsg{})
-	got := out.(model)
+	got := out.(*model)
 	if !got.liveDisconnected {
 		t.Error("expected liveDisconnected=true after end signal")
 	}
@@ -260,7 +260,7 @@ func TestUpdate_LiveStreamErrMsg_RendersErrorRow(t *testing.T) {
 	m.viewport.SetWidth(80)
 
 	out, cmd := m.Update(liveStreamErrMsg{err: errors.New("boom")})
-	got := out.(model)
+	got := out.(*model)
 	last := got.history.Snapshot()[got.history.Len()-1]
 	if last.Role != RoleError {
 		t.Errorf("expected RoleError, got %v", last.Role)
@@ -298,7 +298,7 @@ func TestUpdate_LiveStreamErrMsg_PermanentStatuses_StopRetrying(t *testing.T) {
 			m.viewport.SetWidth(80)
 
 			out, cmd := m.Update(liveStreamErrMsg{err: tc.err})
-			got := out.(model)
+			got := out.(*model)
 			last := got.history.Snapshot()[got.history.Len()-1]
 			if last.Role != RoleError {
 				t.Errorf("expected RoleError, got %v", last.Role)
@@ -331,7 +331,7 @@ func TestUpdate_LiveStreamErrMsg_PermanentStreamErrorInterface(t *testing.T) {
 	m.viewport.SetWidth(80)
 
 	out, cmd := m.Update(liveStreamErrMsg{err: &permErr{msg: "adapter-specific: session evicted"}})
-	got := out.(model)
+	got := out.(*model)
 	last := got.history.Snapshot()[got.history.Len()-1]
 	if !got.liveDisconnected {
 		t.Error("PermanentStreamError should flip liveDisconnected")
@@ -418,7 +418,7 @@ func TestUpdate_SubmitInLiveMode_NoInjectLogsReadOnlyNoteOnce(t *testing.T) {
 	m.input.SetValue("hello")
 	enter := tea.KeyPressMsg(tea.Key{Code: tea.KeyEnter})
 	out, _ := m.Update(enter)
-	m = out.(model)
+	m = out.(*model)
 	if !m.liveReadOnlyNoted {
 		t.Fatal("expected liveReadOnlyNoted=true after first submit")
 	}
@@ -436,7 +436,7 @@ func TestUpdate_SubmitInLiveMode_NoInjectLogsReadOnlyNoteOnce(t *testing.T) {
 	// Second submit must NOT log a duplicate note.
 	m.input.SetValue("again")
 	out, _ = m.Update(enter)
-	m = out.(model)
+	m = out.(*model)
 	second := m.history.Snapshot()
 	noteCount = 0
 	for _, e := range second {
@@ -458,7 +458,7 @@ func TestUpdate_SubmitInLiveMode_InjectableHostCallsInjectAndAppendsUserRow(t *t
 	m.input.SetValue("hello there")
 	enter := tea.KeyPressMsg(tea.Key{Code: tea.KeyEnter})
 	out, _ := m.Update(enter)
-	got := out.(model)
+	got := out.(*model)
 
 	select {
 	case v := <-agent.injectsOut:

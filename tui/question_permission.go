@@ -124,10 +124,9 @@ func newPermissionQuestion(req PermissionRequest, layout PermissionLayout) *perm
 // It closes over the question because the effects need the request —
 // the AlwaysAllow callback is handed the whole PermissionRequest so
 // the host knows what scope to persist, and the transcript echo names
-// the tool. Closing over the question is safe in a way closing over a
-// *model is not: the question is heap-allocated and outlives every
-// per-Update copy of the model, which is the reason resolver takes its
-// *model as a parameter in the first place.
+// the tool. The resolver closes over the question and takes the
+// *model as a parameter, so it never holds on to the model past the
+// call that resolves it.
 func permissionResolver(q *permissionQuestion) resolver {
 	return func(a answer, m *model) tea.Cmd {
 		switch a := a.(type) {

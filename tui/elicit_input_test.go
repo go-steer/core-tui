@@ -142,7 +142,7 @@ func TestElicitKey_SeededDefaultRoundTrips(t *testing.T) {
 // on. The commit keys are still inside modalInputGrace — call
 // pastGrace before pressing one, except in the test that is about the
 // window itself.
-func elicitFlowFor(t *testing.T, req ElicitRequest) (model, chan ElicitResult) {
+func elicitFlowFor(t *testing.T, req ElicitRequest) (*model, chan ElicitResult) {
 	t.Helper()
 	e := NewElicitor().(*elicitor)
 	results := make(chan ElicitResult, 1)
@@ -156,9 +156,9 @@ func elicitFlowFor(t *testing.T, req ElicitRequest) (model, chan ElicitResult) {
 
 	m := newModel(Options{Elicitor: e})
 	out, _ := m.Update(tea.WindowSizeMsg{Width: 100, Height: 40})
-	m = out.(model)
+	m = out.(*model)
 	out, _ = m.Update(elicitRequestMsg{serverName: "srv", req: req})
-	m = out.(model)
+	m = out.(*model)
 	if m.openElicit() == nil {
 		t.Fatal("setup: elicitRequestMsg did not open the modal")
 	}
@@ -172,12 +172,12 @@ func elicitFlowFor(t *testing.T, req ElicitRequest) (model, chan ElicitResult) {
 // stamp belongs to the seam, not to the widget, which is what lets
 // every future agent-opened question inherit the window without
 // writing any of it.
-func pastGrace(m model) model { return pastGraceFor(m, elicitDialogID) }
+func pastGrace(m *model) *model { return pastGraceFor(m, elicitDialogID) }
 
 // pastGraceFor is pastGrace for any question on the stack — the same
 // backdating, reached by id, because the window belongs to the seam
 // and every agent-opened question inherits it.
-func pastGraceFor(m model, id string) model {
+func pastGraceFor(m *model, id string) *model {
 	if aq := m.overlayStack.asked(id); aq != nil {
 		aq.shownAt = time.Now().Add(-modalInputGrace - time.Millisecond)
 	}
@@ -209,7 +209,7 @@ func TestElicitForm_DeclinesOnCtrlD(t *testing.T) {
 	m = typeWord(m, "ada")
 
 	out, cmd := m.Update(keyPress("ctrl+d"))
-	m = out.(model)
+	m = out.(*model)
 	if m.openElicit() != nil {
 		t.Fatal("ctrl+d left the modal open — the form still has no reachable decline")
 	}
@@ -249,7 +249,7 @@ func TestElicitForm_DeclineAndCancelAreDifferentAnswers(t *testing.T) {
 			m = pastGrace(m)
 
 			out, _ := m.Update(keyPress(tc.stroke))
-			m = out.(model)
+			m = out.(*model)
 			if m.openElicit() != nil {
 				t.Fatalf("%s left the modal open", tc.stroke)
 			}
@@ -275,7 +275,7 @@ func TestElicitForm_DeclineSkipsRequiredFieldValidation(t *testing.T) {
 	m, results := elicitFlowFor(t, req)
 	m = pastGrace(m)
 	out, _ := m.Update(keyPress("enter"))
-	m = out.(model)
+	m = out.(*model)
 	if m.openElicit() == nil {
 		t.Fatal("precondition: Enter submitted with the required field empty")
 	}
@@ -284,7 +284,7 @@ func TestElicitForm_DeclineSkipsRequiredFieldValidation(t *testing.T) {
 	}
 
 	out, _ = m.Update(keyPress("ctrl+d"))
-	m = out.(model)
+	m = out.(*model)
 	if m.openElicit() != nil {
 		t.Fatal("ctrl+d was refused on a form with an empty required field — " +
 			"validation gates submission, not declining")
@@ -308,7 +308,7 @@ func TestElicitForm_DeclineIsHeldDuringTheGraceWindow(t *testing.T) {
 	}
 
 	out, _ := m.Update(keyPress("ctrl+d"))
-	m = out.(model)
+	m = out.(*model)
 	if m.openElicit() == nil {
 		t.Fatal("ctrl+d declined inside the grace window")
 	}
@@ -320,7 +320,7 @@ func TestElicitForm_DeclineIsHeldDuringTheGraceWindow(t *testing.T) {
 
 	m = pastGrace(m)
 	out, _ = m.Update(keyPress("ctrl+d"))
-	m = out.(model)
+	m = out.(*model)
 	if m.openElicit() != nil {
 		t.Fatal("ctrl+d after the grace window did not decline")
 	}
@@ -367,15 +367,14 @@ func TestElicitModal_AdvertisesTheKeysItHonors(t *testing.T) {
 			plain := func(s string) string {
 				return unbindLegend(ansi.Strip(s))
 			}
-			if got := plain(m.overlayStack.render(m.width, &m)); !strings.Contains(got, tc.key) {
+			if got := plain(m.overlayStack.render(m.width, m)); !strings.Contains(got, tc.key) {
 				t.Errorf("the modal footer does not offer %q:\n%s", tc.key, got)
 			}
 			if got := plain(m.footerHint()); !strings.Contains(got, tc.key) {
 				t.Errorf("the footer hint does not offer %q: %s", tc.key, got)
 			}
 
-			out, _ := m.Update(keyPress(tc.stroke))
-			m = out.(model)
+			m.Update(keyPress(tc.stroke))
 			if got := awaitElicit(t, results).Action; got != ElicitActionDecline {
 				t.Errorf("the advertised decline key %q dispatched %v, want Decline",
 					tc.stroke, got)
@@ -404,7 +403,7 @@ func TestElicitURLMode_ActionRow(t *testing.T) {
 			m = pastGrace(m)
 
 			out, _ := m.Update(keyPress(tc.stroke))
-			m = out.(model)
+			m = out.(*model)
 			if m.openElicit() != nil {
 				t.Fatalf("%s left the modal open", tc.stroke)
 			}
@@ -429,7 +428,7 @@ type elicitReply struct {
 // hands it a request the modal cannot draw, the way an MCP server
 // would. It deliberately does NOT use elicitFlowFor, which asserts a
 // modal opened: not opening one is the behaviour under test.
-func unsupportedElicitFlow(t *testing.T, req ElicitRequest, server string) (model, chan elicitReply, tea.Cmd) {
+func unsupportedElicitFlow(t *testing.T, req ElicitRequest, server string) (*model, chan elicitReply, tea.Cmd) {
 	t.Helper()
 	e := NewElicitor().(*elicitor)
 	replies := make(chan elicitReply, 1)
@@ -442,9 +441,9 @@ func unsupportedElicitFlow(t *testing.T, req ElicitRequest, server string) (mode
 	}
 	m := newModel(Options{Elicitor: e})
 	out, _ := m.Update(tea.WindowSizeMsg{Width: 100, Height: 40})
-	m = out.(model)
+	m = out.(*model)
 	out, cmd := m.Update(elicitRequestMsg{serverName: server, req: req})
-	return out.(model), replies, cmd
+	return out.(*model), replies, cmd
 }
 
 // awaitElicitReply is awaitElicit for the unsupported path, where the
@@ -656,7 +655,7 @@ func TestElicit_HostsCanMatchTheUnsupportedSentinel(t *testing.T) {
 
 // lastSystemRow returns the text of the transcript's final RoleSystem
 // message.
-func lastSystemRow(t *testing.T, m model) string {
+func lastSystemRow(t *testing.T, m *model) string {
 	t.Helper()
 	msgs := m.history.Snapshot()
 	for i := len(msgs) - 1; i >= 0; i-- {

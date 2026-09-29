@@ -36,21 +36,23 @@ import (
 //
 // # Why the render is eager rather than lazy
 //
-// The obvious shape — a cache consulted by View — is not available
-// here. model.View has a value receiver, so anything it writes lands
-// in a copy that is thrown away when it returns; a lazy cache would
-// have to live behind a pointer shared between every copy of the
-// model, and two copies that diverged would then read each other's
-// entries. The listCache can afford that because its key carries a
-// message identity and version that pin the content exactly. A
-// textarea has no such identity, and the failure mode is the worst
+// The obvious shape — a cache consulted by View — was not available
+// when this was written: model.View had a value receiver, so anything
+// it wrote landed in a copy that was thrown away when it returned. A
+// lazy cache would have had to live behind a pointer shared between
+// every copy of the model, and two copies that diverged would then
+// read each other's entries. A textarea has no message identity or
+// version to key such a cache on, and the failure mode is the worst
 // one available to a text editor: a composer that shows something
-// other than what the operator typed.
+// other than what the operator typed. The model has had pointer
+// receivers since issue #266, so View runs on the live model now,
+// but eager rendering keeps its other advantage: View stays a field
+// read that cannot be stale.
 //
 // So the block is rendered at mutation time instead of at draw time,
 // by every method below that can change what the textarea looks like.
-// The rendered string is an ordinary field, copied with the value
-// like any other, and View is a field read that cannot be stale
+// The rendered string is an ordinary field of the composer value, and
+// View is a field read that cannot be stale
 // because nothing can reach the textarea without going through this
 // type. Rendering eagerly is not more work: bubbletea calls View
 // after every Update, so the old code rendered once per mutation
@@ -74,7 +76,7 @@ type composer struct {
 
 	// rendered is ta.View() as of the last mutation. Kept in the
 	// value rather than behind a pointer so it travels with the
-	// model copy that produced it.
+	// textarea state that produced it.
 	rendered string
 
 	// ready distinguishes a composer that newComposer built from the

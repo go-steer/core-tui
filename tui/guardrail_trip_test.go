@@ -26,7 +26,7 @@ import (
 // errorRows returns the RoleError entries in history, which is what
 // the absorb rule is ultimately about: how many warning blocks an
 // operator sees for one guardrail halt.
-func errorRows(m model) []Message {
+func errorRows(m *model) []Message {
 	var out []Message
 	for _, e := range m.history.entries {
 		if e.Role == RoleError {
@@ -100,7 +100,7 @@ func TestGuardrailTrip_AppendsStyledRow(t *testing.T) {
 	m.viewport.SetWidth(80)
 
 	got, _ := m.Update(boundaryTrip())
-	m2 := got.(model)
+	m2 := got.(*model)
 	rows := errorRows(m2)
 	if len(rows) != 1 {
 		t.Fatalf("guardrail-trip appended %d error rows, want 1", len(rows))
@@ -135,8 +135,8 @@ func TestGuardrailTrip_HaltedTurnAbsorbsFollowingCancel(t *testing.T) {
 	m.viewport.SetWidth(80)
 
 	got, _ := m.Update(haltingTrip())
-	got2, _ := got.(model).Update(canceledTurnError())
-	m2 := got2.(model)
+	got2, _ := got.(*model).Update(canceledTurnError())
+	m2 := got2.(*model)
 
 	rows := errorRows(m2)
 	if len(rows) != 1 {
@@ -159,11 +159,11 @@ func TestGuardrailTrip_BoundaryTripDoesNotAbsorb(t *testing.T) {
 	m.viewport.SetWidth(80)
 
 	got, _ := m.Update(boundaryTrip())
-	if got.(model).absorbNextCancel {
+	if got.(*model).absorbNextCancel {
 		t.Fatal("a halted_turn:false trip must not arm the absorb")
 	}
-	got2, _ := got.(model).Update(canceledTurnError())
-	if rows := errorRows(got2.(model)); len(rows) != 2 {
+	got2, _ := got.(*model).Update(canceledTurnError())
+	if rows := errorRows(got2.(*model)); len(rows) != 2 {
 		t.Fatalf("boundary trip plus a cancel rendered %d error rows, want 2", len(rows))
 	}
 }
@@ -176,7 +176,7 @@ func TestGuardrailTrip_CancelWithoutTripStillRenders(t *testing.T) {
 	m.viewport.SetWidth(80)
 
 	got, _ := m.Update(canceledTurnError())
-	rows := errorRows(got.(model))
+	rows := errorRows(got.(*model))
 	if len(rows) != 1 || rows[0].TurnError == nil || rows[0].TurnError.Kind != TurnErrorCanceled {
 		t.Fatalf("an unaccompanied cancel should render its own block, got %+v", rows)
 	}
@@ -191,11 +191,11 @@ func TestGuardrailTrip_AbsorbIsOneShotOnKind(t *testing.T) {
 	m.viewport.SetWidth(80)
 
 	got, _ := m.Update(haltingTrip())
-	got2, _ := got.(model).Update(turnErrorMsg{turnError: TurnError{
+	got2, _ := got.(*model).Update(turnErrorMsg{turnError: TurnError{
 		Kind:    TurnErrorRateLimited,
 		Message: "Vertex quota exceeded.",
 	}})
-	m2 := got2.(model)
+	m2 := got2.(*model)
 	if rows := errorRows(m2); len(rows) != 2 {
 		t.Fatalf("a non-cancel error after a halting trip rendered %d error rows, want 2", len(rows))
 	}
@@ -213,7 +213,7 @@ func TestGuardrailTrip_FinalizeTurnDisarmsAbsorb(t *testing.T) {
 	m.viewport.SetWidth(80)
 
 	got, _ := m.Update(haltingTrip())
-	m2 := got.(model)
+	m2 := got.(*model)
 	if !m2.absorbNextCancel {
 		t.Fatal("a halted_turn:true trip should arm the absorb")
 	}
@@ -223,7 +223,7 @@ func TestGuardrailTrip_FinalizeTurnDisarmsAbsorb(t *testing.T) {
 	}
 
 	got3, _ := m2.Update(canceledTurnError())
-	rows := errorRows(got3.(model))
+	rows := errorRows(got3.(*model))
 	if len(rows) != 2 {
 		t.Fatalf("a cancel on a later turn rendered %d error rows, want 2 (trip + cancel)", len(rows))
 	}
@@ -243,7 +243,7 @@ func TestGuardrailTrip_StaleGenerationDropped(t *testing.T) {
 	trip.gen = 1
 
 	got, _ := m.Update(trip)
-	m2 := got.(model)
+	m2 := got.(*model)
 	if rows := errorRows(m2); len(rows) != 0 {
 		t.Fatalf("a stale-generation trip rendered %d error rows, want 0", len(rows))
 	}
@@ -262,7 +262,7 @@ func TestGuardrailTrip_SessionSwitchDisarmsAbsorb(t *testing.T) {
 	m.viewport.SetWidth(80)
 
 	got, _ := m.Update(haltingTrip())
-	m2 := got.(model)
+	m2 := got.(*model)
 	if !m2.absorbNextCancel {
 		t.Fatal("a halted_turn:true trip should arm the absorb")
 	}
@@ -274,7 +274,7 @@ func TestGuardrailTrip_SessionSwitchDisarmsAbsorb(t *testing.T) {
 	cancel := canceledTurnError()
 	cancel.gen = m2.sessionGen
 	got3, _ := m2.Update(cancel)
-	if rows := errorRows(got3.(model)); len(rows) != 1 {
+	if rows := errorRows(got3.(*model)); len(rows) != 1 {
 		t.Fatalf("the new session's cancel rendered %d error rows, want 1", len(rows))
 	}
 }

@@ -228,9 +228,9 @@ func mustBeFast(t *testing.T, what string, fn func()) {
 
 // pressKey drives one keystroke through Update the way bubble-tea
 // does, returning the new model and the Cmd.
-func pressKey(m model, key tea.Key) (model, tea.Cmd) {
+func pressKey(m *model, key tea.Key) (*model, tea.Cmd) {
 	out, cmd := m.Update(tea.KeyPressMsg(key))
-	return out.(model), cmd
+	return out.(*model), cmd
 }
 
 // drainBatch runs cmd and flattens whatever it produced into the
@@ -280,11 +280,11 @@ func TestView_NeverCallsHost(t *testing.T) {
 	before := agent.calls.Load()
 	mustBeFast(t, "View with no dialog", func() { _ = m.View() })
 
-	askModelPicker(&m, true)
+	askModelPicker(m, true)
 	mustBeFast(t, "View with a loading model picker", func() { _ = m.View() })
 	m.overlayStack.close(modelPickerDialogID)
 
-	askSessionPicker(&m, true)
+	askSessionPicker(m, true)
 	mustBeFast(t, "View with a loading session picker", func() { _ = m.View() })
 	m.overlayStack.close(sessionPickerDialogID)
 
@@ -295,7 +295,7 @@ func TestView_NeverCallsHost(t *testing.T) {
 	// Snapshot installed: still zero host calls, now with real rows.
 	// The AvailableModels() pull readyModelPicker makes is the
 	// open-time one and happens before the counter is re-read.
-	readyModelPicker(&m)
+	readyModelPicker(m)
 	before = agent.calls.Load()
 	mustBeFast(t, "View with a populated model picker", func() { _ = m.View() })
 	if got := agent.calls.Load(); got != before {
@@ -335,12 +335,12 @@ func TestUpdate_ModelPickerOpensWithoutBlocking(t *testing.T) {
 		t.Fatalf("modelsLoadedMsg carried %d models, want 2", len(msg.models))
 	}
 	out, _ := m.Update(msg)
-	m = out.(model)
+	m = out.(*model)
 	q = modelPickerOn(&m.overlayStack)
 	if !q.loaded || len(q.rows()) != 2 {
 		t.Fatalf("snapshot not installed: loaded=%v rows=%d", q.loaded, len(q.rows()))
 	}
-	if got := ansi.Strip(m.overlayStack.render(80, &m)); !strings.Contains(got, "m1") {
+	if got := ansi.Strip(m.overlayStack.render(80, m)); !strings.Contains(got, "m1") {
 		t.Errorf("picker render missing the snapshot rows:\n%s", got)
 	}
 }
@@ -364,7 +364,7 @@ func TestModelPicker_EnterSwitchesOffLoop(t *testing.T) {
 	m := newModel(Options{Agent: agent})
 	m.viewport.SetWidth(80)
 
-	q := readyModelPicker(&m)
+	q := readyModelPicker(m)
 	q.idx = 1
 
 	var cmd tea.Cmd
@@ -380,7 +380,7 @@ func TestModelPicker_EnterSwitchesOffLoop(t *testing.T) {
 	if m.opts.Agent != Agent(agent) {
 		t.Errorf("Agent swapped before the reply landed")
 	}
-	if got := ansi.Strip(m.overlayStack.render(80, &m)); !strings.Contains(got, "switching to m2") {
+	if got := ansi.Strip(m.overlayStack.render(80, m)); !strings.Contains(got, "switching to m2") {
 		t.Errorf("in-flight render missing the progress line:\n%s", got)
 	}
 
@@ -390,7 +390,7 @@ func TestModelPicker_EnterSwitchesOffLoop(t *testing.T) {
 	}
 	mustBeFast(t, "the switch request", func() {
 		out, follow := m.Update(req)
-		m, cmd = out.(model), follow
+		m, cmd = out.(*model), follow
 	})
 	if cmd == nil {
 		t.Fatalf("the request scheduled no SwitchModel call")
@@ -398,7 +398,7 @@ func TestModelPicker_EnterSwitchesOffLoop(t *testing.T) {
 
 	msg := cmd().(modelSwitchedMsg)
 	out, _ := m.Update(msg)
-	m = out.(model)
+	m = out.(*model)
 	if m.opts.Agent != Agent(next) {
 		t.Fatalf("Agent not swapped after modelSwitchedMsg: %v", m.opts.Agent)
 	}
@@ -421,10 +421,10 @@ func TestModelSwitchedMsg_StaleGenDoesNotAttach(t *testing.T) {
 	m.sessionGen = 7
 
 	stale := &bareAgent{id: "stale-from-the-old-session"}
-	askModelPicker(&m, false)
+	askModelPicker(m, false)
 
 	out, _ := m.Update(modelSwitchedMsg{gen: 6, id: "m9", agent: stale})
-	m = out.(model)
+	m = out.(*model)
 
 	if m.opts.Agent != Agent(current) {
 		t.Fatalf("stale modelSwitchedMsg attached its agent: %v", m.opts.Agent)
@@ -441,7 +441,7 @@ func TestModelSwitchedMsg_StaleGenDoesNotAttach(t *testing.T) {
 	// The matching generation still lands.
 	fresh := &bareAgent{id: "fresh"}
 	out, _ = m.Update(modelSwitchedMsg{gen: 7, id: "m1", agent: fresh})
-	m = out.(model)
+	m = out.(*model)
 	if m.opts.Agent != Agent(fresh) {
 		t.Fatalf("same-gen reply did not attach: %v", m.opts.Agent)
 	}
@@ -455,11 +455,10 @@ func TestModelsLoadedMsg_RoutesToCoveredDialog(t *testing.T) {
 	m := newModel(Options{Agent: agent})
 	m.viewport.SetWidth(80)
 
-	picker := askModelPicker(&m, true)
+	picker := askModelPicker(m, true)
 	m.overlayStack.open(newToolCallDialog(1)) // covers the picker
 
-	out, _ := m.Update(modelsLoadedMsg{gen: m.sessionGen, models: []ModelInfo{{ID: "m1"}}})
-	m = out.(model)
+	m.Update(modelsLoadedMsg{gen: m.sessionGen, models: []ModelInfo{{ID: "m1"}}})
 
 	if !picker.loaded || len(picker.rows()) != 1 {
 		t.Fatalf("covered picker did not receive its snapshot: loaded=%v rows=%d",
@@ -477,7 +476,7 @@ func TestSessionPicker_EnterSwitchesOffLoop(t *testing.T) {
 	m := newModel(Options{Agent: agent})
 	m.viewport.SetWidth(80)
 
-	q := readySessionPicker(&m)
+	q := readySessionPicker(m)
 	q.idx = 1
 
 	var (
@@ -499,14 +498,14 @@ func TestSessionPicker_EnterSwitchesOffLoop(t *testing.T) {
 	var follow tea.Cmd
 	mustBeFast(t, "the switch request", func() {
 		out, c := m.Update(cmd().(sessionSwitchRequestedMsg))
-		m, follow = out.(model), c
+		m, follow = out.(*model), c
 	})
 	if follow == nil {
 		t.Fatal("the request produced no Cmd — the host call would never happen")
 	}
 	for _, msg := range drainBatch(t, follow) {
 		out, _ := m.Update(msg)
-		m = out.(model)
+		m = out.(*model)
 	}
 	if got, ok := m.opts.Agent.(*bareAgent); !ok || got.id != "other" {
 		t.Fatalf("session not attached: %v", m.opts.Agent)
@@ -530,7 +529,7 @@ func TestSessionSwitchedMsg_StaleGenDropped(t *testing.T) {
 		id:     "old",
 		target: SwitchTarget{Agent: &bareAgent{id: "old"}},
 	})
-	m = out.(model)
+	m = out.(*model)
 	if m.opts.Agent != Agent(current) {
 		t.Fatalf("stale sessionSwitchedMsg attached: %v", m.opts.Agent)
 	}
@@ -592,7 +591,7 @@ func TestFilePalette_OpensImmediatelyOnALargeTree(t *testing.T) {
 		t.Fatalf("scan produced no items")
 	}
 	out, _ := m.Update(msg)
-	m = out.(model)
+	m = out.(*model)
 	if m.palette == nil || m.palette.loading {
 		t.Fatalf("palette did not settle: %+v", m.palette)
 	}
@@ -630,7 +629,7 @@ func TestFileItemsMsg_StaleSeqDropped(t *testing.T) {
 		seq:   seq - 1,
 		items: []paletteItem{{Name: "ghost.go", Available: true}},
 	})
-	m = out.(model)
+	m = out.(*model)
 	for _, it := range m.palette.items {
 		if it.Name == "ghost.go" {
 			t.Fatalf("stale scan repopulated the live palette")
@@ -676,7 +675,7 @@ func TestSlashPalette_OpensWithBuiltinsThenMergesHost(t *testing.T) {
 		t.Fatalf("slash Cmd produced %T, want slashCommandsMsg", msg)
 	}
 	out, _ := m.Update(msg)
-	m = out.(model)
+	m = out.(*model)
 	found := false
 	for _, it := range m.palette.items {
 		if it.Name == "btw" {
@@ -716,7 +715,7 @@ func TestSidebarSubagents_ReadsTheSnapshot(t *testing.T) {
 		t.Fatalf("a wired SubagentReporter must start the snapshot cycle")
 	}
 	out, _ := m.Update(cmd())
-	m = out.(model)
+	m = out.(*model)
 
 	got := m.subagentSummary()
 	if len(got) != 1 || !strings.Contains(got[0], "probe") {
@@ -754,11 +753,10 @@ func TestReloadAndPricingRefresh_GetBoundedContexts(t *testing.T) {
 	m := newModel(Options{Agent: host})
 	m.viewport.SetWidth(80)
 
-	handled, out, cmd := m.dispatchBuiltinSlash("reload", "")
+	handled, cmd := m.dispatchBuiltinSlash("reload", "")
 	if !handled || cmd == nil {
 		t.Fatalf("/reload: handled=%v cmd=%v, want handled with a Cmd", handled, cmd)
 	}
-	m = out.(model)
 	if last := lastText(m); !strings.Contains(last, "rebuilding") {
 		t.Errorf("/reload missing the immediate acknowledgement, got %q", last)
 	}
@@ -769,17 +767,15 @@ func TestReloadAndPricingRefresh_GetBoundedContexts(t *testing.T) {
 	if !host.reloadDeadline {
 		t.Errorf("Reload was handed a context with no deadline")
 	}
-	out, _ = m.Update(msg)
-	m = out.(model)
+	m.Update(msg)
 	if last := lastText(m); !strings.Contains(last, "/reload: done") {
 		t.Errorf("reload note not applied, got %q", last)
 	}
 
-	handled, out, cmd = m.dispatchBuiltinSlash("pricing", "refresh")
+	handled, cmd = m.dispatchBuiltinSlash("pricing", "refresh")
 	if !handled || cmd == nil {
 		t.Fatalf("/pricing refresh: handled=%v cmd=%v", handled, cmd)
 	}
-	m = out.(model)
 	pmsg, ok := cmd().(pricingRefreshedMsg)
 	if !ok {
 		t.Fatalf("/pricing refresh Cmd produced %T, want pricingRefreshedMsg", pmsg)
@@ -787,8 +783,7 @@ func TestReloadAndPricingRefresh_GetBoundedContexts(t *testing.T) {
 	if !host.pricingDeadline {
 		t.Errorf("PricingController.Refresh was handed a context with no deadline")
 	}
-	out, _ = m.Update(pmsg)
-	m = out.(model)
+	m.Update(pmsg)
 	if last := lastText(m); !strings.Contains(last, "prices refreshed") {
 		t.Errorf("pricing summary not surfaced, got %q", last)
 	}
@@ -806,7 +801,7 @@ func TestReloadDoneMsg_StaleGenDropped(t *testing.T) {
 		gen:    3,
 		result: ReloadResult{Agent: &bareAgent{id: "stale"}, Note: "should not appear"},
 	})
-	m = out.(model)
+	m = out.(*model)
 	if m.opts.Agent != Agent(current) {
 		t.Fatalf("stale reloadDoneMsg swapped the Agent: %v", m.opts.Agent)
 	}
@@ -832,24 +827,23 @@ func TestSlashModelWithArg_RunsOffLoop(t *testing.T) {
 		cmd     tea.Cmd
 	)
 	mustBeFast(t, "/model m1", func() {
-		handled, out, cmd = m.dispatchBuiltinSlash("model", "m1")
+		handled, cmd = m.dispatchBuiltinSlash("model", "m1")
 	})
 	if !handled || cmd == nil {
 		t.Fatalf("/model <id>: handled=%v cmd=%v", handled, cmd)
 	}
-	m = out.(model)
 	if m.opts.Agent != Agent(agent) {
 		t.Errorf("Agent swapped inline")
 	}
 	out, _ = m.Update(cmd())
-	m = out.(model)
+	m = out.(*model)
 	if m.opts.Agent != Agent(next) {
 		t.Fatalf("Agent not swapped after the reply: %v", m.opts.Agent)
 	}
 }
 
 // lastText returns the text of the last history row, or "".
-func lastText(m model) string {
+func lastText(m *model) string {
 	snap := m.history.Snapshot()
 	if len(snap) == 0 {
 		return ""
@@ -927,7 +921,7 @@ func TestShiftTab_PermissionModeRunsOffLoop(t *testing.T) {
 	}
 
 	out, _ := m.Update(msg)
-	m = out.(model)
+	m = out.(*model)
 	if m.permMode != PermissionModeAcceptEdits {
 		t.Errorf("chip moved on a clean reply: %s", m.permMode)
 	}
@@ -953,7 +947,7 @@ func TestPermissionModeApplied_SetFailureRollsBackTheChip(t *testing.T) {
 		mode: PermissionModeBypass,
 		err:  errors.New("gate refuses bypass"),
 	})
-	m = out.(model)
+	m = out.(*model)
 	if m.permMode != PermissionModePlan {
 		t.Fatalf("chip = %s, want the rollback to plan", m.permMode)
 	}
@@ -970,7 +964,7 @@ func TestPermissionModeApplied_SetFailureRollsBackTheChip(t *testing.T) {
 		mode: PermissionModeBypass,
 		err:  errors.New("late refusal"),
 	})
-	m = out.(model)
+	m = out.(*model)
 	if m.permMode != PermissionModeDefault {
 		t.Errorf("a superseded failure rewound the chip to %s", m.permMode)
 	}
@@ -990,7 +984,7 @@ func TestPermissionModeApplied_PersistFailureKeepsTheMode(t *testing.T) {
 		mode:       PermissionModePlan,
 		persistErr: errors.New("read-only config"),
 	})
-	m = out.(model)
+	m = out.(*model)
 	if m.permMode != PermissionModePlan {
 		t.Errorf("chip = %s, want plan — Set succeeded", m.permMode)
 	}
@@ -1038,12 +1032,11 @@ func TestSlashCommandsRunOffLoop(t *testing.T) {
 				cmd     tea.Cmd
 			)
 			mustBeFast(t, "/"+tc.cmd+" "+tc.args, func() {
-				handled, out, cmd = m.dispatchBuiltinSlash(tc.cmd, tc.args)
+				handled, cmd = m.dispatchBuiltinSlash(tc.cmd, tc.args)
 			})
 			if !handled {
 				t.Fatalf("/%s not handled", tc.cmd)
 			}
-			m = out.(model)
 			if got := agent.calls.Load(); got != 0 {
 				t.Fatalf("%d host call(s) ran on the Update goroutine", got)
 			}
@@ -1062,7 +1055,7 @@ func TestSlashCommandsRunOffLoop(t *testing.T) {
 				t.Errorf("Cmd made %d host call(s), want 1", got)
 			}
 			out, _ = m.Update(msg)
-			m = out.(model)
+			m = out.(*model)
 			if last := lastText(m); !strings.Contains(last, tc.want) {
 				t.Errorf("reply row = %q, want it to contain %q", last, tc.want)
 			}
@@ -1083,13 +1076,11 @@ func TestPermissionRules_ReachTheHost(t *testing.T) {
 		{"deny", "bash:rm *"},
 		{"allow", "bundle:dev_tools"},
 	} {
-		_, out, cmd := m.dispatchBuiltinSlash(step.cmd, step.args)
-		m = out.(model)
+		_, cmd := m.dispatchBuiltinSlash(step.cmd, step.args)
 		if cmd == nil {
 			t.Fatalf("/%s %s returned no Cmd", step.cmd, step.args)
 		}
-		out, _ = m.Update(cmd())
-		m = out.(model)
+		m.Update(cmd())
 	}
 	if len(agent.allowed) != 1 || agent.allowed[0] != "bash:git *" {
 		t.Errorf("AddAllowPatterns got %v", agent.allowed)
@@ -1109,10 +1100,8 @@ func TestPermissionRuleAdded_FailureRendersAsAnError(t *testing.T) {
 	m := newModel(Options{Agent: &slowAgent{id: "slow", ruleErr: errors.New("gate is read-only")}})
 	m.viewport.SetWidth(80)
 
-	_, out, cmd := m.dispatchBuiltinSlash("deny", "bash:rm *")
-	m = out.(model)
-	out, _ = m.Update(cmd())
-	m = out.(model)
+	_, cmd := m.dispatchBuiltinSlash("deny", "bash:rm *")
+	m.Update(cmd())
 
 	snap := m.history.Snapshot()
 	last := snap[len(snap)-1]
@@ -1131,14 +1120,12 @@ func TestHelpCommands_HostSectionArrivesSeparately(t *testing.T) {
 	m := newModel(Options{Agent: &slowAgent{id: "slow"}}) // no specs
 	m.viewport.SetWidth(80)
 
-	_, out, cmd := m.dispatchBuiltinSlash("help", "")
-	m = out.(model)
+	_, cmd := m.dispatchBuiltinSlash("help", "")
 	before := len(m.history.Snapshot())
 	if !strings.Contains(lastText(m), "/pricing refresh|set") {
 		t.Errorf("built-in help did not render on the keystroke: %q", lastText(m))
 	}
-	out, _ = m.Update(cmd())
-	m = out.(model)
+	m.Update(cmd())
 	if got := len(m.history.Snapshot()); got != before {
 		t.Errorf("an empty SlashCommands() still appended a row (%d → %d)", before, got)
 	}
@@ -1159,7 +1146,7 @@ func TestSubagentDetail_ResolvesFromTheSnapshot(t *testing.T) {
 
 	// Seed the snapshot the way the periodic refresh does.
 	out, _ := m.Update(m.refreshHostSnapshotCmd()())
-	m = out.(model)
+	m = out.(*model)
 	before := agent.calls.Load()
 
 	var (
@@ -1208,7 +1195,7 @@ func TestIssue137Msgs_StaleGenDropped(t *testing.T) {
 			m.sessionGen = 2 // the msg left under gen 1
 
 			out, _ := m.Update(tc.msg)
-			m = out.(model)
+			m = out.(*model)
 			for _, row := range m.history.Snapshot() {
 				if strings.Contains(row.Text, tc.probe) {
 					t.Fatalf("stale %s leaked a transcript row: %q", tc.name, row.Text)
@@ -1227,7 +1214,7 @@ func TestIssue137Msgs_StaleGenDropped(t *testing.T) {
 		gen: 1, prev: PermissionModeDefault, mode: PermissionModeBypass,
 		err: errors.New("stale refusal"),
 	})
-	if got := out.(model).permMode; got != PermissionModeBypass {
+	if got := out.(*model).permMode; got != PermissionModeBypass {
 		t.Errorf("stale permissionModeAppliedMsg rewound the chip to %s", got)
 	}
 }
@@ -1270,7 +1257,7 @@ func TestPersistCallbacks_RunOffLoop(t *testing.T) {
 	out, _ := m.Update(persistDoneMsg{
 		gen: m.sessionGen, what: "status layout", err: errors.New("disk full"),
 	})
-	if last := lastText(out.(model)); !strings.Contains(last, "status layout: persist failed: disk full") {
+	if last := lastText(out.(*model)); !strings.Contains(last, "status layout: persist failed: disk full") {
 		t.Errorf("persist failure row = %q", last)
 	}
 }
@@ -1293,7 +1280,7 @@ func TestModelSwitch_PersistsOffLoop(t *testing.T) {
 	var cmd tea.Cmd
 	mustBeFast(t, "modelSwitchedMsg", func() {
 		out, c := m.Update(modelSwitchedMsg{gen: m.sessionGen, id: "m2", agent: &bareAgent{id: "m2"}})
-		m, cmd = out.(model), c
+		m, cmd = out.(*model), c
 	})
 	if len(persisted) != 0 {
 		t.Fatalf("PersistModelChoice ran on the Update goroutine: %v", persisted)
@@ -1325,8 +1312,7 @@ func TestSwitchWithID_IsTwoStagesOffLoop(t *testing.T) {
 		out tea.Model
 		cmd tea.Cmd
 	)
-	mustBeFast(t, "/switch b", func() { out, cmd = m.dispatchSlash("/switch b") })
-	m = out.(model)
+	mustBeFast(t, "/switch b", func() { cmd = m.dispatchSlash("/switch b") })
 	if got := agent.calls.Load(); got != 0 {
 		t.Fatalf("%d host call(s) ran on the Update goroutine", got)
 	}
@@ -1351,7 +1337,7 @@ func TestSwitchWithID_IsTwoStagesOffLoop(t *testing.T) {
 
 	var stage2 tea.Cmd
 	mustBeFast(t, "switchLookupMsg", func() { out, stage2 = m.Update(lookup) })
-	m = out.(model)
+	m = out.(*model)
 	if got := agent.calls.Load(); got != 1 {
 		t.Fatalf("SwitchToSession ran on the Update goroutine (%d calls)", got)
 	}
@@ -1369,7 +1355,7 @@ func TestSwitchWithID_IsTwoStagesOffLoop(t *testing.T) {
 		t.Fatalf("stage two produced %T, want sessionSwitchedMsg", switched)
 	}
 	out, _ = m.Update(switched)
-	m = out.(model)
+	m = out.(*model)
 	if m.opts.Agent == Agent(agent) {
 		t.Fatalf("the switch never landed")
 	}
@@ -1388,14 +1374,12 @@ func TestSwitchWithID_ActionRowStillOpensItsDialog(t *testing.T) {
 	m := newModel(Options{Agent: agent})
 	m.viewport.SetWidth(80)
 
-	out, cmd := m.dispatchSlash("/switch +attach")
-	m = out.(model)
+	cmd := m.dispatchSlash("/switch +attach")
 	lookup := cmd().(switchLookupMsg)
 	if lookup.row == nil || lookup.row.ID != "+attach" {
 		t.Fatalf("enumerate did not resolve the action row: %+v", lookup.row)
 	}
-	out, cmd = m.Update(lookup)
-	m = out.(model)
+	_, cmd = m.Update(lookup)
 	if cmd != nil {
 		t.Errorf("an action row produced a stage-two Cmd: %T", cmd)
 	}
@@ -1417,8 +1401,7 @@ func TestSwitchLookup_SupersededEnumerateNeverSwitches(t *testing.T) {
 		stale func(m *model)
 	}{
 		{"another /cmd was typed", func(m *model) {
-			out, _ := m.dispatchSlash("/keys")
-			*m = out.(model)
+			m.dispatchSlash("/keys")
 		}},
 		{"the session turned over", func(m *model) { m.sessionGen++ }},
 	} {
@@ -1427,15 +1410,13 @@ func TestSwitchLookup_SupersededEnumerateNeverSwitches(t *testing.T) {
 			m := newModel(Options{Agent: agent})
 			m.viewport.SetWidth(80)
 
-			out, cmd := m.dispatchSlash("/switch b")
-			m = out.(model)
+			cmd := m.dispatchSlash("/switch b")
 			lookup := cmd().(switchLookupMsg)
 
-			tc.stale(&m)
+			tc.stale(m)
 			before := agent.calls.Load()
 
-			out, cmd = m.Update(lookup)
-			m = out.(model)
+			_, cmd = m.Update(lookup)
 			if cmd != nil {
 				t.Errorf("superseded enumerate returned a Cmd (%T) — stage two would run", cmd)
 			}
@@ -1462,8 +1443,7 @@ func TestDispatchSlash_MatchAndInvokeRunOffLoop(t *testing.T) {
 		out tea.Model
 		cmd tea.Cmd
 	)
-	mustBeFast(t, "/btw hello", func() { out, cmd = m.dispatchSlash("/btw hello") })
-	m = out.(model)
+	mustBeFast(t, "/btw hello", func() { cmd = m.dispatchSlash("/btw hello") })
 	if got := agent.calls.Load(); got != 0 {
 		t.Fatalf("%d host call(s) ran on the Update goroutine", got)
 	}
@@ -1489,7 +1469,7 @@ func TestDispatchSlash_MatchAndInvokeRunOffLoop(t *testing.T) {
 	}
 
 	mustBeFast(t, "slashDispatchedMsg", func() { out, _ = m.Update(msg) })
-	m = out.(model)
+	m = out.(*model)
 	if last := lastText(m); !strings.Contains(last, "/btw answered") {
 		t.Errorf("reply row = %q, want the host's SystemMessage", last)
 	}
@@ -1507,14 +1487,13 @@ func TestUnknownCommand_CannotLandUnderTheNextCommand(t *testing.T) {
 	m.viewport.SetWidth(80)
 
 	// Control: nothing else happens, and the operator is told.
-	out, cmd := m.dispatchSlash("/foo")
-	m = out.(model)
+	cmd := m.dispatchSlash("/foo")
 	verdict := cmd().(slashDispatchedMsg)
 	if verdict.matched {
 		t.Fatal("setup: /foo should not have matched")
 	}
-	out, _ = m.Update(verdict)
-	if last := lastText(out.(model)); !strings.Contains(last, "unknown command /foo") {
+	m.Update(verdict)
+	if last := lastText(m); !strings.Contains(last, "unknown command /foo") {
 		t.Fatalf("the verdict never reached the operator: %q", last)
 	}
 
@@ -1522,14 +1501,11 @@ func TestUnknownCommand_CannotLandUnderTheNextCommand(t *testing.T) {
 	// while the match for /foo is still out with the host.
 	m = newModel(Options{Agent: agent})
 	m.viewport.SetWidth(80)
-	out, cmd = m.dispatchSlash("/foo")
-	m = out.(model)
-	out, _ = m.dispatchSlash("/help")
-	m = out.(model)
+	cmd = m.dispatchSlash("/foo")
+	m.dispatchSlash("/help")
 	helpRows := m.history.Len()
 
-	out, _ = m.Update(cmd().(slashDispatchedMsg))
-	m = out.(model)
+	m.Update(cmd().(slashDispatchedMsg))
 	if m.history.Len() != helpRows {
 		t.Errorf("the stale verdict appended a row: %q", lastText(m))
 	}
@@ -1548,12 +1524,12 @@ func TestSlashDispatched_StaleGenDropped(t *testing.T) {
 	m.sessionGen = 2
 
 	out, _ := m.Update(slashDispatchedMsg{gen: 1, name: "ghost-cmd"})
-	m = out.(model)
+	m = out.(*model)
 	out, _ = m.Update(slashDispatchedMsg{
 		gen: 1, name: "btw", matched: true, invoked: true,
 		res: SlashResult{SystemMessage: "ghost-answer"},
 	})
-	m = out.(model)
+	m = out.(*model)
 	for _, row := range m.history.Snapshot() {
 		if strings.Contains(row.Text, "ghost-") {
 			t.Errorf("stale slashDispatchedMsg leaked a transcript row: %q", row.Text)
@@ -1604,8 +1580,7 @@ var attachRowEntryPoints = []struct {
 		// front dialog after Key returns, so a question that pushed
 		// one would watch it be popped again.
 		for _, msg := range drainBatch(t, cmd) {
-			out, _ := m.Update(msg)
-			*m = out.(model)
+			m.Update(msg)
 		}
 		if !m.overlayStack.hasID(sessionInputDialogID) {
 			t.Fatal("the action row did not open its text input")
@@ -1614,8 +1589,7 @@ var attachRowEntryPoints = []struct {
 	}},
 	{"/switch <action-row-id>", func(t *testing.T, m *model, a *slowAgent) {
 		t.Helper()
-		out, cmd := m.dispatchSlash("/switch +attach")
-		*m = out.(model)
+		cmd := m.dispatchSlash("/switch +attach")
 		if cmd == nil {
 			t.Fatal("/switch +attach returned no Cmd — the enumerate would never happen")
 		}
@@ -1623,8 +1597,7 @@ var attachRowEntryPoints = []struct {
 		if !ok {
 			t.Fatalf("/switch +attach produced %T, want switchLookupMsg", lookup)
 		}
-		out, _ = m.Update(lookup)
-		*m = out.(model)
+		m.Update(lookup)
 		a.calls.Store(0)
 	}},
 }
@@ -1632,7 +1605,7 @@ var attachRowEntryPoints = []struct {
 // openAttachDialog wires a slow host whose session list ends in the
 // action row, opens the row's text input through entry, and types
 // value into it — leaving the model one Enter short of committing.
-func openAttachDialog(t *testing.T, open func(*testing.T, *model, *slowAgent), value string) (model, *slowAgent, Agent) {
+func openAttachDialog(t *testing.T, open func(*testing.T, *model, *slowAgent), value string) (*model, *slowAgent, Agent) {
 	t.Helper()
 	next := Agent(&bareAgent{id: "attached"})
 	agent := &slowAgent{id: "slow"}
@@ -1640,12 +1613,12 @@ func openAttachDialog(t *testing.T, open func(*testing.T, *model, *slowAgent), v
 	m := newModel(Options{Agent: agent})
 	m.viewport.SetWidth(80)
 
-	open(t, &m, agent)
+	open(t, m, agent)
 	front := m.overlayStack.front()
 	if front == nil || front.ID() != sessionInputDialogID {
 		t.Fatalf("entry point did not leave the action row's text input frontmost: %v", front)
 	}
-	typeInto(t, front, &m, value)
+	typeInto(t, front, m, value)
 	return m, agent, next
 }
 
@@ -1667,7 +1640,7 @@ func TestSessionInputSubmit_RunsOffLoop(t *testing.T) {
 			// somehow never reached a counted method, and it is the
 			// assertion a loaded CI runner can make lie.
 			start := time.Now()
-			consumed, cmd := pressEnter(&m)
+			consumed, cmd := pressEnter(m)
 			elapsed := time.Since(start)
 
 			if got := agent.calls.Load(); got != 0 {
@@ -1692,7 +1665,7 @@ func TestSessionInputSubmit_RunsOffLoop(t *testing.T) {
 			if !m.overlayStack.hasID(sessionInputDialogID) {
 				t.Fatal("the dialog closed before its answer arrived")
 			}
-			frame := renderPlain(m.overlayStack.front(), &m)
+			frame := renderPlain(m.overlayStack.front(), m)
 			if got := agent.calls.Load(); got != 0 {
 				t.Fatalf("the in-flight render made %d host call(s) — View must never touch the host", got)
 			}
@@ -1710,7 +1683,7 @@ func TestSessionInputSubmit_RunsOffLoop(t *testing.T) {
 
 			var out tea.Model
 			mustBeFast(t, "sessionInputSubmittedMsg", func() { out, _ = m.Update(msg) })
-			m = out.(model)
+			m = out.(*model)
 			if m.opts.Agent != next {
 				t.Fatalf("the attach never landed: agent = %v", m.opts.Agent)
 			}
@@ -1735,13 +1708,13 @@ func TestSessionInputSubmit_RunsOffLoop(t *testing.T) {
 func TestSessionInputSubmit_SecondEnterDoesNotStackADial(t *testing.T) {
 	m, agent, _ := openAttachDialog(t, attachRowEntryPoints[0].open, "http://wedged:7778")
 
-	_, cmd := pressEnter(&m)
+	_, cmd := pressEnter(m)
 	if cmd == nil {
 		t.Fatal("setup: the first enter produced no Cmd")
 	}
 
 	for _, stroke := range []string{"enter", "x", "backspace"} {
-		consumed, extra := m.overlayStack.handleKeyMsg(keyMsgFromStroke(stroke), &m)
+		consumed, extra := m.overlayStack.handleKeyMsg(keyMsgFromStroke(stroke), m)
 		if !consumed {
 			t.Errorf("%q leaked out of an in-flight dialog — it would land in the chat textarea behind it", stroke)
 		}
@@ -1756,7 +1729,7 @@ func TestSessionInputSubmit_SecondEnterDoesNotStackADial(t *testing.T) {
 		t.Fatal("a swallowed key closed the dialog")
 	}
 
-	consumed, _ := m.overlayStack.handleKeyMsg(keyMsgFromStroke("esc"), &m)
+	consumed, _ := m.overlayStack.handleKeyMsg(keyMsgFromStroke("esc"), m)
 	if !consumed || m.overlayStack.hasID(sessionInputDialogID) {
 		t.Error("esc must still close an in-flight dialog — a wedged endpoint may not take the keyboard with it")
 	}
@@ -1786,8 +1759,7 @@ func TestSessionInputSubmit_ReplyIsDiscardedWhenTheOperatorMovedOn(t *testing.T)
 		}},
 		{"another /cmd was typed", func(t *testing.T, m *model) {
 			t.Helper()
-			out, _ := m.dispatchSlash("/keys")
-			*m = out.(model)
+			m.dispatchSlash("/keys")
 		}},
 		{"the session turned over", func(t *testing.T, m *model) { m.sessionGen++ }},
 	} {
@@ -1795,18 +1767,18 @@ func TestSessionInputSubmit_ReplyIsDiscardedWhenTheOperatorMovedOn(t *testing.T)
 			m, _, _ := openAttachDialog(t, attachRowEntryPoints[0].open, "http://wedged:7778")
 			before := m.opts.Agent
 
-			_, cmd := pressEnter(&m)
+			_, cmd := pressEnter(m)
 			if cmd == nil {
 				t.Fatal("setup: enter produced no Cmd")
 			}
 			// The host answers, eventually — after the operator has
 			// already gone elsewhere.
 			msg := cmd().(sessionInputSubmittedMsg)
-			tc.moveOn(t, &m)
+			tc.moveOn(t, m)
 			rows := m.history.Len()
 
 			out, after := m.Update(msg)
-			m = out.(model)
+			m = out.(*model)
 			if after != nil {
 				t.Errorf("a discarded reply returned a Cmd (%T) — the attach was still dispatched", after)
 			}
@@ -1831,7 +1803,7 @@ func TestSessionInputSubmit_ReplyDoesNotLandOnAReplacementDialog(t *testing.T) {
 	m, agent, next := openAttachDialog(t, attachRowEntryPoints[0].open, "http://wedged:7778")
 	before := m.opts.Agent
 
-	_, cmd := pressEnter(&m)
+	_, cmd := pressEnter(m)
 	if cmd == nil {
 		t.Fatal("setup: enter produced no Cmd")
 	}
@@ -1839,7 +1811,7 @@ func TestSessionInputSubmit_ReplyDoesNotLandOnAReplacementDialog(t *testing.T) {
 
 	// Give up on that endpoint and type a different one. The picker
 	// is still underneath, with the cursor still on the action row.
-	m.overlayStack.handleKeyMsg(keyMsgFromStroke("esc"), &m)
+	m.overlayStack.handleKeyMsg(keyMsgFromStroke("esc"), m)
 	picker := sessionPickerOn(&m.overlayStack)
 	if picker == nil {
 		t.Fatalf("setup: esc left %T frontmost, want the picker", m.overlayStack.front())
@@ -1847,20 +1819,20 @@ func TestSessionInputSubmit_ReplyDoesNotLandOnAReplacementDialog(t *testing.T) {
 	if want := len(picker.rows()) - 1; picker.idx != want {
 		t.Fatalf("setup: cursor is at %d, want it still on the action row %d", picker.idx, want)
 	}
-	_, reopen := m.overlayStack.handleKeyMsg(keyMsgFromStroke("enter"), &m)
+	_, reopen := m.overlayStack.handleKeyMsg(keyMsgFromStroke("enter"), m)
 	for _, msg := range drainBatch(t, reopen) {
 		out, _ := m.Update(msg)
-		m = out.(model)
+		m = out.(*model)
 	}
-	typeInto(t, m.overlayStack.front(), &m, "http://elsewhere:7778")
+	typeInto(t, m.overlayStack.front(), m, "http://elsewhere:7778")
 	agent.calls.Store(0)
-	_, second := pressEnter(&m)
+	_, second := pressEnter(m)
 	if second == nil {
 		t.Fatal("setup: the replacement dialog produced no Cmd")
 	}
 
 	out, after := m.Update(stale)
-	m = out.(model)
+	m = out.(*model)
 	if after != nil {
 		t.Errorf("the abandoned reply returned a Cmd (%T)", after)
 	}
@@ -1870,13 +1842,13 @@ func TestSessionInputSubmit_ReplyDoesNotLandOnAReplacementDialog(t *testing.T) {
 	if !m.overlayStack.hasID(sessionInputDialogID) {
 		t.Fatal("the abandoned reply closed the replacement dialog")
 	}
-	if frame := renderPlain(m.overlayStack.front(), &m); !strings.Contains(frame, "attaching to http://elsewhere:7778") {
+	if frame := renderPlain(m.overlayStack.front(), m); !strings.Contains(frame, "attaching to http://elsewhere:7778") {
 		t.Errorf("the replacement dialog stopped waiting for its own answer:\n%s", frame)
 	}
 
 	// And the replacement's own reply still commits normally.
 	out, _ = m.Update(second().(sessionInputSubmittedMsg))
-	m = out.(model)
+	m = out.(*model)
 	if m.opts.Agent != next {
 		t.Fatalf("the replacement never attached: agent = %v", m.opts.Agent)
 	}

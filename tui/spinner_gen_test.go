@@ -26,11 +26,11 @@ import (
 
 // streamingModel returns a model that has just started a turn, plus
 // the generation stamp the tick chain for that turn carries.
-func streamingModel(t *testing.T) (model, uint64) {
+func streamingModel(t *testing.T) (*model, uint64) {
 	t.Helper()
 	m := newModel(Options{Agent: stubAgent{}})
 	m.viewport.SetWidth(80)
-	m = m.submitTurn("first prompt")
+	m.submitTurn("first prompt")
 	if m.state != stateStreaming {
 		t.Fatalf("setup: state = %v, want stateStreaming", m.state)
 	}
@@ -46,7 +46,7 @@ func TestSubmitTurn_BumpsSpinnerGeneration(t *testing.T) {
 	m, first := streamingModel(t)
 	before := m.sessionGen
 
-	m = m.submitTurn("second prompt")
+	m.submitTurn("second prompt")
 	if m.spinnerGen == first {
 		t.Errorf("spinnerGen unchanged across turns (%d) — a second turn would share the first's tick chain", first)
 	}
@@ -63,14 +63,14 @@ func TestSpinnerTick_StaleChainDroppedAndDoesNotReArm(t *testing.T) {
 	m, stale := streamingModel(t)
 
 	// Second turn begins while turn one's tick is still in flight.
-	m = m.submitTurn("second prompt")
+	m.submitTurn("second prompt")
 	if m.state != stateStreaming {
 		t.Fatalf("setup: state = %v, want stateStreaming", m.state)
 	}
 	idxBefore := m.spinnerFrame
 
 	next, cmd := m.Update(spinnerTickMsg{gen: stale})
-	nm := next.(model)
+	nm := next.(*model)
 
 	if cmd != nil {
 		t.Error("stale tick re-armed the spinner — the superseded chain is still alive")
@@ -87,7 +87,7 @@ func TestSpinnerTick_CurrentChainRotatesAndReArms(t *testing.T) {
 	idxBefore := m.spinnerFrame
 
 	next, cmd := m.Update(spinnerTickMsg{gen: gen})
-	nm := next.(model)
+	nm := next.(*model)
 
 	if cmd == nil {
 		t.Fatal("current-generation tick did not re-arm the spinner")
@@ -106,13 +106,13 @@ func TestSpinnerTick_CurrentChainRotatesAndReArms(t *testing.T) {
 // not twice.
 func TestSpinnerTick_TwoChainsAdvanceVerbPoolOnce(t *testing.T) {
 	m, stale := streamingModel(t)
-	m = m.submitTurn("second prompt")
+	m.submitTurn("second prompt")
 	fresh := m.spinnerGen
 	idxBefore := m.spinnerFrame
 
 	next, _ := m.Update(spinnerTickMsg{gen: stale})
-	next, _ = next.(model).Update(spinnerTickMsg{gen: fresh})
-	nm := next.(model)
+	next, _ = next.(*model).Update(spinnerTickMsg{gen: fresh})
+	nm := next.(*model)
 
 	if got := nm.spinnerFrame - idxBefore; got != 1 {
 		t.Errorf("verb pool advanced %dx in one cadence, want 1x", got)
@@ -128,7 +128,7 @@ func TestSpinnerTick_QueueDrainRetiresPreviousChain(t *testing.T) {
 	m.queue = []QueueEntry{{Text: "queued prompt", State: QueueQueued, Created: time.Now()}}
 
 	next, _ := m.Update(turnDoneMsg{gen: m.sessionGen, elapsed: time.Second})
-	drained := next.(model)
+	drained := next.(*model)
 	if drained.state != stateStreaming {
 		t.Fatalf("setup: queue drain did not start a turn (state = %v)", drained.state)
 	}
@@ -144,7 +144,7 @@ func TestSpinnerTick_QueueDrainRetiresPreviousChain(t *testing.T) {
 	if cmd != nil {
 		t.Error("tick from the drained turn re-armed — the drain produced a second live chain")
 	}
-	if got := after.(model).spinnerFrame; got != idxBefore {
+	if got := after.(*model).spinnerFrame; got != idxBefore {
 		t.Errorf("spinnerFrame = %d, want %d — stale chain rotated the verb pool", got, idxBefore)
 	}
 }
@@ -159,25 +159,26 @@ func TestSpinnerTick_AutoContinueRetiresPreviousChain(t *testing.T) {
 		MidTurnInjectionMode: AutoContinueFromInbox,
 	})
 	m.viewport.SetWidth(80)
-	m = m.submitTurn("first prompt")
+	m.submitTurn("first prompt")
 	stale := m.spinnerGen
 
-	out, cmd, ok := m.maybeAutoContinue()
+	cmd, ok := m.maybeAutoContinue()
 	if !ok {
 		t.Fatal("setup: maybeAutoContinue declined to submit")
 	}
 	if cmd == nil {
 		t.Fatal("auto-continue returned no Cmd")
 	}
-	if out.spinnerGen == stale {
+	if m.spinnerGen == stale {
 		t.Error("auto-continue re-used the previous turn's spinner generation")
 	}
 
-	after, tickCmd := out.Update(spinnerTickMsg{gen: stale})
+	frame := m.spinnerFrame
+	after, tickCmd := m.Update(spinnerTickMsg{gen: stale})
 	if tickCmd != nil {
 		t.Error("tick from the previous turn re-armed after auto-continue")
 	}
-	if after.(model).spinnerFrame != out.spinnerFrame {
+	if after.(*model).spinnerFrame != frame {
 		t.Error("stale tick rotated the verb pool after auto-continue")
 	}
 }
@@ -191,7 +192,7 @@ func TestSpinnerTick_LiveAgentStretchStillAnimates(t *testing.T) {
 	m.viewport.SetWidth(80)
 
 	next, cmd := m.Update(streamChunkMsg{gen: m.sessionGen, text: "tok", partial: true})
-	live := next.(model)
+	live := next.(*model)
 	if !live.spinnerActive {
 		t.Fatal("setup: expected spinnerActive after a partial chunk in liveMode")
 	}
@@ -204,7 +205,7 @@ func TestSpinnerTick_LiveAgentStretchStillAnimates(t *testing.T) {
 	idxBefore := live.spinnerFrame
 
 	after, tickCmd := live.Update(spinnerTickMsg{gen: live.spinnerGen})
-	am := after.(model)
+	am := after.(*model)
 	if tickCmd == nil {
 		t.Fatal("liveMode spinner did not re-arm — the guard starved the LiveAgent path")
 	}
@@ -217,7 +218,7 @@ func TestSpinnerTick_LiveAgentStretchStillAnimates(t *testing.T) {
 	stale := am.spinnerGen
 	am.applyStreamChunk(streamChunkMsg{text: "done", partial: false})
 	restarted, _ := am.Update(streamChunkMsg{gen: am.sessionGen, text: "more", partial: true})
-	rm := restarted.(model)
+	rm := restarted.(*model)
 	if rm.spinnerGen == stale {
 		t.Fatal("second liveMode stretch re-used the first stretch's generation")
 	}

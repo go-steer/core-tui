@@ -52,8 +52,8 @@ func TestStatusCache_StaysFresh(t *testing.T) {
 		do   func(m *model)
 	}{
 		{"initial", func(*model) {}},
-		{"narrow", func(m *model) { *m = resizeModel(*m, 60, 24) }},
-		{"widen", func(m *model) { *m = resizeModel(*m, 140, 40) }},
+		{"narrow", func(m *model) { resizeModel(m, 60, 24) }},
+		{"widen", func(m *model) { resizeModel(m, 140, 40) }},
 		{"theme swap", func(m *model) { m.applyNamedTheme(BuiltinThemes()[1].Name) }},
 		{"theme swap back", func(m *model) { m.applyNamedTheme(BuiltinThemes()[0].Name) }},
 		{"light mode", func(m *model) { m.styles = newStylesWithTheme(false, m.styles.Theme) }},
@@ -100,7 +100,7 @@ func TestStatusCache_StaysFresh(t *testing.T) {
 	}
 
 	for _, step := range steps {
-		step.do(&m)
+		step.do(m)
 		if got, want := m.renderHeader(), uncachedHeader(m); got != want {
 			t.Fatalf("after %q the memoized header is stale\n memoized: %q\n    fresh: %q",
 				step.name, got, want)
@@ -128,10 +128,13 @@ func TestStatusCache_HitsOnASettledFrame(t *testing.T) {
 	}
 }
 
-// uncachedHeader renders the header the long way. renderHeader has a
-// value receiver, so blanking the cache pointer on the copy is enough
-// to force the miss without disturbing the caller's model.
-func uncachedHeader(m model) string {
-	m.statusCache = nil
-	return m.renderHeader()
+// uncachedHeader renders the header the long way: it blanks the cache
+// pointer on a shallow copy, which forces the miss without disturbing
+// the caller's model. The copy is explicit — m is a pointer, so
+// blanking m.statusCache directly would switch the cache off for the
+// rest of the caller's test and make every later comparison vacuous.
+func uncachedHeader(m *model) string {
+	c := *m
+	c.statusCache = nil
+	return c.renderHeader()
 }

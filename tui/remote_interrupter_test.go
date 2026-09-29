@@ -53,7 +53,7 @@ func TestInterrupt_LocalCancelWinsWhenAvailable(t *testing.T) {
 	cancelled := false
 	m.cancelTurn = func() { cancelled = true }
 
-	handled, next, cmd := m.dispatchBuiltinSlash("interrupt", "")
+	handled, cmd := m.dispatchBuiltinSlash("interrupt", "")
 	if !handled {
 		t.Fatalf("dispatchBuiltinSlash returned handled=false for /interrupt")
 	}
@@ -68,7 +68,6 @@ func TestInterrupt_LocalCancelWinsWhenAvailable(t *testing.T) {
 	if cmd != nil {
 		t.Errorf("local cancel should return nil cmd (synchronous); got %T", cmd())
 	}
-	_ = next
 }
 
 // TestInterrupt_RemoteFallthrough_FiresRemoteAndReportsOutcome pins
@@ -83,7 +82,7 @@ func TestInterrupt_RemoteFallthrough_FiresRemoteAndReportsOutcome(t *testing.T) 
 	// zero values. This mirrors observer-mode reality (LiveAgent
 	// drains events but nothing ever populated cancelTurn).
 
-	handled, next, cmd := m.dispatchBuiltinSlash("interrupt", "")
+	handled, cmd := m.dispatchBuiltinSlash("interrupt", "")
 	if !handled {
 		t.Fatal("dispatchBuiltinSlash returned handled=false")
 	}
@@ -91,7 +90,7 @@ func TestInterrupt_RemoteFallthrough_FiresRemoteAndReportsOutcome(t *testing.T) 
 		t.Fatal("remote fallthrough should return a Cmd to invoke Interrupt off the Update loop")
 	}
 	// Placeholder row landed synchronously.
-	nm := next.(model)
+	nm := m
 	entries := nm.history.Snapshot()
 	if len(entries) == 0 || !strings.Contains(entries[len(entries)-1].Text, "cancelling remote turn") {
 		t.Errorf("expected 'cancelling remote turn…' placeholder in history, got %+v", entries)
@@ -113,7 +112,7 @@ func TestInterrupt_RemoteFallthrough_FiresRemoteAndReportsOutcome(t *testing.T) 
 	// Feed the done msg through Update — should append the
 	// success row.
 	next2, _ := nm.Update(done)
-	nm2 := next2.(model)
+	nm2 := next2.(*model)
 	entries2 := nm2.history.Snapshot()
 	last := entries2[len(entries2)-1]
 	if last.Role != RoleSystem {
@@ -131,17 +130,17 @@ func TestInterrupt_RemoteFallthrough_ErrorSurfaces(t *testing.T) {
 	agent := &remoteInterrupterAgent{interruptErr: errors.New("endpoint returned 500")}
 	m := newModel(Options{Agent: agent})
 
-	handled, next, cmd := m.dispatchBuiltinSlash("interrupt", "")
+	handled, cmd := m.dispatchBuiltinSlash("interrupt", "")
 	if !handled || cmd == nil {
 		t.Fatalf("expected handled with cmd, got handled=%v cmd=%v", handled, cmd)
 	}
-	nm := next.(model)
+	nm := m
 	done := cmd().(remoteInterruptDoneMsg)
 	if done.err == nil {
 		t.Fatal("expected propagated error from Interrupt")
 	}
 	next2, _ := nm.Update(done)
-	nm2 := next2.(model)
+	nm2 := next2.(*model)
 	entries := nm2.history.Snapshot()
 	last := entries[len(entries)-1]
 	if last.Role != RoleError {
@@ -161,14 +160,14 @@ func TestInterrupt_NoLocalNoRemote_FallsBackToNoTurnMessage(t *testing.T) {
 	// live turn.
 	m := newModel(Options{Agent: stubAgent{}})
 
-	handled, next, cmd := m.dispatchBuiltinSlash("interrupt", "")
+	handled, cmd := m.dispatchBuiltinSlash("interrupt", "")
 	if !handled {
 		t.Fatal("expected handled=true even on the no-turn path")
 	}
 	if cmd != nil {
 		t.Errorf("no-turn path should return nil cmd, got %T", cmd())
 	}
-	nm := next.(model)
+	nm := m
 	entries := nm.history.Snapshot()
 	last := entries[len(entries)-1]
 	if !strings.Contains(last.Text, "no turn in flight") {
@@ -204,7 +203,7 @@ func TestInterrupt_RemoteSuccessStopsTheLiveSpinner(t *testing.T) {
 			}
 
 			out, _ := m.Update(remoteInterruptDoneMsg{err: tc.err})
-			got := out.(model)
+			got := out.(*model)
 
 			if got.spinnerActive != tc.wantSpinner {
 				t.Errorf("spinnerActive = %v after interrupt (err=%v), want %v",
@@ -247,7 +246,7 @@ func TestEsc_RemoteInterruptWithoutAPauser(t *testing.T) {
 	}
 	// The operator needs to know the keypress landed before the
 	// round trip finishes.
-	if got := lastText(out.(model)); !strings.Contains(got, "Interrupting") {
+	if got := lastText(out.(*model)); !strings.Contains(got, "Interrupting") {
 		t.Errorf("no acknowledgement row; last = %q", got)
 	}
 }
@@ -264,7 +263,7 @@ func TestEsc_NoCapabilitiesStaysANoOp(t *testing.T) {
 	if cmd != nil {
 		t.Errorf("esc dispatched %T on a host with no interrupt capability", cmd())
 	}
-	after := out.(model)
+	after := out.(*model)
 	if got := len(after.history.Snapshot()); got != before {
 		t.Errorf("esc appended %d rows on a no-op", got-before)
 	}

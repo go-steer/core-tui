@@ -35,12 +35,12 @@ import (
 // silentDaemonTurn returns a live model whose host has reported a
 // running turn that has painted nothing: turn_state streaming, no
 // spinner. It fails the test if that is not the state it built.
-func silentDaemonTurn(t *testing.T) model {
+func silentDaemonTurn(t *testing.T) *model {
 	t.Helper()
 	m := newModel(Options{Agent: &liveHoldAgent{}})
 	m.width, m.height = 100, 40
 	out, _ := m.Update(statusUpdateMsg{status: StatusUpdate{TurnState: TurnStateStreaming}})
-	m = out.(model)
+	m = out.(*model)
 	if !m.liveMode {
 		t.Fatal("setup: the fixture must be a LiveAgent host")
 	}
@@ -110,10 +110,11 @@ func TestSilentDaemonTurn_SafeSlashesDispatch(t *testing.T) {
 // turns count as running, not about what the fallthrough does.
 func TestSilentDaemonTurn_UnlistedSlashRoutesAsWhenPainting(t *testing.T) {
 	const line = "/foo bar"
-	route := func(m model) (model, []Message) {
+	route := func(m *model) (*model, []Message) {
 		m.input.SetValue(line)
+		before := m.history.Len()
 		next, _ := pressKey(m, tea.Key{Code: tea.KeyEnter})
-		return next, next.history.Snapshot()[m.history.Len():]
+		return next, next.history.Snapshot()[before:]
 	}
 
 	silent, silentRows := route(silentDaemonTurn(t))
@@ -141,7 +142,7 @@ func TestSilentDaemonTurn_UnlistedSlashRoutesAsWhenPainting(t *testing.T) {
 func TestIdleDaemon_ClearStillConfirms(t *testing.T) {
 	m := silentDaemonTurn(t)
 	out, _ := m.Update(statusUpdateMsg{status: StatusUpdate{TurnState: TurnStateIdle}})
-	m = out.(model)
+	m = out.(*model)
 	if m.turnRunning() {
 		t.Fatal("setup: turnRunning must clear once the host reports idle")
 	}

@@ -65,7 +65,7 @@ var modalFitHeights = []int{24, 16, 15, 14, 13, 12, 11, 10, 8, 6, 4, 3, 2}
 type modalFitCase struct {
 	name string
 	// open returns a model sized to (w, h) with the modal open.
-	open func(t *testing.T, w, h int) model
+	open func(t *testing.T, w, h int) *model
 	// render returns the modal's composed block — the string
 	// lipgloss.Place centers, before clipFrame sees it.
 	render func(m *model) string
@@ -102,9 +102,9 @@ func modalFitCases() []modalFitCase {
 	return []modalFitCase{
 		{
 			name: "theme-picker",
-			open: func(_ *testing.T, w, h int) model {
+			open: func(_ *testing.T, w, h int) *model {
 				m := newFrameModel(StatusHeader, w, h)
-				askThemePicker(&m)
+				askThemePicker(m)
 				return m
 			},
 			render:        func(m *model) string { return m.overlayStack.render(m.width, m) },
@@ -116,7 +116,7 @@ func modalFitCases() []modalFitCase {
 		},
 		{
 			name: "model-picker",
-			open: func(t *testing.T, w, h int) model {
+			open: func(t *testing.T, w, h int) *model {
 				m, _ := openModelPickerFixture(t)
 				return resizeModel(m, w, h)
 			},
@@ -129,7 +129,7 @@ func modalFitCases() []modalFitCase {
 		},
 		{
 			name: "session-picker",
-			open: func(t *testing.T, w, h int) model {
+			open: func(t *testing.T, w, h int) *model {
 				m, _ := openSessionPickerFixture(t)
 				return resizeModel(m, w, h)
 			},
@@ -142,7 +142,7 @@ func modalFitCases() []modalFitCase {
 		},
 		{
 			name: "permission-modal",
-			open: func(_ *testing.T, w, h int) model {
+			open: func(_ *testing.T, w, h int) *model {
 				// newFrameModel asks for PermissionOverlay: the
 				// centered layout is the one with a modal frame to fit,
 				// and the default inline layout has no box at all.
@@ -154,7 +154,7 @@ func modalFitCases() []modalFitCase {
 					Detail: "rm -rf /tmp/a-really-quite-long-path/that/keeps/going/" +
 						"well/past/any/sensible/terminal/width",
 				}})
-				return out.(model)
+				return out.(*model)
 			},
 			render: func(m *model) string { return m.overlayStack.render(m.width, m) },
 			// keyLegend glues each key to its action with a
@@ -167,7 +167,7 @@ func modalFitCases() []modalFitCase {
 		},
 		{
 			name: "elicit-modal",
-			open: func(_ *testing.T, w, h int) model {
+			open: func(_ *testing.T, w, h int) *model {
 				m := newFrameModel(StatusHeader, w, h)
 				out, _ := m.Update(elicitRequestMsg{
 					serverName: "an-mcp-server-with-a-long-name",
@@ -182,7 +182,7 @@ func modalFitCases() []modalFitCase {
 						},
 					},
 				})
-				return out.(model)
+				return out.(*model)
 			},
 			render:        func(m *model) string { return m.overlayStack.render(m.width, m) },
 			footer:        "esc cancel",
@@ -197,7 +197,7 @@ func modalFitCases() []modalFitCase {
 			// regime and a renderContext that never told
 			// fitModalContent how tall the terminal was.
 			name: "tool-call",
-			open: func(_ *testing.T, w, h int) model {
+			open: func(_ *testing.T, w, h int) *model {
 				m := newFrameModel(StatusHeader, w, h)
 				m.history.Append(Message{
 					Role:            RoleTool,
@@ -231,7 +231,7 @@ func modalFitCases() []modalFitCase {
 		},
 		{
 			name: "subagent",
-			open: func(_ *testing.T, w, h int) model {
+			open: func(_ *testing.T, w, h int) *model {
 				m := newFrameModel(StatusHeader, w, h)
 				d := newSubagentDialog("auditor")
 				d.apply(subagentEventsMsg{
@@ -264,7 +264,7 @@ func modalFitCases() []modalFitCase {
 		},
 		{
 			name: "text-input",
-			open: func(_ *testing.T, w, h int) model {
+			open: func(_ *testing.T, w, h int) *model {
 				m := newFrameModel(StatusHeader, w, h)
 				m.overlayStack.open(newTextInputDialog(textInputConfig{
 					Title:  "Attach to Endpoint",
@@ -281,7 +281,7 @@ func modalFitCases() []modalFitCase {
 		},
 		{
 			name: "side-answer",
-			open: func(_ *testing.T, w, h int) model {
+			open: func(_ *testing.T, w, h int) *model {
 				m := newFrameModel(StatusHeader, w, h)
 				m.sideAnswer = &SideAnswer{
 					Question: "what does the scheduler do when a node goes unready",
@@ -301,9 +301,9 @@ func modalFitCases() []modalFitCase {
 // resizeModel drives a WindowSizeMsg through Update so the model
 // re-derives its budget the way a real resize does, rather than
 // having m.height poked behind resize()'s back.
-func resizeModel(m model, w, h int) model {
+func resizeModel(m *model, w, h int) *model {
 	out, _ := m.Update(tea.WindowSizeMsg{Width: w, Height: h})
-	return out.(model)
+	return out.(*model)
 }
 
 // modalRows is the modal block's height in terminal rows, ignoring a
@@ -328,7 +328,7 @@ func TestModalFit_ShortTerminal(t *testing.T) {
 				name := tc.name + "/" + strconv.Itoa(w) + "x" + strconv.Itoa(h)
 				t.Run(name, func(t *testing.T) {
 					m := tc.open(t, w, h)
-					block := tc.render(&m)
+					block := tc.render(m)
 					if block == "" {
 						t.Fatalf("%s rendered nothing at %dx%d", tc.name, w, h)
 					}
@@ -390,8 +390,8 @@ func TestModalFit_BelowTheChromeFloor(t *testing.T) {
 		for _, h := range []int{1, 2} {
 			t.Run(strconv.Itoa(w)+"x"+strconv.Itoa(h), func(t *testing.T) {
 				m := newFrameModel(StatusHeader, w, h)
-				askThemePicker(&m)
-				block := m.overlayStack.render(m.width, &m)
+				askThemePicker(m)
+				block := m.overlayStack.render(m.width, m)
 				plain := unbindLegend(ansi.Strip(block))
 				if !strings.Contains(plain, "esc cancel") {
 					t.Errorf("the last row spent is not the close key\n%s", plain)
@@ -429,7 +429,7 @@ func TestModalFit_ComposesExactly(t *testing.T) {
 				name := tc.name + "/" + strconv.Itoa(w) + "x" + strconv.Itoa(h)
 				t.Run(name, func(t *testing.T) {
 					m := tc.open(t, w, h)
-					block := tc.render(&m)
+					block := tc.render(m)
 					placed := lipgloss.Place(m.width, m.height,
 						lipgloss.Center, lipgloss.Center, block)
 					got := lipgloss.Height(placed)
@@ -475,7 +475,7 @@ func TestModalFit_NoRegressionAtNormalSizes(t *testing.T) {
 	for _, tc := range modalFitCases() {
 		for _, h := range modalRoomyHeights() {
 			t.Run(tc.name+"/"+strconv.Itoa(h), func(t *testing.T) {
-				block := ansi.Strip(tc.render(ptr(tc.open(t, 100, h))))
+				block := ansi.Strip(tc.render(tc.open(t, 100, h)))
 				// The blank row under the title and the blank row
 				// above the footer rule: two empty content rows,
 				// present iff fitModalContent shed nothing.
@@ -536,12 +536,12 @@ func TestModalFit_OverflowingModalTakesItsWholeAllowance(t *testing.T) {
 	cases := []struct {
 		name   string
 		chrome int
-		open   func(w, h int) model
+		open   func(w, h int) *model
 	}{
 		{
 			name:   "tool-call",
 			chrome: toolCallDialogChromeRows,
-			open: func(w, h int) model {
+			open: func(w, h int) *model {
 				m := newFrameModel(StatusHeader, w, h)
 				m.history.Append(Message{
 					Role:            RoleTool,
@@ -557,7 +557,7 @@ func TestModalFit_OverflowingModalTakesItsWholeAllowance(t *testing.T) {
 		{
 			name:   "subagent",
 			chrome: modalChromeRows,
-			open: func(w, h int) model {
+			open: func(w, h int) *model {
 				m := newFrameModel(StatusHeader, w, h)
 				d := newSubagentDialog("auditor")
 				events := make([]SubagentEvent, 0, 60)
@@ -587,7 +587,7 @@ func TestModalFit_OverflowingModalTakesItsWholeAllowance(t *testing.T) {
 			}
 			t.Run(tc.name+"/"+strconv.Itoa(h), func(t *testing.T) {
 				m := tc.open(100, h)
-				block := m.overlayStack.render(m.width, &m)
+				block := m.overlayStack.render(m.width, m)
 				want := h - modalMarginRows
 				if got := modalRows(block); got != want {
 					t.Errorf("overflowing modal is %d rows in a %d-row terminal, want exactly %d "+
@@ -609,10 +609,6 @@ func manyKeys(n int) map[string]any {
 	}
 	return out
 }
-
-// ptr is the addressable-copy helper the render funcs need — they
-// take *model because View's own modal renderers do.
-func ptr(m model) *model { return &m }
 
 // modalRoomyHeights is the set of terminal heights at which every
 // modal composes with its margin intact and sheds nothing: the first

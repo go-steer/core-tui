@@ -263,7 +263,7 @@ func (m *model) chatToggleCollapsed() {
 }
 
 // chatSelectedMessage is the history entry under the cursor.
-func (m model) chatSelectedMessage() (Message, bool) {
+func (m *model) chatSelectedMessage() (Message, bool) {
 	if m.selIdx < 0 || m.selIdx >= m.history.Len() {
 		return Message{}, false
 	}
@@ -281,7 +281,7 @@ func (m model) chatSelectedMessage() (Message, bool) {
 // The lines it returns are a fresh slice: the ones it copies from
 // belong to the render cache, and a returned slice that aliased them
 // would let a later append write into the memo.
-func (m model) chatCollapsedRow(lines []string) []string {
+func (m *model) chatCollapsedRow(lines []string) []string {
 	if len(lines) <= chatCollapsedLines+1 {
 		return lines
 	}
@@ -294,7 +294,7 @@ func (m model) chatCollapsedRow(lines []string) []string {
 // chatRowCollapsed reports whether history row i takes the generic
 // fold. A row carrying the inbox guidance never does: its entry in
 // m.collapsed drives the guidance marker instead (issue #298).
-func (m model) chatRowCollapsed(msg Message) bool {
+func (m *model) chatRowCollapsed(msg Message) bool {
 	return len(m.collapsed) > 0 && m.collapsed[msg.ID] && !hasInboxGuidance(msg)
 }
 
@@ -309,12 +309,12 @@ func (m model) chatRowCollapsed(msg Message) bool {
 // marker that stays lit would claim otherwise. The state survives the
 // round trip either way — it is drawing, not selection, that the
 // focus gates.
-func (m model) chatRowMarked(i int) bool {
+func (m *model) chatRowMarked(i int) bool {
 	return m.focus == focusTranscript && i == m.selIdx && i < m.history.Len()
 }
 
 // chatGutterPrefixes returns the marked and unmarked gutters, built
 // once per frame because every drawn line takes one of them.
-func (m model) chatGutterPrefixes() (marked, plain string) {
+func (m *model) chatGutterPrefixes() (marked, plain string) {
 	return m.styles.Accent.Render(glyphSelectBar) + " ", strings.Repeat(" ", chatGutterWidth)
 }

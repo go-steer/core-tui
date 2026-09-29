@@ -76,15 +76,15 @@ type statusKey struct {
 
 // statusCache holds the last header and the key that produced it.
 //
-// It lives behind a pointer because model.View has a value receiver:
-// anything View writes to its receiver lands in a copy that is
-// discarded on return, so a cache filled during a draw has to be
-// reachable through a field that survives the copy. That is only safe
-// because the key above is content-derived. A pointer cache keyed on
-// a version stamp would be a hazard here — two divergent copies of a
-// model can hold the same stamp with different content, and the
-// second one to draw would be handed the first one's header. Keyed on
-// the values, divergent copies simply miss and re-render.
+// It lives behind a pointer because, when it was written, model.View
+// had a value receiver and a cache filled during a draw had to be
+// reachable through a field that survived the copy. The model has had
+// pointer receivers since issue #266, so that reason is gone; the
+// pointer stays because a nil cache is how a zero-value model{} (the
+// tests' bare literals) opts out. The key above is content-derived
+// rather than a version stamp, so the cache is safe however many
+// holders the pointer has: a model whose inputs differ simply misses
+// and re-renders.
 type statusCache struct {
 	key      statusKey
 	rendered string
@@ -95,7 +95,7 @@ type statusCache struct {
 // rather than in view.go so that adding a segment to the status line
 // and forgetting to key on it is a one-file mistake rather than a
 // two-file one.
-func (m model) statusLineKey() statusKey {
+func (m *model) statusLineKey() statusKey {
 	k := statusKey{
 		width:     m.width,
 		theme:     m.styles.Theme.Name,

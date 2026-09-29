@@ -67,7 +67,7 @@ func seedInput(m *model, text string) bool {
 // never rendered once.
 func TestResize_KeepsGrownInputHeight(t *testing.T) {
 	m := newFrameModel(StatusHeader, 100, 40)
-	if !seedInput(&m, strings.Repeat("line\n", 6)) {
+	if !seedInput(m, strings.Repeat("line\n", 6)) {
 		t.Fatal("precondition: seeding 6 newlines should have grown the textarea")
 	}
 	if got := m.input.Height(); got != 7 {
@@ -90,7 +90,7 @@ func TestResize_KeepsGrownInputHeight(t *testing.T) {
 // has to be reachable.
 func TestResize_InputReachesTextareaMaxHeight(t *testing.T) {
 	m := newFrameModel(StatusHeader, 100, 60)
-	seedInput(&m, strings.Repeat("line\n", textareaMaxHeight*2))
+	seedInput(m, strings.Repeat("line\n", textareaMaxHeight*2))
 	if got := m.input.Height(); got != textareaMaxHeight {
 		t.Errorf("textarea is %d rows after pasting %d lines into a 60-row terminal, "+
 			"want textareaMaxHeight (%d)", got, textareaMaxHeight*2, textareaMaxHeight)
@@ -114,7 +114,7 @@ func TestResize_InputGrowthYieldsToChatFloor(t *testing.T) {
 		t.Run(strconv.Itoa(h), func(t *testing.T) {
 			m := newFrameModel(StatusHeader, 100, h)
 			m = withHostileTranscript(m)
-			seedInput(&m, strings.Repeat("line\n", textareaMaxHeight*2))
+			seedInput(m, strings.Repeat("line\n", textareaMaxHeight*2))
 
 			if got := m.viewport.Height(); got < chatMinHeight {
 				t.Errorf("chat viewport shrank to %d rows, below the %d-row floor",
@@ -140,7 +140,7 @@ func TestSyncInputHeight_AgreesWithResize(t *testing.T) {
 	for _, h := range []int{10, 12, 16, 24, 40} {
 		t.Run(strconv.Itoa(h), func(t *testing.T) {
 			m := newFrameModel(StatusHeader, 100, h)
-			seedInput(&m, strings.Repeat("line\n", textareaMaxHeight*2))
+			seedInput(m, strings.Repeat("line\n", textareaMaxHeight*2))
 			if m.syncInputHeight() {
 				t.Errorf("syncInputHeight still wants to move the textarea after resize "+
 					"settled it at %d rows (budget affords %d)",
@@ -168,7 +168,7 @@ func TestResize_HelpPanelKeepsInputAndFooterInFrame(t *testing.T) {
 	m := newFrameModel(StatusHeader, w, h)
 	m = withHostileTranscript(m)
 	const typed = "the-prompt-being-typed"
-	seedInput(&m, typed)
+	seedInput(m, typed)
 
 	// Opened but not yet reconciled: the panel's natural height, with
 	// no cap on it, is the thing that has to be too tall for this to
@@ -308,14 +308,14 @@ func TestResize_BudgetSurvivesResizeSequence(t *testing.T) {
 	m = withHostileTranscript(m)
 	m.helpOpen = true
 	m.resize()
-	seedInput(&m, strings.Repeat("line\n", textareaMaxHeight*2))
+	seedInput(m, strings.Repeat("line\n", textareaMaxHeight*2))
 
 	seq := []struct{ w, h int }{
 		{120, 40}, {80, 24}, {40, 12}, {200, 50}, {100, 14}, {41, 10}, {120, 40},
 	}
 	for _, s := range seq {
 		out, _ := m.Update(tea.WindowSizeMsg{Width: s.w, Height: s.h})
-		m = out.(model)
+		m = out.(*model)
 		t.Run(strconv.Itoa(s.w)+"x"+strconv.Itoa(s.h), func(t *testing.T) {
 			assertBudgetExact(t, m)
 			assertFrameFits(t, m.View().Content, s.w, s.h)
@@ -334,7 +334,7 @@ func TestUpdate_NewlineKeyGrowsTheBox(t *testing.T) {
 	m := newFrameModel(StatusHeader, 100, 40)
 	for i := 1; i <= 6; i++ {
 		out, _ := m.Update(tea.KeyPressMsg(tea.Key{Code: 'j', Mod: tea.ModCtrl}))
-		m = out.(model)
+		m = out.(*model)
 		want := i + 1
 		if want < textareaMinHeight {
 			want = textareaMinHeight
@@ -358,7 +358,7 @@ func TestUpdate_NewlineKeyGrowsTheBox(t *testing.T) {
 func TestUpdate_PasteGrowsTheBox(t *testing.T) {
 	m := newFrameModel(StatusHeader, 100, 40)
 	out, _ := m.Update(tea.PasteMsg{Content: strings.Repeat("pasted line\n", 5) + "pasted line"})
-	m = out.(model)
+	m = out.(*model)
 
 	if got, want := m.input.LineCount(), 6; got != want {
 		t.Fatalf("paste produced %d lines, want %d", got, want)

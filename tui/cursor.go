@@ -219,7 +219,7 @@ func stackColumn(parts []string, width int) string {
 //
 // Called after clipFrame so the clamp is against the frame the
 // operator will actually see.
-func (m model) frameCursor(origin inputOrigin, modal string) *tea.Cursor {
+func (m *model) frameCursor(origin inputOrigin, modal string) *tea.Cursor {
 	c, covered := m.modalCursor(modal)
 	if !covered {
 		// No overlay: the frame is the chat layout, and the textarea
@@ -236,7 +236,7 @@ func (m model) frameCursor(origin inputOrigin, modal string) *tea.Cursor {
 // there), which is the "nothing should own the cursor" case for the
 // base layout — better a hidden cursor than one parked on an
 // arbitrary cell.
-func (m model) textareaCursor(origin inputOrigin) *tea.Cursor {
+func (m *model) textareaCursor(origin inputOrigin) *tea.Cursor {
 	c := m.input.Cursor()
 	if c == nil {
 		return nil
@@ -265,7 +265,7 @@ func (m model) textareaCursor(origin inputOrigin) *tea.Cursor {
 // border. The pickers left that set in #117 — their filter row
 // implements DialogCursor, and without it this arm would answer
 // (nil, true) for a surface the operator is typing CJK into.
-func (m model) modalCursor(modal string) (c *tea.Cursor, covered bool) {
+func (m *model) modalCursor(modal string) (c *tea.Cursor, covered bool) {
 	switch {
 	case m.pendingForm != nil:
 		// huh renders its own caret and exposes no tea.Cursor in the
@@ -284,7 +284,7 @@ func (m model) modalCursor(modal string) (c *tea.Cursor, covered bool) {
 		if _, inline := m.overlayStack.inlineFront(); inline {
 			return nil, false
 		}
-		c = m.overlayStack.cursor(m.width, &m)
+		c = m.overlayStack.cursor(m.width, m)
 	default:
 		return nil, false
 	}

@@ -163,7 +163,7 @@ func TestApplyToolResult_LatencyBadgeAppendedToPreview(t *testing.T) {
 
 func TestToolCallDialog_HeaderShowsLatencyChip(t *testing.T) {
 	styles := newStyles(true, Branding{})
-	m := model{}
+	m := &model{}
 	m.styles = styles
 	m.width = 120
 	m.height = 40
@@ -176,7 +176,7 @@ func TestToolCallDialog_HeaderShowsLatencyChip(t *testing.T) {
 		ToolLatencyMs:   2400,
 	})
 	d := newToolCallDialog(1)
-	out := d.Render(m.width, &m)
+	out := d.Render(m.width, m)
 	if !strings.Contains(out, "2.4s") {
 		t.Errorf("expected '2.4s' chip in dialog header, got:\n%s", out)
 	}

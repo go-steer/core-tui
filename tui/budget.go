@@ -324,7 +324,7 @@ func (m *model) fitInputBox(maxRows int) (rows, inputMax int) {
 // for the help panel that defect is issue #119's to fix. This is the
 // mechanism that stops it reaching the frame, not a UI for living
 // with it.
-func (m model) fitPanelRows(lines []string, maxRows, width int) []string {
+func (m *model) fitPanelRows(lines []string, maxRows, width int) []string {
 	if maxRows <= 0 || len(lines) <= maxRows {
 		return lines
 	}
@@ -343,7 +343,7 @@ func (m model) fitPanelRows(lines []string, maxRows, width int) []string {
 
 // joinPanelRows is fitPanelRows plus the join every panel renderer
 // ends with.
-func (m model) joinPanelRows(lines []string, maxRows, width int) string {
+func (m *model) joinPanelRows(lines []string, maxRows, width int) string {
 	return strings.Join(m.fitPanelRows(lines, maxRows, width), "\n")
 }
 

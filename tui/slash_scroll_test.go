@@ -36,11 +36,11 @@ import (
 // invisible there. It only shows once the operator has scrolled up to
 // read something — which is also the moment a slash reply landing
 // off-screen costs the most.
-func scrolledUpModel(t *testing.T, agent Agent) model {
+func scrolledUpModel(t *testing.T, agent Agent) *model {
 	t.Helper()
 	m := newModel(Options{Agent: agent})
 	out, _ := m.Update(tea.WindowSizeMsg{Width: 100, Height: 24})
-	m = out.(model)
+	m = out.(*model)
 	for i := 0; i < 20; i++ {
 		q := "what does this function do?"
 		m.history.Append(Message{Role: RoleUser, Text: q, Rendered: q})
@@ -156,8 +156,8 @@ func TestApplySlashDispatch_UnknownCommandPinsTail(t *testing.T) {
 func TestDispatchSlash_NoSlashSurfacePinsTail(t *testing.T) {
 	m := scrolledUpModel(t, &bareAgent{id: "bare"})
 
-	out, cmd := m.dispatchSlash("/usage")
-	got := out.(model)
+	cmd := m.dispatchSlash("/usage")
+	got := m
 	if cmd != nil {
 		t.Errorf("nothing to ask, but got a follow-up %T", cmd)
 	}

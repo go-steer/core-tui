@@ -288,7 +288,7 @@ func TestGolden_ModalFrame(t *testing.T) {
 	for _, w := range goldenWidths {
 		t.Run("width-"+strconv.Itoa(w), func(t *testing.T) {
 			m := goldenModel(t, w, 24)
-			askThemePicker(&m)
+			askThemePicker(m)
 			assertGolden(t, "modal_frame_w"+strconv.Itoa(w), m.View().Content)
 		})
 	}
@@ -322,7 +322,7 @@ func TestGolden_LiveFrame(t *testing.T) {
 // forty-two seconds is past turnElapsedFloor, which means the suffix
 // is actually in the captured bytes. Left on the wall clock this
 // corpus would re-diff on every run.
-func goldenLiveModel(t *testing.T, w, h int) model {
+func goldenLiveModel(t *testing.T, w, h int) *model {
 	t.Helper()
 	m := goldenModel(t, w, h)
 	m.liveMode = true
@@ -331,7 +331,7 @@ func goldenLiveModel(t *testing.T, w, h int) model {
 		text:    "Reading the package and working out what changed.",
 		partial: true,
 	})
-	m = out.(model)
+	m = out.(*model)
 	start := time.Date(2026, 8, 15, 9, 0, 0, 0, time.UTC)
 	m.turnStarted = start
 	m.now = func() time.Time { return start.Add(42 * time.Second) }
@@ -372,7 +372,7 @@ func TestGolden_HelpFrame(t *testing.T) {
 
 // goldenHelpModel is goldenModel with the help panel opened and
 // walked to page, through the same advanceHelp the `?` key runs.
-func goldenHelpModel(t *testing.T, w, h, page int) model {
+func goldenHelpModel(t *testing.T, w, h, page int) *model {
 	t.Helper()
 	m := goldenModel(t, w, h)
 	m.advanceHelp()
@@ -400,7 +400,7 @@ func goldenHelpModel(t *testing.T, w, h, page int) model {
 // enough to churn every full-frame golden depending on where
 // -update was run. Call pinCwd alongside this for the third
 // environment input, the working directory in the status header.
-func goldenModel(t *testing.T, w, h int) model {
+func goldenModel(t *testing.T, w, h int) *model {
 	t.Helper()
 	m := newModel(Options{
 		Agent: &bareAgent{id: "golden"},
@@ -414,7 +414,7 @@ func goldenModel(t *testing.T, w, h int) model {
 	m.caps = terminalCapabilities{}
 	m.newlineHint = defaultNewlineHint("")
 	out, _ := m.Update(tea.WindowSizeMsg{Width: w, Height: h})
-	return out.(model)
+	return out.(*model)
 }
 
 // TestGolden_PausedFrame pins the composed frame while the agent is
@@ -455,7 +455,7 @@ func TestGolden_PausedFrame(t *testing.T) {
 		for _, w := range goldenWidths {
 			t.Run(sh.name+"/width-"+strconv.Itoa(w), func(t *testing.T) {
 				m := goldenModel(t, w, 24)
-				sh.fn(&m)
+				sh.fn(m)
 				m.resize()
 				m.refreshViewport()
 				assertGolden(t, "paused_frame_"+sh.name+"_w"+strconv.Itoa(w), m.View().Content)

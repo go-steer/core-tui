@@ -55,7 +55,7 @@ func TestTextInputDialog_Defaults(t *testing.T) {
 	if d.ID() != textInputDialogID {
 		t.Errorf("ID() = %q, want %q", d.ID(), textInputDialogID)
 	}
-	out := renderPlain(d, &m)
+	out := renderPlain(d, m)
 	if !strings.Contains(out, "Enter a Value") {
 		t.Errorf("default title missing from render:\n%s", out)
 	}
@@ -83,8 +83,8 @@ func TestTextInputDialog_TypeAndSubmit(t *testing.T) {
 		},
 	})
 
-	typeInto(t, d, &m, "http://h:7778 ")
-	act := d.HandleKey("enter", &m)
+	typeInto(t, d, m, "http://h:7778 ")
+	act := d.HandleKey("enter", m)
 
 	if got != "http://h:7778" {
 		t.Errorf("Submit value = %q, want the trimmed URL", got)
@@ -111,17 +111,17 @@ func TestTextInputDialog_Editing(t *testing.T) {
 		},
 	})
 
-	typeInto(t, d, &m, "abcd")
-	d.HandleKey("backspace", &m)
-	typeInto(t, d, &m, "z")
-	d.HandleKey("enter", &m)
+	typeInto(t, d, m, "abcd")
+	d.HandleKey("backspace", m)
+	typeInto(t, d, m, "z")
+	d.HandleKey("enter", m)
 	if got != "abcz" {
 		t.Errorf("after backspace + z: %q, want %q", got, "abcz")
 	}
 
-	d.HandleKey("ctrl+u", &m) // delete before cursor = whole line
-	typeInto(t, d, &m, "fresh")
-	d.HandleKey("enter", &m)
+	d.HandleKey("ctrl+u", m) // delete before cursor = whole line
+	typeInto(t, d, m, "fresh")
+	d.HandleKey("enter", m)
 	if got != "fresh" {
 		t.Errorf("after ctrl+u: %q, want %q", got, "fresh")
 	}
@@ -141,10 +141,10 @@ func TestTextInputDialog_SpaceIsTyped(t *testing.T) {
 			return dialogAction{Consumed: true, Close: true}
 		},
 	})
-	typeInto(t, d, &m, "a")
-	d.HandleKey("space", &m)
-	typeInto(t, d, &m, "b")
-	d.HandleKey("enter", &m)
+	typeInto(t, d, m, "a")
+	d.HandleKey("space", m)
+	typeInto(t, d, m, "b")
+	d.HandleKey("enter", m)
 	if got != "a b" {
 		t.Errorf("value = %q, want %q", got, "a b")
 	}
@@ -171,15 +171,15 @@ func TestTextInputDialog_ValidateKeepsOpen(t *testing.T) {
 		},
 	})
 
-	typeInto(t, d, &m, "nope")
-	act := d.HandleKey("enter", &m)
+	typeInto(t, d, m, "nope")
+	act := d.HandleKey("enter", m)
 	if act.Close {
 		t.Errorf("validation failure must NOT close the dialog: %+v", act)
 	}
 	if submits != 0 {
 		t.Errorf("Submit called %d times despite validation failure", submits)
 	}
-	if out := renderPlain(d, &m); !strings.Contains(out, "must start with http") {
+	if out := renderPlain(d, m); !strings.Contains(out, "must start with http") {
 		t.Errorf("validation error not rendered:\n%s", out)
 	}
 	// The buffer survives so the operator can edit rather than retype.
@@ -188,13 +188,13 @@ func TestTextInputDialog_ValidateKeepsOpen(t *testing.T) {
 	}
 
 	// Typing clears the stale error, and a valid value submits.
-	typeInto(t, d, &m, "x")
-	if out := renderPlain(d, &m); strings.Contains(out, "must start with http") {
+	typeInto(t, d, m, "x")
+	if out := renderPlain(d, m); strings.Contains(out, "must start with http") {
 		t.Errorf("stale validation error survived an edit:\n%s", out)
 	}
-	d.HandleKey("ctrl+u", &m)
-	typeInto(t, d, &m, "http://ok")
-	if act := d.HandleKey("enter", &m); !act.Close {
+	d.HandleKey("ctrl+u", m)
+	typeInto(t, d, m, "http://ok")
+	if act := d.HandleKey("enter", m); !act.Close {
 		t.Errorf("valid value should submit + close, got %+v", act)
 	}
 	if submits != 1 {
@@ -214,8 +214,8 @@ func TestTextInputDialog_EscCloses(t *testing.T) {
 			return dialogAction{Consumed: true, Close: true}
 		},
 	})
-	typeInto(t, d, &m, "half-typed")
-	act := d.HandleKey("esc", &m)
+	typeInto(t, d, m, "half-typed")
+	act := d.HandleKey("esc", m)
 	if !act.Consumed || !act.Close {
 		t.Errorf("esc = %+v, want Consumed+Close", act)
 	}
@@ -231,8 +231,8 @@ func TestTextInputDialog_NilSubmitCloses(t *testing.T) {
 	m.viewport.SetWidth(80)
 
 	d := newTextInputDialog(textInputConfig{})
-	typeInto(t, d, &m, "x")
-	if act := d.HandleKey("enter", &m); !act.Close {
+	typeInto(t, d, m, "x")
+	if act := d.HandleKey("enter", m); !act.Close {
 		t.Errorf("nil Submit should close, got %+v", act)
 	}
 }
@@ -244,7 +244,7 @@ func TestTextInputDialog_InitialAndPlaceholder(t *testing.T) {
 	m.viewport.SetWidth(80)
 
 	empty := newTextInputDialog(textInputConfig{Placeholder: "http://host:7778"})
-	if out := renderPlain(empty, &m); !strings.Contains(out, "http://host:7778") {
+	if out := renderPlain(empty, m); !strings.Contains(out, "http://host:7778") {
 		t.Errorf("placeholder not rendered while empty:\n%s", out)
 	}
 
@@ -252,7 +252,7 @@ func TestTextInputDialog_InitialAndPlaceholder(t *testing.T) {
 		Initial:     "http://seed:1",
 		Placeholder: "http://host:7778",
 	})
-	out := renderPlain(pre, &m)
+	out := renderPlain(pre, m)
 	if !strings.Contains(out, "http://seed:1") {
 		t.Errorf("Initial value not rendered:\n%s", out)
 	}
@@ -265,8 +265,8 @@ func TestTextInputDialog_InitialAndPlaceholder(t *testing.T) {
 		got = v
 		return dialogAction{Consumed: true, Close: true}
 	}
-	typeInto(t, pre, &m, "2")
-	pre.HandleKey("enter", &m)
+	typeInto(t, pre, m, "2")
+	pre.HandleKey("enter", m)
 	if got != "http://seed:12" {
 		t.Errorf("append after Initial = %q, want %q", got, "http://seed:12")
 	}
@@ -292,11 +292,11 @@ func TestOverlay_HandleKeyMsg_PrefersKeyMsgDialog(t *testing.T) {
 	// round trip would lose it for anything exotic.
 	for _, r := range "hé∂" {
 		key := tea.KeyPressMsg(tea.Key{Code: r, Text: string(r)})
-		if consumed, _ := m.overlayStack.handleKeyMsg(key, &m); !consumed {
+		if consumed, _ := m.overlayStack.handleKeyMsg(key, m); !consumed {
 			t.Fatalf("KeyPressMsg %q not consumed", string(r))
 		}
 	}
-	consumed, _ := m.overlayStack.handleKeyMsg(tea.KeyPressMsg(tea.Key{Code: tea.KeyEnter}), &m)
+	consumed, _ := m.overlayStack.handleKeyMsg(tea.KeyPressMsg(tea.Key{Code: tea.KeyEnter}), m)
 	if !consumed {
 		t.Fatalf("enter not consumed")
 	}
@@ -316,7 +316,7 @@ func TestOverlay_HandleKeyMsg_PrefersKeyMsgDialog(t *testing.T) {
 	if _, ok := m.overlayStack.front().(keyMsgDialog); ok {
 		t.Fatal("the fallback arm needs a dialog that is NOT a keyMsgDialog")
 	}
-	consumed, _ = m.overlayStack.handleKeyMsg(tea.KeyPressMsg(tea.Key{Code: tea.KeyEnter}), &m)
+	consumed, _ = m.overlayStack.handleKeyMsg(tea.KeyPressMsg(tea.Key{Code: tea.KeyEnter}), m)
 	if !consumed {
 		t.Errorf("plain Dialog should still consume via the HandleKey fallback")
 	}
@@ -338,13 +338,12 @@ func TestTextInputDialog_PasteRoutesToDialog(t *testing.T) {
 	m.overlayStack.open(d)
 
 	out, _ := m.Update(tea.PasteMsg{Content: "http://pasted:7778"})
-	m = out.(model)
+	m = out.(*model)
 	if v := m.input.Value(); v != "" {
 		t.Errorf("paste leaked into the chat textarea: %q", v)
 	}
 
-	out, _ = m.Update(tea.KeyPressMsg(tea.Key{Code: tea.KeyEnter}))
-	m = out.(model)
+	m.Update(tea.KeyPressMsg(tea.Key{Code: tea.KeyEnter}))
 	if got != "http://pasted:7778" {
 		t.Errorf("pasted value = %q, want the URL", got)
 	}
@@ -357,7 +356,7 @@ func TestTextInputDialog_PasteFallsThroughWithoutDialog(t *testing.T) {
 	m.viewport.SetWidth(80)
 
 	out, _ := m.Update(tea.PasteMsg{Content: "plain text"})
-	m = out.(model)
+	m = out.(*model)
 	if v := m.input.Value(); v != "plain text" {
 		t.Errorf("chat textarea = %q, want the pasted text", v)
 	}

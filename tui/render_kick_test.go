@@ -40,7 +40,7 @@ func TestForceRenderMsg_NoOpHandler(t *testing.T) {
 	historyBefore := m.history.Len()
 
 	out, cmd := m.Update(forceRenderMsg{})
-	got := out.(model)
+	got := out.(*model)
 
 	if cmd != nil {
 		t.Errorf("forceRenderMsg handler should return nil Cmd, got %T", cmd)
@@ -65,7 +65,7 @@ func TestPermissionRequestMsg_ReturnsRenderKickCmd(t *testing.T) {
 	out, cmd := m.Update(permissionRequestMsg{
 		req: PermissionRequest{ToolName: "bash", Detail: "ls /tmp"},
 	})
-	got := out.(model)
+	got := out.(*model)
 	if got.openPermission() == nil {
 		t.Fatal("expected the permission question on the overlay stack")
 	}
@@ -91,7 +91,7 @@ func TestElicitRequestMsg_ReturnsRenderKickCmd(t *testing.T) {
 			Fields: []ElicitField{{Name: "who", Type: ElicitFieldString}},
 		},
 	})
-	got := out.(model)
+	got := out.(*model)
 	if got.openElicit() == nil {
 		t.Fatal("expected the elicit form on the overlay stack")
 	}
@@ -117,7 +117,7 @@ func TestLiveStreamStartedMsg_ReArmsEventListener(t *testing.T) {
 	m.viewport.SetWidth(80)
 
 	out, cmd := m.Update(liveStreamStartedMsg{cancel: func() {}})
-	got := out.(model)
+	got := out.(*model)
 	if cmd == nil {
 		t.Fatal("expected non-nil Cmd (render kick + listener re-arm), got nil")
 	}
@@ -132,7 +132,7 @@ func TestLiveStreamErrMsg_ReArmsEventListener(t *testing.T) {
 	m.viewport.SetWidth(80)
 
 	out, cmd := m.Update(liveStreamErrMsg{err: errors.New("boom")})
-	got := out.(model)
+	got := out.(*model)
 	if cmd == nil {
 		t.Fatal("expected non-nil Cmd (render kick + listener re-arm), got nil")
 	}
@@ -144,7 +144,7 @@ func TestLiveStreamEndedMsg_ReArmsEventListener(t *testing.T) {
 	m.viewport.SetWidth(80)
 
 	out, cmd := m.Update(liveStreamEndedMsg{})
-	got := out.(model)
+	got := out.(*model)
 	if cmd == nil {
 		t.Fatal("expected non-nil Cmd (render kick + listener re-arm), got nil")
 	}
@@ -157,7 +157,7 @@ func TestLiveStreamEndedMsg_ReArmsEventListener(t *testing.T) {
 // the background, and asserts the goroutine pulled the Msg back
 // out. If the listener wasn't re-armed, the channel buffer would
 // keep the Msg and this test would time out.
-func requireEventListenerReArmed(t *testing.T, m model, cmd tea.Cmd) {
+func requireEventListenerReArmed(t *testing.T, m *model, cmd tea.Cmd) {
 	t.Helper()
 	// Push a sentinel Msg onto m.eventCh; if the helper's
 	// eventListener fires, it'll read this and surface it via

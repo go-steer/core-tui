@@ -34,10 +34,9 @@ import (
 // id turned out to name a session rather than an action row —
 // SwitchToSession. Returns the model as of the last reply plus the Cmd
 // that reply produced (the listener batch, on a switch that landed).
-func submitSwitch(t *testing.T, m model, text string) (model, tea.Cmd) {
+func submitSwitch(t *testing.T, m *model, text string) (*model, tea.Cmd) {
 	t.Helper()
-	out, cmd := m.dispatchSlash(text)
-	m = out.(model)
+	cmd := m.dispatchSlash(text)
 	for hop := 0; hop < 2 && cmd != nil; hop++ {
 		msg := cmd()
 		switch msg.(type) {
@@ -45,8 +44,7 @@ func submitSwitch(t *testing.T, m model, text string) (model, tea.Cmd) {
 		default:
 			return m, cmd
 		}
-		out, cmd = m.Update(msg)
-		m = out.(model)
+		_, cmd = m.Update(msg)
 	}
 	return m, cmd
 }
@@ -248,7 +246,7 @@ func TestStaleTerminalMsg_Dropped(t *testing.T) {
 
 	// A matching-gen msg still triggers finalize.
 	out, _ := m.Update(turnDoneMsg{gen: 5, elapsed: 0})
-	got := out.(model)
+	got := out.(*model)
 	if got.state != stateIdle {
 		t.Errorf("matching-gen turnDoneMsg should trigger finalize, state = %v", got.state)
 	}
@@ -268,7 +266,7 @@ func TestStaleStreamChunk_Dropped(t *testing.T) {
 
 	// Matching-gen chunk accumulates as expected.
 	out, _ := m.Update(streamChunkMsg{gen: 3, text: "kept", partial: true})
-	got := out.(model)
+	got := out.(*model)
 	if got.inProgressText != "kept" {
 		t.Errorf("matching-gen chunk lost, inProgressText = %q", got.inProgressText)
 	}
@@ -284,11 +282,11 @@ func TestApplySlashResult_SwitchTo(t *testing.T) {
 	m.history.Append(Message{Role: RoleUser, Text: "prior"})
 	beforeGen := m.sessionGen
 
-	out, cmd := m.applySlashResult("switch", SlashResult{
+	cmd := m.applySlashResult("switch", SlashResult{
 		SystemMessage: "swapped",
 		SwitchTo:      &SwitchTarget{Agent: fresh, Note: "at new"},
 	}, nil)
-	got := out.(model)
+	got := m
 
 	if got.opts.Agent != Agent(fresh) {
 		t.Errorf("Agent not swapped: %v", got.opts.Agent)
@@ -314,10 +312,10 @@ func TestApplySlashResult_SwitchTo_NilAgent(t *testing.T) {
 	m := newModel(Options{Agent: old})
 	m.viewport.SetWidth(80)
 
-	out, cmd := m.applySlashResult("switch", SlashResult{
+	cmd := m.applySlashResult("switch", SlashResult{
 		SwitchTo: &SwitchTarget{Agent: nil},
 	}, nil)
-	got := out.(model)
+	got := m
 
 	if got.opts.Agent != Agent(old) {
 		t.Errorf("Agent should not have swapped on nil-Agent SwitchTo")
@@ -347,11 +345,11 @@ func TestSwitchBuiltin_OpensPicker(t *testing.T) {
 	m := newModel(Options{Agent: agent})
 	m.viewport.SetWidth(80)
 
-	handled, out, _ := m.dispatchBuiltinSlash("switch", "")
+	handled, _ := m.dispatchBuiltinSlash("switch", "")
 	if !handled {
 		t.Fatalf("expected /switch to be handled by builtin dispatcher")
 	}
-	got := out.(model)
+	got := m
 	if !got.overlayStack.hasID(sessionPickerDialogID) {
 		t.Errorf("expected session picker dialog opened")
 	}
@@ -422,7 +420,7 @@ func TestSwitchBuiltin_FallsThroughWhenNoCapability(t *testing.T) {
 	m := newModel(Options{Agent: agent})
 	m.viewport.SetWidth(80)
 
-	handled, _, _ := m.dispatchBuiltinSlash("switch", "b")
+	handled, _ := m.dispatchBuiltinSlash("switch", "b")
 	if handled {
 		t.Errorf("expected handled=false when Agent lacks SessionSwitcher")
 	}
@@ -437,11 +435,11 @@ func TestSwitchBuiltin_SessAlias(t *testing.T) {
 	m := newModel(Options{Agent: agent})
 	m.viewport.SetWidth(80)
 
-	handled, out, _ := m.dispatchBuiltinSlash("sess", "")
+	handled, _ := m.dispatchBuiltinSlash("sess", "")
 	if !handled {
 		t.Fatalf("expected /sess (alias) to be handled")
 	}
-	got := out.(model)
+	got := m
 	if !got.overlayStack.hasID(sessionPickerDialogID) {
 		t.Errorf("expected session picker opened via /sess alias")
 	}
@@ -464,7 +462,7 @@ func TestSessionPickerQuestion_EnterCommits(t *testing.T) {
 	m := newModel(Options{Agent: agent})
 	m.viewport.SetWidth(80)
 
-	q := readySessionPicker(&m)
+	q := readySessionPicker(m)
 	q.idx = 1 // point at "other"
 	ans, cmd := q.Key(keyMsgFromStroke("enter"))
 	if ans != nil {
@@ -481,10 +479,10 @@ func TestSessionPickerQuestion_EnterCommits(t *testing.T) {
 	// the call, and its reply is what ends the question.
 	for _, msg := range drainBatch(t, cmd) {
 		out, follow := m.Update(msg)
-		m = out.(model)
+		m = out.(*model)
 		for _, reply := range drainBatch(t, follow) {
 			out, _ = m.Update(reply)
-			m = out.(model)
+			m = out.(*model)
 		}
 	}
 	if m.opts.Agent != Agent(next) {
@@ -563,7 +561,7 @@ func TestApplySwitchTarget_AnswersAPendingPrompt(t *testing.T) {
 			t.Fatal("nextRequest returned !ok with a pending request")
 		}
 		out, _ := m.Update(permissionRequestMsg{req: req})
-		m = out.(model)
+		m = out.(*model)
 		if m.openPermission() == nil {
 			t.Fatal("the permission question was not seeded; the arm proves nothing")
 		}
@@ -602,7 +600,7 @@ func TestApplySwitchTarget_AnswersAPendingPrompt(t *testing.T) {
 			t.Fatal("nextRequest returned !ok with a pending request")
 		}
 		out, _ := m.Update(elicitRequestMsg{serverName: flow.serverName, req: flow.req})
-		m = out.(model)
+		m = out.(*model)
 		if m.openElicit() == nil {
 			t.Fatal("the elicit form is not open; the arm proves nothing")
 		}

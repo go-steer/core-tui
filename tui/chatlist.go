@@ -52,8 +52,8 @@
 // row, it changes on every chunk so a cache would never hit, and
 // refreshViewport already runs on every change that can affect it —
 // so it is rendered there, once, into m.chatTail, and read from there
-// by everything else. That also keeps chatView pure enough to run
-// under View's value receiver.
+// by everything else. That also keeps chatView a pure read, which is
+// what the draw path is supposed to be.
 package tui
 
 import (
@@ -149,7 +149,7 @@ func (m *model) chatTailOffScreen() bool {
 
 // chatRowCount is the number of rows in the transcript: one per
 // history message, plus the live tail when it has anything to show.
-func (m model) chatRowCount() int {
+func (m *model) chatRowCount() int {
 	n := m.history.Len()
 	if len(m.chatTail) > 0 {
 		n++
@@ -165,7 +165,7 @@ func (m model) chatRowCount() int {
 // the bottom-offset walk, the flat-offset conversion — so a row is
 // rendered at most once no matter how many of them ask, and usually
 // zero times because listCache already has it.
-func (m model) chatRowLines(i int) []string {
+func (m *model) chatRowLines(i int) []string {
 	n := m.history.Len()
 	if i < 0 || i > n {
 		return nil
@@ -211,7 +211,7 @@ func (m model) chatRowLines(i int) []string {
 // shared one is no weaker a contract than the file already keeps.
 var chatBlankSeparator = []string{""}
 
-func (m model) chatSeparator(msg Message) []string {
+func (m *model) chatSeparator(msg Message) []string {
 	if msg.Role != RoleUser {
 		return chatBlankSeparator
 	}
@@ -228,7 +228,7 @@ func (m model) chatSeparator(msg Message) []string {
 // memo is rebuilt every refresh, so the only way to reach it stale is
 // a resize that has not repainted yet — hence the width guard and the
 // fall back to building it here.
-func (m model) chatRuleLine() string {
+func (m *model) chatRuleLine() string {
 	if m.chatRule != "" && m.chatRuleWidth == m.viewport.Width() {
 		return m.chatRule
 	}
@@ -236,7 +236,7 @@ func (m model) chatRuleLine() string {
 }
 
 // buildChatRule renders the separator rule at the current width.
-func (m model) buildChatRule() string {
+func (m *model) buildChatRule() string {
 	return m.styles.Rule.Render(strings.Repeat(GlyphRule, m.viewport.Width()))
 }
 
@@ -255,7 +255,7 @@ func (m model) buildChatRule() string {
 // A fold (issue #152) is applied on the way out rather than being
 // rendered: it is the head of the ordinary render plus a count, so
 // the cache neither knows nor needs to know that the row is folded.
-func (m model) chatMessageLines(i, total int, msg Message) []string {
+func (m *model) chatMessageLines(i, total int, msg Message) []string {
 	width := m.viewport.Width()
 	// Looked up by ID rather than through listItem so the hit path does
 	// not build (and heap-allocate) a messageItem it would throw away
@@ -281,7 +281,7 @@ func (m model) chatMessageLines(i, total int, msg Message) []string {
 // lookup, and a lookup by ID does not want one — so asking for them
 // was asking the caller to assemble a value purely to be discarded
 // (issue #204).
-func (m model) chatRowCached(msg Message) bool {
+func (m *model) chatRowCached(msg Message) bool {
 	_, ok := m.listCache.getLinesByID(msg.ID, msg.Version, m.viewport.Width())
 	return ok
 }
@@ -350,7 +350,7 @@ func (m *model) chatVisitWindow(visit func(i int)) {
 // block is always exactly height rows of exactly that many columns, so
 // the frame it is joined into does not shift when the transcript is
 // short. See chatBlock for why that pad is hand-rolled.
-func (m model) chatView() string {
+func (m *model) chatView() string {
 	w, h := m.viewport.Width(), m.viewport.Height()
 	if w <= 0 || h <= 0 {
 		return ""
@@ -542,12 +542,10 @@ func chatWriteSpaces(b *strings.Builder, n int) {
 // it, so visiting the window is the whole job. It costs what the frame
 // costs — bounded by the height, not by the transcript. What it buys
 // is that the work stays where the rest of the transcript's work is: a
-// refresh renders, a draw reads. View has a value receiver and runs on
-// a copy, so a render that happens there still populates the cache (it
-// is behind a pointer) but nothing else it computes can be kept, and
-// the resize path's "is this row exact yet" contract is about what a
-// repaint has settled, not about what the last paint happened to
-// touch.
+// refresh renders, a draw reads. A render that happens inside View
+// populates the cache like any other, but the resize path's "is this
+// row exact yet" contract is about what a repaint has settled, not
+// about what the last paint happened to touch.
 func (m *model) warmChatWindow() {
 	m.chatVisitWindow(func(int) {})
 }
@@ -655,7 +653,7 @@ func chatCutLine(ln string, x, width int) string {
 // exhaustive total: it walks UP from the end and stops as soon as it
 // has covered a window's worth of lines, so it costs the same at
 // 4,000 rows as at 10.
-func (m model) chatBottomOffset() (int, int) {
+func (m *model) chatBottomOffset() (int, int) {
 	n := m.chatRowCount()
 	if n == 0 {
 		return 0, 0
@@ -668,7 +666,7 @@ func (m model) chatBottomOffset() (int, int) {
 // chatBottomOffset, and bounded for the same reason: it stops as soon
 // as it has covered a window's worth of lines. The selection reveal
 // (issue #152) uses it to scroll an item just far enough into view.
-func (m model) chatEndOffset(last int) (int, int) {
+func (m *model) chatEndOffset(last int) (int, int) {
 	need := m.viewport.Height()
 	for i := last; i >= 0; i-- {
 		h := len(m.chatRowLines(i))
@@ -681,7 +679,7 @@ func (m model) chatEndOffset(last int) (int, int) {
 }
 
 // chatAtBottom reports whether the last content line is visible.
-func (m model) chatAtBottom() bool {
+func (m *model) chatAtBottom() bool {
 	idx, line := m.chatBottomOffset()
 	cur, curLine := m.viewport.Offset()
 	return cur > idx || (cur == idx && curLine >= line)
@@ -815,7 +813,7 @@ func (m *model) forwardChatScroll(msg tea.Msg) {
 // because a flat offset is the natural way to ASSERT on a scroll
 // position, and because SetYOffset needs an inverse. Nothing on the
 // frame path may call it.
-func (m model) chatYOffset() int {
+func (m *model) chatYOffset() int {
 	total := 0
 	for i := 0; i < m.viewport.offsetIdx && i < m.chatRowCount(); i++ {
 		total += len(m.chatRowLines(i))

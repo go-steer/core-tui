@@ -41,7 +41,7 @@ import (
 // cursorModel builds a sized model in the requested layout with the
 // theme pinned, matching newFrameModel but with the inline
 // permission layout left at its default.
-func cursorModel(t *testing.T, layout StatusLayout, w, h int) model {
+func cursorModel(t *testing.T, layout StatusLayout, w, h int) *model {
 	t.Helper()
 	m := newModel(Options{
 		Agent:        &bareAgent{id: "cursor"},
@@ -49,17 +49,17 @@ func cursorModel(t *testing.T, layout StatusLayout, w, h int) model {
 	})
 	m.styles = newStylesWithTheme(true, goldenTheme())
 	out, _ := m.Update(tea.WindowSizeMsg{Width: w, Height: h})
-	return out.(model)
+	return out.(*model)
 }
 
 // typeInto feeds text into the model one grapheme at a time through
 // the real Update path, so the test exercises the same keystroke
 // plumbing an operator does (and not textarea.SetValue, which skips
 // it).
-func typeIntoModel(m model, text string) model {
+func typeIntoModel(m *model, text string) *model {
 	for _, r := range text {
 		out, _ := m.Update(tea.KeyPressMsg(tea.Key{Code: r, Text: string(r)}))
-		m = out.(model)
+		m = out.(*model)
 	}
 	return m
 }
@@ -174,7 +174,10 @@ func TestCursor_MultibyteAdvancesByCells(t *testing.T) {
 		{"aé日😀", 6},
 	} {
 		t.Run(tc.text, func(t *testing.T) {
-			v := typeIntoModel(base, tc.text).View()
+			// A fresh model per case: typing mutates the model it is
+			// handed, so reusing base would accumulate every case.
+			m := cursorModel(t, StatusHeader, 100, 30)
+			v := typeIntoModel(m, tc.text).View()
 			if v.Cursor == nil {
 				t.Fatal("cursor went nil after typing")
 			}
@@ -379,7 +382,7 @@ func TestCursor_ElicitFormField(t *testing.T) {
 			},
 		},
 	})
-	m = out.(model)
+	m = out.(*model)
 	m = typeIntoModel(m, "acme")
 
 	v := m.View()
@@ -388,7 +391,7 @@ func TestCursor_ElicitFormField(t *testing.T) {
 	// Tab to the second field: the caret must follow the focus onto
 	// the next row and sit at that field's own value column.
 	out, _ = m.Update(tea.KeyPressMsg(tea.Key{Code: tea.KeyTab}))
-	m = out.(model)
+	m = out.(*model)
 	empty := m.View()
 	if empty.Cursor == nil {
 		t.Fatal("cursor went nil after tabbing to the second string field")
@@ -427,13 +430,13 @@ func TestCursor_ElicitNonTextFieldHasNoCaret(t *testing.T) {
 			},
 		},
 	})
-	m = out.(model)
+	m = out.(*model)
 	for i, field := range []string{"boolean", "enum"} {
 		if c := m.View().Cursor; c != nil {
 			t.Errorf("%s field (index %d) claimed the cursor at (%d,%d)", field, i, c.X, c.Y)
 		}
 		out, _ = m.Update(tea.KeyPressMsg(tea.Key{Code: tea.KeyTab}))
-		m = out.(model)
+		m = out.(*model)
 	}
 }
 
@@ -444,17 +447,17 @@ func TestCursor_ElicitNonTextFieldHasNoCaret(t *testing.T) {
 func TestCursor_NilWhenNothingOwnsIt(t *testing.T) {
 	cases := []struct {
 		name  string
-		setup func(t *testing.T) model
+		setup func(t *testing.T) *model
 	}{
 		{
 			name: "unsized-model",
-			setup: func(*testing.T) model {
+			setup: func(*testing.T) *model {
 				return newModel(Options{Agent: &bareAgent{id: "cursor"}})
 			},
 		},
 		{
 			name: "blurred-textarea",
-			setup: func(t *testing.T) model {
+			setup: func(t *testing.T) *model {
 				m := cursorModel(t, StatusHeader, 100, 30)
 				m.input.Blur()
 				return m
@@ -462,7 +465,7 @@ func TestCursor_NilWhenNothingOwnsIt(t *testing.T) {
 		},
 		{
 			name: "side-answer-viewer",
-			setup: func(t *testing.T) model {
+			setup: func(t *testing.T) *model {
 				m := cursorModel(t, StatusHeader, 100, 30)
 				m.sideAnswer = &SideAnswer{
 					Question: "what is a goroutine",
@@ -473,7 +476,7 @@ func TestCursor_NilWhenNothingOwnsIt(t *testing.T) {
 		},
 		{
 			name: "permission-overlay",
-			setup: func(t *testing.T) model {
+			setup: func(t *testing.T) *model {
 				m := cursorModel(t, StatusHeader, 100, 30)
 				m.opts.PermissionLayout = PermissionOverlay
 				out, _ := m.Update(permissionRequestMsg{req: PermissionRequest{
@@ -481,7 +484,7 @@ func TestCursor_NilWhenNothingOwnsIt(t *testing.T) {
 					ToolName: "bash",
 					Detail:   "rm -rf /tmp/x",
 				}})
-				return out.(model)
+				return out.(*model)
 			},
 		},
 		{
@@ -490,7 +493,7 @@ func TestCursor_NilWhenNothingOwnsIt(t *testing.T) {
 			// detail overlay is the arrow-nav dialog that remains,
 			// and it still has nothing to type into.
 			name: "arrow-nav-dialog",
-			setup: func(t *testing.T) model {
+			setup: func(t *testing.T) *model {
 				m := cursorModel(t, StatusHeader, 100, 30)
 				m.overlayStack.open(newToolCallDialog(0))
 				return m

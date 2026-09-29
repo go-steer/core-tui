@@ -55,18 +55,18 @@ var guidanceMarkerRE = regexp.MustCompile(`▸ bundle-handling guidance \((\d+) 
 // guidanceModel is a live-mode model — the attach path, where the
 // inbox turn's prompt arrives as a committed chunk — with the
 // transcript focused.
-func guidanceModel(t *testing.T) model {
+func guidanceModel(t *testing.T) *model {
 	t.Helper()
 	m := newModel(Options{Agent: &bareAgent{id: "inbox"}})
 	m.styles = newStylesWithTheme(true, goldenTheme())
 	m.liveMode = true
 	out, _ := m.Update(tea.WindowSizeMsg{Width: 100, Height: 40})
-	return out.(model)
+	return out.(*model)
 }
 
 // rowText is the stripped render of history row i as the transcript
 // draws it.
-func rowText(m model, i int) string {
+func rowText(m *model, i int) string {
 	msg, _ := m.history.at(i)
 	return ansi.Strip(strings.Join(m.chatMessageLines(i, m.history.Len(), msg), "\n"))
 }
@@ -105,7 +105,7 @@ func TestSplitInboxGuidance(t *testing.T) {
 func TestInboxGuidance_FoldedByDefaultOnTheAttachPath(t *testing.T) {
 	m := guidanceModel(t)
 	out, _ := m.Update(streamChunkMsg{gen: m.sessionGen, text: testInboxBundle})
-	m = out.(model)
+	m = out.(*model)
 
 	snap := m.history.Snapshot()
 	if len(snap) != 1 || snap[0].Role != RoleAssistant {
@@ -155,7 +155,7 @@ func TestInboxGuidance_FoldedByDefaultOnTheAttachPath(t *testing.T) {
 func TestInboxGuidance_TheFollowingPromptStaysVisible(t *testing.T) {
 	m := guidanceModel(t)
 	out, _ := m.Update(streamChunkMsg{gen: m.sessionGen, text: testInboxBundle + "\n\n---\n\nand check the nodes"})
-	m = out.(model)
+	m = out.(*model)
 	got := rowText(m, 0)
 	if !strings.Contains(got, "and check the nodes") || !guidanceMarkerRE.MatchString(got) {
 		t.Errorf("want the marker and the trailing prompt, got:\n%s", got)
@@ -190,8 +190,8 @@ func TestInboxGuidance_FoldedOnAnAutoContinueRow(t *testing.T) {
 func TestInboxGuidance_TranscriptKeepsTheFullText(t *testing.T) {
 	m := guidanceModel(t)
 	out, _ := m.Update(streamChunkMsg{gen: m.sessionGen, text: testInboxBundle})
-	m = out.(model)
-	tr := buildTranscript(&m)
+	m = out.(*model)
+	tr := buildTranscript(m)
 	if len(tr.Messages) == 0 || tr.Messages[0].Text != testInboxBundle {
 		t.Errorf("transcript = %+v, want the full bundle text", tr.Messages)
 	}

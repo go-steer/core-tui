@@ -71,7 +71,7 @@ func TestModalFooters_KeysStayWithTheirActions(t *testing.T) {
 			}
 			t.Run(tc.name+"/"+strconv.Itoa(w), func(t *testing.T) {
 				m := tc.open(t, w, 24)
-				plain := ansi.Strip(tc.render(&m))
+				plain := ansi.Strip(tc.render(m))
 				checked := 0
 				for _, pair := range tc.footerPairs {
 					action := pair[strings.LastIndex(pair, " ")+1:]
@@ -113,8 +113,8 @@ func TestModalFooters_LegendsBreakOnASeparator(t *testing.T) {
 	keys := []string{"type", "↑↓", "enter", "esc"}
 
 	m := newFrameModel(StatusHeader, 40, 24)
-	askThemePicker(&m)
-	block := ansi.Strip(m.overlayStack.render(m.width, &m))
+	askThemePicker(m)
+	block := ansi.Strip(m.overlayStack.render(m.width, m))
 
 	// Footer rows are the boxed rows carrying a bound pair. The
 	// placeholder row says "type to filter" as well, with ordinary

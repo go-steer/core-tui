@@ -62,7 +62,7 @@ var (
 // model whose View() gets measured.
 type frameState struct {
 	name  string
-	setup func(t *testing.T, m model, w, h int) model
+	setup func(t *testing.T, m *model, w, h int) *model
 }
 
 // frameStates enumerates the UI states the invariants must hold in.
@@ -73,19 +73,19 @@ func frameStates() []frameState {
 	return []frameState{
 		{
 			name: "base-chat-empty",
-			setup: func(_ *testing.T, m model, _, _ int) model {
+			setup: func(_ *testing.T, m *model, _, _ int) *model {
 				return m
 			},
 		},
 		{
 			name: "base-chat-transcript",
-			setup: func(_ *testing.T, m model, _, _ int) model {
+			setup: func(_ *testing.T, m *model, _, _ int) *model {
 				return withHostileTranscript(m)
 			},
 		},
 		{
 			name: "permission-modal",
-			setup: func(_ *testing.T, m model, _, _ int) model {
+			setup: func(_ *testing.T, m *model, _, _ int) *model {
 				m = withHostileTranscript(m)
 				out, _ := m.Update(permissionRequestMsg{req: PermissionRequest{
 					Kind:     PermissionKindBash,
@@ -93,12 +93,12 @@ func frameStates() []frameState {
 					Verb:     "rm",
 					Detail:   "rm -rf /tmp/a-really-quite-long-path/that/keeps/going/well/past/any/sensible/terminal/width",
 				}})
-				return out.(model)
+				return out.(*model)
 			},
 		},
 		{
 			name: "elicit-modal",
-			setup: func(_ *testing.T, m model, _, _ int) model {
+			setup: func(_ *testing.T, m *model, _, _ int) *model {
 				m = withHostileTranscript(m)
 				out, _ := m.Update(elicitRequestMsg{
 					serverName: "an-mcp-server-with-a-long-name",
@@ -112,12 +112,12 @@ func frameStates() []frameState {
 						},
 					},
 				})
-				return out.(model)
+				return out.(*model)
 			},
 		},
 		{
 			name: "help-panel",
-			setup: func(_ *testing.T, m model, _, _ int) model {
+			setup: func(_ *testing.T, m *model, _, _ int) *model {
 				m = withHostileTranscript(m)
 				m.helpOpen = true
 				m.resize()
@@ -131,7 +131,7 @@ func frameStates() []frameState {
 			// different set of rows at a different height. The
 			// invariants have to hold on those too.
 			name: "help-panel-paged",
-			setup: func(_ *testing.T, m model, _, _ int) model {
+			setup: func(_ *testing.T, m *model, _, _ int) *model {
 				m = withHostileTranscript(m)
 				m.advanceHelp()
 				m.resize()
@@ -151,7 +151,7 @@ func frameStates() []frameState {
 			// geometry — wrapped Glamour prose plus the spinner verb
 			// with its widest elapsed suffix — is inside the invariants.
 			name: "live-stretch",
-			setup: func(_ *testing.T, m model, _, _ int) model {
+			setup: func(_ *testing.T, m *model, _, _ int) *model {
 				return withLiveStretch(withHostileTranscript(m))
 			},
 		},
@@ -174,9 +174,9 @@ func frameStates() []frameState {
 			// measured BEFORE the clamp, which is the assertion that
 			// can.
 			name: "theme-picker",
-			setup: func(_ *testing.T, m model, _, _ int) model {
+			setup: func(_ *testing.T, m *model, _, _ int) *model {
 				m = withHostileTranscript(m)
-				askThemePicker(&m)
+				askThemePicker(m)
 				return m
 			},
 		},
@@ -187,7 +187,7 @@ func frameStates() []frameState {
 			// with a box taller than three rows and the clamp on it
 			// was untested by construction.
 			name: "tall-textarea",
-			setup: func(_ *testing.T, m model, _, _ int) model {
+			setup: func(_ *testing.T, m *model, _, _ int) *model {
 				return withTallTextarea(withHostileTranscript(m))
 			},
 		},
@@ -223,7 +223,7 @@ func frameStates() []frameState {
 		// invariants at five different modal surfaces.
 		{
 			name: "model-picker",
-			setup: func(_ *testing.T, m model, _, _ int) model {
+			setup: func(_ *testing.T, m *model, _, _ int) *model {
 				return withModelPicker(withHostileTranscript(m), "")
 			},
 		},
@@ -245,16 +245,16 @@ func frameStates() []frameState {
 			// which is the vacuous case this whole block exists to
 			// avoid.
 			name: "model-picker-filtered",
-			setup: func(_ *testing.T, m model, _, _ int) model {
+			setup: func(_ *testing.T, m *model, _, _ int) *model {
 				return withModelPicker(withHostileTranscript(m), "gateway")
 			},
 		},
 		{
 			name: "session-picker",
-			setup: func(_ *testing.T, m model, _, _ int) model {
+			setup: func(_ *testing.T, m *model, _, _ int) *model {
 				m = withHostileTranscript(m)
 				m.opts.Agent = &switchAgent{id: "cur", sessions: frameSessions()}
-				q := askSessionPicker(&m, true)
+				q := askSessionPicker(m, true)
 				q.applySessions(frameSessions())
 				// Off row 0: the cursor cell is two lines tall and
 				// listWindow is called twice to keep both of them on
@@ -267,7 +267,7 @@ func frameStates() []frameState {
 		},
 		{
 			name: "subagent-detail",
-			setup: func(_ *testing.T, m model, _, _ int) model {
+			setup: func(_ *testing.T, m *model, _, _ int) *model {
 				m = withHostileTranscript(m)
 				d := newSubagentDialog("cluster-auditor")
 				d.apply(subagentEventsMsg{
@@ -287,7 +287,7 @@ func frameStates() []frameState {
 		},
 		{
 			name: "tool-call-detail",
-			setup: func(_ *testing.T, m model, _, _ int) model {
+			setup: func(_ *testing.T, m *model, _, _ int) *model {
 				m = withHostileTranscript(m)
 				m = withToolCalls(m)
 				m.overlayStack.open(newToolCallDialog(len(collectToolCalls(m.history.Snapshot()))))
@@ -341,15 +341,15 @@ func frameModels() []ModelInfo {
 // The filter is typed through overlay.handleKeyMsg rather than poked
 // into the widget, so the state the grid measures is the one a
 // keystroke actually produces.
-func withModelPicker(m model, filter string) model {
+func withModelPicker(m *model, filter string) *model {
 	models := frameModels()
 	current := models[1].ID
 	m.opts.Agent = &swapAgent{id: current, models: models}
 	m.currentModel = current
-	q := askModelPicker(&m, true)
+	q := askModelPicker(m, true)
 	q.applyModels(models, current)
 	if filter != "" {
-		typeIntoPicker(&m, filter)
+		typeIntoPicker(m, filter)
 	}
 	return m
 }
@@ -423,7 +423,7 @@ func frameSubagentPage() SubagentEventPage {
 // renderToolDetail, and it is both wider and taller than the modal —
 // wider so the width contract has something to bound, taller so the
 // body windows and the scrollbar column appears.
-func withToolCalls(m model) model {
+func withToolCalls(m *model) *model {
 	m.history.Append(Message{
 		Role:       RoleTool,
 		ToolName:   "read_file",
@@ -457,11 +457,11 @@ func withToolCalls(m model) model {
 // time-dependent frame is a flaky frame, and because the value chosen
 // is the widest the suffix ever gets ("2h00m"), which is the case the
 // width invariant should be measuring.
-func withLiveStretch(m model) model {
+func withLiveStretch(m *model) *model {
 	m.liveMode = true
 	long := strings.Repeat("live-streamed-unbreakable-token-", 8)
 	out, _ := m.Update(streamChunkMsg{gen: m.sessionGen, text: long, partial: true})
-	m = out.(model)
+	m = out.(*model)
 	start := time.Date(2026, 8, 15, 9, 0, 0, 0, time.UTC)
 	m.turnStarted = start
 	m.now = func() time.Time { return start.Add(2 * time.Hour) }
@@ -473,7 +473,7 @@ func withLiveStretch(m model) model {
 // to stress the width budget: an unbreakable token far longer than
 // any terminal, a wide fenced code block, and enough rows to fill
 // the tallest viewport in the matrix.
-func withHostileTranscript(m model) model {
+func withHostileTranscript(m *model) *model {
 	m.history.Append(Message{
 		Role:     RoleUser,
 		Text:     "please read the file",
@@ -613,7 +613,7 @@ const frameCwd = "~/core-tui"
 // on a wrap boundary failed the 41x5 resize step in one worktree and
 // passed it in another (issue #307). The long-cwd case is covered on
 // purpose by TestFrameInvariants_LongCwdHeader instead.
-func newFrameModel(layout StatusLayout, w, h int) model {
+func newFrameModel(layout StatusLayout, w, h int) *model {
 	return newFrameModelAt(layout, frameCwd, w, h)
 }
 
@@ -622,7 +622,7 @@ func newFrameModel(layout StatusLayout, w, h int) model {
 // header's wrapped height is charged to the chrome budget, and a
 // same-size WindowSizeMsg afterwards is a no-op that would not
 // re-measure it.
-func newFrameModelAt(layout StatusLayout, cwd string, w, h int) model {
+func newFrameModelAt(layout StatusLayout, cwd string, w, h int) *model {
 	m := newModel(Options{
 		Agent:            &bareAgent{id: "frame"},
 		StatusLayout:     layout,
@@ -631,7 +631,7 @@ func newFrameModelAt(layout StatusLayout, cwd string, w, h int) model {
 	m.cwd = cwd
 	m.styles = newStylesWithTheme(true, goldenTheme())
 	out, _ := m.Update(tea.WindowSizeMsg{Width: w, Height: h})
-	return out.(model)
+	return out.(*model)
 }
 
 // assertFrameFits is the invariant itself. Kept deliberately small
@@ -825,7 +825,7 @@ func (p framePanel) matchAt(frame []string, row int) (int, string) {
 //
 // It returns the left column's stack, the sidebar panel, and whether
 // the sidebar is part of this layout at all.
-func composedStack(m model) (stack []framePanel, sidebar framePanel, hasSidebar bool) {
+func composedStack(m *model) (stack []framePanel, sidebar framePanel, hasSidebar bool) {
 	cw := m.chromeWidth()
 	add := func(name, block string) {
 		stack = append(stack, framePanel{name: name, block: block, col: 0, end: cw})
@@ -879,11 +879,11 @@ func modalBlock(m *model) (string, bool) {
 // assertPanelsSurvive is the panel-survival invariant: every panel the
 // layout contract puts on screen is on screen, in its own rectangle,
 // whole.
-func assertPanelsSurvive(t *testing.T, m model, w, h int) {
+func assertPanelsSurvive(t *testing.T, m *model, w, h int) {
 	t.Helper()
 	frame := frameCellRows(m.View().Content)
 
-	if block, ok := modalBlock(&m); ok {
+	if block, ok := modalBlock(m); ok {
 		assertModalSurvives(t, m, frame, block, w, h)
 		return
 	}
@@ -1045,7 +1045,7 @@ func assertPanelsNotDegenerate(t *testing.T, stack []framePanel) {
 // key hint that closes the thing live. Asserting the whole block lands
 // inside the frame at its centred origin says the footer survived
 // without naming the footer's text.
-func assertModalSurvives(t *testing.T, m model, frame []string, block string, w, h int) {
+func assertModalSurvives(t *testing.T, m *model, frame []string, block string, w, h int) {
 	t.Helper()
 	bw, bh := lipgloss.Width(block), lipgloss.Height(block)
 	if bh > h || bw > w {
@@ -1279,9 +1279,9 @@ func renderedBlocks(m *model) []widthContract {
 // assertRenderersHonorWidth is the invariant: no renderer hands the
 // layout a line wider than the width it was asked for, and no
 // renderer hands it a line whose width the layout cannot measure.
-func assertRenderersHonorWidth(t *testing.T, m model) {
+func assertRenderersHonorWidth(t *testing.T, m *model) {
 	t.Helper()
-	for _, c := range renderedBlocks(&m) {
+	for _, c := range renderedBlocks(m) {
 		for i, line := range strings.Split(c.block, "\n") {
 			if got := ansi.StringWidth(line); got > c.width {
 				t.Errorf("%s produced line %d at %d cols after being asked for %d (overflow %d) — "+
@@ -1343,7 +1343,7 @@ func TestFrameInvariants_ResizeSequence(t *testing.T) {
 	}
 	for _, s := range seq {
 		out, _ := m.Update(tea.WindowSizeMsg{Width: s.w, Height: s.h})
-		m = out.(model)
+		m = out.(*model)
 		t.Run(strconv.Itoa(s.w)+"x"+strconv.Itoa(s.h), func(t *testing.T) {
 			assertFrameFits(t, m.View().Content, s.w, s.h)
 			assertPanelsSurvive(t, m, s.w, s.h)
