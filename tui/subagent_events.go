@@ -526,9 +526,12 @@ func renderSubagentTurn(e SubagentEvent, styles styleSet, width int) []string {
 		out = append(out, gutter+line)
 	}
 	for _, r := range e.ToolResults {
-		text, style := subagentResultSummary(r, styles)
+		text, style, warn := subagentResultSummary(r, styles)
 		out = append(out, gutter+styles.Muted.Render("  ↳ ")+
 			style.Render(truncateDisplay(text, w-4)))
+		if warn != "" {
+			out = append(out, gutter+"    "+styles.WarningText.Render(truncateDisplay(warn, w-4)))
+		}
 	}
 	if len(out) == 0 {
 		// A turn with neither prose nor tool traffic still happened
@@ -559,19 +562,27 @@ func subagentGutter(e SubagentEvent, styles styleSet) string {
 // error if it failed, else the most content-shaped field the host
 // sent, else a bare "ok". Returns the text and the style to render
 // it in separately so the caller can truncate before styling.
-func subagentResultSummary(r SubagentToolResult, styles styleSet) (string, lipgloss.Style) {
+//
+// warn is a second, warning-styled line for a result whose run
+// failed after delivering it (a non-empty `run_error`, issue #316),
+// else "". The summary itself is unchanged in that case — `output`
+// is the real deliverable — and an `error` still takes precedence.
+func subagentResultSummary(r SubagentToolResult, styles styleSet) (text string, style lipgloss.Style, warn string) {
 	if err := collapseWhitespace(r.Error); err != "" {
-		return GlyphToolFail + " " + err, styles.ErrorText
+		return GlyphToolFail + " " + err, styles.ErrorText, ""
+	}
+	if runErr := collapseWhitespace(resultRunError(r.Response)); runErr != "" {
+		warn = GlyphWarn + " " + runErrorLead + ": " + runErr
 	}
 	for _, key := range []string{"output", "result", "content", "text", "summary", "stdout"} {
 		if v, ok := r.Response[key]; ok {
 			if s := collapseWhitespace(fmt.Sprint(v)); s != "" {
-				return s, styles.ToolBody
+				return s, styles.ToolBody, warn
 			}
 		}
 	}
 	if len(r.Response) == 0 {
-		return "ok", styles.Muted
+		return "ok", styles.Muted, warn
 	}
 	// Unknown shape: name the keys rather than dumping JSON into a
 	// single line that would just get elided anyway.
@@ -580,7 +591,7 @@ func subagentResultSummary(r SubagentToolResult, styles styleSet) (string, lipgl
 		keys = append(keys, k)
 	}
 	sort.Strings(keys)
-	return strings.Join(keys, ", "), styles.Muted
+	return strings.Join(keys, ", "), styles.Muted, warn
 }
 
 // subagentTextWidth is how much room a turn line's content gets after

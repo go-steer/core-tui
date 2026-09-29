@@ -89,6 +89,7 @@ type styleSet struct {
 	SystemText    lipgloss.Style
 	NoticeText    lipgloss.Style // RoleNotice — host-initiated rows (issue #30)
 	ErrorText     lipgloss.Style
+	WarningText   lipgloss.Style // delivered with a caveat, never ErrorText (issue #316)
 	ToolHead      lipgloss.Style
 	ToolBody      lipgloss.Style
 
@@ -172,6 +173,7 @@ func newStylesWithTheme(dark bool, theme Theme) styleSet {
 		// renderMessage) carry the distinction.
 		NoticeText:       lipgloss.NewStyle().Foreground(theme.Info),
 		ErrorText:        lipgloss.NewStyle().Foreground(theme.Error),
+		WarningText:      lipgloss.NewStyle().Foreground(theme.Warning),
 		ToolHead:         lipgloss.NewStyle().Foreground(theme.Accent).Bold(true),
 		ToolBody:         lipgloss.NewStyle().Foreground(muted),
 		Wordmark:         lipgloss.NewStyle().Foreground(theme.Primary).Bold(true),

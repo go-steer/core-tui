@@ -72,6 +72,28 @@ func TestToolCallDialog_OpensOnMostRecent(t *testing.T) {
 	}
 }
 
+// Issue #316: the header's state hint for a delivered result whose
+// run failed afterwards is a warning, not "✘ failed".
+func TestRenderToolCallHeader_RunErrorWarnsNotFails(t *testing.T) {
+	styles := newStyles(true, Branding{})
+	tool := Message{
+		Role:            RoleTool,
+		ToolName:        "spawn_agent",
+		ToolResponseMap: map[string]any{"output": "x", "run_error": "429"},
+	}
+	got := renderToolCallHeader(0, 1, tool, styles)
+	if !strings.Contains(got, GlyphWarn+" run failed after returning") {
+		t.Errorf("expected the run-failed warning hint, got:\n%s", got)
+	}
+	if strings.Contains(got, "failed") && strings.Contains(got, "✘") {
+		t.Errorf("run_error must not render as ✘ failed, got:\n%s", got)
+	}
+	tool.ToolError = "boom"
+	if got := renderToolCallHeader(0, 1, tool, styles); !strings.Contains(got, "✘ failed") {
+		t.Errorf("expected error to keep precedence, got:\n%s", got)
+	}
+}
+
 func TestToolCallDialog_LeftRightWalk(t *testing.T) {
 	m := modelWithTools(t)
 	d := newToolCallDialog(len(collectToolCalls(m.history.Snapshot())))

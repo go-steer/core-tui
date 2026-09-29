@@ -69,6 +69,11 @@ func renderToolPreviewWithResult(name string, args, response map[string]any, err
 // Errors short-circuit to a uniform red one-line summary so any
 // failed tool — known or not — still surfaces the failure under
 // its row.
+//
+// A non-empty `run_error` in the response (issue #316) is the third
+// state between the two: the tool delivered its result and the run
+// behind it failed afterwards. The per-tool body renders as usual
+// and one warning line goes under it. `err` keeps precedence.
 func renderToolResult(name string, args, response map[string]any, err string, styles styleSet) string {
 	if err != "" {
 		return renderResultError(err, styles)
@@ -76,6 +81,20 @@ func renderToolResult(name string, args, response map[string]any, err string, st
 	if response == nil {
 		return ""
 	}
+	body := renderToolResultBody(name, args, response, styles)
+	runErr := resultRunError(response)
+	switch {
+	case runErr == "":
+		return body
+	case body == "":
+		return renderResultRunError(runErr, styles)
+	default:
+		return body + "\n" + renderResultRunError(runErr, styles)
+	}
+}
+
+// renderToolResultBody is the per-tool switch behind renderToolResult.
+func renderToolResultBody(name string, args, response map[string]any, styles styleSet) string {
 	switch name {
 	case "read_file":
 		return renderReadFileResult(args, response, styles)
@@ -97,6 +116,31 @@ func renderToolResult(name string, args, response map[string]any, err string, st
 		return ""
 	}
 	return ""
+}
+
+// resultRunError returns the response's `run_error` when it is a
+// non-empty string, else "". Keyed on the map, not the tool name:
+// core-agent's spawn_agent / await_subagent adopted it first
+// (core-agent#1154) but any tool may. An empty string is absent.
+func resultRunError(response map[string]any) string {
+	s, _ := response["run_error"].(string)
+	return strings.TrimSpace(s)
+}
+
+// runErrorLead is the fixed wording of the warning line, shared by
+// the chat row, the subagent drill-in and the detail overlay.
+const runErrorLead = "run failed after returning"
+
+// renderResultRunError is the one-line warning for a result that was
+// delivered by a run that then failed. Warning, not error, colored:
+// the row keeps its ✓ because the result is real, and a red ✘ here
+// would re-create for the operator the misreading core-agent#1002
+// fixed for the model. Whitespace-collapsed and sanitized like the
+// error row.
+func renderResultRunError(runErr string, styles styleSet) string {
+	warn := styles.WarningText.Bold(true)
+	return styles.Muted.Render(summaryIndent) + warn.Render(GlyphWarn+" "+runErrorLead+": ") +
+		styles.WarningText.Render(sanitizeLine(collapseWhitespace(runErr)))
 }
 
 // renderResultError formats a tool failure as a red error row

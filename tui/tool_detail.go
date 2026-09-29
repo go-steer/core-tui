@@ -88,6 +88,9 @@ func renderToolDetail(args, response map[string]any, errStr string, styles style
 	if strings.TrimSpace(errStr) != "" {
 		sections = append(sections, renderDetailError(errStr, styles))
 	} else if len(response) > 0 {
+		if runErr := resultRunError(response); runErr != "" {
+			sections = append(sections, renderDetailRunError(runErr, styles))
+		}
 		sections = append(sections, renderDetailSection("response", response, styles))
 	}
 
@@ -152,6 +155,17 @@ func renderDetailError(errStr string, styles styleSet) string {
 	head := styles.Muted.Render(detailIndent + "error:")
 	body := indentBlock(sanitizeContent(normalizeNewlines(text)), detailIndent+"  ")
 	return head + "\n" + styles.ErrorText.Render(body)
+}
+
+// renderDetailRunError is the overlay's counterpart to
+// renderResultRunError (issue #316): the result below it was
+// delivered, and the run that produced it failed afterwards. Full
+// text, sanitized, warning-colored — the response section still
+// renders under it because that result is the deliverable.
+func renderDetailRunError(runErr string, styles styleSet) string {
+	head := styles.WarningText.Render(detailIndent + GlyphWarn + " " + runErrorLead + ":")
+	body := indentBlock(sanitizeContent(normalizeNewlines(runErr)), detailIndent+"  ")
+	return head + "\n" + styles.WarningText.Render(body)
 }
 
 // marshalPretty JSON-encodes v with 2-space indent. Uses a fallback

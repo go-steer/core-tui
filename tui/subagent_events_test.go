@@ -213,6 +213,60 @@ func TestRenderSubagentTurns_FailedToolReadsAsError(t *testing.T) {
 	}
 }
 
+// TestSubagentResultSummary_RunError covers issue #316 for the
+// drill-in: `output` stays the summary, a non-empty run_error adds a
+// warning line, an empty one is absent, and `error` wins.
+func TestSubagentResultSummary_RunError(t *testing.T) {
+	styles := newStyles(true, Branding{})
+	cases := []struct {
+		name     string
+		r        SubagentToolResult
+		wantText string
+		wantWarn string
+	}{
+		{"output only", SubagentToolResult{Response: map[string]any{"output": "x"}}, "x", ""},
+		{"output plus run_error", SubagentToolResult{Response: map[string]any{"output": "x", "run_error": "429"}},
+			"x", GlyphWarn + " run failed after returning: 429"},
+		{"error only", SubagentToolResult{Error: "boom"}, GlyphToolFail + " boom", ""},
+		{"empty run_error is absent", SubagentToolResult{Response: map[string]any{"output": "x", "run_error": ""}}, "x", ""},
+		{"error beats run_error", SubagentToolResult{Error: "boom", Response: map[string]any{"output": "x", "run_error": "429"}},
+			GlyphToolFail + " boom", ""},
+		{"run_error collapsed", SubagentToolResult{Response: map[string]any{"output": "x", "run_error": "rate\n  limited"}},
+			"x", GlyphWarn + " run failed after returning: rate limited"},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			text, _, warn := subagentResultSummary(tc.r, styles)
+			if text != tc.wantText {
+				t.Errorf("text = %q, want %q", text, tc.wantText)
+			}
+			if warn != tc.wantWarn {
+				t.Errorf("warn = %q, want %q", warn, tc.wantWarn)
+			}
+		})
+	}
+}
+
+func TestRenderSubagentTurns_RunErrorAddsWarningLine(t *testing.T) {
+	styles := newStyles(true, Branding{})
+	evs := []SubagentEvent{{
+		Seq: 1,
+		ToolResults: []SubagentToolResult{{
+			Name: "await_subagent", Response: map[string]any{"output": "the report", "run_error": "429"},
+		}},
+	}}
+	lines := renderSubagentTurns(evs, styles, 100)
+	if len(lines) != 2 {
+		t.Fatalf("expected summary + warning lines, got %d:\n%s", len(lines), strings.Join(lines, "\n"))
+	}
+	if !strings.Contains(lines[0], "the report") || strings.Contains(lines[0], GlyphToolFail) {
+		t.Errorf("expected the output as a plain summary, got %q", lines[0])
+	}
+	if !strings.Contains(lines[1], GlyphWarn) || !strings.Contains(lines[1], "429") {
+		t.Errorf("expected the warning line naming run_error, got %q", lines[1])
+	}
+}
+
 func TestRenderSubagentTurns_TruncatesToWidth(t *testing.T) {
 	styles := newStyles(true, Branding{})
 	long := strings.Repeat("x", 500)

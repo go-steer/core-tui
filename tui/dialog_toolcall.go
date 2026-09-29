@@ -235,6 +235,9 @@ func renderToolCallHeader(idx, total int, tool Message, styles styleSet) string 
 	}
 	if strings.TrimSpace(tool.ToolError) != "" {
 		parts = append(parts, styles.ErrorText.Render("✘ failed"))
+	} else if resultRunError(tool.ToolResponseMap) != "" {
+		// Delivered, then the run failed (#316): warn, never ✘.
+		parts = append(parts, styles.WarningText.Render(GlyphWarn+" "+runErrorLead))
 	} else if tool.ToolResponseMap == nil {
 		parts = append(parts, styles.Muted.Render("(pending)"))
 	}

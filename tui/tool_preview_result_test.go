@@ -17,6 +17,8 @@ package tui
 import (
 	"strings"
 	"testing"
+
+	"github.com/charmbracelet/x/ansi"
 )
 
 func TestRenderToolPreviewWithResult_CallAndResultJoin(t *testing.T) {
@@ -164,6 +166,69 @@ func TestRenderToolResult_ErrorShortCircuits(t *testing.T) {
 	}
 	if !strings.Contains(got, "boom") {
 		t.Errorf("expected error message in output, got:\n%q", got)
+	}
+}
+
+// TestRenderToolResult_RunError covers issue #316: a result carrying
+// a non-empty run_error was delivered, so it renders like any other
+// success plus one warning line — never the red ✘ error row — and
+// `error` keeps precedence. Keyed on the map, so an unrecognized tool
+// name (spawn_agent) gets the warning too.
+func TestRenderToolResult_RunError(t *testing.T) {
+	styles := newStyles(true, Branding{})
+	cases := []struct {
+		name     string
+		tool     string
+		response map[string]any
+		err      string
+		wantWarn bool
+		want     []string
+	}{
+		{"output only", "bash", map[string]any{"output": "x"}, "", false, []string{"x"}},
+		{"output plus run_error", "bash", map[string]any{"output": "x", "run_error": "429"}, "", true, []string{"x", "429"}},
+		{"error only", "bash", map[string]any{}, "boom", false, []string{"✘ error: ", "boom"}},
+		{"empty run_error is absent", "bash", map[string]any{"output": "x", "run_error": ""}, "", false, []string{"x"}},
+		{"unknown tool still warns", "spawn_agent", map[string]any{"output": "x", "run_error": "429"}, "", true, []string{"429"}},
+		{"error beats run_error", "bash", map[string]any{"output": "x", "run_error": "429"}, "boom", false, []string{"boom"}},
+		{"non-string run_error ignored", "bash", map[string]any{"output": "x", "run_error": 429}, "", false, []string{"x"}},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			got := ansi.Strip(renderToolResult(tc.tool, nil, tc.response, tc.err, styles))
+			for _, w := range tc.want {
+				if !strings.Contains(got, w) {
+					t.Errorf("expected %q in:\n%s", w, got)
+				}
+			}
+			hasWarn := strings.Contains(got, GlyphWarn+" run failed after returning: ")
+			if hasWarn != tc.wantWarn {
+				t.Errorf("warning line present = %v, want %v:\n%s", hasWarn, tc.wantWarn, got)
+			}
+			if tc.err == "" && strings.Contains(got, "✘") {
+				t.Errorf("a delivered result must not render as an error:\n%s", got)
+			}
+			if tc.tool == "spawn_agent" && strings.Contains(got, "\n") {
+				t.Errorf("expected only the warning line for an unknown tool:\n%s", got)
+			}
+		})
+	}
+}
+
+func TestRenderToolResult_RunErrorIsOneSanitizedLine(t *testing.T) {
+	response := map[string]any{"output": "x", "run_error": "stream\n  error:\t\x1b[31mreset\n" + strings.Repeat("y", 400)}
+	got := renderToolResult("spawn_agent", nil, response, "", newStyles(true, Branding{}))
+	if strings.Contains(got, "\n") {
+		t.Errorf("expected one line, got:\n%q", got)
+	}
+	plain := ansi.Strip(got)
+	if !strings.Contains(plain, "stream error: ") {
+		t.Errorf("expected whitespace collapsed, got:\n%q", plain)
+	}
+	if !strings.Contains(plain, GlyphTruncate) {
+		t.Errorf("expected a long run_error truncated, got:\n%q", plain)
+	}
+	if strings.Contains(got, "\x1b[31mreset") {
+		t.Errorf("expected the payload's escape neutralized, got:\n%q", got)
 	}
 }
 
