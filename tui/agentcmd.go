@@ -484,6 +484,10 @@ func (m model) startAgentTurn(agent Agent, prompt string) context.CancelFunc {
 	// since bumped m.sessionGen (see model.go). Same rationale for
 	// per-event chat msgs; emitEvent takes gen as an argument.
 	gen := m.sessionGen
+	// The channel is taken by value for the same reason: the goroutine
+	// outlives this call, so it holds what it needs rather than the
+	// model, whose fields the event loop goes on writing (issue #266).
+	ch := m.eventCh
 
 	go func() {
 		var fail error
@@ -492,7 +496,7 @@ func (m model) startAgentTurn(agent Agent, prompt string) context.CancelFunc {
 				fail = err
 				break
 			}
-			emitEvent(ctx, m.eventCh, gen, ev)
+			emitEvent(ctx, ch, gen, ev)
 		}
 
 		var terminal tea.Msg
@@ -507,7 +511,7 @@ func (m model) startAgentTurn(agent Agent, prompt string) context.CancelFunc {
 			terminal = turnDoneMsg{gen: gen, elapsed: time.Since(started)}
 		}
 		select {
-		case m.eventCh <- terminal:
+		case ch <- terminal:
 		case <-time.After(time.Second):
 			// listener is gone — drop the terminal silently.
 		}
@@ -533,11 +537,19 @@ func (m model) startAgentTurn(agent Agent, prompt string) context.CancelFunc {
 // ctx cancellation stops the loop without yielding a final error
 // (per the LiveAgent semantics).
 func (m model) startLiveStream(agent LiveAgent) context.CancelFunc {
-	ctx, cancel := context.WithCancel(context.Background())
 	// Snapshot the session generation at goroutine start; every
 	// msg emitted from this drain carries it so a subsequent
 	// applySwitchTarget invalidates the stale stream cleanly.
-	gen := m.sessionGen
+	return runLiveStream(agent, m.eventCh, m.sessionGen)
+}
+
+// runLiveStream is startLiveStream with the two model fields it reads
+// taken as arguments: ch is the model's eventCh, gen the sessionGen to
+// stamp every msg with. spawnLiveStreamCmd calls it from a Cmd, which
+// runs off the event loop and so must not read the model at all
+// (issue #266).
+func runLiveStream(agent LiveAgent, ch chan<- tea.Msg, gen uint64) context.CancelFunc {
+	ctx, cancel := context.WithCancel(context.Background())
 	go func() {
 		for ev, err := range agent.Events(ctx) {
 			if ctx.Err() != nil {
@@ -545,18 +557,18 @@ func (m model) startLiveStream(agent LiveAgent) context.CancelFunc {
 			}
 			if err != nil {
 				select {
-				case m.eventCh <- liveStreamErrMsg{gen: gen, err: err}:
+				case ch <- liveStreamErrMsg{gen: gen, err: err}:
 				case <-ctx.Done():
 					return
 				}
 				continue
 			}
-			emitEvent(ctx, m.eventCh, gen, ev)
+			emitEvent(ctx, ch, gen, ev)
 		}
 		// Iterator returned cleanly (or stopped yielding). Tell the
 		// TUI so the "Disconnected" banner can render.
 		select {
-		case m.eventCh <- liveStreamEndedMsg{gen: gen}:
+		case ch <- liveStreamEndedMsg{gen: gen}:
 		case <-time.After(time.Second):
 			// listener gone; drop quietly.
 		}

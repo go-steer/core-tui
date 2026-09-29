@@ -110,8 +110,11 @@ func (m model) spawnLiveStreamCmd(agent LiveAgent) tea.Cmd {
 	// the returned liveStreamStartedMsg is discarded if
 	// applySwitchTarget bumps m.sessionGen before it lands.
 	gen := m.sessionGen
+	// The Cmd runs on its own goroutine, so it takes the channel by
+	// value too instead of reaching back into the model (issue #266).
+	ch := m.eventCh
 	return func() tea.Msg {
-		cancel := m.startLiveStream(agent)
+		cancel := runLiveStream(agent, ch, gen)
 		return liveStreamStartedMsg{gen: gen, cancel: cancel}
 	}
 }
