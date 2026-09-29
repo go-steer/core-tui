@@ -177,6 +177,42 @@ func namesABuiltinSlash(text string) bool {
 	return builtinSlashNames[canonicalSlashName(strings.ToLower(name))]
 }
 
+// hostSlashNameSet folds a host catalog into the set the held-input
+// recogniser keys off (model.hostSlashNames, issue #311): every Name
+// and every Alias, lowercased and run through canonicalSlashName, so a
+// lookup reaches the same verdict the two static recognisers above
+// reach for the same spelling. Runs in slashCommandsCmd's goroutine.
+//
+// Always non-nil, even for an empty catalog: a fetched answer of "no
+// commands" is still an answer, and nil is reserved for "not fetched".
+func hostSlashNameSet(specs []SlashCommandSpec) map[string]bool {
+	names := make(map[string]bool, len(specs))
+	add := func(n string) {
+		if n = strings.TrimSpace(n); n != "" {
+			names[canonicalSlashName(strings.ToLower(n))] = true
+		}
+	}
+	for _, spec := range specs {
+		add(spec.Name)
+		for _, a := range spec.Aliases {
+			add(a)
+		}
+	}
+	return names
+}
+
+// hostNamesASlash reports whether text's command word is in the cached
+// host catalog. text is the raw line including the leading slash. A
+// cold cache answers false, which leaves the caller on the static
+// tables alone — never a reason to wait.
+func (m model) hostNamesASlash(text string) bool {
+	if !strings.HasPrefix(text, "/") {
+		return false
+	}
+	name, _, _ := strings.Cut(strings.TrimPrefix(text, "/"), " ")
+	return m.hostSlashNames[canonicalSlashName(strings.ToLower(name))]
+}
+
 // midTurnSlashDisposition classifies a /-prefixed input line. text is
 // the raw line including the leading slash.
 func midTurnSlashDisposition(text string) midTurnDisposition {
@@ -1396,11 +1432,16 @@ func (m *model) applySwitchLookup(msg switchLookupMsg) tea.Cmd {
 // off-loop /reload path). Called only after the sessionGen guard has
 // passed — like SwitchModel it can replace m.opts.Agent, so a reply
 // that outlived its session must not land.
-func (m *model) applyReload(msg reloadDoneMsg) {
+//
+// A successful reload returns a refetch of the host's slash catalog
+// for the held-input recogniser (issue #311): a rebuilt agent — or the
+// same one with freshly re-read config — may advertise different
+// commands than the cache holds. Nil on failure, when nothing changed.
+func (m *model) applyReload(msg reloadDoneMsg) tea.Cmd {
 	if msg.err != nil {
 		m.history.Append(Message{Role: RoleError, Text: "/reload: " + msg.err.Error()})
 		m.refreshAndScroll()
-		return
+		return nil
 	}
 	res := msg.result
 	if res.Agent != nil {
@@ -1421,6 +1462,7 @@ func (m *model) applyReload(msg reloadDoneMsg) {
 	}
 	m.history.Append(Message{Role: RoleSystem, Text: note})
 	m.refreshAndScroll()
+	return m.hostSlashNamesCmd()
 }
 
 // remoteInterruptCmd runs a RemoteInterrupter.Interrupt in a

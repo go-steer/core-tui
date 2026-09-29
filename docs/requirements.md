@@ -859,12 +859,18 @@ listed in `/help`:
     vanish. Exactly one user row either way, and a resume the host
     refuses puts the text back in the input box rather than losing it.
 
-  A line naming a command is dispatched rather than steered, using the
-  same allowlist R-HOLD-3 applies mid-turn so the two states cannot
-  disagree about what a command is. Both of R-HOLD-3's buckets run
-  here: nothing is in flight to refuse against, so `/clear` while held
-  clears. Anything outside the allowlist is prose and steers, which is
-  what the input box is for while the gate is shut.
+  A line naming a command is dispatched rather than steered. The
+  question here is recognition, not safety: every command the TUI
+  dispatches itself qualifies, both of R-HOLD-3's buckets run
+  (nothing is in flight to refuse against, so `/clear` while held
+  clears), and so does any name in the host's `SlashCommands()`
+  catalog. The catalog is a host call, so it is never made on the
+  keystroke: the TUI caches it off the event loop — at startup, on
+  every palette open, and again whenever a session switch, `/model`
+  or `/reload` replaces the agent — and until that first answer lands
+  only the TUI's own names are recognised. Anything else is prose and
+  steers, which is what the input box is for while the gate is shut.
+  Mid-turn (R-HOLD-3) does not consult the catalog.
 
   `/continue` (alias `/cont`) resumes with `ResumeModeContinue` and no
   new instruction; `/abandon` resumes with `ResumeModeAbandon`,

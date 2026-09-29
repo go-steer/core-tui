@@ -454,7 +454,14 @@ func (m *model) applyModelSwitch(msg modelSwitchedMsg) tea.Cmd {
 	// defaultTheme.
 	m.refreshTheme()
 	m.refreshViewport()
-	return persistChoiceCmd(m.sessionGen, "/model", m.opts.PersistModelChoice, msg.id)
+	// SwitchModel handed back a new agent, and the held-input
+	// recogniser's cache describes the old one (issue #311). Refetch
+	// rather than clear: same session, so the old set is the better
+	// guess until the new one lands.
+	return tea.Batch(
+		persistChoiceCmd(m.sessionGen, "/model", m.opts.PersistModelChoice, msg.id),
+		m.hostSlashNamesCmd(),
+	)
 }
 
 // modelSwitchFailure is why a SwitchModel reply is unusable, or "" when

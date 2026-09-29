@@ -402,10 +402,17 @@ type sessionSwitchedMsg struct {
 // every open). A palette opens and closes many times inside one
 // session generation, so gen alone can't tell whether the reply still
 // belongs to what is on screen.
+//
+// names is the same catalog folded for the held-input recogniser
+// (model.hostSlashNames, issue #311). It is applied on the gen guard
+// alone: the cache outlives the palette, so a reply for a palette the
+// operator has since closed — or the seq-0 priming fetch, which never
+// had one — still carries a good answer for this session.
 type slashCommandsMsg struct {
 	gen   uint64
 	seq   uint64
 	items []paletteItem
+	names map[string]bool
 }
 
 // fileItemsMsg carries the @-palette's directory-walk result for the

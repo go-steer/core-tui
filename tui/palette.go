@@ -269,9 +269,9 @@ func formatFileSize(n int64) string {
 // slashProviderItems converts a host's SlashCommands() specs into
 // palette rows. Runs inside slashCommandsCmd's goroutine (off the
 // event loop) — SlashCommands() is a host method like any other and
-// gets no free pass just because it looks like a constant lookup.
-func slashProviderItems(provider slashLister) []paletteItem {
-	specs := provider.SlashCommands()
+// gets no free pass just because it looks like a constant lookup, so
+// the caller makes that call and hands the answer in.
+func slashProviderItems(specs []SlashCommandSpec) []paletteItem {
 	items := make([]paletteItem, 0, len(specs))
 	for _, spec := range specs {
 		display := "/" + spec.Name

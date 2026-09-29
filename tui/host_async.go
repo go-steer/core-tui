@@ -135,6 +135,13 @@ func switchToSessionCmd(switcher SessionSwitcher, gen uint64, id string) tea.Cmd
 // opened and closed many times within one session generation, so the
 // handler needs to know the reply belongs to the palette that is open
 // right now.
+//
+// The same reply also refreshes the model's host-name cache
+// (model.hostSlashNames, issue #311), so every palette open keeps it
+// current for free. The name set is built here, in the goroutine,
+// alongside the rows — both are pure functions of one SlashCommands()
+// answer, and asking twice would be two host round trips that could
+// disagree.
 func (m model) slashCommandsCmd(seq uint64) tea.Cmd {
 	provider, ok := m.opts.Agent.(slashLister)
 	if !ok {
@@ -142,8 +149,25 @@ func (m model) slashCommandsCmd(seq uint64) tea.Cmd {
 	}
 	gen := m.sessionGen
 	return func() tea.Msg {
-		return slashCommandsMsg{gen: gen, seq: seq, items: slashProviderItems(provider)}
+		specs := provider.SlashCommands()
+		return slashCommandsMsg{
+			gen:   gen,
+			seq:   seq,
+			items: slashProviderItems(specs),
+			names: hostSlashNameSet(specs),
+		}
 	}
+}
+
+// hostSlashNamesCmd primes or refreshes the host-name cache with no
+// palette open — at startup, and whenever the agent the cache
+// describes is replaced (session switch, /model, /reload). It is
+// slashCommandsCmd with seq 0, which no palette ever carries:
+// refreshPalette bumps paletteSeq BEFORE stamping an open, so the
+// first palette is 1 and this reply updates the cache without being
+// merged into anything on screen. Nil when the agent has no catalog.
+func (m model) hostSlashNamesCmd() tea.Cmd {
+	return m.slashCommandsCmd(0)
 }
 
 // scanFileItemsCmd runs the @-palette's filepath.WalkDir off the

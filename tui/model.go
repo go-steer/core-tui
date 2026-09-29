@@ -647,6 +647,30 @@ type model struct {
 	// host call it can land after the output of whatever the operator
 	// typed next.
 	slashSeq uint64
+
+	// hostSlashNames is the host's slash catalog as a set of folded
+	// names (hostSlashNameSet), consulted by the held-input recogniser
+	// so a command the host adds at runtime — /usage, /new, /attach —
+	// runs while the agent is parked instead of reaching it as steer
+	// prose (issue #311). The static tables in slash_builtin.go can
+	// only know the names core-tui ships.
+	//
+	// Filled off the event loop by every slashCommandsMsg: the
+	// palette's own fetch, plus a priming fetch (hostSlashNamesCmd) at
+	// Init and whenever the agent is replaced. Unlike the palette's
+	// rows it is kept after the palette closes, which is the point.
+	// applySwitchTarget clears it with the sessionGen bump, so a
+	// session never reads another session's catalog, and the gen guard
+	// drops a reply that was fetched from the outgoing agent.
+	//
+	// nil means "not fetched yet" and reads as empty: the held arm
+	// falls back to exactly the static tables, which is the behaviour
+	// before this cache existed. Enter never waits for it.
+	//
+	// Deliberately NOT consulted mid-turn. That path asks whether a
+	// command is safe against a live turn, not whether it is one, and
+	// see midTurnRefusedSlashes for why it stays static.
+	hostSlashNames map[string]bool
 }
 
 // NewModel constructs the Bubble Tea model that drives the TUI, for
