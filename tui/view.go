@@ -1040,7 +1040,14 @@ func (m model) renderMessage(msg Message) string {
 		// ↻ glyph and a muted body — same card shape so they line
 		// up with operator prompts, but visually quieter so the
 		// operator can scan for what THEY typed.
-		body := wordWrapIndent(msg.Display(), width-2, "  ")
+		wrap := func(s string) string { return wordWrapIndent(s, width-2, "  ") }
+		text := msg.Display()
+		if head, guidance, tail, ok := splitInboxGuidance(msg.Text); ok && m.guidanceFolded(msg) {
+			// Issue #298: an auto-continue bundle carries the host's
+			// bundle-handling guidance. See inbox_guidance.go.
+			text = foldedGuidanceText(head, guidance, tail, wrap)
+		}
+		body := wrap(text)
 		bodyStyle := m.styles.UserText.Bold(true)
 		prefixStyle := m.styles.UserPrefix
 		glyph := GlyphUserPrompt
@@ -1088,7 +1095,22 @@ func (m model) renderMessage(msg Message) string {
 		// raw path — the Glamour render already wrapped to the
 		// renderer's WithWordWrap width.
 		text := msg.Display()
-		if msg.Rendered == "" {
+		raw := msg.Rendered == ""
+		if head, guidance, tail, ok := splitInboxGuidance(msg.Text); ok && m.guidanceFolded(msg) {
+			// Issue #298: on the attach path an inbox turn's prompt
+			// arrives as a committed chunk, guidance and all. See
+			// inbox_guidance.go.
+			folded, rendered := "", false
+			if !raw {
+				folded, rendered = m.renderFoldedAssistantGuidance(head, guidance, tail)
+			}
+			if !rendered {
+				folded = foldedGuidanceText(head, guidance, tail, func(s string) string { return wordWrap(s, width) })
+				raw = true
+			}
+			text = folded
+		}
+		if raw {
 			text = wordWrap(text, width)
 		}
 		body := m.styles.AssistantText.Render(text)

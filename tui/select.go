@@ -242,7 +242,14 @@ func (m *model) chatToggleCollapsed() {
 	if m.collapsed == nil {
 		m.collapsed = make(map[uint64]bool)
 	}
-	if m.collapsed[msg.ID] {
+	if hasInboxGuidance(msg) {
+		// Issue #298: on a row carrying the inbox guidance the fold
+		// IS the guidance marker, and it starts folded. It is drawn
+		// by renderMessage rather than sliced off the cached render,
+		// so the row has to be re-rendered. See inbox_guidance.go.
+		m.collapsed[msg.ID] = !m.guidanceFolded(msg)
+		m.history.BumpVersion(msg.ID)
+	} else if m.collapsed[msg.ID] {
 		delete(m.collapsed, msg.ID)
 	} else {
 		m.collapsed[msg.ID] = true
@@ -284,9 +291,11 @@ func (m model) chatCollapsedRow(lines []string) []string {
 	return append(out, m.styles.Muted.Render(summary))
 }
 
-// chatRowCollapsed reports whether history row i is folded.
+// chatRowCollapsed reports whether history row i takes the generic
+// fold. A row carrying the inbox guidance never does: its entry in
+// m.collapsed drives the guidance marker instead (issue #298).
 func (m model) chatRowCollapsed(msg Message) bool {
-	return len(m.collapsed) > 0 && m.collapsed[msg.ID]
+	return len(m.collapsed) > 0 && m.collapsed[msg.ID] && !hasInboxGuidance(msg)
 }
 
 // ---------------------------------------------------------------
