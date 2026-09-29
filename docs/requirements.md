@@ -843,7 +843,10 @@ listed in `/help`:
   was typed: submitting from the slash palette — which typing `/` opens,
   and which has an Enter of its own that inserts a selection and submits
   it in one keystroke — takes the same road as a line submitted with the
-  palette closed.
+  palette closed. "During a turn" includes a host turn that is printing
+  nothing — one sitting in a tool call, say. On a `LiveAgent` host, a
+  non-idle `turn_state` from the host counts as a turn in flight even
+  while the spinner is not showing.
 - **R-HOLD-4** Enter with text while held never starts a fresh turn
   against a shut gate — that turn would block in the host's
   `awaitResume` and spin forever. What it does instead depends on

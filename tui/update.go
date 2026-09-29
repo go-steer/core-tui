@@ -2233,7 +2233,19 @@ func (m model) submitInputLine(text string) (tea.Model, tea.Cmd) {
 	// only make sense mid-turn. The allowlist is narrow and the
 	// fallthrough is still "queue it": prose beginning with a
 	// slash must not become a command.
-	if m.turnInFlight() && strings.HasPrefix(text, "/") {
+	//
+	// turnRunning, not turnInFlight (issue #308). turnInFlight is the
+	// render gate, and on the live path it is spinnerActive, which
+	// only an arriving partial chunk or the operator's own inject
+	// arms. A daemon turn sitting in a tool call produces neither, so
+	// through every silent stretch the gate read idle, this block was
+	// skipped, and /clear and /transcripts — refused because loading
+	// or wiping the transcript under a turn still writing into it is
+	// a race — ran as if nothing were in flight. The race does not
+	// care whether the turn is quiet at the moment the key lands; the
+	// host's non-idle turn_state is what says it is running. Esc's
+	// two arms made the same swap in #302.
+	if m.turnRunning() && strings.HasPrefix(text, "/") {
 		switch midTurnSlashDisposition(text) {
 		case midTurnDispatch:
 			return m.dispatchSlash(text)
