@@ -35,7 +35,7 @@ import (
 // writerModel is copyModel with a host clipboard writer wired, and
 // the channel the writer records what it was handed on. Buffered so
 // the writer never blocks whether or not the test reads it.
-func writerModel(t *testing.T, sel int, err error) (model, chan string) {
+func writerModel(t *testing.T, sel int, err error) (*model, chan string) {
 	t.Helper()
 	got := make(chan string, 4)
 	m := copyModel(t, sel)
@@ -147,17 +147,17 @@ func TestClipboard_TheNoticeHedgesUntilSomethingConfirmsIt(t *testing.T) {
 // than one that is dropped, because it describes a clipboard state
 // that is no longer current.
 func TestClipboard_AStaleReplyStaysQuiet(t *testing.T) {
-	cases := map[string]func(m model) model{
-		"the operator moved the cursor": func(m model) model { return press(m, "down") },
-		"the operator left focus mode": func(m model) model {
+	cases := map[string]func(m *model) *model{
+		"the operator moved the cursor": func(m *model) *model { return press(m, "down") },
+		"the operator left focus mode": func(m *model) *model {
 			m.setFocus(focusInput)
 			return m
 		},
-		"a second copy superseded it": func(m model) model {
+		"a second copy superseded it": func(m *model) *model {
 			m, _ = pressCmd(m, "c")
 			return m
 		},
-		"a declining key superseded it": func(m model) model {
+		"a declining key superseded it": func(m *model) *model {
 			m.selIdx = 0
 			m, _ = pressCmd(m, "c") // a prompt has no code block
 			return m

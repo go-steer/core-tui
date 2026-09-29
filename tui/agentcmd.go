@@ -187,8 +187,7 @@ func pendingExitTick() tea.Cmd {
 // listenerCtx is the context every drain-loop listener Cmd below
 // parks on, so that shutdown unblocks them instead of leaving them
 // wedged on a channel nobody will ever write to again (issue #202).
-// See the lifeCtx field comment in model.go for the lifecycle, and
-// for why a value copy of the model is enough to share it.
+// See the lifeCtx field comment in model.go for the lifecycle.
 //
 // Falls back to context.Background() for a zero-value model{}, which
 // is what many of the Update-level tests construct. Those tests call
@@ -196,7 +195,7 @@ func pendingExitTick() tea.Cmd {
 // never-cancelled context is exactly right for them; the fallback
 // keeps this from being a nil-context panic in the one place where
 // the leak cannot happen anyway.
-func (m model) listenerCtx() context.Context {
+func (m *model) listenerCtx() context.Context {
 	if m.lifeCtx == nil {
 		return context.Background()
 	}
@@ -207,7 +206,7 @@ func (m model) listenerCtx() context.Context {
 // listener goroutine. Idempotent, as context.CancelFunc is — both
 // callers (model.quitCmd and Run's defer) fire on an ordinary run.
 // Tolerates the nil a zero-value model{} carries.
-func (m model) endListeners() {
+func (m *model) endListeners() {
 	if m.lifeCancel != nil {
 		m.lifeCancel()
 	}
@@ -227,7 +226,7 @@ func (m model) endListeners() {
 // noticing QuitMsg returns a nil Msg, which bubbletea drops. A
 // handler that re-issues a listener in that same window gets a Cmd
 // that returns nil immediately.
-func (m model) quitCmd() tea.Cmd {
+func (m *model) quitCmd() tea.Cmd {
 	m.endListeners()
 	return tea.Quit
 }
@@ -244,7 +243,7 @@ func (m model) quitCmd() tea.Cmd {
 // in this file. It resolves to the same context either way, but
 // taking it eagerly leaves the closure with no reason to touch model
 // state off the loop.
-func (m model) promptListener() tea.Cmd {
+func (m *model) promptListener() tea.Cmd {
 	if m.opts.Prompter == nil {
 		return nil
 	}
@@ -279,7 +278,7 @@ func (m model) promptListener() tea.Cmd {
 // tea.Program (which is exactly what the smoke tests do, and exactly
 // what embedding looks like) has nothing that ever closes the channel
 // and would park this goroutine for the life of the process.
-func (m model) notifyListener() tea.Cmd {
+func (m *model) notifyListener() tea.Cmd {
 	if m.opts.Notifier == nil {
 		return nil
 	}
@@ -305,7 +304,7 @@ func (m model) notifyListener() tea.Cmd {
 // request channel and forwards each inbound request as an
 // elicitRequestMsg (R-ELIC-1). Same drain-loop pattern as
 // promptListener.
-func (m model) elicitListener() tea.Cmd {
+func (m *model) elicitListener() tea.Cmd {
 	if m.opts.Elicitor == nil {
 		return nil
 	}
@@ -328,7 +327,7 @@ func (m model) elicitListener() tea.Cmd {
 // Same drain-loop pattern as elicitListener, down to the type
 // assertion: a host may hand Options.Asker its own implementation for a
 // test, and there is nothing for the loop to drain in that case.
-func (m model) askListener() tea.Cmd {
+func (m *model) askListener() tea.Cmd {
 	if m.opts.Asker == nil {
 		return nil
 	}
@@ -357,7 +356,7 @@ func (m model) askListener() tea.Cmd {
 // also the listener most reliably parked at shutdown, because it is
 // armed from Init on every run regardless of which capabilities the
 // host wired.
-func (m model) eventListener() tea.Cmd {
+func (m *model) eventListener() tea.Cmd {
 	if m.eventCh == nil {
 		return nil
 	}
@@ -393,7 +392,7 @@ func spinnerTick(gen uint64) tea.Cmd {
 // beginLiveStretch for a LiveAgent one); re-arming from the tick
 // handler keeps the same generation because it continues the chain
 // that is already live rather than starting another one.
-func (m model) armSpinner() tea.Cmd {
+func (m *model) armSpinner() tea.Cmd {
 	return spinnerTick(m.spinnerGen)
 }
 
@@ -447,7 +446,7 @@ func (m *model) endLiveStretch() {
 // it and no contract entitling it to expect the host will, so
 // without a second case the drain parks until the host happens to
 // signal — which, at shutdown, it never does.
-func (m model) wakeListener() tea.Cmd {
+func (m *model) wakeListener() tea.Cmd {
 	waker, ok := m.opts.Agent.(WakeRequester)
 	if !ok {
 		return nil
@@ -475,7 +474,7 @@ func (m model) wakeListener() tea.Cmd {
 // the cancel func for the turn's context so Esc-interrupt (R-CHAT-6)
 // can call it. The goroutine emits exactly one terminal message
 // (turnDoneMsg / turnErrMsg / turnCancelledMsg) before returning.
-func (m model) startAgentTurn(agent Agent, prompt string) context.CancelFunc {
+func (m *model) startAgentTurn(agent Agent, prompt string) context.CancelFunc {
 	ctx, cancel := context.WithCancel(context.Background())
 	started := time.Now()
 	// Snapshot the session generation at goroutine start so any
@@ -484,6 +483,10 @@ func (m model) startAgentTurn(agent Agent, prompt string) context.CancelFunc {
 	// since bumped m.sessionGen (see model.go). Same rationale for
 	// per-event chat msgs; emitEvent takes gen as an argument.
 	gen := m.sessionGen
+	// The channel is taken by value for the same reason: the goroutine
+	// outlives this call, so it holds what it needs rather than the
+	// model, whose fields the event loop goes on writing (issue #266).
+	ch := m.eventCh
 
 	go func() {
 		var fail error
@@ -492,7 +495,7 @@ func (m model) startAgentTurn(agent Agent, prompt string) context.CancelFunc {
 				fail = err
 				break
 			}
-			emitEvent(ctx, m.eventCh, gen, ev)
+			emitEvent(ctx, ch, gen, ev)
 		}
 
 		var terminal tea.Msg
@@ -507,7 +510,7 @@ func (m model) startAgentTurn(agent Agent, prompt string) context.CancelFunc {
 			terminal = turnDoneMsg{gen: gen, elapsed: time.Since(started)}
 		}
 		select {
-		case m.eventCh <- terminal:
+		case ch <- terminal:
 		case <-time.After(time.Second):
 			// listener is gone — drop the terminal silently.
 		}
@@ -532,12 +535,20 @@ func (m model) startAgentTurn(agent Agent, prompt string) context.CancelFunc {
 //
 // ctx cancellation stops the loop without yielding a final error
 // (per the LiveAgent semantics).
-func (m model) startLiveStream(agent LiveAgent) context.CancelFunc {
-	ctx, cancel := context.WithCancel(context.Background())
+func (m *model) startLiveStream(agent LiveAgent) context.CancelFunc {
 	// Snapshot the session generation at goroutine start; every
 	// msg emitted from this drain carries it so a subsequent
 	// applySwitchTarget invalidates the stale stream cleanly.
-	gen := m.sessionGen
+	return runLiveStream(agent, m.eventCh, m.sessionGen)
+}
+
+// runLiveStream is startLiveStream with the two model fields it reads
+// taken as arguments: ch is the model's eventCh, gen the sessionGen to
+// stamp every msg with. spawnLiveStreamCmd calls it from a Cmd, which
+// runs off the event loop and so must not read the model at all
+// (issue #266).
+func runLiveStream(agent LiveAgent, ch chan<- tea.Msg, gen uint64) context.CancelFunc {
+	ctx, cancel := context.WithCancel(context.Background())
 	go func() {
 		for ev, err := range agent.Events(ctx) {
 			if ctx.Err() != nil {
@@ -545,18 +556,18 @@ func (m model) startLiveStream(agent LiveAgent) context.CancelFunc {
 			}
 			if err != nil {
 				select {
-				case m.eventCh <- liveStreamErrMsg{gen: gen, err: err}:
+				case ch <- liveStreamErrMsg{gen: gen, err: err}:
 				case <-ctx.Done():
 					return
 				}
 				continue
 			}
-			emitEvent(ctx, m.eventCh, gen, ev)
+			emitEvent(ctx, ch, gen, ev)
 		}
 		// Iterator returned cleanly (or stopped yielding). Tell the
 		// TUI so the "Disconnected" banner can render.
 		select {
-		case m.eventCh <- liveStreamEndedMsg{gen: gen}:
+		case ch <- liveStreamEndedMsg{gen: gen}:
 		case <-time.After(time.Second):
 			// listener gone; drop quietly.
 		}

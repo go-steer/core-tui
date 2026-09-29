@@ -46,7 +46,7 @@ func TestCoalescedRefresh_BurstOfEvents_SchedulesOneRefresh(t *testing.T) {
 	const burst = 25
 	for i := 0; i < burst; i++ {
 		out, _ := m.Update(streamChunkMsg{text: "chunk\n\n", partial: false})
-		m = out.(model)
+		m = out.(*model)
 		if !m.viewportDirty {
 			t.Fatalf("iteration %d: viewportDirty must latch true after streamChunkMsg", i)
 		}
@@ -65,14 +65,14 @@ func TestCoalescedRefresh_MsgHandlerClearsFlagsAndRefreshes(t *testing.T) {
 
 	// Prime: one event dirties + schedules.
 	out, _ := m.Update(streamChunkMsg{text: "hello\n\n", partial: false})
-	m = out.(model)
+	m = out.(*model)
 	if !m.viewportDirty || !m.refreshPending {
 		t.Fatal("prime: expected both flags true after first event")
 	}
 
 	// Flush.
 	out, cmd := m.Update(coalescedRefreshMsg{})
-	m = out.(model)
+	m = out.(*model)
 	if m.viewportDirty {
 		t.Error("viewportDirty should be false after coalescedRefreshMsg handler")
 	}
@@ -85,7 +85,7 @@ func TestCoalescedRefresh_MsgHandlerClearsFlagsAndRefreshes(t *testing.T) {
 
 	// A subsequent burst re-schedules cleanly (flags reset properly).
 	out, _ = m.Update(streamChunkMsg{text: "world\n\n", partial: false})
-	m = out.(model)
+	m = out.(*model)
 	if !m.viewportDirty || !m.refreshPending {
 		t.Fatal("post-flush: expected both flags true again after next event")
 	}
@@ -100,7 +100,7 @@ func TestScheduleCoalescedRefresh_NoOpWhenClean(t *testing.T) {
 	m := newModel(Options{})
 	m.viewport.SetWidth(80)
 	if cmd := m.scheduleCoalescedRefresh(); cmd != nil {
-		t.Errorf("expected nil Cmd on clean model, got %T", cmd)
+		t.Errorf("expected nil Cmd on clean *model, got %T", cmd)
 	}
 	if m.refreshPending {
 		t.Error("refreshPending should NOT be set when nothing was dirty")
@@ -157,7 +157,7 @@ func TestCoalescedRefresh_ToolCallAndResult_AlsoCoalesce(t *testing.T) {
 	}
 	for i, msg := range seq {
 		out, _ := m.Update(msg)
-		m = out.(model)
+		m = out.(*model)
 		if !m.viewportDirty {
 			t.Fatalf("step %d (%T): viewportDirty must be true", i, msg)
 		}
@@ -203,7 +203,7 @@ func TestWindowSizeMsg_NoOpWhenUnchanged(t *testing.T) {
 	// Prime the width so a later identical msg is a true no-op.
 	first := tea.WindowSizeMsg{Width: 100, Height: 40}
 	out, _ := m.Update(first)
-	m = out.(model)
+	m = out.(*model)
 
 	// Seed an assistant message with a Rendered value and pin its
 	// Version — rerenderHistoryMarkdown bumps Version on every
@@ -219,7 +219,7 @@ func TestWindowSizeMsg_NoOpWhenUnchanged(t *testing.T) {
 	// Second WindowSizeMsg — identical dimensions. Guard must
 	// short-circuit before rerenderHistoryMarkdown runs.
 	out, _ = m.Update(tea.WindowSizeMsg{Width: 100, Height: 40})
-	m = out.(model)
+	m = out.(*model)
 
 	snap = m.history.Snapshot()
 	versionAfter := snap[len(snap)-1].Version
@@ -236,14 +236,14 @@ func TestWindowSizeMsg_HeightOnlyChange_SkipsMarkdownRerender(t *testing.T) {
 	m := newModel(Options{})
 	// Prime.
 	out, _ := m.Update(tea.WindowSizeMsg{Width: 100, Height: 40})
-	m = out.(model)
+	m = out.(*model)
 
 	m.history.Append(Message{Role: RoleAssistant, Text: "hi", Rendered: "hi"})
 	versionBefore := m.history.Snapshot()[0].Version
 
 	// Height-only change.
 	out, _ = m.Update(tea.WindowSizeMsg{Width: 100, Height: 50})
-	m = out.(model)
+	m = out.(*model)
 
 	versionAfter := m.history.Snapshot()[0].Version
 	if versionAfter != versionBefore {

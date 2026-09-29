@@ -53,7 +53,7 @@ func TestUpdate_BackgroundColor_RefreshesStyles(t *testing.T) {
 	}
 	// Light background message.
 	out, _ := m.Update(tea.BackgroundColorMsg{Color: lightColor{}})
-	got := out.(model)
+	got := out.(*model)
 	if got.styles.Dark {
 		t.Errorf("expected styles.Dark=false after light BackgroundColorMsg")
 	}
@@ -71,7 +71,7 @@ func TestUpdate_PermissionMode_Cycles(t *testing.T) {
 	})
 	shiftTab := tea.KeyPressMsg(tea.Key{Code: tea.KeyTab, Mod: tea.ModShift})
 	out, cmd := m.Update(shiftTab)
-	got := out.(model)
+	got := out.(*model)
 	// The chip flips on the keystroke; the host callbacks ride the Cmd
 	// (issue #137), so Set has not been called yet.
 	if got.permMode != PermissionModeAcceptEdits {
@@ -132,7 +132,7 @@ func TestUpdate_BackgroundColor_IgnoredWhenForceTheme(t *testing.T) {
 	// must NOT flip to light — explicit choice wins.
 	m := newModel(Options{ForceTheme: ThemeDark})
 	out, _ := m.Update(tea.BackgroundColorMsg{Color: lightColor{}})
-	got := out.(model)
+	got := out.(*model)
 	if !got.styles.Dark {
 		t.Errorf("ForceTheme=dark should ignore a light BackgroundColorMsg, got Dark=false")
 	}
@@ -143,7 +143,7 @@ func TestUpdate_BackgroundColor_RespectedWhenAutoTheme(t *testing.T) {
 	// the handler must still update on BackgroundColorMsg.
 	m := newModel(Options{}) // ForceTheme zero = "auto"
 	out, _ := m.Update(tea.BackgroundColorMsg{Color: lightColor{}})
-	got := out.(model)
+	got := out.(*model)
 	if got.styles.Dark {
 		t.Errorf("ForceTheme=auto should honor light BackgroundColorMsg")
 	}
@@ -180,16 +180,14 @@ func TestSlashMouse_TogglesAndPropagatesToView(t *testing.T) {
 	m.viewport.SetHeight(24)
 	m.width, m.height = 80, 24
 
-	out, _ := m.dispatchSlash("/mouse")
-	m = out.(model)
+	m.dispatchSlash("/mouse")
 	v := m.View()
 	if v.MouseMode != tea.MouseModeNone {
 		t.Errorf("after /mouse from default-on, expected MouseModeNone, got %v", v.MouseMode)
 	}
 
 	// Second /mouse flips back to on.
-	out2, _ := m.dispatchSlash("/mouse")
-	m = out2.(model)
+	m.dispatchSlash("/mouse")
 	v = m.View()
 	if v.MouseMode != tea.MouseModeCellMotion {
 		t.Errorf("after second /mouse, expected MouseModeCellMotion, got %v", v.MouseMode)
@@ -226,7 +224,7 @@ func TestContextFillStyle_TracksActiveTheme(t *testing.T) {
 	for _, tc := range themes {
 		for _, tier := range tiers {
 			t.Run(tc.name+"/"+tier.name, func(t *testing.T) {
-				m := model{styles: newStylesWithTheme(tc.dark, tc.theme)}
+				m := &model{styles: newStylesWithTheme(tc.dark, tc.theme)}
 				got := m.contextFillStyle(tier.used, tier.size)
 				want := tier.want(tc.theme)
 				if got.GetForeground() != want {
@@ -248,8 +246,8 @@ func TestContextFillStyle_TracksActiveTheme(t *testing.T) {
 // gold / cardinal against the default's #5FD787 / #FFD75F / #FF5F5F,
 // so all three tiers have to move.
 func TestContextFillStyle_DiffersAcrossThemes(t *testing.T) {
-	dark := model{styles: newStylesWithTheme(true, defaultTheme(true))}
-	light := model{styles: newStylesWithTheme(false, christmasTheme(false))}
+	dark := &model{styles: newStylesWithTheme(true, defaultTheme(true))}
+	light := &model{styles: newStylesWithTheme(false, christmasTheme(false))}
 	tiers := []struct {
 		name string
 		used int
@@ -271,7 +269,7 @@ func TestContextFillStyle_DiffersAcrossThemes(t *testing.T) {
 // size unknown" path on the muted chrome style instead of implying a
 // usage tier.
 func TestContextFillStyle_UnknownSizeIsMuted(t *testing.T) {
-	m := model{styles: newStylesWithTheme(true, defaultTheme(true))}
+	m := &model{styles: newStylesWithTheme(true, defaultTheme(true))}
 	got := m.contextFillStyle(1000, 0)
 	if got.GetForeground() != m.styles.Muted.GetForeground() {
 		t.Errorf("contextFillStyle with size=0 foreground = %v, want Muted %v",
@@ -298,7 +296,7 @@ func TestDisplayCwd_ResolvedAtConstruction(t *testing.T) {
 
 	m := newModel(Options{Agent: &bareAgent{id: "cwd"}})
 	out, _ := m.Update(tea.WindowSizeMsg{Width: 100, Height: 24})
-	m = out.(model)
+	m = out.(*model)
 
 	if got := m.displayCwd(); got != want {
 		t.Fatalf("displayCwd() at construction = %q, want %q", got, want)

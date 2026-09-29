@@ -61,7 +61,7 @@ func TestObserverFooter_WireOrder_StampsAllFields(t *testing.T) {
 		// that observer mode used to show $0 forever without the
 		// LastTurn back-annotation from usage-update.
 	}})
-	m = out.(model)
+	m = out.(*model)
 
 	// Post-turnSummary the footer already renders tokens+model+
 	// latency (cost still $0). Confirm.
@@ -92,7 +92,7 @@ func TestObserverFooter_WireOrder_StampsAllFields(t *testing.T) {
 			Model:     "gemini-3.5-flash",
 		},
 	}})
-	m = out.(model)
+	m = out.(*model)
 
 	tail = m.history.Snapshot()[m.history.Len()-1]
 	if tail.CostUSD != 0.045432 {
@@ -140,7 +140,7 @@ func TestObserverFooter_TurnCompleteBeforeCommit(t *testing.T) {
 		TokensOut: 20,
 		LatencyMs: 500,
 	}})
-	m = out.(model)
+	m = out.(*model)
 	if m.currentModel != "gemini-3.5-flash" {
 		t.Fatal("setup: turnSummary should have populated m.currentModel")
 	}
@@ -178,14 +178,14 @@ func TestObserverFooter_UsageUpdateWithoutLastTurn(t *testing.T) {
 		TokensOut: 5,
 		LatencyMs: 200,
 	}})
-	m = out.(model)
+	m = out.(*model)
 
 	// usage-update WITHOUT LastTurn (pre-#249 server).
 	out, _ = m.Update(usageUpdateMsg{update: UsageUpdate{
 		TokensInTotal: 10,
 		TurnsTotal:    1,
 	}})
-	m = out.(model)
+	m = out.(*model)
 
 	tail := m.history.Snapshot()[m.history.Len()-1]
 	if tail.Model != "gpt-x" {

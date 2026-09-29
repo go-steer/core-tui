@@ -55,10 +55,9 @@ func (s *slashAgent) InvokeSlash(_ context.Context, name, args string) (SlashRes
 // result-channel drain for the async shapes. Only for commands that
 // reach the host: a built-in never issues a slashDispatchedMsg and
 // this fails rather than run its Cmd blind.
-func submitSlash(t *testing.T, m model, text string) (model, tea.Cmd) {
+func submitSlash(t *testing.T, m *model, text string) (*model, tea.Cmd) {
 	t.Helper()
-	out, cmd := m.dispatchSlash(text)
-	m = out.(model)
+	cmd := m.dispatchSlash(text)
 	if cmd == nil {
 		t.Fatalf("dispatchSlash(%q) returned no Cmd — the host would never be asked", text)
 	}
@@ -66,8 +65,8 @@ func submitSlash(t *testing.T, m model, text string) (model, tea.Cmd) {
 	if !ok {
 		t.Fatalf("dispatchSlash(%q) produced a %T, want slashDispatchedMsg", text, msg)
 	}
-	out, cmd = m.Update(msg)
-	return out.(model), cmd
+	_, cmd = m.Update(msg)
+	return m, cmd
 }
 
 // TestDispatchSlash_OpensSideAnswerModal pins R-CMD-5: a SlashResult
@@ -173,8 +172,7 @@ func TestSlashClear_BareEnterConfirms(t *testing.T) {
 	m.history.Append(Message{Role: RoleAssistant, Text: "hi back"})
 
 	// Arm the confirmation.
-	out, _ := m.dispatchSlash("/clear")
-	m = out.(model)
+	m.dispatchSlash("/clear")
 	if !m.confirmingClear {
 		t.Fatalf("expected confirmingClear=true after /clear")
 	}
@@ -186,7 +184,7 @@ func TestSlashClear_BareEnterConfirms(t *testing.T) {
 	// Bare Enter (empty input) MUST wipe history.
 	enter := tea.KeyPressMsg(tea.Key{Code: tea.KeyEnter})
 	out2, _ := m.Update(enter)
-	m = out2.(model)
+	m = out2.(*model)
 	if m.confirmingClear {
 		t.Errorf("expected confirmingClear=false after bare-Enter confirmation")
 	}
@@ -204,13 +202,12 @@ func TestSlashClear_YesConfirms(t *testing.T) {
 	m.viewport.SetWidth(80)
 	m.history.Append(Message{Role: RoleUser, Text: "hello"})
 
-	out, _ := m.dispatchSlash("/clear")
-	m = out.(model)
+	m.dispatchSlash("/clear")
 
 	m.input.SetValue("yes")
 	enter := tea.KeyPressMsg(tea.Key{Code: tea.KeyEnter})
 	out2, _ := m.Update(enter)
-	m = out2.(model)
+	m = out2.(*model)
 	if m.history.Len() != 0 {
 		t.Errorf("expected history wiped after typed 'yes', got Len=%d", m.history.Len())
 	}
@@ -224,14 +221,13 @@ func TestSlashClear_OtherTextCancels(t *testing.T) {
 	m.viewport.SetWidth(80)
 	m.history.Append(Message{Role: RoleUser, Text: "hello"})
 
-	out, _ := m.dispatchSlash("/clear")
-	m = out.(model)
+	m.dispatchSlash("/clear")
 	armedLen := m.history.Len()
 
 	m.input.SetValue("nope")
 	enter := tea.KeyPressMsg(tea.Key{Code: tea.KeyEnter})
 	out2, _ := m.Update(enter)
-	m = out2.(model)
+	m = out2.(*model)
 
 	if m.confirmingClear {
 		t.Errorf("expected confirmingClear=false after cancel")
@@ -321,7 +317,7 @@ func TestDispatchSlash_AsyncPath_RoutesThroughApplySlashResult(t *testing.T) {
 
 	// Hand-deliver the message (no goroutine race in the test).
 	out, _ := m.Update(slashResultMsg{name: "btw", res: SlashResult{ModalAnswer: &SideAnswer{Question: "q?", Answer: "a."}}})
-	got := out.(model)
+	got := out.(*model)
 	if got.sideAnswer == nil {
 		t.Fatalf("expected sideAnswer to be set after slashResultMsg")
 	}
@@ -383,7 +379,7 @@ func TestUpdate_ToastClearMsg_StickyWhenSlashInFlight(t *testing.T) {
 	m.toastSetAt = time.Now().Add(-30 * time.Second) // way past TTL
 
 	out, _ := m.Update(toastClearMsg{})
-	got := out.(model)
+	got := out.(*model)
 	if got.toast == "" {
 		t.Errorf("expected toast to persist while slash in flight, got cleared")
 	}
@@ -397,7 +393,7 @@ func TestUpdate_SlashResultMsg_ClearsInFlightAndToast(t *testing.T) {
 	m.toast = "▸ /btw running…"
 
 	out, _ := m.Update(slashResultMsg{name: "btw", res: SlashResult{SystemMessage: "answer"}})
-	got := out.(model)
+	got := out.(*model)
 	if got.inFlightSlash != nil {
 		t.Errorf("expected inFlightSlash cleared on result, got %+v", got.inFlightSlash)
 	}
@@ -450,7 +446,7 @@ func TestUpdate_Esc_CancelsInFlightSlash(t *testing.T) {
 
 	esc := tea.KeyPressMsg(tea.Key{Code: tea.KeyEsc})
 	out, _ := m.Update(esc)
-	got := out.(model)
+	got := out.(*model)
 	if !cancelled {
 		t.Error("expected Esc to fire cancelSlash")
 	}
@@ -818,7 +814,7 @@ func TestHelpSlash_AsyncOnlyHostGetsAHostSection(t *testing.T) {
 	m := newModel(Options{Agent: newAsyncOnlyAgent()})
 	m.viewport.SetWidth(80)
 
-	_, cmd := m.dispatchSlash("/help")
+	cmd := m.dispatchSlash("/help")
 	if cmd == nil {
 		t.Fatal("no follow-up Cmd: /help skipped an async-only host's section")
 	}

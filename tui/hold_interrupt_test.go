@@ -72,7 +72,7 @@ func (a *liveHoldAgent) Interrupt(_ context.Context) error {
 
 // heldHostMidTurn returns a model wired to agent with a locally driven
 // turn in flight, and reports whether the local cancel fired.
-func heldHostMidTurn(agent Agent) (model, *bool) {
+func heldHostMidTurn(agent Agent) (*model, *bool) {
 	m := newModel(Options{Agent: agent})
 	m.width, m.height = 100, 40
 	cancelled := false
@@ -150,7 +150,7 @@ func TestSlashInterrupt_StopsTheRemoteTurnAsWellAsHolding(t *testing.T) {
 	agent := &perTurnHoldAgent{}
 	m, cancelled := heldHostMidTurn(agent)
 
-	handled, _, cmd := m.dispatchBuiltinSlash("interrupt", "")
+	handled, cmd := m.dispatchBuiltinSlash("interrupt", "")
 	if !handled {
 		t.Fatal("dispatchBuiltinSlash returned handled=false for /interrupt")
 	}
@@ -182,7 +182,7 @@ func TestSlashInterrupt_ObserverModeStopsAndHolds(t *testing.T) {
 		t.Fatal("setup: expected to open a stretch on a fresh model")
 	}
 
-	handled, _, cmd := m.dispatchBuiltinSlash("interrupt", "")
+	handled, cmd := m.dispatchBuiltinSlash("interrupt", "")
 	if !handled {
 		t.Fatal("dispatchBuiltinSlash returned handled=false for /interrupt")
 	}
@@ -236,7 +236,7 @@ func TestEsc_MidDaemonTurnWithNothingStreamingStillCancels(t *testing.T) {
 			// it: no partial chunk has arrived, so no live stretch
 			// was ever opened.
 			got, _ := m.Update(statusUpdateMsg{status: StatusUpdate{TurnState: state}})
-			m = got.(model)
+			m = got.(*model)
 
 			if m.turnInFlight() {
 				t.Fatal("setup: the render gate must read idle here — that is the condition under test")
@@ -285,7 +285,7 @@ func TestEsc_MidDaemonTurnOnAGatelessHostStillCancels(t *testing.T) {
 	}
 
 	got, _ := m.Update(statusUpdateMsg{status: StatusUpdate{TurnState: TurnStateStreaming}})
-	m = got.(model)
+	m = got.(*model)
 	if m.turnInFlight() {
 		t.Fatal("setup: the render gate must read idle here — that is the condition under test")
 	}
@@ -296,7 +296,7 @@ func TestEsc_MidDaemonTurnOnAGatelessHostStillCancels(t *testing.T) {
 	if got := agent.interruptCalls.Load(); got != 1 {
 		t.Errorf("Interrupt calls = %d, want 1 — esc did nothing at all against a running turn", got)
 	}
-	after := out.(model)
+	after := out.(*model)
 	last := after.history.Snapshot()[after.history.Len()-1]
 	if !strings.Contains(last.Text, "Interrupting") {
 		t.Errorf("last row = %q, want the Interrupting… row — an esc with no visible effect reads as a dead key", last.Text)
@@ -313,8 +313,8 @@ func TestEsc_AfterTheHostReportsIdleHoldsWithoutInterrupting(t *testing.T) {
 	m.width, m.height = 100, 40
 
 	got, _ := m.Update(statusUpdateMsg{status: StatusUpdate{TurnState: TurnStateStreaming}})
-	got, _ = got.(model).Update(statusUpdateMsg{status: StatusUpdate{TurnState: TurnStateIdle}})
-	m = got.(model)
+	got, _ = got.(*model).Update(statusUpdateMsg{status: StatusUpdate{TurnState: TurnStateIdle}})
+	m = got.(*model)
 
 	if m.turnRunning() {
 		t.Fatal("setup: turnRunning must clear once the host reports idle")
@@ -358,7 +358,7 @@ func TestHold_InterruptFailureStillShutsTheGate(t *testing.T) {
 	}
 
 	out, _ := m.Update(done)
-	if got := lastText(out.(model)); !strings.Contains(got, "endpoint returned 500") {
+	if got := lastText(out.(*model)); !strings.Contains(got, "endpoint returned 500") {
 		t.Errorf("last row = %q, want the failure surfaced inline", got)
 	}
 }
@@ -409,7 +409,7 @@ func TestPauseEvent_ReplayDoesNotReArmTheGateOnAPerTurnHost(t *testing.T) {
 		Reason:      "operator interrupt",
 		Interrupted: true,
 	}})
-	replayed := out.(model)
+	replayed := out.(*model)
 
 	if replayed.pause.paused() {
 		t.Error("a stale replayed frame shut the gate; on a per-turn host the poll owns it")

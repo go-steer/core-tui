@@ -72,7 +72,7 @@ const pricingRefreshTimeout = 30 * time.Second
 // Update goroutine for the model picker's open-time snapshot. Nil when
 // the capability is unwired — the dialog renders its own
 // "does not implement ModelSwapper" body in that case.
-func (m model) availableModelsCmd() tea.Cmd {
+func (m *model) availableModelsCmd() tea.Cmd {
 	swapper, ok := m.opts.Agent.(ModelSwapper)
 	if !ok {
 		return nil
@@ -101,7 +101,7 @@ func switchModelCmd(swapper ModelSwapper, gen uint64, id string) tea.Cmd {
 // sessionsCmd pulls SessionSwitcher.Sessions() off the Update
 // goroutine for the session picker's open-time snapshot. Nil when the
 // capability is unwired.
-func (m model) sessionsCmd() tea.Cmd {
+func (m *model) sessionsCmd() tea.Cmd {
 	switcher, ok := m.opts.Agent.(SessionSwitcher)
 	if !ok {
 		return nil
@@ -142,7 +142,7 @@ func switchToSessionCmd(switcher SessionSwitcher, gen uint64, id string) tea.Cmd
 // alongside the rows — both are pure functions of one SlashCommands()
 // answer, and asking twice would be two host round trips that could
 // disagree.
-func (m model) slashCommandsCmd(seq uint64) tea.Cmd {
+func (m *model) slashCommandsCmd(seq uint64) tea.Cmd {
 	provider, ok := m.opts.Agent.(slashLister)
 	if !ok {
 		return nil
@@ -166,7 +166,7 @@ func (m model) slashCommandsCmd(seq uint64) tea.Cmd {
 // refreshPalette bumps paletteSeq BEFORE stamping an open, so the
 // first palette is 1 and this reply updates the cache without being
 // merged into anything on screen. Nil when the agent has no catalog.
-func (m model) hostSlashNamesCmd() tea.Cmd {
+func (m *model) hostSlashNamesCmd() tea.Cmd {
 	return m.slashCommandsCmd(0)
 }
 

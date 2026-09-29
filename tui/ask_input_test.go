@@ -42,7 +42,7 @@ type askReply struct {
 // a host's ask-the-user tool would, and returns the model parked on the
 // question plus the channel Ask answers on. The committing keys are
 // still inside modalInputGrace — call pastGraceFor before pressing one.
-func askFlowFor(t *testing.T, req AskRequest) (model, chan askReply) {
+func askFlowFor(t *testing.T, req AskRequest) (*model, chan askReply) {
 	t.Helper()
 	m, replies, _ := askFlowRaw(t, req)
 	if m.openAsk() == nil {
@@ -55,7 +55,7 @@ func askFlowFor(t *testing.T, req AskRequest) (model, chan askReply) {
 // for the refusal tests, where not opening one is the behaviour under
 // test. It also hands back the Cmd the branch returned, which is where
 // the re-armed listener and the render kick live.
-func askFlowRaw(t *testing.T, req AskRequest) (model, chan askReply, tea.Cmd) {
+func askFlowRaw(t *testing.T, req AskRequest) (*model, chan askReply, tea.Cmd) {
 	t.Helper()
 	a := NewAsker().(*asker)
 	replies := make(chan askReply, 1)
@@ -69,9 +69,9 @@ func askFlowRaw(t *testing.T, req AskRequest) (model, chan askReply, tea.Cmd) {
 
 	m := newModel(Options{Asker: a})
 	out, _ := m.Update(tea.WindowSizeMsg{Width: 100, Height: 40})
-	m = out.(model)
+	m = out.(*model)
 	out, cmd := m.Update(askRequestMsg{req: req})
-	return out.(model), replies, cmd
+	return out.(*model), replies, cmd
 }
 
 // awaitAsk reads what reached the host, or fails.
@@ -94,9 +94,9 @@ func TestAsk_TheOperatorsChoiceReachesTheHost(t *testing.T) {
 	m = pastGraceFor(m, askDialogID)
 
 	out, _ := m.Update(keyPress("down"))
-	m = out.(model)
+	m = out.(*model)
 	out, _ = m.Update(keyPress("enter"))
-	m = out.(model)
+	m = out.(*model)
 
 	if m.openAsk() != nil {
 		t.Error("the question stayed open after it was answered")
@@ -120,10 +120,10 @@ func TestAsk_TypedTextReachesTheHost(t *testing.T) {
 
 	for _, r := range "ada " {
 		out, _ := m.Update(keyPress(string(r)))
-		m = out.(model)
+		m = out.(*model)
 	}
 	out, _ := m.Update(keyPress("enter"))
-	m = out.(model)
+	m = out.(*model)
 	if m.openAsk() != nil {
 		t.Error("the question is still up after it was answered")
 	}
@@ -151,7 +151,7 @@ func TestAsk_DeclineAndCancelAreDifferentAnswers(t *testing.T) {
 			m = pastGraceFor(m, askDialogID)
 
 			out, _ := m.Update(keyPress(tc.stroke))
-			m = out.(model)
+			m = out.(*model)
 			if m.openAsk() != nil {
 				t.Fatalf("%s left the question open", tc.stroke)
 			}
@@ -183,7 +183,7 @@ func TestAskModal_AdvertisesTheKeysItHonors(t *testing.T) {
 			// The U+00A0 keyLegend binds a phrase with is a line-break
 			// detail, not part of what was promised.
 			plain := func(s string) string { return unbindLegend(ansi.Strip(s)) }
-			if got := plain(m.overlayStack.render(m.width, &m)); !strings.Contains(got, tc.key) {
+			if got := plain(m.overlayStack.render(m.width, m)); !strings.Contains(got, tc.key) {
 				t.Errorf("the modal footer does not offer %q:\n%s", tc.key, got)
 			}
 			if got := plain(m.footerHint()); !strings.Contains(got, tc.key) {
@@ -281,7 +281,7 @@ func TestAskEditor_SavedBufferAnswersTheQuestion(t *testing.T) {
 	m, replies := askFlowFor(t, AskRequest{Kind: AskLongText, Prompt: "Write it up"})
 
 	out, _ := m.Update(askEditorDoneMsg{text: "the long answer"})
-	m = out.(model)
+	m = out.(*model)
 	if m.openAsk() != nil {
 		t.Error("the question stayed open after the editor answered it")
 	}
@@ -310,7 +310,7 @@ func TestAskEditor_AFailedRoundTripLeavesTheQuestionOpen(t *testing.T) {
 			m, replies := askFlowFor(t, AskRequest{Kind: AskLongText, Prompt: "Write it up"})
 
 			out, _ := m.Update(tc.msg)
-			m = out.(model)
+			m = out.(*model)
 
 			q, ok := m.openAsk().(*askEditorQuestion)
 			if !ok {
@@ -355,7 +355,7 @@ func TestAsk_SessionSwitchCancelsTheOpenQuestion(t *testing.T) {
 // are never seen again.
 func TestAsk_SessionSwitchReArmsTheListenerExactlyOnce(t *testing.T) {
 	m, _ := askFlowFor(t, twoChoices(AskChoice))
-	if cmd := askResolver(dismissed{Reason: dismissSuperseded}, &m); cmd != nil {
+	if cmd := askResolver(dismissed{Reason: dismissSuperseded}, m); cmd != nil {
 		t.Error("the superseded resolver re-armed a listener step 8 also re-arms")
 	}
 	fresh := NewAsker()

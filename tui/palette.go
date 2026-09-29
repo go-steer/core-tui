@@ -470,7 +470,7 @@ const maxPaletteRows = 8
 // budget.go) so the panel scrolls a smaller window instead of pushing
 // the input box out of the frame — the palette is the third of the
 // three variable-height elements that could do that (issue #121).
-func (m model) renderPalette(width int) string {
+func (m *model) renderPalette(width int) string {
 	if m.palette == nil || width <= 0 {
 		return ""
 	}
@@ -541,7 +541,7 @@ func (m model) renderPalette(width int) string {
 // still elides at the end as a backstop, because the two scroll
 // indicators are conditional and can each add a row after the window
 // has been chosen.
-func (m model) paletteWindow() int {
+func (m *model) paletteWindow() int {
 	window := maxPaletteRows
 	if ceiling := m.chrome.paletteCap; ceiling > 0 {
 		const panelChrome = 3 // top rule + header + bottom rule
@@ -554,7 +554,7 @@ func (m model) paletteWindow() int {
 
 // renderPaletteRow renders one row: `> Display              Description`.
 // Selected row uses the accent color; unavailable items render dim.
-func (m model) renderPaletteRow(it paletteItem, selected bool, width int) string {
+func (m *model) renderPaletteRow(it paletteItem, selected bool, width int) string {
 	display := it.Display
 	if display == "" {
 		display = m.palette.triggerRune() + it.Name

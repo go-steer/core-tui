@@ -50,11 +50,11 @@ func spinnerParts(t *testing.T, m *model, frame int) (glyph, rest string) {
 func TestSpinnerFrameRate_GlyphAdvancesOnEveryFrame(t *testing.T) {
 	m := newModel(Options{Agent: stubAgent{}})
 	m.viewport.SetWidth(80)
-	m = m.submitTurn("go")
+	m.submitTurn("go")
 
-	prev, _ := spinnerParts(t, &m, 0)
+	prev, _ := spinnerParts(t, m, 0)
 	for frame := 1; frame < len(brailleSpinnerGlyphs); frame++ {
-		glyph, _ := spinnerParts(t, &m, frame)
+		glyph, _ := spinnerParts(t, m, frame)
 		if glyph == prev {
 			t.Fatalf("frame %d drew the same glyph as frame %d (%q) — the animation is indexed "+
 				"by something slower than the tick", frame, frame-1, glyph)
@@ -66,16 +66,16 @@ func TestSpinnerFrameRate_GlyphAdvancesOnEveryFrame(t *testing.T) {
 func TestSpinnerFrameRate_VerbHoldsForOneCadence(t *testing.T) {
 	m := newModel(Options{Agent: stubAgent{}})
 	m.viewport.SetWidth(80)
-	m = m.submitTurn("go")
+	m.submitTurn("go")
 
-	_, want := spinnerParts(t, &m, 0)
+	_, want := spinnerParts(t, m, 0)
 	for frame := 1; frame < spinnerFramesPerVerb; frame++ {
-		if _, got := spinnerParts(t, &m, frame); got != want {
+		if _, got := spinnerParts(t, m, frame); got != want {
 			t.Fatalf("verb changed at frame %d of %d: %q → %q — the phrase is rotating at the "+
 				"animation rate and will strobe", frame, spinnerFramesPerVerb, want, got)
 		}
 	}
-	if _, got := spinnerParts(t, &m, spinnerFramesPerVerb); got == want {
+	if _, got := spinnerParts(t, m, spinnerFramesPerVerb); got == want {
 		// Only meaningful with more than one phrase in the pool, which
 		// the built-in pool has; a single-entry host pool would
 		// legitimately repeat.

@@ -31,7 +31,7 @@ import (
 // the agent dispatch goroutine, and (when the host's agent
 // implements WakeRequester) subscribes to the wake channel for
 // transient toast banners (R-WAKE-1).
-func (m model) Init() tea.Cmd {
+func (m *model) Init() tea.Cmd {
 	cmds := []tea.Cmd{
 		tea.RequestBackgroundColor,
 		textarea.Blink,
@@ -81,10 +81,10 @@ func (m model) Init() tea.Cmd {
 	// a foot-gun).
 	if m.liveMode {
 		if liveAgent, ok := m.opts.Agent.(LiveAgent); ok {
-			// Init has a value receiver — we can't mutate m here.
-			// startLiveStream's cancel needs to live somewhere
-			// addressable; stash via a tea.Cmd that returns a
-			// liveStreamStartedMsg carrying the cancel func.
+			// The cancel reaches the model through a tea.Cmd that
+			// returns a liveStreamStartedMsg carrying it, so the
+			// field is written in Update like every other one, and
+			// the same message drives the "Attached as observer" row.
 			cmds = append(cmds, m.spawnLiveStreamCmd(liveAgent))
 		}
 	}
@@ -100,18 +100,20 @@ func (m model) Init() tea.Cmd {
 	return tea.Batch(cmds...)
 }
 
-// spawnLiveStreamCmd is the bridge that lets Init() (value
-// receiver) hand the eventually-mutating cancelLiveStream onto
-// the model: returns a Cmd that starts the drain goroutine and
-// reports back via liveStreamStartedMsg so the Update handler
-// can stash the cancel on the pointer it owns.
-func (m model) spawnLiveStreamCmd(agent LiveAgent) tea.Cmd {
+// spawnLiveStreamCmd returns a Cmd that starts the drain goroutine
+// and reports back via liveStreamStartedMsg, so the Update handler
+// stashes the cancel on cancelLiveStream. The Cmd runs off the event
+// loop and must not touch the model itself.
+func (m *model) spawnLiveStreamCmd(agent LiveAgent) tea.Cmd {
 	// Capture the current sessionGen at Cmd-construction time so
 	// the returned liveStreamStartedMsg is discarded if
 	// applySwitchTarget bumps m.sessionGen before it lands.
 	gen := m.sessionGen
+	// The Cmd runs on its own goroutine, so it takes the channel by
+	// value too instead of reaching back into the model (issue #266).
+	ch := m.eventCh
 	return func() tea.Msg {
-		cancel := m.startLiveStream(agent)
+		cancel := runLiveStream(agent, ch, gen)
 		return liveStreamStartedMsg{gen: gen, cancel: cancel}
 	}
 }
@@ -119,7 +121,7 @@ func (m model) spawnLiveStreamCmd(agent LiveAgent) tea.Cmd {
 // Update is the Bubble Tea dispatcher. The visual-preview slice
 // handles window-resize, background-color, and a small keymap; later
 // slices add agent-event dispatch, modal forms, etc.
-func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
+func (m *model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	// Pending huh.Form intercepts EVERY tea.Msg (KeyPress,
 	// WindowSize, ticks) so the embedded form runs its own
 	// state machine. On completion / abort, updatePricingForm
@@ -196,7 +198,7 @@ func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		return m, nil
 
 	case tea.KeyPressMsg:
-		return m.handleKey(msg)
+		return m, m.handleKey(msg)
 
 	case tea.MouseWheelMsg:
 		// A modal on screen owns the wheel. Without this the event
@@ -225,7 +227,7 @@ func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		// through as before.
 		if _, ok := m.overlayStack.front().(keyMsgDialog); ok {
 			if key, ok := pasteKeyMsg(msg.Content); ok {
-				if consumed, cmd := m.overlayStack.handleKeyMsg(key, &m); consumed {
+				if consumed, cmd := m.overlayStack.handleKeyMsg(key, m); consumed {
 					m.refreshViewport()
 					return m, cmd
 				}
@@ -298,7 +300,7 @@ func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		m.inFlightSlash = nil
 		m.cancelSlash = nil
 		m.toast = ""
-		return m.applySlashResult(msg.name, msg.res, msg.err)
+		return m, m.applySlashResult(msg.name, msg.res, msg.err)
 	case liveStreamStartedMsg:
 		// Issue #48: a switch away from a LiveAgent host may have
 		// bumped m.sessionGen before this msg landed — the
@@ -700,7 +702,7 @@ func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			q.fail.set(reason)
 			return m, cmd
 		}
-		return m, tea.Batch(cmd, m.overlayStack.resolve(modelPickerDialogID, chosen{ID: msg.id}, &m))
+		return m, tea.Batch(cmd, m.overlayStack.resolve(modelPickerDialogID, chosen{ID: msg.id}, m))
 	case sessionsLoadedMsg:
 		if msg.gen != m.sessionGen {
 			return m, nil
@@ -762,7 +764,7 @@ func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			q.fail.set(reason)
 			return m, cmd
 		}
-		return m, tea.Batch(cmd, m.overlayStack.resolve(sessionPickerDialogID, chosen{ID: msg.id}, &m))
+		return m, tea.Batch(cmd, m.overlayStack.resolve(sessionPickerDialogID, chosen{ID: msg.id}, m))
 	case slashCommandsMsg:
 		// Host slash commands merging into an already-open / palette,
 		// and into the held-input recogniser's cache (issue #311).
@@ -942,7 +944,7 @@ func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		if msg.gen != m.sessionGen || msg.seq != m.slashSeq {
 			return m, nil
 		}
-		return m.applySlashDispatch(msg)
+		return m, m.applySlashDispatch(msg)
 
 	case inboxStateMsg:
 		if msg.gen != m.sessionGen {
@@ -1063,22 +1065,22 @@ func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		// and submits a synthetic auto-continue turn instead of
 		// draining one queue entry at a time. Falls through to
 		// maybeDrainQueue when not applicable.
-		if next, cmd, ok := m.maybeAutoContinue(); ok {
-			return next, cmd
+		if cmd, ok := m.maybeAutoContinue(); ok {
+			return m, cmd
 		}
-		return m.maybeDrainQueue()
+		return m, m.maybeDrainQueue()
 	case turnErrMsg:
 		if msg.gen != m.sessionGen {
 			return m, m.eventListener()
 		}
 		m.finalizeTurn(0, msg.err.Error())
-		return m.maybeDrainQueue()
+		return m, m.maybeDrainQueue()
 	case turnCancelledMsg:
 		if msg.gen != m.sessionGen {
 			return m, m.eventListener()
 		}
 		m.finalizeTurn(0, "(interrupted)")
-		return m.maybeDrainQueue()
+		return m, m.maybeDrainQueue()
 	case spinnerTickMsg:
 		// Identity guard (issue #112). The two level gates below can
 		// only tell whether *a* spinner should be running right now,
@@ -1170,8 +1172,8 @@ func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			return m, nil
 		}
 		m.recordPrompt(text)
-		out := m.submitTurn(text)
-		return out, out.armSpinner()
+		m.submitTurn(text)
+		return m, m.armSpinner()
 	case remoteInterruptDoneMsg:
 		// Follow-up to the "/interrupt: cancelling remote turn…"
 		// placeholder appended in the slash handler. Success case
@@ -1266,8 +1268,8 @@ func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		if msg.submit != "" {
 			// Per-turn steer: the gate is open, so this is now an
 			// ordinary submission (see resumeThenSubmitCmd).
-			out := m.submitTurn(msg.submit)
-			return out, out.armSpinner()
+			m.submitTurn(msg.submit)
+			return m, m.armSpinner()
 		}
 		return m, nil
 	case wakeMsg:
@@ -1398,7 +1400,7 @@ func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 				q.setNote("editor returned an empty answer — nothing sent")
 			}
 		default:
-			cmd = m.overlayStack.resolve(askDialogID, text{Value: msg.text}, &m)
+			cmd = m.overlayStack.resolve(askDialogID, text{Value: msg.text}, m)
 		}
 		m.refreshViewport()
 		// The child process owned the terminal; the frame it left behind
@@ -1560,7 +1562,7 @@ func withinGrace(shownAt time.Time) bool {
 // We use msg.String() (a normalized keystroke like "ctrl+b" /
 // "shift+enter") for dispatch — Code+Mod bit-fiddling is brittle in
 // the face of v2's keyboard-enhancement protocol.
-func (m model) handleKey(msg tea.KeyPressMsg) (tea.Model, tea.Cmd) {
+func (m *model) handleKey(msg tea.KeyPressMsg) tea.Cmd {
 	stroke := msg.String()
 
 	// Esc cascades through overlays (R-CHAT-6): side-answer modal →
@@ -1571,7 +1573,7 @@ func (m model) handleKey(msg tea.KeyPressMsg) (tea.Model, tea.Cmd) {
 			m.sideAnswer = nil
 			m.resize()
 			m.refreshViewport()
-			return m, nil
+			return nil
 		}
 		// Esc goes to the front-most dialog first so it can do
 		// cancel-time work (the theme picker restores the palette
@@ -1580,25 +1582,25 @@ func (m model) handleKey(msg tea.KeyPressMsg) (tea.Model, tea.Cmd) {
 		// esc; the closeFront below is the fallback for one that
 		// declines to handle it.
 		if m.overlayStack.hasDialogs() {
-			if consumed, cmd := m.overlayStack.handleKeyMsg(msg, &m); consumed {
+			if consumed, cmd := m.overlayStack.handleKeyMsg(msg, m); consumed {
 				m.refreshViewport()
-				return m, cmd
+				return cmd
 			}
 			m.overlayStack.closeFront()
 			m.refreshViewport()
-			return m, nil
+			return nil
 		}
 		if m.helpOpen {
 			m.closeHelp()
 			m.resize()
 			m.refreshViewport()
-			return m, nil
+			return nil
 		}
 		if m.palette != nil {
 			m.palette = nil
 			m.resize()
 			m.refreshViewport()
-			return m, nil
+			return nil
 		}
 		// Hand the keyboard back to the composer (issue #151).
 		// Placed here — below every open surface, above the two
@@ -1610,7 +1612,7 @@ func (m model) handleKey(msg tea.KeyPressMsg) (tea.Model, tea.Cmd) {
 		// key that escapes everything else.
 		if m.focus != focusInput {
 			m.setFocus(focusInput)
-			return m, nil
+			return nil
 		}
 		// Issue #13 bonus: Esc cancels an in-flight async slash
 		// via the cancellable ctx we stashed in dispatchSlash.
@@ -1627,7 +1629,7 @@ func (m model) handleKey(msg tea.KeyPressMsg) (tea.Model, tea.Cmd) {
 				m.toastSetAt = time.Now()
 				m.refreshViewport()
 			}
-			return m, nil
+			return nil
 		}
 		// Already held: esc dismisses the banner and leaves the gate
 		// shut. Esc is the key that backs out of things, and the
@@ -1640,7 +1642,7 @@ func (m model) handleKey(msg tea.KeyPressMsg) (tea.Model, tea.Cmd) {
 			m.pause.dismissed = true
 			m.resize()
 			m.refreshViewport()
-			return m, nil
+			return nil
 		}
 		// Local cancel first: it's instant and it unwedges the local
 		// call stack. It is not exclusive with the hold below — on a
@@ -1659,7 +1661,7 @@ func (m model) handleKey(msg tea.KeyPressMsg) (tea.Model, tea.Cmd) {
 		// operator wants to get ahead of the next one. Parking is
 		// never a dead end — typing un-parks.
 		if p, ok := m.opts.Agent.(Pauser); ok {
-			return m, m.holdCmd(p, "operator interrupt")
+			return m.holdCmd(p, "operator interrupt")
 		}
 		// No Pauser: fall back to the remote cancel. On a host new
 		// enough to hold (core-agent ≥ protocol 1.5.0) /interrupt
@@ -1673,10 +1675,10 @@ func (m model) handleKey(msg tea.KeyPressMsg) (tea.Model, tea.Cmd) {
 			if ri, ok := m.opts.Agent.(RemoteInterrupter); ok && m.turnRunning() {
 				m.history.Append(Message{Role: RoleSystem, Text: "Interrupting…"})
 				m.refreshAndScroll()
-				return m, remoteInterruptCmd(ri)
+				return remoteInterruptCmd(ri)
 			}
 		}
-		return m, nil
+		return nil
 	}
 
 	// Side-answer modal also dismisses on Enter / Space (R-CMD-5).
@@ -1684,7 +1686,7 @@ func (m model) handleKey(msg tea.KeyPressMsg) (tea.Model, tea.Cmd) {
 		m.sideAnswer = nil
 		m.resize()
 		m.refreshViewport()
-		return m, nil
+		return nil
 	}
 
 	// A /btw answer longer than the terminal is tall gets windowed
@@ -1692,7 +1694,7 @@ func (m model) handleKey(msg tea.KeyPressMsg) (tea.Model, tea.Cmd) {
 	// here also stops "up" from quietly walking prompt history
 	// behind the modal, which is what it did before.
 	if m.sideAnswer != nil && m.scroll().applyStroke(stroke) {
-		return m, nil
+		return nil
 	}
 
 	// dialog overlay — front-most dialog gets every keystroke
@@ -1702,9 +1704,9 @@ func (m model) handleKey(msg tea.KeyPressMsg) (tea.Model, tea.Cmd) {
 	// Cmd is dialogs' channel for emitting outbound msgs (e.g.
 	// theme picker fires ThemeChangedMsg here on commit).
 	if m.overlayStack.hasDialogs() {
-		if consumed, cmd := m.overlayStack.handleKeyMsg(msg, &m); consumed {
+		if consumed, cmd := m.overlayStack.handleKeyMsg(msg, m); consumed {
 			m.refreshViewport()
-			return m, cmd
+			return cmd
 		}
 	}
 
@@ -1715,14 +1717,15 @@ func (m model) handleKey(msg tea.KeyPressMsg) (tea.Model, tea.Cmd) {
 		switch stroke {
 		case "up", "ctrl+p":
 			m.palette.moveCursor(-1)
-			return m, nil
+			return nil
 		case "down", "ctrl+n":
 			m.palette.moveCursor(1)
-			return m, nil
+			return nil
 		case "tab":
 			// Tab inserts the selection without submitting so the
 			// operator can keep typing args (`/allow ` → `/allow pat`).
-			return m.paletteComplete(), nil
+			m.paletteComplete()
+			return nil
 		case "enter":
 			// Enter on a slash palette item: insert AND submit in one
 			// keystroke (mirrors internal/tui's UX so `/mcp ⏎` from
@@ -1736,7 +1739,7 @@ func (m model) handleKey(msg tea.KeyPressMsg) (tea.Model, tea.Cmd) {
 			if sel, ok := m.palette.selected(); ok {
 				noAuto = sel.NoAutoSubmit
 			}
-			m = m.paletteInsert().(model)
+			m.paletteInsert()
 			if kind == paletteSlash && !noAuto {
 				text := strings.TrimSpace(m.input.Value())
 				if strings.HasPrefix(text, "/") {
@@ -1748,7 +1751,7 @@ func (m model) handleKey(msg tea.KeyPressMsg) (tea.Model, tea.Cmd) {
 					return m.submitInputLine(text)
 				}
 			}
-			return m, nil
+			return nil
 		}
 	}
 
@@ -1766,7 +1769,7 @@ func (m model) handleKey(msg tea.KeyPressMsg) (tea.Model, tea.Cmd) {
 	// ctrl+g would defeat the mode. See handleTranscriptKey.
 	if m.focus == focusTranscript {
 		if cmd, claimed := m.handleTranscriptKey(stroke); claimed {
-			return m, cmd
+			return cmd
 		}
 	}
 
@@ -1779,7 +1782,7 @@ func (m model) handleKey(msg tea.KeyPressMsg) (tea.Model, tea.Cmd) {
 		//  3. idle, armed -> quit
 		if m.state == stateStreaming && m.cancelTurn != nil {
 			m.cancelTurn() // goroutine emits turnCancelledMsg
-			return m, nil
+			return nil
 		}
 		if !m.pendingExit {
 			m.pendingExit = true
@@ -1788,15 +1791,15 @@ func (m model) handleKey(msg tea.KeyPressMsg) (tea.Model, tea.Cmd) {
 				Text: "press ctrl+c again within 2s to exit",
 			})
 			m.refreshViewport()
-			return m, pendingExitTick()
+			return pendingExitTick()
 		}
 		m.quitting = true
-		return m, m.quitCmd()
+		return m.quitCmd()
 	case "ctrl+d":
 		// Ctrl+D quits unconditionally — "EOF closes input" is the
 		// muscle memory and most TUIs honor it without a warning.
 		m.quitting = true
-		return m, m.quitCmd()
+		return m.quitCmd()
 
 	case "ctrl+l":
 		// Reset viewport scroll to the top. Mirrors the shell-style
@@ -1806,7 +1809,7 @@ func (m model) handleKey(msg tea.KeyPressMsg) (tea.Model, tea.Cmd) {
 		// would drag the operator straight back down.
 		m.follow = false
 		m.chatGotoTop()
-		return m, nil
+		return nil
 
 	case "end":
 		// The counterpart to ctrl+l: jump back to the tail and
@@ -1828,7 +1831,7 @@ func (m model) handleKey(msg tea.KeyPressMsg) (tea.Model, tea.Cmd) {
 		if m.input.Value() == "" {
 			m.follow = true
 			m.chatGotoBottom()
-			return m, nil
+			return nil
 		}
 		// Non-empty input: fall through to the textarea below.
 
@@ -1839,7 +1842,7 @@ func (m model) handleKey(msg tea.KeyPressMsg) (tea.Model, tea.Cmd) {
 		m.historyCursor = -1
 		m.historyDraft = ""
 		m.refreshViewport()
-		return m, nil
+		return nil
 
 	case "ctrl+b":
 		if m.statusLayout == StatusHeader {
@@ -1852,7 +1855,7 @@ func (m model) handleKey(msg tea.KeyPressMsg) (tea.Model, tea.Cmd) {
 		// PersistStatusLayout is host code that writes the operator's
 		// pick to the host's config; it ran inline on this bare
 		// keystroke with its error discarded (issue #137).
-		return m, persistChoiceCmd(m.sessionGen, "status layout",
+		return persistChoiceCmd(m.sessionGen, "status layout",
 			m.opts.PersistStatusLayout, m.statusLayout)
 
 	case "tab":
@@ -1863,7 +1866,7 @@ func (m model) handleKey(msg tea.KeyPressMsg) (tea.Model, tea.Cmd) {
 		// for prefix completion, which is the more local meaning
 		// while a palette is up.
 		m.cycleFocus()
-		return m, nil
+		return nil
 
 	case "shift+tab":
 		// Cycle the permission-mode chip. The chip flips immediately —
@@ -1876,11 +1879,11 @@ func (m model) handleKey(msg tea.KeyPressMsg) (tea.Model, tea.Cmd) {
 		// permissionModeAppliedMsg rolls the chip back when the host
 		// refuses the mode, and surfaces either error as a row.
 		if !m.permissionModeWired() {
-			return m, nil
+			return nil
 		}
 		prev := m.permMode
 		m.permMode = prev.Next()
-		return m, permissionModeCmd(m.opts.PermissionMode, m.sessionGen, prev, m.permMode)
+		return permissionModeCmd(m.opts.PermissionMode, m.sessionGen, prev, m.permMode)
 
 	case "ctrl+g":
 		// Open the model picker dialog. Singleton — re-press
@@ -1891,10 +1894,10 @@ func (m model) handleKey(msg tea.KeyPressMsg) (tea.Model, tea.Cmd) {
 		if _, ok := m.opts.Agent.(ModelSwapper); ok {
 			if cmd := m.openModelPicker(); cmd != nil {
 				m.refreshViewport()
-				return m, cmd
+				return cmd
 			}
 		}
-		return m, nil
+		return nil
 
 	case "ctrl+x":
 		// Open the expand-single tool-call detail dialog (core-tui
@@ -1931,7 +1934,7 @@ func (m model) handleKey(msg tea.KeyPressMsg) (tea.Model, tea.Cmd) {
 				m.refreshViewport()
 			}
 		}
-		return m, nil
+		return nil
 
 	case "up":
 		// Shell-style history recall when the input is empty:
@@ -1941,7 +1944,7 @@ func (m model) handleKey(msg tea.KeyPressMsg) (tea.Model, tea.Cmd) {
 		// internal/tui:434-442).
 		if strings.TrimSpace(m.input.Value()) == "" || m.historyCursor >= 0 {
 			m.recallPrompt(-1)
-			return m, nil
+			return nil
 		}
 	case "down":
 		// Forward through history when actively navigating;
@@ -1949,7 +1952,7 @@ func (m model) handleKey(msg tea.KeyPressMsg) (tea.Model, tea.Cmd) {
 		// (more common while composing).
 		if m.historyCursor >= 0 {
 			m.recallPrompt(+1)
-			return m, nil
+			return nil
 		}
 
 	case "enter":
@@ -1977,7 +1980,7 @@ func (m model) handleKey(msg tea.KeyPressMsg) (tea.Model, tea.Cmd) {
 			m.resize()
 			m.refreshViewport()
 		}
-		return m, cmd
+		return cmd
 
 	case "?":
 		// Walk the bottom-anchored stacked help panel: open it, page
@@ -1997,7 +2000,7 @@ func (m model) handleKey(msg tea.KeyPressMsg) (tea.Model, tea.Cmd) {
 			m.advanceHelp()
 			m.resize()
 			m.refreshViewport()
-			return m, nil
+			return nil
 		}
 	}
 
@@ -2041,7 +2044,7 @@ func (m model) handleKey(msg tea.KeyPressMsg) (tea.Model, tea.Cmd) {
 	// other keystroke. Opening returns the Cmd that fills the panel
 	// off the event loop (issue #114); re-filtering returns nil.
 	paletteCmd := m.refreshPalette()
-	return m, tea.Batch(taCmd, paletteCmd)
+	return tea.Batch(taCmd, paletteCmd)
 }
 
 // refreshPalette re-derives palette state from the current textarea
@@ -2150,13 +2153,13 @@ func atFilterFrom(s string, triggerPos int) string {
 // of the matched palette items (Tab while palette is open). Leaves
 // the palette open for further filtering. Idempotent when the filter
 // is already the full common prefix.
-func (m model) paletteComplete() tea.Model {
+func (m *model) paletteComplete() {
 	if m.palette == nil {
-		return m
+		return
 	}
 	extension := m.palette.completion()
 	if extension == "" {
-		return m
+		return
 	}
 	value := m.input.Value()
 	tokenEnd := m.palette.triggerPos + 1 + len(m.palette.filter)
@@ -2168,7 +2171,6 @@ func (m model) paletteComplete() tea.Model {
 	// The trigger char is untouched, so this only re-filters the
 	// snapshot the palette already holds — never a fresh fetch.
 	_ = m.refreshPalette()
-	return m
 }
 
 // submitTurn appends the user's message, kicks off the agent dispatch
@@ -2202,7 +2204,7 @@ func (m model) paletteComplete() tea.Model {
 // claim the key before it gets here.
 //
 // text is the already-trimmed input line.
-func (m model) submitInputLine(text string) (tea.Model, tea.Cmd) {
+func (m *model) submitInputLine(text string) tea.Cmd {
 	// /clear confirmation: the prior /clear submission armed
 	// confirmingClear. The prompt says "press enter for y/yes",
 	// so a bare Enter (empty text) counts as the y/yes answer;
@@ -2217,14 +2219,14 @@ func (m model) submitInputLine(text string) (tea.Model, tea.Cmd) {
 			m.history.Reset()
 			m.resetChatSelection()
 			m.refreshViewport()
-			return m, nil
+			return nil
 		}
 		m.history.Append(Message{Role: RoleSystem, Text: "clear cancelled"})
 		m.refreshViewport()
-		return m, nil
+		return nil
 	}
 	if text == "" {
-		return m, nil
+		return nil
 	}
 	// Mid-turn slash routing (R-HOLD-3). This runs BEFORE the
 	// stateStreaming branch below because that branch queues the
@@ -2265,7 +2267,7 @@ func (m model) submitInputLine(text string) (tea.Model, tea.Cmd) {
 				Text: "/" + name + ": not while a turn is running",
 			})
 			m.refreshAndScroll()
-			return m, nil
+			return nil
 		case midTurnQueue:
 			// Fall through to the paused / streaming arms
 			// below, which is where queueing lives.
@@ -2326,7 +2328,7 @@ func (m model) submitInputLine(text string) (tea.Model, tea.Cmd) {
 				// turn, and the standing Events stream shows it.
 				m.history.Append(Message{Role: RoleUser, Text: text})
 				m.refreshAndScroll()
-				return m, resumeCmd(p, ResumeRequest{Mode: ResumeModeSteer, Steer: text})
+				return resumeCmd(p, ResumeRequest{Mode: ResumeModeSteer, Steer: text})
 			}
 			// Per-turn host: WE own the turn. Open the gate,
 			// drop the held work, and run the steer through
@@ -2336,14 +2338,14 @@ func (m model) submitInputLine(text string) (tea.Model, tea.Cmd) {
 			// submitTurn appends it, so the transcript gets one
 			// copy either way.
 			m.refreshAndScroll()
-			return m, resumeThenSubmitCmd(p, ResumeRequest{Mode: ResumeModeAbandon}, text)
+			return resumeThenSubmitCmd(p, ResumeRequest{Mode: ResumeModeAbandon}, text)
 		}
 	}
 	if m.state == stateStreaming {
 		m.enqueueDuringStream(text)
 		m.input.Reset()
 		m.refreshViewport()
-		return m, nil
+		return nil
 	}
 	if strings.HasPrefix(text, "/") {
 		return m.dispatchSlash(text)
@@ -2365,7 +2367,7 @@ func (m model) submitInputLine(text string) (tea.Model, tea.Cmd) {
 			if err := injector.Inject(text); err != nil {
 				m.history.Append(Message{Role: RoleError, Text: "inject failed: " + err.Error()})
 				m.refreshViewport()
-				return m, nil
+				return nil
 			}
 			// Render the typed prompt as a normal user row
 			// so the operator sees what they sent — the
@@ -2389,7 +2391,7 @@ func (m model) submitInputLine(text string) (tea.Model, tea.Cmd) {
 				spin = m.armSpinner()
 			}
 			m.refreshViewport()
-			return m, spin
+			return spin
 		}
 		if !m.liveReadOnlyNoted {
 			m.liveReadOnlyNoted = true
@@ -2399,7 +2401,7 @@ func (m model) submitInputLine(text string) (tea.Model, tea.Cmd) {
 			})
 			m.refreshViewport()
 		}
-		return m, nil
+		return nil
 	}
 	// Record the non-slash, non-empty prompt in history so
 	// ↑/↓ can recall it next time. recordPrompt dedupes
@@ -2408,11 +2410,11 @@ func (m model) submitInputLine(text string) (tea.Model, tea.Cmd) {
 	// Operator-initiated turn resets the auto-continue cap so
 	// the next streak gets the full budget. (Issue #9.)
 	m.consecutiveAutoContinues = 0
-	out := m.submitTurn(text)
-	return out, out.armSpinner()
+	m.submitTurn(text)
+	return m.armSpinner()
 }
 
-func (m model) submitTurn(text string) model {
+func (m *model) submitTurn(text string) {
 	m.history.Append(Message{Role: RoleUser, Text: text})
 
 	// Resolve @-refs against the operator's view of the filesystem.
@@ -2461,7 +2463,6 @@ func (m model) submitTurn(text string) model {
 	m.chatGotoBottom()
 	// Spinner tick scheduled separately from event listener; both
 	// stream their own messages into Update.
-	return m
 }
 
 // applyStreamChunk handles a streamChunkMsg from the agent. Accumulates
@@ -2814,7 +2815,7 @@ func (m *model) finalizeTurn(elapsed time.Duration, notice string) {
 // unrecognized names fall through to the agent's optional
 // SlashProvider (/btw, /subagent, etc.); anything still unmatched
 // surfaces as a system row pointing at /help.
-func (m model) dispatchSlash(text string) (tea.Model, tea.Cmd) {
+func (m *model) dispatchSlash(text string) tea.Cmd {
 	rest := strings.TrimPrefix(text, "/")
 	name, args, _ := strings.Cut(rest, " ")
 	name = strings.ToLower(name)
@@ -2827,8 +2828,8 @@ func (m model) dispatchSlash(text string) (tea.Model, tea.Cmd) {
 	// anything overtaken (model.go's slashSeq).
 	m.slashSeq++
 
-	if handled, model, cmd := m.dispatchBuiltinSlash(name, args); handled {
-		return model, cmd
+	if handled, cmd := m.dispatchBuiltinSlash(name, args); handled {
+		return cmd
 	}
 
 	// A catalog is all it takes to be worth asking. SlashProvider and
@@ -2844,7 +2845,7 @@ func (m model) dispatchSlash(text string) (tea.Model, tea.Cmd) {
 		})
 		m.input.Reset()
 		m.refreshAndScroll()
-		return m, nil
+		return nil
 	}
 
 	// The name match reads the host's SlashCommands() and the
@@ -2867,7 +2868,7 @@ func (m model) dispatchSlash(text string) (tea.Model, tea.Cmd) {
 	}
 	m.input.Reset()
 	m.refreshViewport()
-	return m, slashDispatchCmd(lister, m.sessionGen, m.slashSeq, name, args, sync)
+	return slashDispatchCmd(lister, m.sessionGen, m.slashSeq, name, args, sync)
 }
 
 // applySlashDispatch is the Update-side half of a host /cmd (issue
@@ -2882,14 +2883,14 @@ func (m model) dispatchSlash(text string) (tea.Model, tea.Cmd) {
 // through the other. Narrowing SlashProvider to AsyncSlashProvider
 // read naturally but made the async path conditional on a synchronous
 // InvokeSlash the host has no reason to have (issue #275).
-func (m model) applySlashDispatch(msg slashDispatchedMsg) (tea.Model, tea.Cmd) {
+func (m *model) applySlashDispatch(msg slashDispatchedMsg) tea.Cmd {
 	if !msg.matched {
 		m.history.Append(Message{
 			Role: RoleSystem,
 			Text: "unknown command /" + msg.name + " — type / to see what's available",
 		})
 		m.refreshAndScroll()
-		return m, nil
+		return nil
 	}
 	if msg.invoked {
 		return m.applySlashResult(msg.name, msg.res, msg.err)
@@ -2909,8 +2910,8 @@ func (m model) applySlashDispatch(msg slashDispatchedMsg) (tea.Model, tea.Cmd) {
 	// is launched. An empty preamble skips the row, which is what a
 	// host with nothing to say returns.
 	if asyncProv, ok := m.opts.Agent.(AsyncSlashProvider); ok {
-		if refusal, refused := m.refuseConcurrentSlash(name); refused {
-			return refusal, nil
+		if m.refuseConcurrentSlash(name) {
+			return nil
 		}
 		// Cancellable ctx so the Esc handler can fire cancelSlash and
 		// the host can bail per the AsyncSlashProvider contract.
@@ -2929,7 +2930,7 @@ func (m model) applySlashDispatch(msg slashDispatchedMsg) (tea.Model, tea.Cmd) {
 		} else {
 			m.refreshViewport()
 		}
-		return m, awaitSlashChannel(name, ch)
+		return awaitSlashChannel(name, ch)
 	}
 	if sync, ok := m.opts.Agent.(SlashProvider); ok {
 		// Not the async shape, and the match Cmd didn't invoke: the
@@ -2938,7 +2939,7 @@ func (m model) applySlashDispatch(msg slashDispatchedMsg) (tea.Model, tea.Cmd) {
 		// reaching for InvokeSlash from here — this is the one path
 		// back to the loop, and it is not going to become an unbounded
 		// inline call again.
-		return m, slashDispatchCmd(sync, m.sessionGen, m.slashSeq, name, args, sync)
+		return slashDispatchCmd(sync, m.sessionGen, m.slashSeq, name, args, sync)
 	}
 	if _, ok := m.opts.Agent.(slashLister); ok {
 		// The host published this command in its catalog and
@@ -2951,27 +2952,27 @@ func (m model) applySlashDispatch(msg slashDispatchedMsg) (tea.Model, tea.Cmd) {
 			Text: "/" + name + " — the agent lists this command but doesn't implement a way to run it",
 		})
 		m.refreshAndScroll()
-		return m, nil
+		return nil
 	}
 	// The agent was replaced mid-match by one with no slash surface at
 	// all. Nothing to invoke and nothing worth saying — the swap itself
 	// already wrote its own row.
-	return m, nil
+	return nil
 }
 
 // refuseConcurrentSlash applies issue #13's concurrent-slash policy:
 // when an async slash is already in flight, log a RoleSystem refusal
 // for the new dispatch and return refused=true.
-func (m model) refuseConcurrentSlash(name string) (model, bool) {
+func (m *model) refuseConcurrentSlash(name string) bool {
 	if m.inFlightSlash == nil {
-		return m, false
+		return false
 	}
 	m.history.Append(Message{
 		Role: RoleSystem,
 		Text: "/" + name + " refused — /" + m.inFlightSlash.name + " is still running. Wait for it (or press Esc to cancel) then retry.",
 	})
 	m.refreshAndScroll()
-	return m, true
+	return true
 }
 
 // awaitSlashChannel returns a tea.Cmd that drains exactly one value
@@ -2992,14 +2993,14 @@ func awaitSlashChannel(name string, ch <-chan SlashResultOrErr) tea.Cmd {
 // synchronous and async slash paths. Returns the new model + a
 // Cmd (typically nil, or a listener batch when SwitchTo triggers
 // a session swap).
-func (m model) applySlashResult(name string, res SlashResult, err error) (tea.Model, tea.Cmd) {
+func (m *model) applySlashResult(name string, res SlashResult, err error) tea.Cmd {
 	if err != nil {
 		m.history.Append(Message{
 			Role: RoleError,
 			Text: "/" + name + " failed: " + err.Error(),
 		})
 		m.refreshAndScroll()
-		return m, nil
+		return nil
 	}
 	if res.ModalAnswer != nil {
 		m.sideAnswer = res.ModalAnswer
@@ -3039,11 +3040,11 @@ func (m model) applySlashResult(name string, res SlashResult, err error) (tea.Mo
 				Text: "/" + name + ": SwitchTo has nil Agent — ignored",
 			})
 			m.refreshAndScroll()
-			return m, nil
+			return nil
 		}
-		return m, m.applySwitchTarget(res.SwitchTo)
+		return m.applySwitchTarget(res.SwitchTo)
 	}
-	return m, nil
+	return nil
 }
 
 // applySwitchTarget detaches the current Agent's local subscriptions
@@ -3451,7 +3452,7 @@ func (m *model) dispatchAskErr(r AskResult, err error) {
 // in the queue panel during streaming, then finalizeTurn flips it to
 // Done / Failed. Skips terminal-state entries (Done / Failed) that
 // haven't culled yet. Returns the next-step Cmd batch.
-func (m model) maybeDrainQueue() (tea.Model, tea.Cmd) {
+func (m *model) maybeDrainQueue() tea.Cmd {
 	next, idx := -1, -1
 	for i := range m.queue {
 		if m.queue[i].State == QueueQueued {
@@ -3460,12 +3461,12 @@ func (m model) maybeDrainQueue() (tea.Model, tea.Cmd) {
 		}
 	}
 	if next < 0 {
-		return m, m.eventListener()
+		return m.eventListener()
 	}
 	prompt := m.queue[idx].Text
 	m.queue[idx].State = QueueInFlight
-	out := m.submitTurn(prompt)
-	return out, tea.Batch(out.armSpinner(), out.eventListener())
+	m.submitTurn(prompt)
+	return tea.Batch(m.armSpinner(), m.eventListener())
 }
 
 // enqueueDuringStream routes an operator-typed-during-streaming
@@ -3606,15 +3607,15 @@ func trimToolArg(s string, max int) string {
 //     `@`. The palette re-filters to entries under the new prefix.
 //   - Unavailable items are skipped — closing the palette silently
 //     — until a real slice surfaces a system-message hint.
-func (m model) paletteInsert() tea.Model {
+func (m *model) paletteInsert() {
 	if m.palette == nil {
-		return m
+		return
 	}
 	item, ok := m.palette.selected()
 	if !ok || !item.Available {
 		m.palette = nil
 		m.resize()
-		return m
+		return
 	}
 	value := m.input.Value()
 	tokenEnd := m.palette.triggerPos + 1 + len(m.palette.filter)
@@ -3639,5 +3640,4 @@ func (m model) paletteInsert() tea.Model {
 		m.palette = nil
 		m.resize()
 	}
-	return m
 }

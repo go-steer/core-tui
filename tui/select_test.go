@@ -36,12 +36,12 @@ import (
 // selectModel is a transcript of tall items — ten-line answers, which
 // is the shape #152 is about: long enough that a fold changes the
 // frame and that a single item can fill a window.
-func selectModel(t *testing.T, turns, w, h int) model {
+func selectModel(t *testing.T, turns, w, h int) *model {
 	t.Helper()
 	m := newModel(Options{Agent: &bareAgent{id: "sel"}})
 	m.styles = newStylesWithTheme(true, goldenTheme())
 	out, _ := m.Update(tea.WindowSizeMsg{Width: w, Height: h})
-	m = out.(model)
+	m = out.(*model)
 	for i := range turns {
 		q := "turn " + strconv.Itoa(i) + ": what does this function do?"
 		m.history.Append(Message{Role: RoleUser, Text: q, Rendered: q})
@@ -151,13 +151,13 @@ func TestSelect_CursorNeverLeavesTheWindow(t *testing.T) {
 
 	for _, stroke := range []string{"down", "down", "down", "down", "down", "down", "down", "down"} {
 		m = press(m, stroke)
-		if !chatWindowRows(&m)[m.selIdx] {
+		if !chatWindowRows(m)[m.selIdx] {
 			t.Fatalf("after %q the cursor is on item %d, which the window (%v) does not show", stroke, m.selIdx, m.viewport)
 		}
 	}
 	for range 12 {
 		m = press(m, "up")
-		if !chatWindowRows(&m)[m.selIdx] {
+		if !chatWindowRows(m)[m.selIdx] {
 			t.Fatalf("scrolling back up left the cursor on item %d, off screen", m.selIdx)
 		}
 	}
@@ -270,7 +270,7 @@ func TestSelect_SeedLandsOnTheLastVisibleItemAndScrollsNothing(t *testing.T) {
 	idx, line := m.viewport.Offset()
 
 	m.setFocus(focusTranscript)
-	rows := chatWindowRows(&m)
+	rows := chatWindowRows(m)
 	if !rows[m.selIdx] {
 		t.Errorf("the cursor was seeded at item %d, which the window does not show", m.selIdx)
 	}

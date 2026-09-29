@@ -95,7 +95,7 @@ func TestAskResolver_ReArmsOnlyWhenTheFlowIsFree(t *testing.T) {
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
 			m := newModel(Options{Asker: NewAsker()})
-			cmd := askResolver(tc.ans, &m)
+			cmd := askResolver(tc.ans, m)
 			if got := cmd != nil; got != tc.reArms {
 				t.Errorf("re-armed = %v, want %v", got, tc.reArms)
 			}
@@ -421,7 +421,7 @@ func askActionFor(t *testing.T, ans answer) AskAction {
 	flow := askFlow{response: make(chan askResponse, 1)}
 	a.pending = &flow
 	m := newModel(Options{Asker: a})
-	askResolver(ans, &m)
+	askResolver(ans, m)
 	select {
 	case r := <-flow.response:
 		return r.result.Action

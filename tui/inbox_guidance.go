@@ -116,7 +116,7 @@ func hasInboxGuidance(msg Message) bool {
 // marker. Folded is the default, so it is the ABSENCE of an entry in
 // m.collapsed that means folded here — the inverse of every other row
 // — and an explicit false records that the operator opened it.
-func (m model) guidanceFolded(msg Message) bool {
+func (m *model) guidanceFolded(msg Message) bool {
 	folded, set := m.collapsed[msg.ID]
 	return !set || folded
 }
@@ -138,7 +138,7 @@ func foldedGuidanceText(head, guidance, tail string, wrap func(string) string) s
 //
 // Returns ok=false when there is no renderer to hand the pieces to;
 // the caller falls back to the raw path.
-func (m model) renderFoldedAssistantGuidance(head, guidance, tail string) (string, bool) {
+func (m *model) renderFoldedAssistantGuidance(head, guidance, tail string) (string, bool) {
 	mr := m.markdown
 	if mr == nil || mr.r == nil {
 		return "", false

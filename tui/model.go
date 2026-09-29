@@ -70,8 +70,7 @@ type model struct {
 	// empty-state hint — as lines, separator included. Rebuilt by
 	// refreshViewport (buildChatTail) rather than cached per item:
 	// it changes on essentially every event, so there is nothing to
-	// memoize, and rebuilding it there keeps chatView pure enough to
-	// run under View's value receiver.
+	// memoize, and rebuilding it there keeps chatView a pure read.
 	chatTail []string
 
 	// chatRule is the separator rule drawn above a user turn, and
@@ -213,11 +212,11 @@ type model struct {
 	// side answer. Questions on the stack own their own scrollState
 	// instead; see elicitQuestion.sc and permissionQuestion.sc.
 	//
-	// It's a POINTER because View() has a value receiver: the render
-	// path measures the body and writes the geometry back here so
-	// the next keystroke can clamp without re-rendering. Use
-	// model.scroll() rather than touching the field — a zero-value
-	// model{} (tests) has nil here.
+	// The render path measures the body and writes the geometry back
+	// here so the next keystroke can clamp without re-rendering. It
+	// is a pointer for historical reasons (View had a value receiver
+	// until issue #266). Use model.scroll() rather than touching the
+	// field — a zero-value model{} (tests) has nil here.
 	modalScroll *scrollState
 
 	// toast is a transient banner that renders between the input
@@ -312,11 +311,9 @@ type model struct {
 	listCache *listCache
 
 	// statusCache memoizes the assembled status header keyed on the
-	// values that feed it (issue #201). Behind a pointer for the same
-	// reason listCache is: it is filled during a draw, and model.View
-	// has a value receiver. See statuscache.go for why the key is the
-	// values rather than a version stamp, which is the one thing that
-	// makes a shared pointer safe here.
+	// values that feed it (issue #201). It is filled during a draw.
+	// See statuscache.go for why it is behind a pointer and why the
+	// key is the values rather than a version stamp.
 	statusCache *statusCache
 
 	// Incremental Glamour cache for the in-progress assistant
@@ -442,13 +439,10 @@ type model struct {
 	// "cancel where we return tea.Quit, and again once Run returns"
 	// is the whole of the observable surface.
 	//
-	// Both fields are copied by value along with the rest of the
-	// model, and that is fine here in a way it is not for listCache
-	// or modalScroll: nothing ever writes these fields after
-	// construction. Every copy carries the same context.Context
-	// interface value and the same cancel closure over the same
-	// cancelCtx, so cancelling through any copy cancels the one
-	// context all the listeners are parked on. Read them through
+	// Nothing ever writes these fields after construction, so every
+	// listener Cmd that read the context, and every caller that
+	// cancels it, sees the same cancelCtx: cancelling it once
+	// releases every listener parked on it. Read them through
 	// model.listenerCtx / model.endListeners, which tolerate the nil
 	// a zero-value model{} (tests) has.
 	lifeCtx    context.Context
@@ -695,7 +689,7 @@ func NewModel(opts Options) tea.Model {
 // newModel constructs a model from Options. Transcript is applied
 // first, then SeedHistory entries are appended in order, before the
 // first render.
-func newModel(opts Options) model {
+func newModel(opts Options) *model {
 	ta := textarea.New()
 	ta.Placeholder = "Type a message and hit Enter. /help for commands."
 	if opts.Branding.InputPlaceholder != "" {
@@ -758,13 +752,13 @@ func newModel(opts Options) model {
 	// for the three readings to disagree.
 	caps := detectCapabilities()
 	// The listener lifetime starts here rather than in Init so that
-	// it is non-nil for every model a host can get its hands on —
-	// Init runs on the Bubble Tea loop's goroutine, after
-	// tea.NewProgram has already copied the model, and a context
-	// installed there would never reach the copy the program holds.
-	// See the lifeCtx field comment for what cancels it.
+	// it is non-nil for every model a host can get its hands on,
+	// including one whose program never got as far as calling Init.
+	// It also keeps the two fields write-once: nothing after this
+	// constructor assigns them. See the lifeCtx field comment for
+	// what cancels it.
 	lifeCtx, lifeCancel := context.WithCancel(context.Background())
-	m := model{
+	m := &model{
 		opts:            opts,
 		lifeCtx:         lifeCtx,
 		lifeCancel:      lifeCancel,
@@ -824,7 +818,7 @@ func newModel(opts Options) model {
 // the rendered line is "Thinking…" (issue #141). The entries stay
 // punctuated because they read as prose here, and because a
 // host-supplied pool gets the same normalization either way.
-func (m model) thinkingPhrases() []string {
+func (m *model) thinkingPhrases() []string {
 	if len(m.opts.ThinkingPhrases) > 0 {
 		return m.opts.ThinkingPhrases
 	}
@@ -848,7 +842,7 @@ func (m model) thinkingPhrases() []string {
 	}
 }
 
-func (m model) workingPhrases() []string {
+func (m *model) workingPhrases() []string {
 	if len(m.opts.WorkingPhrases) > 0 {
 		return m.opts.WorkingPhrases
 	}
@@ -902,12 +896,12 @@ func (m *model) ensureModalMarkdown(width int) *markdownRenderer {
 }
 
 // permissionModeWired reports whether the host configured the chip.
-func (m model) permissionModeWired() bool {
+func (m *model) permissionModeWired() bool {
 	return m.opts.PermissionMode.Set != nil
 }
 
 // wordmark returns the brand identity string for the status surface.
-func (m model) wordmark() string {
+func (m *model) wordmark() string {
 	if m.opts.Branding.Wordmark != "" {
 		return m.opts.Branding.Wordmark
 	}
@@ -949,13 +943,13 @@ func defaultNewlineHint(termProgram string) string {
 // exists to keep for the host (issue #223). The value is resolved once
 // in NewModel by resolveDisplayCwd.
 //
-// It has to be a field resolved at construction rather than one filled
-// lazily on first use: model is copied by value throughout the package
-// and View has a value receiver, so anything the render path writes to
-// its receiver lands in a copy that is discarded on return. A lazily
-// filled field would do the syscalls on every frame anyway and simply
-// throw the answer away each time.
-func (m model) displayCwd() string {
+// It is a field resolved at construction rather than one filled lazily
+// on first use. That was forced while model had value receivers — a
+// lazily filled field would have been written to a copy on every frame
+// and thrown away — and it stays the better shape now that the
+// receivers are pointers (issue #266): the lookup happens once, off
+// the render path, and displayCwd has no first-call side effect.
+func (m *model) displayCwd() string {
 	return m.cwd
 }
 
@@ -998,7 +992,7 @@ func abbreviateHome(dir, home string) string {
 // StatusReporter read. Otherwise falls back to the host snapshot
 // (see host_snapshot.go), or empty when neither path has surfaced a
 // provider. Reads only cached state so it's safe from View().
-func (m model) displayProvider() string {
+func (m *model) displayProvider() string {
 	if m.pushedProvider != "" {
 		return m.pushedProvider
 	}
@@ -1061,7 +1055,7 @@ func (m *model) applyNamedTheme(name string) {
 // picked. Called from BackgroundColorMsg (first-paint dark/light
 // detect) and any time the active provider could have changed
 // (post-/model swap) or the operator switched themes.
-func (m model) resolveStyles(dark bool) styleSet {
+func (m *model) resolveStyles(dark bool) styleSet {
 	var theme Theme
 	switch {
 	case m.themeName != "":
@@ -1094,7 +1088,7 @@ func (m model) resolveStyles(dark bool) styleSet {
 //     neither source has fired yet.
 //
 // Reads only cached state so it never calls the host from View().
-func (m model) displayModelName() string {
+func (m *model) displayModelName() string {
 	if m.hostSnap.modelName != "" {
 		return m.hostSnap.modelName
 	}
@@ -1108,7 +1102,7 @@ func (m model) displayModelName() string {
 // spend block for the status header. Empty when no UsageTracker is
 // wired (the header just drops the trailing segment rather than
 // rendering placeholder zeros that look like real data).
-func (m model) usageSummaryOneLine() string {
+func (m *model) usageSummaryOneLine() string {
 	if m.opts.UsageTracker == nil || !m.hostSnap.hasUsage {
 		return ""
 	}
@@ -1130,7 +1124,7 @@ func (m model) usageSummaryOneLine() string {
 // First line: "Nk in · Nk out"; second line: "$X · used / size" (or
 // just "$X" when context window is unknown). Empty pair when no
 // UsageTracker is wired.
-func (m model) usageSummaryStacked() (string, string) {
+func (m *model) usageSummaryStacked() (string, string) {
 	if m.opts.UsageTracker == nil || !m.hostSnap.hasUsage {
 		return "", ""
 	}
@@ -1155,7 +1149,7 @@ func (m model) usageSummaryStacked() (string, string) {
 // skill §17.C). Lets the operator see overflow risk before it
 // bites. The tiers read from the active Theme rather than fixed
 // hex so the ramp keeps its contrast on light themes too.
-func (m model) contextFillStyle(used, size int) lipgloss.Style {
+func (m *model) contextFillStyle(used, size int) lipgloss.Style {
 	if size <= 0 {
 		return m.styles.Muted
 	}
@@ -1192,7 +1186,7 @@ func formatKTokens(n int) string {
 // from renderSidebar, i.e. from View(), which host_snapshot.go
 // guarantees never blocks on a host method. The roster refreshes on
 // the same hostSnapshotInterval tick as the header figures.
-func (m model) subagentSummary() []string {
+func (m *model) subagentSummary() []string {
 	if _, ok := m.opts.Agent.(SubagentReporter); !ok {
 		return []string{"none (no SubagentReporter)"}
 	}

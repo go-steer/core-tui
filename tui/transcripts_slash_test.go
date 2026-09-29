@@ -23,7 +23,7 @@ import (
 
 // transcriptsModel builds a model with one saved transcript on disk
 // and returns it alongside the file's base name.
-func transcriptsModel(t *testing.T) (model, string) {
+func transcriptsModel(t *testing.T) (*model, string) {
 	t.Helper()
 	dir := t.TempDir()
 	path, err := saveTranscriptFile(dir, Transcript{
@@ -108,11 +108,11 @@ func TestTranscripts_EveryLineOwnsTheNewName(t *testing.T) {
 func TestResumeAlias_WorksAndSaysWhatToTypeInstead(t *testing.T) {
 	m, _ := transcriptsModel(t)
 
-	handled, next, _ := m.dispatchBuiltinSlash("resume", "")
+	handled, _ := m.dispatchBuiltinSlash("resume", "")
 	if !handled {
 		t.Fatal("/resume not handled")
 	}
-	got := lastText(next.(model))
+	got := lastText(m)
 	if !strings.Contains(got, "/resume is now /transcripts") {
 		t.Errorf("alias did not name its replacement\n  output:\n%s", got)
 	}
@@ -122,11 +122,11 @@ func TestResumeAlias_WorksAndSaysWhatToTypeInstead(t *testing.T) {
 	}
 
 	// The new name carries no notice.
-	handled, next, _ = m.dispatchBuiltinSlash("transcripts", "")
+	handled, _ = m.dispatchBuiltinSlash("transcripts", "")
 	if !handled {
 		t.Fatal("/transcripts not handled")
 	}
-	if got := lastText(next.(model)); strings.Contains(got, "is now") {
+	if got := lastText(m); strings.Contains(got, "is now") {
 		t.Errorf("/transcripts should not print the deprecation row\n  output:\n%s", got)
 	}
 }

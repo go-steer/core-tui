@@ -164,9 +164,9 @@ type question interface {
 	//
 	// The returned Cmd belongs to the question's own machinery — a
 	// bubbles textinput's cursor blink, or a message the question
-	// needs the Update loop to apply on its behalf because the
-	// *model it would need is a per-Update copy (the theme picker's
-	// live preview is the one instance today). It is not an answer
+	// needs the Update loop to apply on its behalf because Key is
+	// not handed the *model (the theme picker's live preview is the
+	// one instance today). It is not an answer
 	// channel and must not carry host-visible messages.
 	Key(msg tea.KeyPressMsg) (answer, tea.Cmd)
 
@@ -304,10 +304,12 @@ type cursorQuestion interface {
 // handler knows a pick means applyNamedTheme; the permission listener
 // knows a decision means dispatchDecision.
 //
-// m is a parameter rather than something the resolver closes over,
-// and that is load-bearing: model.Update has a value receiver, so a
-// *model captured when the question was asked points at the Update
-// copy that opened it and is dead by the time the answer arrives.
+// m is a parameter rather than something the resolver closes over.
+// That was load-bearing while model.Update had a value receiver: a
+// *model captured when the question was asked pointed at the Update
+// copy that opened it, dead by the time the answer arrived. Since
+// issue #266 there is one model, but the parameter keeps resolvers
+// from holding a model reference nobody can see.
 type resolver func(a answer, m *model) tea.Cmd
 
 // askedQuestion is the adapter that lets a question ride the existing

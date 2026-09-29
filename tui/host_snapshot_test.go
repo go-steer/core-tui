@@ -112,7 +112,7 @@ func TestHostSnapshotMsg_AdoptsAndReArms(t *testing.T) {
 
 	snap := hostSnapshot{valid: true, modelName: "gemini-3.5-flash", provider: "gemini"}
 	got, cmd := m.Update(hostSnapshotMsg{gen: m.sessionGen, snap: snap})
-	m2 := got.(model)
+	m2 := got.(*model)
 	if m2.hostSnap.modelName != "gemini-3.5-flash" {
 		t.Errorf("adopted snapshot modelName = %q, want gemini-3.5-flash", m2.hostSnap.modelName)
 	}
@@ -122,7 +122,7 @@ func TestHostSnapshotMsg_AdoptsAndReArms(t *testing.T) {
 
 	// Stale generation: snapshot is ignored, no re-arm.
 	got2, cmd2 := m2.Update(hostSnapshotMsg{gen: m2.sessionGen + 1, snap: hostSnapshot{modelName: "stale"}})
-	m3 := got2.(model)
+	m3 := got2.(*model)
 	if m3.hostSnap.modelName != "gemini-3.5-flash" {
 		t.Errorf("stale snapshot mutated cache: modelName = %q, want gemini-3.5-flash", m3.hostSnap.modelName)
 	}

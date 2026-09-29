@@ -78,7 +78,7 @@ func newPausableSlashAgent() *pausableSlashAgent {
 
 // heldModel is a parked model over agent, with the host-name cache
 // left cold.
-func heldModel(t *testing.T, agent Agent) model {
+func heldModel(t *testing.T, agent Agent) *model {
 	t.Helper()
 	m := newModel(Options{Agent: agent})
 	m.width, m.height = 100, 40
@@ -91,14 +91,14 @@ func heldModel(t *testing.T, agent Agent) model {
 
 // warmHostSlashNames runs the priming fetch Init issues and lands its
 // reply, the way the program loop would.
-func warmHostSlashNames(t *testing.T, m model) model {
+func warmHostSlashNames(t *testing.T, m *model) *model {
 	t.Helper()
 	c := m.hostSlashNamesCmd()
 	if c == nil {
 		t.Fatal("hostSlashNamesCmd returned nil for an agent with a slash catalog")
 	}
 	out, _ := m.Update(c())
-	return out.(model)
+	return out.(*model)
 }
 
 // TestEnterWhileHeld_HostSlashDispatches is the reported case: with the
@@ -126,7 +126,7 @@ func TestEnterWhileHeld_HostSlashDispatches(t *testing.T) {
 					t.Fatalf("Enter's Cmd produced %T, want slashDispatchedMsg", msg)
 				}
 				out, _ := next.Update(msg)
-				next = out.(model)
+				next = out.(*model)
 				if _, invoked := agent.calls(); len(invoked) != 1 {
 					t.Errorf("InvokeSlash calls = %q, want exactly one", invoked)
 				}
@@ -190,7 +190,7 @@ func TestHostSlashNames_StaleGenerationIsDropped(t *testing.T) {
 		t.Fatalf("hostSlashNames = %v after a session switch, want it cleared", m.hostSlashNames)
 	}
 	out, _ := m.Update(stale)
-	m = out.(model)
+	m = out.(*model)
 	if m.hostSlashNames != nil {
 		t.Fatalf("hostSlashNames = %v, want the outgoing session's reply dropped", m.hostSlashNames)
 	}
@@ -236,7 +236,7 @@ collect:
 		case msg := <-replies:
 			if sc, ok := msg.(slashCommandsMsg); ok {
 				out, _ := m.Update(sc)
-				m = out.(model)
+				m = out.(*model)
 				landed = true
 			}
 		case <-deadline:
@@ -258,7 +258,7 @@ func TestHostSlashNames_OutlivesThePalette(t *testing.T) {
 	agent := newPausableSlashAgent()
 	m := heldModel(t, agent)
 	out, cmd := m.Update(tea.KeyPressMsg{Code: '/', Text: "/"})
-	m = out.(model)
+	m = out.(*model)
 	if m.palette == nil || cmd == nil {
 		t.Fatal("setup: / did not open the palette with a host fetch")
 	}
@@ -268,7 +268,7 @@ func TestHostSlashNames_OutlivesThePalette(t *testing.T) {
 		t.Fatal("setup: backspace did not close the palette")
 	}
 	out, _ = m.Update(reply)
-	m = out.(model)
+	m = out.(*model)
 	if !m.hostNamesASlash("/attach") {
 		t.Errorf("hostSlashNames = %v, want the late palette reply retained", m.hostSlashNames)
 	}

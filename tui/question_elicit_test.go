@@ -83,7 +83,7 @@ func TestElicitResolver_ReArmsOnlyWhenTheFlowIsFree(t *testing.T) {
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
 			m := newModel(Options{Elicitor: NewElicitor()})
-			cmd := elicitResolver(tc.ans, &m)
+			cmd := elicitResolver(tc.ans, m)
 			if got := cmd != nil; got != tc.reArms {
 				t.Errorf("re-armed = %v, want %v", got, tc.reArms)
 			}
@@ -133,7 +133,7 @@ func TestElicitForm_ScrollHintReachesTheFooter(t *testing.T) {
 	m.overlayStack.ask(q, askAgent, nil)
 
 	// First frame, before anything has measured anything.
-	got := ansi.Strip(m.overlayStack.render(m.width, &m))
+	got := ansi.Strip(m.overlayStack.render(m.width, m))
 	if !strings.Contains(got, scrollHint(true)) {
 		t.Errorf("a 40-field form in 24 rows renders no scroll hint:\n%s", got)
 	}

@@ -63,14 +63,14 @@ func TestComposer_StaysFresh(t *testing.T) {
 		{"cursor up", func(m *model) { pressIntoComposer(m, "up") }},
 		// A width change re-wraps every line, so a stale block here is
 		// the most visible failure the cache could produce.
-		{"narrow", func(m *model) { *m = resizeModel(*m, 40, 24) }},
-		{"widen", func(m *model) { *m = resizeModel(*m, 160, 50) }},
+		{"narrow", func(m *model) { resizeModel(m, 40, 24) }},
+		{"widen", func(m *model) { resizeModel(m, 160, 50) }},
 		{"blur", func(m *model) { m.input.Blur() }},
 		{"focus", func(m *model) { _ = m.input.Focus() }},
 		// Placeholder path: the empty box is the state the cache is
 		// there for, and it renders through different code in bubbles.
 		{"clear to the placeholder", func(m *model) { m.input.Reset() }},
-		{"resize while empty", func(m *model) { *m = resizeModel(*m, 100, 40) }},
+		{"resize while empty", func(m *model) { resizeModel(m, 100, 40) }},
 		{"blur while empty", func(m *model) { m.input.Blur() }},
 		{"focus while empty", func(m *model) { _ = m.input.Focus() }},
 		{"set a value outright", func(m *model) { m.input.SetValue("a programmatic prompt") }},
@@ -88,7 +88,7 @@ func TestComposer_StaysFresh(t *testing.T) {
 	}
 
 	for _, step := range steps {
-		step.do(&m)
+		step.do(m)
 		want := m.input.ta.View()
 		if got := m.input.View(); got != want {
 			t.Fatalf("after %q the cached block is stale\n cached:\n%s\n fresh:\n%s",
@@ -151,6 +151,5 @@ func TestComposer_RendersOncePerMutation(t *testing.T) {
 func keyIntoComposer(m *model, s string) { pressIntoComposer(m, s) }
 
 func pressIntoComposer(m *model, stroke string) {
-	out, _ := m.Update(keyPress(stroke))
-	*m = out.(model)
+	m.Update(keyPress(stroke))
 }

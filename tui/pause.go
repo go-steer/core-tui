@@ -290,7 +290,7 @@ func pauseCmd(p Pauser, reason string) tea.Cmd {
 // completion: 226 seconds of it, measured on GKE against
 // spawn_agent{wait:true}, which is the runaway-subagent case the hold
 // exists to stop.
-func (m model) holdCmd(p Pauser, reason string) tea.Cmd {
+func (m *model) holdCmd(p Pauser, reason string) tea.Cmd {
 	if ri, ok := m.opts.Agent.(RemoteInterrupter); ok && m.turnRunning() {
 		return interruptThenPauseCmd(ri, p, reason)
 	}
@@ -364,22 +364,22 @@ func resumeThenSubmitCmd(p Pauser, req ResumeRequest, submit string) tea.Cmd {
 // dispatchResumeSlash is the shared body of /continue and /abandon.
 // Both are "open the gate with this disposition"; only the mode and
 // the not-held message differ.
-func (m model) dispatchResumeSlash(mode string) (bool, tea.Model, tea.Cmd) {
+func (m *model) dispatchResumeSlash(mode string) (bool, tea.Cmd) {
 	p, ok := m.opts.Agent.(Pauser)
 	if !ok {
 		m.history.Append(Message{Role: RoleSystem, Text: "/" + mode + ": agent doesn't implement Pauser"})
 		m.input.Reset()
 		m.refreshAndScroll()
-		return true, m, nil
+		return true, nil
 	}
 	if !m.pause.paused() {
 		m.history.Append(Message{Role: RoleSystem, Text: "/" + mode + ": agent isn't held"})
 		m.input.Reset()
 		m.refreshAndScroll()
-		return true, m, nil
+		return true, nil
 	}
 	m.input.Reset()
-	return true, m, resumeCmd(p, ResumeRequest{Mode: mode})
+	return true, resumeCmd(p, ResumeRequest{Mode: mode})
 }
 
 // pausedSystemText is the transcript row for a pause landing. Reads

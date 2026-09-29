@@ -165,11 +165,11 @@ func TestFinalizeTurn_InterruptedNotice(t *testing.T) {
 // stream loop keeps running for the next turn.
 func TestMaybeDrainQueue_EmptyKeepsListener(t *testing.T) {
 	m := newModel(Options{})
-	next, cmd := m.maybeDrainQueue()
+	cmd := m.maybeDrainQueue()
 	if cmd == nil {
 		t.Errorf("expected non-nil eventListener Cmd")
 	}
-	got := next.(model)
+	got := m
 	if got.state != stateIdle {
 		t.Errorf("state = %v, want stateIdle", got.state)
 	}
@@ -189,11 +189,11 @@ func TestMaybeDrainQueue_PopsHeadAndStartsTurn(t *testing.T) {
 		{Text: "first queued", State: QueueQueued},
 		{Text: "second queued", State: QueueQueued},
 	}
-	next, cmd := m.maybeDrainQueue()
+	cmd := m.maybeDrainQueue()
 	if cmd == nil {
 		t.Errorf("expected non-nil Cmd batch")
 	}
-	got := next.(model)
+	got := m
 	if got.state != stateStreaming {
 		t.Errorf("state = %v, want stateStreaming", got.state)
 	}

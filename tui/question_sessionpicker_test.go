@@ -67,7 +67,7 @@ func askSessionPicker(m *model, wired bool) *sessionPickerQuestion {
 	return q
 }
 
-func openSessionPickerFixture(t *testing.T) (model, *sessionPickerQuestion) {
+func openSessionPickerFixture(t *testing.T) (*model, *sessionPickerQuestion) {
 	t.Helper()
 	return openSessionPickerSized(t, 30, pickerSessions())
 }
@@ -76,13 +76,13 @@ func openSessionPickerFixture(t *testing.T) (model, *sessionPickerQuestion) {
 // the session list under the test's control — which is what the
 // windowing tests need, since the window only engages once the body is
 // taller than modalBodyHeight.
-func openSessionPickerSized(t *testing.T, height int, sessions []SessionInfo) (model, *sessionPickerQuestion) {
+func openSessionPickerSized(t *testing.T, height int, sessions []SessionInfo) (*model, *sessionPickerQuestion) {
 	t.Helper()
 	m := newModel(Options{Agent: &switchAgent{id: "cur", sessions: sessions}})
 	m.styles = newStylesWithTheme(true, goldenTheme())
 	out, _ := m.Update(tea.WindowSizeMsg{Width: 100, Height: height})
-	m = out.(model)
-	q := askSessionPicker(&m, true)
+	m = out.(*model)
+	q := askSessionPicker(m, true)
 	q.applySessions(sessions)
 	return m, q
 }
@@ -152,13 +152,13 @@ func requestedSession(t *testing.T, msgs []tea.Msg) string {
 // host takes reads as a hang.
 func TestSessionPicker_EnterDoesNotAnswer(t *testing.T) {
 	m, q := openSessionPickerFixture(t)
-	typeIntoPicker(&m, "prod")
+	typeIntoPicker(m, "prod")
 
 	// Straight through the overlay, and the reply deliberately NOT
 	// pumped: what is being asserted is the state between the keystroke
 	// and the host answering, which is the whole state pressPicker
 	// exists to skip past.
-	consumed, cmd := m.overlayStack.handleKeyMsg(keyMsgFromStroke("enter"), &m)
+	consumed, cmd := m.overlayStack.handleKeyMsg(keyMsgFromStroke("enter"), m)
 	if !consumed {
 		t.Error("enter was not consumed")
 	}
@@ -171,7 +171,7 @@ func TestSessionPicker_EnterDoesNotAnswer(t *testing.T) {
 	if q.switching != "prod-042" {
 		t.Errorf("switching = %q, want the filtered row prod-042", q.switching)
 	}
-	body := ansi.Strip(m.overlayStack.render(100, &m))
+	body := ansi.Strip(m.overlayStack.render(100, m))
 	if !strings.Contains(body, "attaching to prod-042") {
 		t.Errorf("the picker is not showing progress:\n%s", body)
 	}
@@ -186,15 +186,14 @@ func TestSessionPicker_RequestReadsTheLiveSwitcherAndGen(t *testing.T) {
 	m, q := openSessionPickerFixture(t)
 	q.idx = 3 // prod-042
 
-	_, cmd := m.overlayStack.handleKeyMsg(keyMsgFromStroke("enter"), &m)
+	_, cmd := m.overlayStack.handleKeyMsg(keyMsgFromStroke("enter"), m)
 	id := requestedSession(t, drainBatch(t, cmd))
 
 	// The agent is replaced AFTER Enter and BEFORE the request lands.
 	next := &switchAgent{id: "next", sessions: pickerSessions()}
 	m.opts.Agent = next
 
-	out, follow := m.Update(sessionSwitchRequestedMsg{ID: id})
-	m = out.(model)
+	_, follow := m.Update(sessionSwitchRequestedMsg{ID: id})
 	drainBatch(t, follow)
 
 	if len(next.switchCalls) != 1 || next.switchCalls[0] != "prod-042" {
@@ -207,12 +206,12 @@ func TestSessionPicker_RequestReadsTheLiveSwitcherAndGen(t *testing.T) {
 func TestSessionPicker_StaleRequestIsDropped(t *testing.T) {
 	m, q := openSessionPickerFixture(t)
 	q.idx = 3
-	_, cmd := m.overlayStack.handleKeyMsg(keyMsgFromStroke("enter"), &m)
+	_, cmd := m.overlayStack.handleKeyMsg(keyMsgFromStroke("enter"), m)
 	msgs := drainBatch(t, cmd)
-	pressPicker(t, &m, "esc")
+	pressPicker(t, m, "esc")
 
 	out, _ := m.Update(sessionSwitchRequestedMsg{ID: requestedSession(t, msgs)})
-	m = out.(model)
+	m = out.(*model)
 
 	agent := m.opts.Agent.(*switchAgent)
 	if len(agent.switchCalls) != 0 {
@@ -235,7 +234,7 @@ func TestSessionPicker_AttachLandingAnswersThePicker(t *testing.T) {
 		id:     "prod-042",
 		target: SwitchTarget{Agent: &bareAgent{id: "attached"}},
 	})
-	m = out.(model)
+	m = out.(*model)
 
 	if m.overlayStack.hasID(sessionPickerDialogID) {
 		t.Error("the attach landed and the picker is still up")
@@ -276,7 +275,7 @@ func TestSessionPicker_FailedAttachKeepsTheListUp(t *testing.T) {
 			msg.gen = m.sessionGen
 
 			out, _ := m.Update(msg)
-			m = out.(model)
+			m = out.(*model)
 
 			if !m.overlayStack.hasID(sessionPickerDialogID) {
 				t.Fatal("a failed attach closed the picker")
@@ -289,7 +288,7 @@ func TestSessionPicker_FailedAttachKeepsTheListUp(t *testing.T) {
 				t.Errorf("history = %v, want a row mentioning %q", snap, tc.want)
 			}
 			// Back on the list, not stuck on the progress line.
-			body := ansi.Strip(m.overlayStack.render(100, &m))
+			body := ansi.Strip(m.overlayStack.render(100, m))
 			if !strings.Contains(body, "prod incident") {
 				t.Errorf("the list did not come back:\n%s", body)
 			}
@@ -328,9 +327,9 @@ func TestSessionPicker_FailedAttachSaysWhyOnThePicker(t *testing.T) {
 			msg.gen = m.sessionGen
 
 			out, _ := m.Update(msg)
-			m = out.(model)
+			m = out.(*model)
 
-			lines := sessionPickerLines(&m)
+			lines := sessionPickerLines(m)
 			at := lineWith(lines, tc.want)
 			if at < 0 {
 				t.Fatalf("the frame does not say why the attach failed:\n%s",
@@ -355,10 +354,10 @@ func TestSessionPicker_FailedAttachSaysWhyOnThePicker(t *testing.T) {
 func TestSessionPicker_FailureRowComesOutOfTheList(t *testing.T) {
 	const height = 24
 	m, q := openSessionPickerSized(t, height, manySessions(40))
-	before := sessionPickerLines(&m)
+	before := sessionPickerLines(m)
 
 	q.fail.set("endpoint unreachable")
-	after := sessionPickerLines(&m)
+	after := sessionPickerLines(m)
 
 	if len(after) != len(before) {
 		t.Errorf("the modal grew from %d rows to %d; the failure row was not "+
@@ -391,7 +390,7 @@ func TestSessionPicker_ReplyForSomeoneElsesAttachLeavesThePicker(t *testing.T) {
 		id:     "prod-042", // a different attach
 		target: SwitchTarget{Agent: &bareAgent{id: "attached"}},
 	})
-	m = out.(model)
+	m = out.(*model)
 
 	if !m.overlayStack.hasID(sessionPickerDialogID) {
 		t.Error("a reply for another attach closed this picker")
@@ -416,7 +415,7 @@ func TestSessionPicker_CurrentRowAnswersImmediately(t *testing.T) {
 	m.history.Append(Message{Role: RoleUser, Text: "keep me"})
 	q.idx = 0 // sess-001, Current
 
-	pressPicker(t, &m, "enter")
+	pressPicker(t, m, "enter")
 
 	if m.overlayStack.hasID(sessionPickerDialogID) {
 		t.Error("picking the attached row left the picker open")
@@ -444,12 +443,12 @@ func TestSessionPicker_CurrentRowAnswersImmediately(t *testing.T) {
 // dialog after Key returns.
 func TestSessionPicker_EnterOnAFilteredActionRow(t *testing.T) {
 	m, q := openSessionPickerFixture(t)
-	typeIntoPicker(&m, "endpoint")
+	typeIntoPicker(m, "endpoint")
 	if got := sessionIDs(q.rows()); len(got) != 1 || got[0] != "attach" {
 		t.Fatalf("filter matched %v, want just the action row", got)
 	}
 
-	pressPicker(t, &m, "enter")
+	pressPicker(t, m, "enter")
 
 	if !m.overlayStack.hasID(sessionInputDialogID) {
 		t.Error("enter on the filtered action row did not open its text input")
@@ -469,7 +468,7 @@ func TestSessionPicker_ActionRowDoesNotStackTwoInputs(t *testing.T) {
 	row := pickerSessions()[4]
 	for range 2 {
 		out, _ := m.Update(sessionInputRequestedMsg{Row: row})
-		m = out.(model)
+		m = out.(*model)
 	}
 
 	var inputs int
@@ -561,10 +560,10 @@ func TestSessionInputAnswer(t *testing.T) {
 func TestSessionPicker_HostWithNoSessionsSaysSo(t *testing.T) {
 	m := newModel(Options{Agent: &switchAgent{id: "cur"}})
 	m.viewport.SetWidth(80)
-	q := askSessionPicker(&m, true)
+	q := askSessionPicker(m, true)
 	q.applySessions(nil)
 
-	pressPicker(t, &m, "down")
+	pressPicker(t, m, "down")
 
 	if m.overlayStack.hasID(sessionPickerDialogID) {
 		t.Error("an empty host list left the picker open")
@@ -584,9 +583,9 @@ func TestSessionPicker_ResolverTellsTheTwoUnrenderableStatesApart(t *testing.T) 
 	t.Run("unwired agent says nothing", func(t *testing.T) {
 		m := newModel(Options{Agent: &bareAgent{id: "bare"}})
 		m.viewport.SetWidth(80)
-		askSessionPicker(&m, false)
+		askSessionPicker(m, false)
 
-		pressPicker(t, &m, "down")
+		pressPicker(t, m, "down")
 
 		if m.overlayStack.hasID(sessionPickerDialogID) {
 			t.Error("an unwired picker stayed open")
@@ -598,9 +597,9 @@ func TestSessionPicker_ResolverTellsTheTwoUnrenderableStatesApart(t *testing.T) 
 	t.Run("a loading picker is not unrenderable", func(t *testing.T) {
 		m := newModel(Options{Agent: &switchAgent{id: "cur"}})
 		m.viewport.SetWidth(80)
-		askSessionPicker(&m, true) // no applySessions: still loading
+		askSessionPicker(m, true) // no applySessions: still loading
 
-		pressPicker(t, &m, "down")
+		pressPicker(t, m, "down")
 
 		if !m.overlayStack.hasID(sessionPickerDialogID) {
 			t.Error("a keystroke before the snapshot landed closed the picker")
@@ -616,9 +615,9 @@ func TestSessionPicker_ResolverTellsTheTwoUnrenderableStatesApart(t *testing.T) 
 // nothing matched by the filter does not.
 func TestSessionPicker_FilterMatchingNothingStaysOpen(t *testing.T) {
 	m, _ := openSessionPickerFixture(t)
-	typeIntoPicker(&m, "zzz")
+	typeIntoPicker(m, "zzz")
 	for _, stroke := range []string{"down", "up", "enter"} {
-		pressPicker(t, &m, stroke)
+		pressPicker(t, m, stroke)
 		if !m.overlayStack.hasID(sessionPickerDialogID) {
 			t.Fatalf("%q on an empty filter result closed the picker", stroke)
 		}
@@ -626,7 +625,7 @@ func TestSessionPicker_FilterMatchingNothingStaysOpen(t *testing.T) {
 	if n := len(m.history.Snapshot()); n != 0 {
 		t.Errorf("an empty filter result wrote %d chat messages", n)
 	}
-	body := ansi.Strip(m.overlayStack.render(100, &m))
+	body := ansi.Strip(m.overlayStack.render(100, m))
 	if !strings.Contains(body, "no sessions match") {
 		t.Errorf("empty-result body does not say so:\n%s", body)
 	}
@@ -643,7 +642,7 @@ func TestSessionPicker_CursorSitsInTheFilterRow(t *testing.T) {
 	for _, typed := range []string{"docs", "セッション"} {
 		t.Run(typed, func(t *testing.T) {
 			m, _ := openSessionPickerFixture(t)
-			typeIntoPicker(&m, typed)
+			typeIntoPicker(m, typed)
 			assertCursorFollows(t, m.View(), filterPromptRail+typed)
 		})
 	}
@@ -674,7 +673,7 @@ func manySessions(n int) []SessionInfo {
 // and never both on the same line.
 func TestSessionPicker_RendersTwoLineCells(t *testing.T) {
 	m, _ := openSessionPickerFixture(t)
-	lines := sessionPickerLines(&m)
+	lines := sessionPickerLines(m)
 
 	title := lineWith(lines, "flaky test hunt")
 	if title < 0 {
@@ -735,7 +734,7 @@ func TestSessionPicker_EmptyDisplayFallsBackToTheID(t *testing.T) {
 		{ID: "sess-cur", Current: true},
 	}
 	m, q := openSessionPickerSized(t, 30, sessions)
-	lines := sessionPickerLines(&m)
+	lines := sessionPickerLines(m)
 
 	for _, s := range sessions[1:] {
 		at := lineWith(lines, s.ID)
@@ -766,7 +765,7 @@ func TestSessionPicker_EmptyDisplayFallsBackToTheID(t *testing.T) {
 	// the selection bar reaches the bottom of the cell, so the cursor
 	// marks a CELL and not just its first line.
 	q.Key(keyMsgFromStroke("down"))
-	lines = sessionPickerLines(&m)
+	lines = sessionPickerLines(m)
 	if got := strings.TrimSpace(lines[lineWith(lines, "sess-bare")+1]); got != glyphSelectBar {
 		t.Errorf("selected bare cell's pad line = %q, want just the selection bar", got)
 	}
@@ -786,7 +785,7 @@ func TestSessionPicker_SelectedCellIsNeverHalfWindowed(t *testing.T) {
 
 	check := func(step string) {
 		t.Helper()
-		lines := sessionPickerLines(&m)
+		lines := sessionPickerLines(m)
 		want := sessions[q.idx]
 		at := lineWith(lines, want.Display)
 		if at < 0 {
@@ -809,7 +808,7 @@ func TestSessionPicker_SelectedCellIsNeverHalfWindowed(t *testing.T) {
 	}
 	// The window has to have actually engaged, or everything above is
 	// vacuously true: at the bottom the first cell is off screen.
-	if lines := sessionPickerLines(&m); lineWith(lines, sessions[0].Display) >= 0 {
+	if lines := sessionPickerLines(m); lineWith(lines, sessions[0].Display) >= 0 {
 		t.Fatalf("nothing was windowed away — the fixture is too tall to test the trap:\n%s",
 			strings.Join(lines, "\n"))
 	}
@@ -820,7 +819,7 @@ func TestSessionPicker_SelectedCellIsNeverHalfWindowed(t *testing.T) {
 	if q.idx != 0 {
 		t.Fatalf("cursor is at %d, want back at the top", q.idx)
 	}
-	if lines := sessionPickerLines(&m); lineWith(lines, sessions[len(sessions)-1].Display) >= 0 {
+	if lines := sessionPickerLines(m); lineWith(lines, sessions[len(sessions)-1].Display) >= 0 {
 		t.Fatalf("the last cell is still on screen after scrolling back to the top:\n%s",
 			strings.Join(lines, "\n"))
 	}
@@ -841,14 +840,14 @@ func TestSessionPicker_ShortTerminal(t *testing.T) {
 			// than a cell has to choose which half to keep.
 			for range len(sessions) - 1 {
 				q.Key(keyMsgFromStroke("down"))
-				m.overlayStack.render(100, &m)
+				m.overlayStack.render(100, m)
 			}
-			rendered := m.overlayStack.render(100, &m)
+			rendered := m.overlayStack.render(100, m)
 			if got := strings.Count(rendered, "\n") + 1; got > h {
 				t.Errorf("picker is %d rows tall in a %d-row terminal:\n%s",
 					got, h, ansi.Strip(rendered))
 			}
-			lines := sessionPickerLines(&m)
+			lines := sessionPickerLines(m)
 			// The filter row is never windowed away — it is what the
 			// operator edits to get back. Probed on the prompt rail
 			// as well as the placeholder because the footer says
@@ -895,7 +894,7 @@ func TestSessionPicker_NarrowTerminal(t *testing.T) {
 		t.Run(fmt.Sprint(w), func(t *testing.T) {
 			m, q := openSessionPickerSized(t, 20, sessions)
 			q.Key(keyMsgFromStroke("down"))
-			rendered := ansi.Strip(m.overlayStack.render(w, &m))
+			rendered := ansi.Strip(m.overlayStack.render(w, m))
 			lines := strings.Split(rendered, "\n")
 			width := ansi.StringWidth(lines[0])
 			for i, ln := range lines {

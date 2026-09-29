@@ -26,10 +26,10 @@ import (
 // operator does and what a test that calls input.SetValue does not.
 // The difference is the whole of issue #278: the leading `/` opens the
 // slash palette, and the palette has its own Enter handler.
-func typeLine(m model, text string) model {
+func typeLine(m *model, text string) *model {
 	for _, r := range text {
 		out, _ := m.Update(tea.KeyPressMsg{Code: r, Text: string(r)})
-		m = out.(model)
+		m = out.(*model)
 	}
 	return m
 }
@@ -37,7 +37,7 @@ func typeLine(m model, text string) model {
 // submitRoute is one of the two ways a line reaches the submit path.
 type submitRoute struct {
 	name string
-	load func(model, string) model
+	load func(*model, string) *model
 }
 
 // bothRoutes: typed rune by rune (palette open, the operator's route)
@@ -45,7 +45,7 @@ type submitRoute struct {
 // used before issue #278). They must agree.
 var bothRoutes = []submitRoute{
 	{"typed", typeLine},
-	{"preloaded", func(m model, text string) model {
+	{"preloaded", func(m *model, text string) *model {
 		m.input.SetValue(text)
 		return m
 	}},

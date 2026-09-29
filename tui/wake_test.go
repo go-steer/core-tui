@@ -87,7 +87,7 @@ func TestUpdate_WakeMsgRaisesToast(t *testing.T) {
 
 	before := time.Now()
 	out, _ := m.Update(wakeMsg{})
-	got := out.(model)
+	got := out.(*model)
 
 	if got.toast == "" {
 		t.Errorf("toast = empty, want non-empty after wakeMsg")
@@ -111,7 +111,7 @@ func TestUpdate_WakeMsg_SuppressedWhenQueuePending(t *testing.T) {
 	}
 
 	out, _ := m.Update(wakeMsg{})
-	got := out.(model)
+	got := out.(*model)
 
 	if got.toast != "" {
 		t.Errorf("expected empty toast when queue has pending entry, got %q", got.toast)
@@ -133,7 +133,7 @@ func TestUpdate_WakeMsg_FiresWhenQueueEmpty(t *testing.T) {
 	// queue is empty by default
 
 	out, _ := m.Update(wakeMsg{})
-	got := out.(model)
+	got := out.(*model)
 
 	if got.toast == "" {
 		t.Errorf("expected non-empty toast when queue is empty (subagent path)")
@@ -157,7 +157,7 @@ func TestUpdate_WakeMsg_RowAssertsNothingAboutTheInbox(t *testing.T) {
 	m.viewport.SetWidth(80)
 
 	out, _ := m.Update(wakeMsg{})
-	got := out.(model)
+	got := out.(*model)
 
 	snap := got.history.Snapshot()
 	if len(snap) != 1 {
@@ -205,7 +205,7 @@ func TestUpdate_WakeMsg_SuppressedWithInFlightEntry(t *testing.T) {
 	}
 
 	out, _ := m.Update(wakeMsg{})
-	got := out.(model)
+	got := out.(*model)
 
 	if got.toast != "" {
 		t.Errorf("expected suppression for QueueInFlight, got toast %q", got.toast)
@@ -226,7 +226,7 @@ func TestUpdate_WakeMsg_FiresWhenAllQueueEntriesTerminal(t *testing.T) {
 	}
 
 	out, _ := m.Update(wakeMsg{})
-	got := out.(model)
+	got := out.(*model)
 
 	if got.toast == "" {
 		t.Errorf("expected toast when only terminal entries present (no active queue work)")

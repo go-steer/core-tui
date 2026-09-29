@@ -144,7 +144,7 @@ func TestRemoteEvents_StatusUpdateMerge(t *testing.T) {
 		Provider:  "anthropic",
 		TurnState: TurnStateStreaming,
 	}})
-	m2 := got.(model)
+	m2 := got.(*model)
 	if m2.currentModel != "new-model" {
 		t.Errorf("currentModel after status with Model = %q, want new-model", m2.currentModel)
 	}
@@ -158,7 +158,7 @@ func TestRemoteEvents_StatusUpdateMerge(t *testing.T) {
 		Provider:  "gemini",
 		TurnState: TurnStateIdle,
 	}})
-	m3 := got2.(model)
+	m3 := got2.(*model)
 	if m3.currentModel != "new-model" {
 		t.Errorf("currentModel after empty-Model update = %q, want unchanged (new-model)", m3.currentModel)
 	}
@@ -184,7 +184,7 @@ func TestRemoteEvents_StatusUpdateContextPct(t *testing.T) {
 		TurnState:  TurnStateIdle,
 		ContextPct: &zero,
 	}})
-	m2 := got.(model)
+	m2 := got.(*model)
 	if m2.pushedContextPct == nil {
 		t.Fatal("pushedContextPct should be non-nil after status carried ContextPct=0")
 	}
@@ -208,7 +208,7 @@ func TestRemoteEvents_UsageUpdateSnapshot(t *testing.T) {
 		},
 	}
 	got, _ := m.Update(usageUpdateMsg{update: payload})
-	m2 := got.(model)
+	m2 := got.(*model)
 	if m2.sessionUsage == nil {
 		t.Fatal("sessionUsage should be non-nil after usage-update")
 	}
@@ -225,20 +225,20 @@ func TestRemoteEvents_UsageUpdateSnapshot(t *testing.T) {
 func TestRemoteEvents_InboxToastOnQueued(t *testing.T) {
 	m := newModel(Options{ForceTheme: ThemeDark, Agent: &noopAgent{}})
 	got, _ := m.Update(inboxStateMsg{event: InboxEvent{State: InboxStateQueued, PromptID: "p-1"}})
-	m2 := got.(model)
+	m2 := got.(*model)
 	if !strings.Contains(m2.toast, "queued") {
 		t.Errorf("toast after queued = %q, want a 'queued' substring", m2.toast)
 	}
 
 	got2, _ := m2.Update(inboxStateMsg{event: InboxEvent{State: InboxStateDequeued, PromptID: "p-1"}})
-	m3 := got2.(model)
+	m3 := got2.(*model)
 	if m3.toast != "" {
 		t.Errorf("toast after dequeued = %q, want cleared", m3.toast)
 	}
 
 	// Unknown state — must not panic + must not set a toast.
 	got3, _ := m3.Update(inboxStateMsg{event: InboxEvent{State: "injected", PromptID: "p-2"}})
-	m4 := got3.(model)
+	m4 := got3.(*model)
 	if m4.toast != "" {
 		t.Errorf("toast after unknown state = %q, want empty (tolerated as no-op)", m4.toast)
 	}
@@ -259,7 +259,7 @@ func TestRemoteEvents_TurnSummaryPopulatesFooterState(t *testing.T) {
 		CostUSD:   0.01,
 		LatencyMs: 1234,
 	}})
-	m2 := got.(model)
+	m2 := got.(*model)
 	if m2.currentModel != "gemini-2.5-pro" {
 		t.Errorf("currentModel after turn-summary = %q", m2.currentModel)
 	}
@@ -281,7 +281,7 @@ func TestRemoteEvents_TurnSummaryPopulatesFooterState(t *testing.T) {
 		CostUSD:   0, // deferred — authoritative cost arrives on next usage-update
 		LatencyMs: 2000,
 	}})
-	m3 := got2.(model)
+	m3 := got2.(*model)
 	if m3.currentCost != 0.01 {
 		t.Errorf("currentCost after deferred-cost turn-summary = %v, want 0.01 (preserved)", m3.currentCost)
 	}
@@ -301,7 +301,7 @@ func TestRemoteEvents_TurnErrorAppendsStyledRow(t *testing.T) {
 		Retryable: false,
 		Hint:      "Check vertex.location and model name.",
 	}})
-	m2 := got.(model)
+	m2 := got.(*model)
 	entries := m2.history.entries
 	if len(entries) == 0 {
 		t.Fatal("turn-error handler should append a Message")
@@ -342,7 +342,7 @@ func TestRemoteEvents_TurnErrorRetryableRendersNoAffordance(t *testing.T) {
 		Message:   "Vertex quota exceeded.",
 		Retryable: true,
 	}})
-	m2 := got.(model)
+	m2 := got.(*model)
 	last := m2.history.entries[len(m2.history.entries)-1]
 	rendered := m2.renderMessage(last)
 	for _, banned := range []string{"retryable", "↻"} {

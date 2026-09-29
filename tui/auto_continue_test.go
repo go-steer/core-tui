@@ -56,7 +56,7 @@ func TestMaybeAutoContinue_NoOpForWrongMode(t *testing.T) {
 		Agent:                agent,
 		MidTurnInjectionMode: QueueForNext, // not AutoContinueFromInbox
 	})
-	_, _, ok := m.maybeAutoContinue()
+	_, ok := m.maybeAutoContinue()
 	if ok {
 		t.Errorf("expected no-op for QueueForNext mode")
 	}
@@ -73,7 +73,7 @@ func TestMaybeAutoContinue_NoOpWhenAgentDoesNotSatisfyInboxDrainer(t *testing.T)
 		Agent:                agent,
 		MidTurnInjectionMode: AutoContinueFromInbox,
 	})
-	_, _, ok := m.maybeAutoContinue()
+	_, ok := m.maybeAutoContinue()
 	if ok {
 		t.Errorf("expected no-op when agent doesn't satisfy InboxDrainer")
 	}
@@ -85,7 +85,7 @@ func TestMaybeAutoContinue_NoOpWhenInboxEmpty(t *testing.T) {
 		Agent:                agent,
 		MidTurnInjectionMode: AutoContinueFromInbox,
 	})
-	_, _, ok := m.maybeAutoContinue()
+	_, ok := m.maybeAutoContinue()
 	if ok {
 		t.Errorf("expected no-op when inbox is empty")
 	}
@@ -101,7 +101,7 @@ func TestMaybeAutoContinue_SubmitsSyntheticTurn(t *testing.T) {
 		MidTurnInjectionMode: AutoContinueFromInbox,
 	})
 	m.viewport.SetWidth(80)
-	next, _, ok := m.maybeAutoContinue()
+	_, ok := m.maybeAutoContinue()
 	if !ok {
 		t.Fatal("expected auto-continue to fire")
 	}
@@ -110,7 +110,7 @@ func TestMaybeAutoContinue_SubmitsSyntheticTurn(t *testing.T) {
 	}
 	// The history should now carry the synthetic user-row marked
 	// AutoContinue=true.
-	entries := next.history.Snapshot()
+	entries := m.history.Snapshot()
 	if len(entries) == 0 {
 		t.Fatal("expected synthetic user-row appended")
 	}
@@ -124,8 +124,8 @@ func TestMaybeAutoContinue_SubmitsSyntheticTurn(t *testing.T) {
 	if !strings.Contains(last.Text, "Continue.") {
 		t.Errorf("expected 'Continue.' instruction in default formatter, got:\n%q", last.Text)
 	}
-	if next.consecutiveAutoContinues != 1 {
-		t.Errorf("expected consecutiveAutoContinues=1, got %d", next.consecutiveAutoContinues)
+	if m.consecutiveAutoContinues != 1 {
+		t.Errorf("expected consecutiveAutoContinues=1, got %d", m.consecutiveAutoContinues)
 	}
 }
 
@@ -139,11 +139,11 @@ func TestMaybeAutoContinue_HonorsCustomFormatter(t *testing.T) {
 		},
 	})
 	m.viewport.SetWidth(80)
-	next, _, ok := m.maybeAutoContinue()
+	_, ok := m.maybeAutoContinue()
 	if !ok {
 		t.Fatal("expected auto-continue to fire")
 	}
-	last := next.history.Snapshot()[next.history.Len()-1]
+	last := m.history.Snapshot()[m.history.Len()-1]
 	if last.Text != "CUSTOM x|y" {
 		t.Errorf("custom formatter not applied, got: %q", last.Text)
 	}
@@ -159,7 +159,7 @@ func TestMaybeAutoContinue_SoftCapStopsLoop(t *testing.T) {
 	m.viewport.SetWidth(80)
 	m.consecutiveAutoContinues = 3 // already at cap
 
-	_, _, ok := m.maybeAutoContinue()
+	_, ok := m.maybeAutoContinue()
 	if ok {
 		t.Errorf("expected soft cap to halt the loop")
 	}
@@ -177,7 +177,7 @@ func TestMaybeAutoContinue_NegativeCapDisablesIt(t *testing.T) {
 	})
 	m.viewport.SetWidth(80)
 	m.consecutiveAutoContinues = 1000 // would otherwise be way past
-	_, _, ok := m.maybeAutoContinue()
+	_, ok := m.maybeAutoContinue()
 	if !ok {
 		t.Errorf("negative cap should disable the check entirely")
 	}
@@ -190,11 +190,11 @@ func TestMaybeAutoContinue_FiltersBlankMessages(t *testing.T) {
 		MidTurnInjectionMode: AutoContinueFromInbox,
 	})
 	m.viewport.SetWidth(80)
-	next, _, ok := m.maybeAutoContinue()
+	_, ok := m.maybeAutoContinue()
 	if !ok {
 		t.Fatal("expected auto-continue to fire")
 	}
-	last := next.history.Snapshot()[next.history.Len()-1]
+	last := m.history.Snapshot()[m.history.Len()-1]
 	if strings.Contains(last.Text, "- \n") || strings.Contains(last.Text, "-   \n") {
 		t.Errorf("expected blank entries filtered out, got:\n%q", last.Text)
 	}
@@ -211,15 +211,15 @@ func TestMaybeAutoContinue_MarksMatchingQueueEntriesDone(t *testing.T) {
 		{Text: "queued-text", State: QueueQueued, Created: time.Now()},
 		{Text: "unrelated", State: QueueQueued, Created: time.Now()},
 	}
-	next, _, ok := m.maybeAutoContinue()
+	_, ok := m.maybeAutoContinue()
 	if !ok {
 		t.Fatal("expected auto-continue to fire")
 	}
-	if next.queue[0].State != QueueDone {
-		t.Errorf("expected matching queue entry → Done, got %v", next.queue[0].State)
+	if m.queue[0].State != QueueDone {
+		t.Errorf("expected matching queue entry → Done, got %v", m.queue[0].State)
 	}
-	if next.queue[1].State != QueueQueued {
-		t.Errorf("expected unrelated queue entry untouched (Queued), got %v", next.queue[1].State)
+	if m.queue[1].State != QueueQueued {
+		t.Errorf("expected unrelated queue entry untouched (Queued), got %v", m.queue[1].State)
 	}
 }
 

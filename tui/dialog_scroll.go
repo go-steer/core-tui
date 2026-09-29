@@ -35,9 +35,8 @@
 //
 // Dialogs on the overlay stack keep their offset in their own struct
 // (they're pointers — mutations from Render persist). The inline
-// modals (permission / elicit / side-answer) share model.modalScroll
-// because View() has a value receiver and can only write back
-// through a pointer.
+// modals (permission / elicit / side-answer) share model.modalScroll,
+// which render paths write their measurement back through.
 
 package tui
 
@@ -202,10 +201,9 @@ func wrappedRows(s string, width int) int {
 // what lets a keystroke clamp ("End" → bottom, "down" at the bottom
 // → no-op) without re-rendering the body to count its lines.
 //
-// The inline modals hold one of these behind model.modalScroll (a
-// pointer, so View()'s value receiver can write the measurement
-// back). Dialogs on the overlay stack are already pointers and can
-// embed it directly.
+// The inline modals hold one of these behind model.modalScroll, which
+// the render path writes the measurement back to. Dialogs on the
+// overlay stack are already pointers and can embed it directly.
 type scrollState struct {
 	// offset is the index of the first visible body row.
 	offset int

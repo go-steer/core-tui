@@ -99,7 +99,7 @@ func TestView_ClipsOversizedFrame(t *testing.T) {
 	m := newModel(Options{Agent: &bareAgent{id: "clip"}})
 	m.helpOpen = true // the help panel renders rows ~82 cols wide
 	out, _ := m.Update(tea.WindowSizeMsg{Width: 40, Height: 12})
-	m = out.(model)
+	m = out.(*model)
 	lines := strings.Split(m.View().Content, "\n")
 	if len(lines) > 12 {
 		t.Errorf("View emitted %d lines into a 12-row terminal", len(lines))

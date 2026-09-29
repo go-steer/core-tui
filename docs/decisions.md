@@ -452,7 +452,7 @@ and becomes available at any time. That lifts the constraint documented
 at `model.go` on `displayCwd` — that anything the render path wants to
 memoise has to be resolved in the constructor, because `View` has a
 value receiver and writes to it land in a discarded copy. Not taken
-here; see #266.
+here; see #266, which has since switched the receivers to pointers.
 
 ---
 

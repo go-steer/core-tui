@@ -159,7 +159,7 @@ func TestMouseHint_RendersThenExpires(t *testing.T) {
 	}
 
 	out, cmd := m.Update(mouseHintArmMsg{})
-	m = out.(model)
+	m = out.(*model)
 	if got := m.renderMouseHint(80); got == "" {
 		t.Fatal("hint did not render after being armed")
 	}
@@ -183,7 +183,7 @@ func TestMouseHint_HiddenWhileCaptureOff(t *testing.T) {
 	m.width, m.height = 100, 40
 	m.resize()
 	out, _ := m.Update(mouseHintArmMsg{})
-	m = out.(model)
+	m = out.(*model)
 	if m.renderMouseHint(80) == "" {
 		t.Fatal("precondition: hint should be up")
 	}
@@ -203,7 +203,7 @@ func TestMouseHint_NegativeTTLDisablesIt(t *testing.T) {
 	m.width, m.height = 100, 40
 	m.resize()
 	out, cmd := m.Update(mouseHintArmMsg{})
-	m = out.(model)
+	m = out.(*model)
 	if cmd != nil {
 		t.Error("a disabled hint should not schedule an expiry tick")
 	}
@@ -220,7 +220,7 @@ func TestMouseHint_YieldsToTheWakeToast(t *testing.T) {
 	m.width, m.height = 100, 40
 	m.resize()
 	out, _ := m.Update(mouseHintArmMsg{})
-	m = out.(model)
+	m = out.(*model)
 	if m.renderMouseHint(80) == "" {
 		t.Fatal("precondition: hint should be up")
 	}
@@ -242,7 +242,7 @@ func TestMouseHint_IsChargedToTheLayoutBudget(t *testing.T) {
 	before := m.allocateChrome(m.opts.StatusLayout, m.width)
 
 	out, _ := m.Update(mouseHintArmMsg{})
-	m = out.(model)
+	m = out.(*model)
 	after := m.allocateChrome(m.opts.StatusLayout, m.width)
 
 	if after.mouseHint == 0 {
@@ -319,7 +319,7 @@ func TestMouseSlash_NilPersistIsFine(t *testing.T) {
 // "after each /mouse on". Turning capture off needs no re-arm — the
 // renderer already drops the row while capture is off.
 func TestMouseSlash_ReArmsTheHintOnlyWhenTurningCaptureOn(t *testing.T) {
-	armCount := func(t *testing.T, m model) int {
+	armCount := func(t *testing.T, m *model) int {
 		t.Helper()
 		m.input.SetValue("/mouse")
 		_, cmd := pressKey(m, tea.Key{Code: tea.KeyEnter})

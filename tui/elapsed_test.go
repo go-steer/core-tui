@@ -37,12 +37,12 @@ func fixedClock(at *time.Time) func() time.Time {
 // elapsedModel returns a streaming model whose clock the caller
 // drives via the returned pointer. The turn is submitted at the
 // clock's initial value, so advancing it is the elapsed time.
-func elapsedModel(t *testing.T, at *time.Time) model {
+func elapsedModel(t *testing.T, at *time.Time) *model {
 	t.Helper()
 	m := newModel(Options{Agent: stubAgent{}})
 	m.now = fixedClock(at)
 	m.viewport.SetWidth(80)
-	m = m.submitTurn("how long is this going to take")
+	m.submitTurn("how long is this going to take")
 	if m.state != stateStreaming {
 		t.Fatalf("setup: state = %v, want stateStreaming", m.state)
 	}
@@ -204,7 +204,7 @@ func TestElapsed_LiveAgentPathStampsTheStretch(t *testing.T) {
 	m.viewport.SetWidth(80)
 
 	next, _ := m.Update(streamChunkMsg{gen: m.sessionGen, text: "tok", partial: true})
-	live := next.(model)
+	live := next.(*model)
 	if !live.spinnerActive {
 		t.Fatal("setup: expected spinnerActive after a partial chunk in liveMode")
 	}
@@ -231,7 +231,7 @@ func TestElapsed_LiveAgentPathStampsTheStretch(t *testing.T) {
 	clock = clock.Add(10 * time.Minute)
 	second := clock
 	restarted, _ := live.Update(streamChunkMsg{gen: live.sessionGen, text: "more", partial: true})
-	rm := restarted.(model)
+	rm := restarted.(*model)
 	if !rm.turnStarted.Equal(second) {
 		t.Fatalf("second stretch turnStarted = %v, want %v", rm.turnStarted, second)
 	}
@@ -287,7 +287,7 @@ func TestSubmitTurn_ReStampsTheOrigin(t *testing.T) {
 	m := elapsedModel(t, &clock)
 
 	clock = clock.Add(45 * time.Second)
-	m = m.submitTurn("second prompt")
+	m.submitTurn("second prompt")
 	if !m.turnStarted.Equal(clock) {
 		t.Fatalf("turnStarted = %v, want the second turn's start %v", m.turnStarted, clock)
 	}

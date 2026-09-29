@@ -57,7 +57,7 @@ func TestModalEdge_EverySurfaceCarriesIt(t *testing.T) {
 		for _, w := range modalEdgeWidths {
 			t.Run(tc.name+"/"+strconv.Itoa(w), func(t *testing.T) {
 				m := tc.open(t, w, h)
-				assertModalEdge(t, tc.render(&m), h)
+				assertModalEdge(t, tc.render(m), h)
 			})
 		}
 	}
@@ -103,8 +103,8 @@ func TestModalEdge_BodyFitsTheReducedColumn(t *testing.T) {
 	for _, w := range modalEdgeWidths {
 		t.Run(strconv.Itoa(w), func(t *testing.T) {
 			m := newFrameModel(StatusHeader, w, h)
-			askThemePicker(&m)
-			block := m.overlayStack.render(m.width, &m)
+			askThemePicker(m)
+			block := m.overlayStack.render(m.width, m)
 
 			bw := lipgloss.Width(block)
 			inner := modalInnerWidth(bw)

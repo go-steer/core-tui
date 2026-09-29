@@ -86,7 +86,7 @@ func TestUpdate_InitialPromptMsg_SubmitsTurn(t *testing.T) {
 	m.viewport.SetWidth(80)
 
 	next, _ := m.Update(initialPromptMsg{text: "hello world"})
-	nm := next.(model)
+	nm := next.(*model)
 
 	entries := nm.history.Snapshot()
 	if len(entries) == 0 {
@@ -110,7 +110,7 @@ func TestUpdate_InitialPromptMsg_EmptyIsNoOp(t *testing.T) {
 	m.viewport.SetWidth(80)
 
 	next, cmd := m.Update(initialPromptMsg{text: "   "})
-	nm := next.(model)
+	nm := next.(*model)
 
 	if entries := nm.history.Snapshot(); len(entries) != 0 {
 		t.Errorf("empty InitialPrompt should not append history, got %d entries", len(entries))
@@ -125,7 +125,7 @@ func TestUpdate_InitialPromptMsg_SlashCommandRejected(t *testing.T) {
 	m.viewport.SetWidth(80)
 
 	next, _ := m.Update(initialPromptMsg{text: "/help"})
-	nm := next.(model)
+	nm := next.(*model)
 
 	entries := nm.history.Snapshot()
 	if len(entries) != 1 {

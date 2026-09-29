@@ -424,9 +424,9 @@ func TestOverlayHandleWheel_ScrollDialogVsPicker(t *testing.T) {
 	pm.width, pm.height = 100, 30
 	pm.resize()
 	pm.applyNamedTheme("default")
-	tp := askThemePicker(&pm)
+	tp := askThemePicker(pm)
 	start := tp.idx
-	if consumed, _ := pm.overlayStack.handleWheel(wheelScrollLines, &pm); !consumed {
+	if consumed, _ := pm.overlayStack.handleWheel(wheelScrollLines, pm); !consumed {
 		t.Fatal("theme picker did not consume the wheel")
 	}
 	if tp.idx != start+1 {
@@ -449,18 +449,18 @@ func TestToolCallDialog_ScrollByClampsToBody(t *testing.T) {
 // Scrolling the subagent log up releases the follow-the-tail pin;
 // wheeling back to the bottom re-arms it.
 func TestSubagentDialog_ScrollByTogglesPin(t *testing.T) {
-	m := model{}
+	m := &model{}
 	m.styles = newStyles(true, Branding{})
 	m.height = 40
 	d := newSubagentDialog("worker")
 	d.lastBody = 200
 	d.scroll = nonNeg(d.lastBody - subagentBodyHeight(m.height))
 
-	d.ScrollBy(-wheelScrollLines, &m)
+	d.ScrollBy(-wheelScrollLines, m)
 	if d.pinned {
 		t.Error("scrolling up left the tail pinned")
 	}
-	d.ScrollBy(wheelScrollLines, &m)
+	d.ScrollBy(wheelScrollLines, m)
 	if !d.pinned {
 		t.Error("scrolling back to the bottom did not re-arm the tail pin")
 	}
@@ -481,7 +481,7 @@ func sideAnswerModel(t *testing.T, n int) *model {
 	}
 	m.sideAnswer = &SideAnswer{Question: "why?", Answer: strings.Join(body, "\n\n")}
 	m.renderSideAnswer() // measures into m.modalScroll
-	return &m
+	return m
 }
 
 func TestSideAnswer_ScrollsWithKeys(t *testing.T) {
@@ -490,8 +490,8 @@ func TestSideAnswer_ScrollsWithKeys(t *testing.T) {
 		t.Fatal("200-line answer in a 30-row terminal should overflow")
 	}
 
-	out, _ := m.handleKey(keyPress("down"))
-	got := out.(model)
+	m.handleKey(keyPress("down"))
+	got := m
 	if got.sideAnswer == nil {
 		t.Fatal("down dismissed the modal; it should scroll it")
 	}
@@ -499,15 +499,14 @@ func TestSideAnswer_ScrollsWithKeys(t *testing.T) {
 		t.Errorf("offset after down = %d, want 1", got.scroll().offset)
 	}
 
-	out, _ = got.handleKey(keyPress("end"))
-	got = out.(model)
+	got.handleKey(keyPress("end"))
 	if want := got.scroll().maxOffset(); got.scroll().offset != want || want == 0 {
 		t.Errorf("offset after end = %d, want %d", got.scroll().offset, want)
 	}
 
 	// Dismissal keys still win over scrolling.
-	out, _ = got.handleKey(keyPress("esc"))
-	if out.(model).sideAnswer != nil {
+	got.handleKey(keyPress("esc"))
+	if m.sideAnswer != nil {
 		t.Error("esc did not dismiss the side answer")
 	}
 }
@@ -547,13 +546,13 @@ func TestPermissionOverlay_ScrollsWithKeys(t *testing.T) {
 		DetailKind: DetailShell,
 	}, PermissionOverlay)
 	m.overlayStack.ask(q, askAgent, nil)
-	m.overlayStack.render(m.width, &m)
+	m.overlayStack.render(m.width, m)
 	if !q.sc.overflows() {
 		t.Fatal("200-line shell detail in a 30-row terminal should overflow")
 	}
 
-	out, _ := m.handleKey(keyPress("pgdn"))
-	got := out.(model)
+	m.handleKey(keyPress("pgdn"))
+	got := m
 	if got.openPermission() == nil {
 		t.Fatal("pgdn resolved the permission prompt; it should only scroll")
 	}
@@ -562,7 +561,7 @@ func TestPermissionOverlay_ScrollsWithKeys(t *testing.T) {
 	}
 
 	// Decision keys still take precedence over scroll keys.
-	rendered := got.overlayStack.render(got.width, &got)
+	rendered := got.overlayStack.render(got.width, got)
 	if !strings.Contains(rendered, "↑↓ scroll") {
 		t.Error("overflowing permission overlay does not advertise the scroll keys")
 	}
@@ -582,7 +581,7 @@ func TestElicitModal_FollowsFocusedField(t *testing.T) {
 	}
 	q := newElicitQuestion("srv", ElicitRequest{Title: "big form", Fields: fields})
 	m.overlayStack.ask(q, askAgent, nil)
-	m.overlayStack.render(m.width, &m)
+	m.overlayStack.render(m.width, m)
 	if !q.sc.overflows() {
 		t.Fatal("40-field form in a 24-row terminal should overflow")
 	}
@@ -590,7 +589,7 @@ func TestElicitModal_FollowsFocusedField(t *testing.T) {
 	for i := 0; i < 30; i++ {
 		q.Key(keyMsgFromStroke("tab"))
 	}
-	m.overlayStack.render(m.width, &m)
+	m.overlayStack.render(m.width, m)
 	if q.idx != 30 {
 		t.Fatalf("field index = %d, want 30", q.idx)
 	}
@@ -615,7 +614,7 @@ func TestElicitModal_FollowsFocusedField(t *testing.T) {
 	// which is what scrollQuestion buys the form and deliberately
 	// does not buy the pickers.
 	before = q.sc.offset
-	consumed, _ := m.overlayStack.handleWheel(wheelScrollLines, &m)
+	consumed, _ := m.overlayStack.handleWheel(wheelScrollLines, m)
 	if !consumed {
 		t.Fatal("the form did not consume a wheel tick")
 	}
@@ -630,13 +629,13 @@ func TestElicitModal_FollowsFocusedField(t *testing.T) {
 // --- picker windowing ----------------------------------------------
 
 func TestThemePicker_WindowsLongListToTerminal(t *testing.T) {
-	m := model{}
+	m := &model{}
 	m.styles = newStyles(true, Branding{})
 	m.width, m.height = 100, 14
 	m.themeName = "default"
-	askThemePicker(&m)
+	askThemePicker(m)
 
-	rendered := m.overlayStack.render(m.width, &m)
+	rendered := m.overlayStack.render(m.width, m)
 	if h := strings.Count(rendered, "\n") + 1; h > m.height {
 		t.Errorf("theme picker is %d rows tall in a %d-row terminal", h, m.height)
 	}
@@ -644,9 +643,9 @@ func TestThemePicker_WindowsLongListToTerminal(t *testing.T) {
 	// Walking the cursor past the fold pulls the window along.
 	last := len(BuiltinThemes()) - 1
 	for i := 0; i < last; i++ {
-		m.overlayStack.handleKeyMsg(keyMsgFromStroke("down"), &m)
+		m.overlayStack.handleKeyMsg(keyMsgFromStroke("down"), m)
 	}
-	rendered = m.overlayStack.render(m.width, &m)
+	rendered = m.overlayStack.render(m.width, m)
 	if !strings.Contains(rendered, BuiltinThemes()[last].Name) {
 		t.Errorf("last theme %q not visible after scrolling to it:\n%s", BuiltinThemes()[last].Name, rendered)
 	}
@@ -655,11 +654,11 @@ func TestThemePicker_WindowsLongListToTerminal(t *testing.T) {
 // An unsized model (no WindowSizeMsg yet) renders every row, exactly
 // as it did before windowing existed.
 func TestThemePicker_UnsizedRendersEveryRow(t *testing.T) {
-	m := model{}
+	m := &model{}
 	m.styles = newStyles(true, Branding{})
 	m.themeName = "default"
-	askThemePicker(&m)
-	rendered := m.overlayStack.render(80, &m)
+	askThemePicker(m)
+	rendered := m.overlayStack.render(80, m)
 	for _, bt := range BuiltinThemes() {
 		if !strings.Contains(rendered, bt.Name) {
 			t.Errorf("theme %q missing from an unsized render", bt.Name)
@@ -877,7 +876,7 @@ func TestGolden_ModalFrameScrolled(t *testing.T) {
 	for _, w := range goldenWidths {
 		t.Run("width-"+strconv.Itoa(w), func(t *testing.T) {
 			m := goldenModel(t, w, 18)
-			askThemePicker(&m)
+			askThemePicker(m)
 			frame := m.View().Content
 			if !strings.Contains(frame, "█") {
 				t.Fatalf("width %d did not window the picker body; the capture would be pointless", w)

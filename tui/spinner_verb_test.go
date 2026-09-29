@@ -75,7 +75,7 @@ func TestSpinnerLine_EndsInExactlyOneEllipsis(t *testing.T) {
 				ThinkingPhrases: []string{tc.in},
 			})
 			m.viewport.SetWidth(80)
-			m = m.submitTurn("go")
+			m.submitTurn("go")
 
 			line := ansi.Strip(m.renderSpinnerLine())
 			assertOneTrailingEllipsis(t, line, tc.want)
@@ -94,7 +94,7 @@ func TestSpinnerLine_WorkingPoolIsNormalizedToo(t *testing.T) {
 		WorkingPhrases:  []string{"Running tools..."},
 	})
 	m.viewport.SetWidth(80)
-	m = m.submitTurn("go")
+	m.submitTurn("go")
 	m.toolActive = true
 
 	assertOneTrailingEllipsis(t, ansi.Strip(m.renderSpinnerLine()), "Running tools")
@@ -106,7 +106,7 @@ func TestSpinnerLine_WorkingPoolIsNormalizedToo(t *testing.T) {
 func TestSpinnerLine_DefaultPoolsAreNormalized(t *testing.T) {
 	m := newModel(Options{Agent: stubAgent{}})
 	m.viewport.SetWidth(80)
-	m = m.submitTurn("go")
+	m.submitTurn("go")
 
 	for _, toolActive := range []bool{false, true} {
 		m.toolActive = toolActive
