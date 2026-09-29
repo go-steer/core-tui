@@ -65,6 +65,13 @@ func (m model) Init() tea.Cmd {
 	if c := m.refreshHostSnapshotCmd(); c != nil {
 		cmds = append(cmds, c)
 	}
+	// Prime the held-input recogniser's host-name cache (issue #311)
+	// so a host command typed while parked is recognised without the
+	// operator having opened the palette first. nil when the agent
+	// has no slash catalog.
+	if c := m.hostSlashNamesCmd(); c != nil {
+		cmds = append(cmds, c)
+	}
 	// Issue #22: LiveAgent mode spawns the single long-lived drain
 	// goroutine at startup so autonomous activity reaches the
 	// chat view even before the operator types anything. The
@@ -757,8 +764,16 @@ func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		}
 		return m, tea.Batch(cmd, m.overlayStack.resolve(sessionPickerDialogID, chosen{ID: msg.id}, &m))
 	case slashCommandsMsg:
-		// Host slash commands merging into an already-open / palette.
-		if msg.gen != m.sessionGen || m.palette == nil ||
+		// Host slash commands merging into an already-open / palette,
+		// and into the held-input recogniser's cache (issue #311).
+		// The cache is applied first, on the gen guard alone: it
+		// outlives the palette, so a reply for a palette that has
+		// since closed — or for the seq-0 priming fetch — still counts.
+		if msg.gen != m.sessionGen {
+			return m, nil
+		}
+		m.hostSlashNames = msg.names
+		if m.palette == nil ||
 			m.palette.kind != paletteSlash || m.palette.seq != msg.seq {
 			return m, nil
 		}
@@ -778,8 +793,7 @@ func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		if msg.gen != m.sessionGen {
 			return m, nil
 		}
-		m.applyReload(msg)
-		return m, nil
+		return m, m.applyReload(msg)
 	case pricingRefreshedMsg:
 		if msg.gen != m.sessionGen {
 			return m, nil
@@ -890,7 +904,14 @@ func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		m.refreshAndScroll()
 		return m, nil
 	case helpCommandsMsg:
-		if msg.gen != m.sessionGen || len(msg.specs) == 0 {
+		if msg.gen != m.sessionGen {
+			return m, nil
+		}
+		// /help fetched the same catalog; keep the held-input
+		// recogniser's cache as fresh as what was just printed
+		// (issue #311).
+		m.hostSlashNames = hostSlashNameSet(msg.specs)
+		if len(msg.specs) == 0 {
 			return m, nil
 		}
 		m.history.Append(Message{Role: RoleSystem, Text: renderHostCommandHelp(msg.specs)})
@@ -2259,9 +2280,21 @@ func (m model) submitInputLine(text string) (tea.Model, tea.Cmd) {
 	// misbehaving agent and then typing /quit opened the gate and
 	// handed it "/quit" as its next instruction.
 	//
+	// The third recogniser is the host's own catalog (issue #311).
+	// The two static tables only know names core-tui ships, so a
+	// command the host registers at runtime — /usage, and more to the
+	// point /new and /attach, the ways an operator LEAVES a runaway —
+	// opened the gate and reached the model as its instruction: #299's
+	// inversion again, for every name outside the tables. The catalog
+	// is a host call, so it is never made here; hostNamesASlash reads
+	// the cache slashCommandsMsg keeps, and a cold cache is simply the
+	// static answer. Held only: the mid-turn branch above asks the
+	// safety question, which the catalog cannot answer.
+	//
 	// Everything else stays prose, which is the whole point of a
 	// steer field — "/tmp is full, look at it" must reach the host.
-	if m.pause.paused() && (namesABuiltinSlash(text) || midTurnSlashDisposition(text) != midTurnQueue) {
+	if m.pause.paused() && (namesABuiltinSlash(text) || m.hostNamesASlash(text) ||
+		midTurnSlashDisposition(text) != midTurnQueue) {
 		return m.dispatchSlash(text)
 	}
 	// Paused: typed text is a steer, not a new turn (R-HOLD-4).
@@ -3108,6 +3141,10 @@ func (m *model) applySwitchTarget(tgt *SwitchTarget) tea.Cmd {
 	m.confirmingClear = false
 	m.inFlightSlash = nil
 	m.toast = ""
+	// The outgoing session's catalog says nothing about the incoming
+	// one (issue #311). Cold until the refetch in step 8 lands, which
+	// is the static-tables behaviour, not a wrong one.
+	m.hostSlashNames = nil
 
 	// Step 3 — wipe history + list cache + the transcript cursor.
 	m.history.Reset()
@@ -3203,6 +3240,13 @@ func (m *model) applySwitchTarget(tgt *SwitchTarget) tea.Cmd {
 	// session (host_snapshot.go). The outgoing cycle's straggler tick is
 	// dropped by the gen guard in Update.
 	if c := m.refreshHostSnapshotCmd(); c != nil {
+		cmds = append(cmds, c)
+	}
+	// Refill the host-name cache cleared in step 2 from the new
+	// agent. Built after step 4 swapped m.opts.Agent and stamped with
+	// the bumped gen, so it asks the right host and a straggler from
+	// the old one is dropped.
+	if c := m.hostSlashNamesCmd(); c != nil {
 		cmds = append(cmds, c)
 	}
 	if len(cmds) == 0 {
