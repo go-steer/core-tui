@@ -17,6 +17,12 @@
 # sit behind the new baseline, and a leftover entry would silently permit
 # a second, unrelated removal of a symbol that no longer exists.
 #
+# Nothing to empty at v0.25.1 either: a fix-only patch release, and
+# verify-apidiff reported no change to the exported API across the whole
+# cycle. #317 reworded Options.MouseHint's doc comment and gave the
+# unexported mouseHintText a width parameter; neither is a symbol this
+# gate compares.
+#
 # Nothing to empty at v0.25.0 either, and for the opposite reason to the
 # usual one: that cycle only added. #313 put six symbols on the exported
 # surface (GuardrailTrip and its two guardrail-name constants, the
@@ -47,4 +53,4 @@
 # clearing them any earlier would leave verify-apidiff reporting the
 # same removals with nothing to match them against.
 
-# Entries since v0.25.0 follow.
+# Entries since v0.25.1 follow.
