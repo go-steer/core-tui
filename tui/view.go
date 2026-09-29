@@ -1163,7 +1163,7 @@ func (m *model) renderMessage(msg Message) string {
 			nameStyle = m.styles.ToolHead.Italic(true)
 		}
 		head := nameStyle.Render(glyph + " " + msg.ToolName)
-		return toolRendererFor(msg.ToolName).RenderCall(msg, head, width, m.styles)
+		return toolRendererFor(msg.ToolName).RenderCall(msg.ToolArgs, msg.ToolPreview, head, width, m.styles)
 	}
 	return wordWrap(msg.Display(), width)
 }
