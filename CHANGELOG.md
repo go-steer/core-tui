@@ -25,6 +25,10 @@ The wire protocol in [`docs/sse-event-stream-protocol.md`](./docs/sse-event-stre
 
 ## [Unreleased]
 
+### Docs
+
+- **The wire protocol spec documents version negotiation** ([#273](https://github.com/go-steer/core-tui/issues/273)). The reference host has negotiated the protocol version on the `/events` request since core-agent#413, and [`docs/sse-event-stream-protocol.md`](./docs/sse-event-stream-protocol.md) never said so. New §3.1 does: a client MAY declare its version via `?protocol=` or `X-Attach-Protocol-Version` (the query param wins), a different major is refused with `409` and an unparseable one with `400`, minor and patch skew are accepted, and declaring nothing is legal — recommended against, not forbidden, because the reference host accepts it. The part an implementer would otherwise get wrong is spelled out: the `409` is terminal, so it belongs in a fallback path and not a reconnect loop, and the echoed response header is only on responses from the stream handler, so a `409` without it — the shortcut form's ambiguous session ID — is not a version mismatch. No protocol version change: nothing on the wire moved, and a bump would name a version no producer speaks.
+
 ## [0.25.1] — 2026-09-27
 
 Two fixes to the mouse-capture hint, no API change. Both come from one operator in VS Code's integrated terminal, served to a Mac browser from a Linux Cloud Workstation. The hint told them to hold Alt, which xterm.js has never bound on any platform. VS Code bypasses capture with Shift, or with Option when the machine rendering the terminal is a Mac — and core-tui, running on the host, can't see that machine. The hint now names what xterm.js actually checks. It also keeps `/mouse`, the half of the hint that works in every terminal, visible in panes too narrow for the full text, where the right-hand clip used to cut it off.
