@@ -61,12 +61,95 @@ const sidebarMinChatWidth = 40
 // budget to ansi.StringWidth and it prices a TAB at zero — see
 // expandTabs for why doing it here changes no bytes and issue #217
 // for what it was costing.
+//
+// Neither pass is quite a bound on its own terms either, which is what
+// carryOverflow is for — see it for the one row both of them let
+// through (issue #307).
 func wordWrap(s string, width int) string {
 	if width <= 0 {
 		return s
 	}
 	s = expandTabs(s)
-	return ansi.Wrap(ansi.Wordwrap(s, width, " -"), width, " -")
+	out := ansi.Wrap(ansi.Wordwrap(s, width, " -"), width, " -")
+	if !anyRowWider(out, width) {
+		return out
+	}
+	// Slow path, taken only by a row that is still over. Each source
+	// line is re-wrapped on its own so the carry below can only move
+	// content onto a row the wrap introduced — never across a newline
+	// the caller wrote, which would glue the tail of one paragraph
+	// onto the head of the next. Both passes reset at a newline, so
+	// wrapping line by line changes nothing but the rows that were
+	// over.
+	lines := strings.Split(s, "\n")
+	for i, line := range lines {
+		rows := strings.Split(ansi.Wrap(ansi.Wordwrap(line, width, " -"), width, " -"), "\n")
+		lines[i] = strings.Join(carryOverflow(rows, width), "\n")
+	}
+	return strings.Join(lines, "\n")
+}
+
+// anyRowWider reports whether any newline-separated row of s measures
+// wider than width cells. It is wordWrap's fast-path check, so it
+// walks s in place rather than splitting it.
+func anyRowWider(s string, width int) bool {
+	for s != "" {
+		row, rest, _ := strings.Cut(s, "\n")
+		if ansi.StringWidth(row) > width {
+			return true
+		}
+		s = rest
+	}
+	return false
+}
+
+// carryOverflow moves whatever sits past width on each row to the
+// front of the row below it, appending a row when the last one is
+// over. rows must all belong to one source line, so every boundary
+// between them is one the wrapper chose and moving content across it
+// is re-breaking, not rewriting.
+//
+// The row it exists for is a breakpoint that does not fit (issue
+// #307). ansi.Wordwrap and ansi.Wrap both handle a hyphen with no room
+// left for it the same way: it joins the pending word, and the pending
+// word is flushed at the next newline or at the end of the input
+// without its width being checked again. So a word that exactly fills
+// the line, followed by a hyphen, comes back one cell over — and the
+// second pass cannot catch it, because the first pass has just put a
+// newline straight after that hyphen. A cwd in the status header was
+// where this showed: "…/worktrees/esc-cancel" at 41 columns wrapped to
+// a 42-cell first row, one column past the terminal, and clipFrame ate
+// the hyphen at the frame edge.
+//
+// The cut is taken at the width Truncate actually kept, not at width,
+// so a wide glyph straddling the boundary moves down whole rather than
+// being lost or split. Both halves are measured with ansi.StringWidth,
+// the same grapheme width the wrap passes bound against. Truncate and
+// TruncateLeft both keep the escapes they walk past, so the carried
+// tail keeps the styling it had.
+func carryOverflow(rows []string, width int) []string {
+	for i := 0; i < len(rows); i++ {
+		if ansi.StringWidth(rows[i]) <= width {
+			continue
+		}
+		head := ansi.Truncate(rows[i], width, "")
+		kept := ansi.StringWidth(head)
+		if kept == 0 {
+			// A single glyph wider than the whole budget (a
+			// two-cell glyph at width 1). There is nothing to cut
+			// that would help; leave it to the backstops rather
+			// than carry it down forever.
+			continue
+		}
+		tail := ansi.TruncateLeft(rows[i], kept, "")
+		rows[i] = head
+		if i+1 < len(rows) {
+			rows[i+1] = tail + rows[i+1]
+		} else {
+			rows = append(rows, tail)
+		}
+	}
+	return rows
 }
 
 // tabExpansion is what one TAB is drawn as: contentTabWidth spaces.

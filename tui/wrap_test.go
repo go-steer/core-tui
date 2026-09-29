@@ -81,6 +81,62 @@ func TestWordWrap_BoundsEveryLine(t *testing.T) {
 	}
 }
 
+// TestWordWrap_BoundsAHyphenOnTheBoundary is issue #307: a token that
+// fills the row to the last cell with a hyphen straight after it.
+// ansi.Wordwrap and ansi.Wrap both let the hyphen join the pending
+// word and then flush it at the newline without re-measuring, so the
+// row came back one cell over and the second pass, handed a newline
+// right after the hyphen, repeated the mistake instead of catching it.
+//
+// The width sweep puts the boundary at every offset; the cases vary
+// what sits around it — styling that must survive the carry, a wide
+// glyph that must move down whole, and a second source line the carry
+// must not reach across.
+func TestWordWrap_BoundsAHyphenOnTheBoundary(t *testing.T) {
+	for width := 2; width <= 60; width++ {
+		fill := strings.Repeat("x", width)
+		cases := map[string]string{
+			"plain":       fill + "-tail",
+			"after-space": "ab " + fill + "-tail",
+			"styled":      "\x1b[2m" + fill + "-tail\x1b[0m",
+			"end-of-line": fill + "-",
+			"multiline":   fill + "-\n" + fill + "-tail",
+			"wide":        strings.Repeat("日", width/2) + strings.Repeat("x", width%2) + "-tail",
+		}
+		for name, s := range cases {
+			got := wordWrap(s, width)
+			for i, line := range strings.Split(got, "\n") {
+				if w := ansi.StringWidth(line); w > width {
+					t.Errorf("%s at width %d: line %d is %d cells: %q",
+						name, width, i, w, ansi.Strip(line))
+				}
+			}
+			if visible(got) != visible(s) {
+				t.Errorf("%s at width %d: content changed\n got %q\nwant %q",
+					name, width, visible(got), visible(s))
+			}
+			// The first line's hyphen gets a row of its own; glued
+			// onto the second source line it would read as part of it.
+			if name == "multiline" && !strings.HasPrefix(got, fill+"\n-\n") {
+				t.Errorf("multiline at width %d: the carry crossed the input's newline: %q",
+					width, got)
+			}
+		}
+	}
+}
+
+// TestWordWrap_CarryStopsOnAGlyphWiderThanTheBudget guards the one
+// input the carry cannot help: a two-cell glyph at width 1. There is
+// no cut that makes it fit, so it has to be left alone rather than
+// carried down row after row.
+func TestWordWrap_CarryStopsOnAGlyphWiderThanTheBudget(t *testing.T) {
+	const s = "日-日"
+	got := wordWrap(s, 1)
+	if visible(got) != visible(s) {
+		t.Errorf("content changed\n got %q\nwant %q", visible(got), visible(s))
+	}
+}
+
 // visible reduces s to the glyphs a reader would see, dropping the
 // styling and all whitespace. Comparing two of these answers "did the
 // wrapper lose any content" without asserting anything about where it
