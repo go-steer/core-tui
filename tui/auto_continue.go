@@ -33,10 +33,13 @@ import (
 // the result as a fresh turn with a Message.AutoContinue marker
 // so the renderer can distinguish it from an operator-typed turn.
 //
-// Returns ok=false (and leaves model untouched) when the agent
-// doesn't satisfy InboxDrainer, the inbox is empty, or the soft
-// cap has been hit — caller should fall through to the regular
-// maybeDrainQueue path in those cases.
+// Returns ok=false when the mode is off, the agent doesn't satisfy
+// InboxDrainer, the inbox is empty, the formatted prompt is blank,
+// or the soft cap has been hit — caller should fall through to the
+// regular maybeDrainQueue path in those cases. Every ok=false path
+// leaves the model untouched except the cap-reached one, which
+// appends a "cap reached" system row to history and refreshes the
+// viewport; those writes land on the receiver and persist.
 func (m *model) maybeAutoContinue() (tea.Cmd, bool) {
 	if m.opts.MidTurnInjectionMode != AutoContinueFromInbox {
 		return nil, false
