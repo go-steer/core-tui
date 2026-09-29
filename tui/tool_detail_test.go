@@ -62,6 +62,31 @@ func TestRenderToolDetail_ErrorSuppressesResponse(t *testing.T) {
 	}
 }
 
+// Issue #316: a run_error is a warning above the response, which
+// still renders because it is the deliverable. Never the error banner.
+func TestRenderToolDetail_RunErrorWarnsAboveResponse(t *testing.T) {
+	styles := newStyles(true, Branding{})
+	response := map[string]any{"output": "the report", "run_error": "429 too many requests"}
+	got := renderToolDetail(nil, response, "", styles)
+	warn := strings.Index(got, GlyphWarn+" run failed after returning:")
+	resp := strings.Index(got, "response:")
+	if warn < 0 || resp < 0 || warn > resp {
+		t.Fatalf("expected the warning above the response section, got:\n%s", got)
+	}
+	if !strings.Contains(got, "the report") {
+		t.Errorf("expected the response body kept, got:\n%s", got)
+	}
+	if strings.Contains(got, "error:") {
+		t.Errorf("run_error must not render as the error banner, got:\n%s", got)
+	}
+
+	// An empty run_error is absent.
+	got = renderToolDetail(nil, map[string]any{"output": "x", "run_error": ""}, "", styles)
+	if strings.Contains(got, GlyphWarn) {
+		t.Errorf("empty run_error should not warn, got:\n%s", got)
+	}
+}
+
 func TestRenderToolDetail_ArgsOnly_CallPending(t *testing.T) {
 	// Tool call in flight — args populated, response not yet
 	// arrived. Detail block should render just the args section.
