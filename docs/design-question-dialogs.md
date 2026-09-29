@@ -602,10 +602,13 @@ separate decision.
 
 The `resolver` signature is also load-bearing in a way worth spelling
 out: `m` is a **parameter**, not something the resolver closes over.
-`Model.Update` has a value receiver, so a `*Model` captured when the
-question was asked points at the per-`Update` copy that opened it and
-is dead by the time the answer arrives. Every effect a widget wants to
-cause has to route through something the Update loop hands it.
+When this was written `Model.Update` had a value receiver, so a
+`*Model` captured when the question was asked pointed at the
+per-`Update` copy that opened it and was dead by the time the answer
+arrived. The receivers have been pointers since #266; the parameter
+stays so a resolver never holds a model reference of its own. Every
+effect a widget wants to cause has to route through something the
+Update loop hands it.
 
 Exactly-once is the overlay's job, and it is what closes the
 `applySwitchTarget` hole from §1.4:
