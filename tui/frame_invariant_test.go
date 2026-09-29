@@ -600,15 +600,35 @@ func widestRow(rows []string) int {
 	return widest
 }
 
+// frameCwd is the working directory every frame model displays.
+const frameCwd = "~/core-tui"
+
 // newFrameModel builds a model sized to (w, h) in the requested
 // status layout. The theme is pinned so a palette change can't turn
 // this into a flaky test through some width-carrying token.
+//
+// The cwd is pinned for the same reason. The status header renders
+// it, so left to resolveDisplayCwd every frame in this file carried
+// the checkout path of whoever ran it, and a path long enough to land
+// on a wrap boundary failed the 41x5 resize step in one worktree and
+// passed it in another (issue #307). The long-cwd case is covered on
+// purpose by TestFrameInvariants_LongCwdHeader instead.
 func newFrameModel(layout StatusLayout, w, h int) model {
+	return newFrameModelAt(layout, frameCwd, w, h)
+}
+
+// newFrameModelAt is newFrameModel displaying cwd. The cwd has to be in
+// place before the first resize, as it is in a real model: the
+// header's wrapped height is charged to the chrome budget, and a
+// same-size WindowSizeMsg afterwards is a no-op that would not
+// re-measure it.
+func newFrameModelAt(layout StatusLayout, cwd string, w, h int) model {
 	m := newModel(Options{
 		Agent:            &bareAgent{id: "frame"},
 		StatusLayout:     layout,
 		PermissionLayout: PermissionOverlay,
 	})
+	m.cwd = cwd
 	m.styles = newStylesWithTheme(true, goldenTheme())
 	out, _ := m.Update(tea.WindowSizeMsg{Width: w, Height: h})
 	return out.(model)
@@ -1328,6 +1348,48 @@ func TestFrameInvariants_ResizeSequence(t *testing.T) {
 			assertFrameFits(t, m.View().Content, s.w, s.h)
 			assertPanelsSurvive(t, m, s.w, s.h)
 		})
+	}
+}
+
+// TestFrameInvariants_LongCwdHeader is issue #307: a cwd long enough to
+// be the status-header segment that lands on the wrap boundary. The
+// header panel rendered one column wider than the terminal and the
+// composed frame hid it — clipFrame trimmed the extra cell, so
+// assertFrameFits passed on a frame that had lost a glyph off the
+// header's right edge. Only the renderer-width contract and the panel
+// rectangle can see that, so both are asserted here beside the frame
+// fit.
+//
+// Two kinds of cwd. The literal one is the path the issue was found
+// in, swept across widths so it crosses the boundary wherever its
+// breakpoints happen to fall. The constructed one is built per width
+// to hit the exact shape that overran — a token that fills a row to
+// the last cell with a hyphen straight after it — so every width in
+// the sweep is a boundary case rather than whichever few the literal
+// path happens to hit.
+func TestFrameInvariants_LongCwdHeader(t *testing.T) {
+	const issuePath = "~/projects/core-tui/.claude/worktrees/esc-cancel"
+	for w := 30; w <= 80; w++ {
+		cwds := map[string]string{
+			"issue-path":  issuePath,
+			"on-boundary": "~/" + strings.Repeat("x", w-2) + "-tail",
+		}
+		for name, cwd := range cwds {
+			for _, h := range []int{5, 24} {
+				t.Run(name+"/"+strconv.Itoa(w)+"x"+strconv.Itoa(h), func(t *testing.T) {
+					m := newFrameModelAt(StatusHeader, cwd, w, h)
+					for i, row := range strings.Split(m.renderHeader(), "\n") {
+						if got := ansi.StringWidth(row); got > w {
+							t.Errorf("status header row %d is %d cols at width %d: %q",
+								i, got, w, ansi.Strip(row))
+						}
+					}
+					assertFrameFits(t, m.View().Content, w, h)
+					assertRenderersHonorWidth(t, m)
+					assertPanelsSurvive(t, m, w, h)
+				})
+			}
+		}
 	}
 }
 
