@@ -147,9 +147,9 @@ func (demoAgent) WakeRequested() <-chan struct{} { return wakeCh }
 // A real host relays the outcome to its permission gate: the decision
 // as before, and a non-empty Reason alongside a deny (core-agent sends
 // it as /perms/respond's "reason").
-func demoPermissionAfter(p *tui.Prompter, n *tui.Notifier, delay time.Duration) {
+func demoPermissionAfter(ctx context.Context, p *tui.Prompter, n *tui.Notifier, delay time.Duration) {
 	time.Sleep(delay)
-	out, err := p.AskApprovalDetailed(context.Background(), tui.PermissionRequest{
+	out, err := p.AskApprovalDetailed(ctx, tui.PermissionRequest{
 		Kind:        tui.PermissionKindEdit,
 		ToolName:    "Write",
 		Detail:      "- if user.Email == \"\" {\n+ if user.Email == \"\" || !strings.Contains(user.Email, \"@\") {",
@@ -170,9 +170,9 @@ func demoPermissionAfter(p *tui.Prompter, n *tui.Notifier, delay time.Duration) 
 
 // demoElicitAfter fires a synthetic MCP elicit request after delay
 // so the visual preview demos the form modal end-to-end.
-func demoElicitAfter(e tui.Elicitor, delay time.Duration) {
+func demoElicitAfter(ctx context.Context, e tui.Elicitor, delay time.Duration) {
 	time.Sleep(delay)
-	_, _ = e.Elicit(context.Background(), "github", tui.ElicitRequest{
+	_, _ = e.Elicit(ctx, "github", tui.ElicitRequest{
 		Mode:        tui.ElicitFormMode,
 		Title:       "repository access",
 		Description: "the github MCP server needs a repo + branch to push to",
@@ -392,15 +392,17 @@ func (demoAgent) SlashCommands() []tui.SlashCommandSpec {
 	}
 }
 
-func (demoAgent) InvokeSlash(_ context.Context, name, args string) (tui.SlashResult, error) {
+func (demoAgent) InvokeSlash(ctx context.Context, name, args string) (tui.SlashResult, error) {
 	switch name {
 	case "perm":
 		// Fired off the event loop: AskApprovalDetailed blocks until
 		// the operator answers, which the loop has to be free to see.
-		go demoPermissionAfter(demoHooks.prompter, demoHooks.notifier, 0)
+		// WithoutCancel because the prompt outlives this call, which
+		// returns at once.
+		go demoPermissionAfter(context.WithoutCancel(ctx), demoHooks.prompter, demoHooks.notifier, 0)
 		return tui.SlashResult{}, nil
 	case "elicit":
-		go demoElicitAfter(demoHooks.elicitor, 0)
+		go demoElicitAfter(context.WithoutCancel(ctx), demoHooks.elicitor, 0)
 		return tui.SlashResult{}, nil
 	case "btw", "by-the-way":
 	default:
@@ -445,8 +447,8 @@ func main() {
 	// after launch so the visual preview demos both modals end-to-
 	// end; /perm and /elicit open them again on demand. A real host wires these into its permission gate +
 	// MCP servers.
-	go demoPermissionAfter(prompter, notifier, 8*time.Second)
-	go demoElicitAfter(elicitor, 18*time.Second)
+	go demoPermissionAfter(context.Background(), prompter, notifier, 8*time.Second)
+	go demoElicitAfter(context.Background(), elicitor, 18*time.Second)
 	// And the agent's own question (R-PROMPT-1), last, because it
 	// walks all five kinds and each one waits for the previous
 	// answer.
