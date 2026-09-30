@@ -25,6 +25,10 @@ The wire protocol in [`docs/sse-event-stream-protocol.md`](./docs/sse-event-stre
 
 ## [Unreleased]
 
+## [0.26.0] — 2026-09-30
+
+Two fixes for a held agent, one new render state, and the wire spec caught up with its producer. Parking a runaway agent and typing `/new` or `/attach` — the ways out — used to resume it and hand it the command as an instruction, because the held input box only recognised core-tui's own commands; it now knows the host's too. `/clear` is refused through a daemon turn that has gone quiet in a tool call, not only while the spinner is showing. A tool result that carries `run_error` — core-agent#1154's subagent that returned its result and then failed — reads as delivered with a warning instead of as a plain success beside a failed agent. The inbox's bundle-handling boilerplate folds to one line, a one-column header overrun that only showed on long checkout paths is gone, and [`docs/sse-event-stream-protocol.md`](./docs/sse-event-stream-protocol.md) now documents version negotiation and every revision through 1.14.0. Minor rather than patch because the `run_error` rendering is new behaviour; no exported API change, and `dev/api-breaks.txt` goes into the tag empty. Two internal refactors ride along with no observable effect: the concrete model moved to pointer receivers (#266), and the tool renderers stopped taking a whole `Message` (#265's first step).
+
 ### Changed
 
 - **The inbox's bundle-handling guidance folds to one line** ([#298](https://github.com/go-steer/core-tui/issues/298)). On an inbox-driven turn core-agent prepends a fixed block of instructions addressed to the model — "How to handle the bundle:" and its branches — and the transcript drew all of it, so the operator's one-line question scrolled past under a dozen lines of boilerplate that is identical on every inbox turn. A row carrying the block now draws it as `▸ bundle-handling guidance (N lines)`, and the ordinary fold key (space, with the transcript focused) opens it in place and closes it again. Both paths the text arrives by are covered: the attach path, where the inbox turn's prompt comes back as a committed chunk, and the in-process auto-continue row. Display only — `Message.Text`, saved transcripts and `/copy` keep the full text. There is no structural handle on the wire, so the block is found by its heading on a row that opens with a bracketed header; if core-agent rewords the heading the fold stops applying and the text renders in full, as before. No API change.
@@ -789,7 +793,8 @@ Initial release: `package tui` extracted from the duplicated `internal/tui` tree
 - **Performance and terminal-fidelity work** — incremental Glamour streaming, an auto-growing textarea, hanging-indent word wrap that preserves source leading whitespace, and the viewport's `h`/`j`/`k`/`l`/arrow bindings disabled with `xOffset` pinned to 0 so a wide line can't shift the whole chat sideways.
 - **The docs that govern all of it** — `docs/requirements.md`, `docs/design.md`, `docs/decisions.md`, `docs/style.md`, `docs/ui-references.md`, and `MIGRATION.md`.
 
-[Unreleased]: https://github.com/go-steer/core-tui/compare/v0.25.1...HEAD
+[Unreleased]: https://github.com/go-steer/core-tui/compare/v0.26.0...HEAD
+[0.26.0]: https://github.com/go-steer/core-tui/compare/v0.25.1...v0.26.0
 [0.25.1]: https://github.com/go-steer/core-tui/compare/v0.25.0...v0.25.1
 [0.25.0]: https://github.com/go-steer/core-tui/compare/v0.24.1...v0.25.0
 [0.24.1]: https://github.com/go-steer/core-tui/compare/v0.24.0...v0.24.1
