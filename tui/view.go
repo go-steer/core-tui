@@ -812,10 +812,12 @@ func (m *model) turnInFlight() bool {
 //
 // Nothing to paint is the right answer for the renderer and the wrong
 // answer for an operator pressing esc, so the two questions get two
-// methods rather than one widened gate. Widening turnInFlight would
-// also start painting a spinner through tool-only stretches — arguably
-// an improvement, but a visible change with its own blast radius and
-// not this fix's to make.
+// methods rather than one widened gate. The spinner through
+// tool-only stretches came later and by a different route (#339):
+// followHostTurnState opens the live stretch from turn_state, so the
+// render gate now covers those stretches too, and this fallback is left
+// for the windows where a stretch was closed while the host still
+// reports a turn (a cancelled hold, a dropped stream).
 //
 // The host's turn_state is authoritative here: core-agent emits
 // streaming before the turn's first content and idle when it commits
@@ -834,7 +836,7 @@ func (m *model) turnRunning() bool {
 	if m.turnInFlight() {
 		return true
 	}
-	return m.liveMode && m.pushedTurnState != "" && m.pushedTurnState != TurnStateIdle
+	return m.hostTurnActive()
 }
 
 // renderInProgress returns the live block at the bottom of the chat
@@ -985,6 +987,18 @@ func (m *model) renderSpinnerLine() string {
 	pool := m.thinkingPhrases()
 	if m.toolActive {
 		pool = m.workingPhrases()
+	}
+	// A live turn blocked on an answer is waiting on a person, not
+	// working. The prompt is on this client's screen only when it
+	// asked; in observer mode it went to another client, and a
+	// thinking verb here would misreport what the turn is doing.
+	if m.liveMode {
+		switch m.pushedTurnState {
+		case TurnStateAwaitingPermission:
+			pool = []string{"Waiting for approval"}
+		case TurnStateAwaitingElicit:
+			pool = []string{"Waiting for input"}
+		}
 	}
 	if len(pool) == 0 {
 		return ""

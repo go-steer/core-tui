@@ -232,11 +232,14 @@ func TestEsc_MidDaemonTurnWithNothingStreamingStillCancels(t *testing.T) {
 				t.Fatal("setup: expected liveMode for a LiveAgent host")
 			}
 
-			// The host says a turn is running. Nothing is painting
-			// it: no partial chunk has arrived, so no live stretch
-			// was ever opened.
+			// The host says a turn is running and no partial chunk
+			// has arrived.
 			got, _ := m.Update(statusUpdateMsg{status: StatusUpdate{TurnState: state}})
 			m = got.(*model)
+			// Since #339 the push opens a live stretch, so close it: what is
+			// under test is turnRunning's fallback, the window where the host
+			// still reports a turn and nothing is painting it.
+			m.endLiveStretch()
 
 			if m.turnInFlight() {
 				t.Fatal("setup: the render gate must read idle here — that is the condition under test")
@@ -286,6 +289,10 @@ func TestEsc_MidDaemonTurnOnAGatelessHostStillCancels(t *testing.T) {
 
 	got, _ := m.Update(statusUpdateMsg{status: StatusUpdate{TurnState: TurnStateStreaming}})
 	m = got.(*model)
+	// Since #339 the push opens a live stretch, so close it: what is
+	// under test is turnRunning's fallback, the window where the host
+	// still reports a turn and nothing is painting it.
+	m.endLiveStretch()
 	if m.turnInFlight() {
 		t.Fatal("setup: the render gate must read idle here — that is the condition under test")
 	}

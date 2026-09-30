@@ -427,11 +427,54 @@ func (m *model) beginLiveStretch() bool {
 	return true
 }
 
+// hostTurnActive reports whether the host's own turn_state says a turn
+// is running. An empty state — a host that never sends one — reads as
+// not active, so such a host keeps the chunk-driven stretch it always
+// had.
+func (m *model) hostTurnActive() bool {
+	return m.liveMode && m.pushedTurnState != "" && m.pushedTurnState != TurnStateIdle
+}
+
+// followHostTurnState opens or closes the live spinner stretch to
+// match the host's turn_state, and returns the Cmd that arms the tick
+// chain when it opened one (nil otherwise).
+//
+// Chunks alone cannot keep the spinner honest (issue #339): they open
+// a stretch on the first partial and the commit closes it, so a turn
+// that commits its text and then sits in a tool call — the ordinary
+// shape of an agent turn — shows nothing at all while the tool runs,
+// and a turn another client started shows nothing until its first
+// token. turn_state spans the whole turn: core-agent sends streaming
+// before the first content and idle once the turn is over.
+//
+// Idle closes the stretch only when no text is still pending. The
+// commit chunk normally lands before idle; if it does not, closing
+// here would hide the pending text, so the commit is left to close
+// the stretch as it always has.
+func (m *model) followHostTurnState() tea.Cmd {
+	if !m.liveMode || m.liveDisconnected {
+		return nil
+	}
+	if m.hostTurnActive() {
+		if m.beginLiveStretch() {
+			return m.armSpinner()
+		}
+		return nil
+	}
+	if m.pushedTurnState == TurnStateIdle && strings.TrimSpace(m.inProgressText) == "" {
+		m.endLiveStretch()
+	}
+	return nil
+}
+
 // endLiveStretch stops a LiveAgent spinner stretch. The tick chain
 // stops on its own: spinnerTickMsg re-arms only while turnInFlight,
 // which on this path is exactly m.spinnerActive.
 func (m *model) endLiveStretch() {
 	m.spinnerActive = false
+	// The stretch is over, so no tool of it is still running; left set,
+	// the next stretch would open on a working verb.
+	m.toolActive = false
 	m.turnStarted = time.Time{}
 }
 

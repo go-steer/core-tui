@@ -71,7 +71,13 @@ documented Go interface set (see `design.md` for the shape).
     registers a `ToolSummarizer` for the tool name in flight, its
     present-continuous string takes precedence over the rotation.
   The TUI infers which state to render from the event sequence — no
-  new `Event` field is required. See [`ui-references.md`](./ui-references.md)
+  new `Event` field is required. On an attached (`LiveAgent`) host,
+  "in flight" is the host's `turn_state` when it sends one: the spinner
+  runs from the first non-idle push to `idle`, across mid-turn commits
+  and tool calls, and a turn blocked on `awaiting_permission` /
+  `awaiting_elicit` reads `Waiting for approval…` / `Waiting for
+  input…` instead of a working verb. A host that sends no
+  `turn_state` gets the spinner from its streaming chunks alone. See [`ui-references.md`](./ui-references.md)
   for the Antigravity `Loading…`/`Working…` and Claude Code
   task-aware-spinner references.
 - **R-CHAT-3a** The verb line carries an elapsed-time suffix once the
