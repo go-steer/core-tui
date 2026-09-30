@@ -345,8 +345,9 @@ nothing ever reports a hold.
 - **The REST half of the 1.5.0 protocol revision**, and the 1.6.0
   `title` field — [#270](https://github.com/go-steer/core-tui/issues/270).
   This change takes `docs/sse-event-stream-protocol.md` to 1.5.0 by
-  writing the `pause` event it actually consumes. The document has
-  never specified REST; #270 decides whether it starts.
+  writing the `pause` event it actually consumes. #270 later settled
+  that the REST surface stays in core-agent's attach HTTP reference
+  rather than being copied here (protocol doc §7).
 - **The core-agent side** — the module pin bump,
   `coreAgentAdapter.Interrupt(ctx) error`, and `coretuiremote.Adapter`
   implementing `Pauser`. That lands there, after this tags.
