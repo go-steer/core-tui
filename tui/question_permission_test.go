@@ -92,7 +92,7 @@ func TestPermissionQuestion_LegendMatchesTheKeys(t *testing.T) {
 		// first field back off.
 		advertised := map[string]bool{}
 		for _, pair := range strings.Split(ansi.Strip(q.legend()), " "+GlyphSeparator+" ") {
-			advertised[strings.Fields(strings.ReplaceAll(pair, " ", " "))[0]] = true
+			advertised[strings.Fields(strings.ReplaceAll(pair, "\u00a0", " "))[0]] = true
 		}
 		if !advertised["esc"] {
 			t.Errorf("verb=%q: legend does not mention esc, which always denies", verb)
@@ -296,6 +296,108 @@ func TestPermissionQuestion_DiffRendersAtTheModalWidth(t *testing.T) {
 		if w := ansi.StringWidth(line); w > permissionModalWidth {
 			t.Errorf("modal row %d draws at %d cells in an %d-column box: %q",
 				i, w, permissionModalWidth, ansi.Strip(line))
+		}
+	}
+}
+
+// The inline block has to be told apart from the transcript around it
+// at a glance: a heading that says what it is, a heavy rule down the
+// left edge that no ordinary gutter row draws, and a cap under the
+// legend so it does not read as the first row of the footer.
+//
+// Asserted on the stripped text first, because that is the monochrome
+// read — the glyphs and the heading are what carry the meaning when
+// NO_COLOR takes the colour away — and then on the raw bytes for the
+// warning colour, which is what separates the block from the accent-
+// coloured tool-call row above it.
+func TestPermissionQuestion_InlineBlockIsLoud(t *testing.T) {
+	st := newStylesWithTheme(true, goldenTheme())
+	q := newPermissionQuestion(PermissionRequest{
+		ToolName:   "bash",
+		Source:     "researcher",
+		Detail:     "rm -rf ./build",
+		DetailKind: DetailShell,
+	}, PermissionInline)
+	raw := q.InlineBody(80, st)
+	rows := strings.Split(ansi.Strip(raw), "\n")
+
+	if want := "┏━ " + GlyphWarn + " Permission required: bash"; rows[0] != want {
+		t.Errorf("heading row = %q, want %q", rows[0], want)
+	}
+	if last := rows[len(rows)-1]; last != "┗━" {
+		t.Errorf("closing row = %q, want the ┗━ cap", last)
+	}
+	for i, row := range rows[1 : len(rows)-1] {
+		if !strings.HasPrefix(row, "┃") {
+			t.Errorf("body row %d = %q, want it behind the heavy ┃ rule", i+1, row)
+		}
+	}
+	// The content the operator decides on is unchanged by the chrome.
+	// keyLegend binds each key to its label with a no-break space, so
+	// the legend is compared with those folded back.
+	body := strings.ReplaceAll(strings.Join(rows, "\n"), "\u00a0", " ")
+	for _, want := range []string{"from sub-agent: researcher", "rm -rf ./build", "y allow once", "a allow always", "esc deny"} {
+		if !strings.Contains(body, want) {
+			t.Errorf("inline block lost %q:\n%s", want, body)
+		}
+	}
+
+	warn := permissionAccent(st)
+	if !strings.Contains(raw, warn.Render("┃ ")) {
+		t.Error("the left rule is not drawn in the warning colour")
+	}
+	if !strings.Contains(raw, warn.Bold(true).Render(GlyphWarn+" Permission required: bash")) {
+		t.Error("the heading is not drawn in the bold warning style")
+	}
+	if strings.Contains(raw, st.Accent.Render("┃ ")) || strings.Contains(raw, st.Accent.Render("│ ")) {
+		t.Error("the rule is still drawn in the accent the tool-call row uses")
+	}
+}
+
+// The block has to fit the chat column it is handed at every width,
+// narrow ones included — a floor above the space available is a row
+// wider than the terminal. Swept over each payload renderer because
+// each one wraps differently, with a tool name long enough to wrap the
+// heading as well.
+func TestPermissionQuestion_InlineBlockHonoursWidth(t *testing.T) {
+	st := newStylesWithTheme(true, goldenTheme())
+	long := strings.Repeat("a-really-quite-long-segment/", 8)
+	reqs := map[string]PermissionRequest{
+		"shell": {ToolName: "bash", Verb: "rm", DetailKind: DetailShell, Detail: "rm -rf /tmp/" + long},
+		"diff":  {ToolName: "edit_file", Verb: "edit", DetailKind: DetailDiff, Detail: goldenPermissionDiff},
+		"args":  {ToolName: "call", DetailKind: DetailArgs, Detail: `{"path":"/tmp/` + long + `","force":true}`},
+		"plain": {ToolName: "mcp__some_server__a_tool_with_a_long_name", Source: "a-sub-agent-" + long, Detail: long},
+		"bare":  {ToolName: "fetch_url"},
+	}
+	for name, req := range reqs {
+		q := newPermissionQuestion(req, PermissionInline)
+		for _, w := range []int{6, 8, 10, 12, 16, 20, 24, 30, 40, 60, 80, 120, 200} {
+			for i, row := range strings.Split(q.InlineBody(w, st), "\n") {
+				if got := ansi.StringWidth(row); got > w {
+					t.Errorf("%s at width %d: row %d is %d cells: %q", name, w, i, got, ansi.Strip(row))
+				}
+			}
+		}
+	}
+}
+
+// Every built-in theme's Warning is a yellow or amber picked against a
+// dark background, which on a light one is close to invisible. The
+// block's colour must clear permissionMinContrast against a light
+// background on every theme, and must be the theme's own Warning,
+// untouched, on a dark one.
+func TestPermissionAccent_LegibleOnEveryBuiltinTheme(t *testing.T) {
+	light := relativeLuminance(onPrimaryLight)
+	for _, bt := range BuiltinThemes() {
+		dark := newStylesWithTheme(true, bt.Build(true))
+		if got, want := permissionAccent(dark).GetForeground(), dark.WarningText.GetForeground(); got != want {
+			t.Errorf("%s/dark: accent %v, want the theme's Warning %v unchanged", bt.Name, got, want)
+		}
+		lt := newStylesWithTheme(false, bt.Build(false))
+		c := permissionAccent(lt).GetForeground()
+		if ratio := (light + 0.05) / (relativeLuminance(c) + 0.05); ratio < permissionMinContrast {
+			t.Errorf("%s/light: accent %s is %.2f:1 against a light background, want >= %.1f",
+				bt.Name, hexColor(c), ratio, permissionMinContrast)
 		}
 	}
 }

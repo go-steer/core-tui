@@ -46,6 +46,7 @@
 package tui
 
 import (
+	"image/color"
 	"strings"
 
 	tea "charm.land/bubbletea/v2"
@@ -282,9 +283,21 @@ func (q *permissionQuestion) Body(width, termHeight int, st styleSet) string {
 }
 
 // InlineBody renders the default layout: the same content as Body,
-// without the centered frame, behind a left-rule gutter that sets it
+// without the centered frame, in a bracketed gutter block that sets it
 // apart from the chat around it while leaving it in the natural scroll
 // position under the tool call that triggered it.
+//
+// The block is deliberately loud. It sits in the transcript flow, and
+// an operator glancing back at a screen they walked away from has to
+// tell a turn that is waiting on them from one that is still printing:
+// a quiet accent rule read as one more quoted transcript row, and the
+// legend under it as one more line of footer hints. So the block opens
+// on a warning-coloured heading, runs a heavy rule down its left edge —
+// ┃ rather than the │ an ordinary gutter row or sidebar divider draws —
+// and closes with a cap, all in the warning colour rather than the
+// accent the tool-call row above it already uses. The meaning is
+// carried by the glyphs and the heading text, not by the colour, so a
+// NO_COLOR or monochrome terminal still reads it as a prompt.
 //
 // width is the chat column, not a modal width — the block is part of
 // the transcript flow and there is no frame to fit inside.
@@ -292,14 +305,40 @@ func (q *permissionQuestion) InlineBody(width int, st styleSet) string {
 	if width <= 0 {
 		width = 80
 	}
-	const gutter = "│ "
-	bodyWidth := width - lipgloss.Width(gutter) - 1
-	if bodyWidth < 20 {
-		bodyWidth = 20
+	const (
+		rule    = "┃ "
+		headCap = "┏━ "
+		// headRule continues a heading that wrapped, indented to the
+		// heading text rather than to the rule so the second row reads
+		// as the heading's tail and not as the body's first line.
+		headRule = "┃  "
+		tailCap  = "┗━"
+	)
+	// One column of slack past the gutter, as before. The floor is one
+	// column rather than a readable minimum: a floor above the space
+	// the chat column actually has is a block wider than the terminal,
+	// and a narrow block wraps where a wide one gets clipped.
+	bodyWidth := max(width-lipgloss.Width(rule)-1, 1)
+	headWidth := max(width-lipgloss.Width(headCap)-1, 1)
+
+	warn := permissionAccent(st)
+	head := warn.Bold(true)
+
+	var b strings.Builder
+	// The heading is wrapped as plain text and styled row by row, so a
+	// long tool name folds under the cap without an escape sequence
+	// being split across the break.
+	heading := GlyphWarn + " Permission required: " + q.req.ToolName
+	for i, hl := range strings.Split(wordWrap(heading, headWidth), "\n") {
+		if i == 0 {
+			b.WriteString(warn.Render(headCap))
+		} else {
+			b.WriteString("\n" + warn.Render(headRule))
+		}
+		b.WriteString(head.Render(hl))
 	}
 
 	var lines []string
-	lines = append(lines, st.Accent.Render("⚠ Permission required: "+q.req.ToolName))
 	if q.req.Source != "" {
 		lines = append(lines, st.Muted.Render("from sub-agent: "+q.req.Source))
 	}
@@ -311,26 +350,50 @@ func (q *permissionQuestion) InlineBody(width int, st styleSet) string {
 	}
 	lines = append(lines, "", st.Muted.Render(q.legend()))
 
-	// Prefix each line with the gutter, in accent so the block reads as
-	// a focused affordance rather than as a quiet quote.
-	rule := st.Accent.Render("│ ")
-	var b strings.Builder
-	for i, line := range lines {
-		if i > 0 {
-			b.WriteByte('\n')
-		}
+	gutter := warn.Render(rule)
+	for _, line := range lines {
 		// Wrap each source line at bodyWidth so long shell commands
 		// fold cleanly under the gutter.
-		wrapped := strings.Split(wordWrap(line, bodyWidth), "\n")
-		for j, wl := range wrapped {
-			if j > 0 {
-				b.WriteByte('\n')
-			}
-			b.WriteString(rule)
-			b.WriteString(wl)
+		for _, wl := range strings.Split(wordWrap(line, bodyWidth), "\n") {
+			b.WriteString("\n" + gutter + wl)
 		}
 	}
+	// The cap is what stops the legend reading as the first row of the
+	// footer when the block is the last thing in the chat column.
+	b.WriteString("\n" + warn.Render(tailCap))
 	return b.String()
+}
+
+// permissionMinContrast is the contrast ratio the inline block's
+// warning colour is held to against a light background — WCAG's floor
+// for large text and for non-text graphics, which the rule is.
+const permissionMinContrast = 3.0
+
+// permissionAccent is WarningText made legible on the background it is
+// drawn on.
+//
+// Every built-in theme uses one Warning for both polarities, and they
+// are all yellows and ambers picked against a dark background: on a
+// light one the default theme's #FFD75F measures 1.4:1 against white,
+// which is a block the operator cannot see rather than one they cannot
+// miss. So on a light background the colour is walked toward black
+// until it clears permissionMinContrast. The hue survives — an amber
+// darkened to an ochre still reads as a warning — and a dark
+// background, or a light theme whose Warning already clears the floor,
+// gets the theme's own colour untouched.
+func permissionAccent(st styleSet) lipgloss.Style {
+	c := st.Theme.Warning
+	if st.Dark || c == nil {
+		return st.WarningText
+	}
+	light := relativeLuminance(onPrimaryLight)
+	contrast := func(c color.Color) float64 {
+		return (light + 0.05) / (relativeLuminance(c) + 0.05)
+	}
+	for step := 1; contrast(c) < permissionMinContrast && step <= 20; step++ {
+		c = mixColors(st.Theme.Warning, onPrimaryDark, float64(step)/20)
+	}
+	return st.WarningText.Foreground(c)
 }
 
 // detail renders the payload styled per DetailKind, at width.

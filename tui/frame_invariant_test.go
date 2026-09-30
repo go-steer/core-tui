@@ -1329,6 +1329,50 @@ func TestFrameInvariants_Grid(t *testing.T) {
 	}
 }
 
+// TestFrameInvariants_InlinePermission runs the grid's geometry checks
+// over the permission prompt's DEFAULT layout, which frameStates does
+// not reach: every frame model there is built under PermissionOverlay,
+// and the inline block is only drawn while a turn is in flight. The
+// block brings its own chrome — a cap row above, a heavy rule down the
+// side, a cap row below — so it is swept down to widths narrower than
+// the grid's, where a floor on its body width would push a row past
+// the chat column.
+//
+// Kept out of frameStates rather than added to it: PanelSurvival would
+// then also assert on the footer, and the footer's wrapped permission
+// legend is a separate question from the block's geometry.
+func TestFrameInvariants_InlinePermission(t *testing.T) {
+	layouts := []struct {
+		name   string
+		layout StatusLayout
+	}{
+		{"header", StatusHeader},
+		{"sidebar", StatusSidebar},
+	}
+	for _, lay := range layouts {
+		for _, w := range []int{20, 24, 30, 40, 60, 80, 120, 200} {
+			for _, h := range frameHeights {
+				name := lay.name + "/" + strconv.Itoa(w) + "x" + strconv.Itoa(h)
+				t.Run(name, func(t *testing.T) {
+					m := withHostileTranscript(newFrameModel(lay.layout, w, h))
+					m.permLayout = PermissionInline
+					out, _ := m.Update(permissionRequestMsg{req: PermissionRequest{
+						Kind:     PermissionKindBash,
+						ToolName: "mcp__a-server-with-a-long-name__a_tool_with_a_long_name",
+						Verb:     "rm",
+						Detail:   "rm -rf /tmp/a-really-quite-long-path/that/keeps/going/well/past/any/sensible/terminal/width",
+					}})
+					m = out.(*model)
+					m.state = stateStreaming
+					m.refreshViewport()
+					assertFrameFits(t, m.View().Content, w, h)
+					assertRenderersHonorWidth(t, m)
+				})
+			}
+		}
+	}
+}
+
 // TestFrameInvariants_ResizeSequence walks a single model through a
 // sequence of resizes rather than building a fresh one per size.
 // State that survives a resize (viewport offset, cached renders,
