@@ -114,6 +114,13 @@ type model struct {
 	statusLayout StatusLayout
 	permMode     PermissionMode
 
+	// permLayout is the layout the NEXT permission prompt renders in,
+	// seeded from Options.PermissionLayout and flipped by
+	// /permissions layout (R-PERM-1a). Read once, when the prompt is
+	// built: a prompt already on screen keeps the layout it opened
+	// with, so a switch applies from the next prompt on.
+	permLayout PermissionLayout
+
 	// themeName holds the operator's explicit named-theme pick
 	// (seeded from Options.InitialThemeName, mutated by the
 	// /theme picker via applyNamedTheme). Empty (zero value)
@@ -767,6 +774,7 @@ func newModel(opts Options) *model {
 		follow:          true, // start pinned to the tail
 		statusLayout:    opts.StatusLayout,
 		permMode:        opts.PermissionMode.Initial,
+		permLayout:      opts.PermissionLayout,
 		themeName:       opts.InitialThemeName,
 		eventCh:         make(chan tea.Msg, 32),
 		seenToolIDs:     make(map[string]bool),

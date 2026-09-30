@@ -108,8 +108,18 @@ type Options struct {
 	// chat viewport flow, right under the tool call that triggered
 	// it, preserving the assistant context. PermissionOverlay
 	// renders a centered modal that dims the chat — more
-	// attention-grabbing, less context.
+	// attention-grabbing, less context. This is the layout the
+	// session starts in; the operator can switch it at runtime with
+	// /permissions layout (R-PERM-1a).
 	PermissionLayout PermissionLayout
+
+	// PersistPermissionLayout is called when the operator switches
+	// the permission prompt layout with /permissions layout, with the
+	// new layout. Mirrors PersistMouseChoice / PersistThemeChoice:
+	// hosts write it to their config and read it back into
+	// PermissionLayout on the next launch, so the choice survives a
+	// restart. Nil means the switch stays session-local.
+	PersistPermissionLayout func(layout PermissionLayout) error
 
 	// StatusLayout picks the status surface (R-USE-2). The initial
 	// value is whatever the host sets here; the user can flip it at

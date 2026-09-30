@@ -1313,7 +1313,13 @@ func (m *model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	case permissionRequestMsg:
 		// askAgent, not askOperator: the prompt arrived unbidden, so
 		// its decision keys stay inert for modalInputGrace (#95).
-		q := newPermissionQuestion(msg.req, m.opts.PermissionLayout)
+		//
+		// m.permLayout, not m.opts.PermissionLayout: the operator may
+		// have switched it with /permissions layout (R-PERM-1a). The
+		// layout is fixed into q here, so a switch while a prompt is
+		// already open — which the prompt owning the keys normally
+		// rules out — takes effect from the next prompt, never this one.
+		q := newPermissionQuestion(msg.req, m.permLayout)
 		m.overlayStack.ask(q, askAgent, permissionResolver(q))
 		// Inline permission layout: force-snap viewport to bottom
 		// so the prompt is visible (operator was likely watching

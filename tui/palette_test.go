@@ -123,18 +123,18 @@ func TestPalette_RankingOrderIsPinned(t *testing.T) {
 		filter string
 		want   []string
 	}{
-		{filter: "m", want: []string{"mcp", "model", "mouse", "memory", "theme", "permissions"}},
+		{filter: "m", want: []string{"mcp", "model", "mouse", "memory", "theme", "permissions", "permissions layout"}},
 		{filter: "mo", want: []string{"model", "mouse", "memory"}},
 		{filter: "model", want: []string{"model"}},
 		{filter: "pricing", want: []string{"pricing", "pricing set", "pricing refresh"}},
-		{filter: "e", want: []string{"deny", "help", "keys", "clear", "model", "mouse", "pause", "theme", "memory", "reload", "continue", "interrupt", "subagents", "permissions", "pricing set", "allow bundle:", "pricing refresh"}},
+		{filter: "e", want: []string{"deny", "help", "keys", "clear", "model", "mouse", "pause", "theme", "memory", "reload", "continue", "interrupt", "subagents", "permissions", "pricing set", "allow bundle:", "pricing refresh", "permissions layout"}},
 		{filter: "allow", want: []string{"allow", "allow bundle:"}},
 		{filter: "sw", want: []string{"switch"}},
 		{filter: "set", want: []string{"pricing set"}},
 		{filter: "ricing", want: []string{"pricing", "pricing set", "pricing refresh"}},
 		{filter: "help", want: []string{"help"}},
 		// Case folding is on the whole name, not just the head.
-		{filter: "S", want: []string{"stats", "skills", "switch", "subagents", "keys", "mouse", "pause", "tools", "permissions", "pricing set", "transcripts", "pricing refresh"}},
+		{filter: "S", want: []string{"stats", "skills", "switch", "subagents", "keys", "mouse", "pause", "tools", "permissions", "pricing set", "transcripts", "pricing refresh", "permissions layout"}},
 		// /resume is a dispatch-level fold (#268), not a palette row —
 		// typing the old name finds nothing here, which is the nudge.
 		{filter: "resume", want: nil},

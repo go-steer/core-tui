@@ -69,6 +69,9 @@
 //	                open in a locally-rendered editor and a copy
 //	                made over SSH becomes reachable from the desktop
 //	                the operator is actually sitting at.
+//	-perm-overlay   start with permission prompts as a centered
+//	                overlay instead of inline; /permissions layout
+//	                flips it at runtime either way
 package main
 
 import (
@@ -390,6 +393,9 @@ func main() {
 		"also write y / c copies to this file (core-tui #175) — the way to reach a "+
 			"local clipboard from a remote box: keep the file open in a locally-rendered "+
 			"editor and copy from there")
+	permOverlay := flag.Bool("perm-overlay", false,
+		"render permission prompts as a centered overlay instead of inline "+
+			"(/permissions layout switches at runtime)")
 	flag.Parse()
 
 	prompter := tui.NewPrompter()
@@ -438,6 +444,14 @@ func main() {
 		// clipboard to write to, which is why it needs no guard.
 		ClipboardWriter: tui.SystemClipboardWriter(),
 	}
+	if *permOverlay {
+		opts.PermissionLayout = tui.PermissionOverlay
+	}
+	// A real host writes the pick to its config here and reads it
+	// back into PermissionLayout on the next launch. The harness has
+	// no config file, so /permissions layout stays session-only; the
+	// no-op is wired to show where the hook goes.
+	opts.PersistPermissionLayout = func(tui.PermissionLayout) error { return nil }
 	if *clipboardFile != "" {
 		// The other kind of host writer, and the only one that works
 		// on a box with no clipboard of its own: a sink the operator

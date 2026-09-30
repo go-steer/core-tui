@@ -286,9 +286,20 @@ listed in `/help`:
 
 - **R-PERM-1** When the host's permission gate invokes the
   TUI-supplied `PermissionPrompter`, the TUI must render a blocking
-  modal showing: tool name, the originating sub-agent name when
-  present, and the **full payload** the agent is asking permission
-  to execute. "Full payload" means:
+  prompt — it holds the keyboard until the operator decides — in one
+  of two layouts picked by `Options.PermissionLayout`:
+  - **Inline** (`PermissionInline`, the default) — a block inside
+    the chat flow, directly under the tool call that triggered it,
+    so the assistant context the operator is approving stays in
+    view.
+  - **Overlay** (`PermissionOverlay`, opt-in) — a centered modal
+    over the dimmed chat: more attention-grabbing, less context.
+
+  The layout changes presentation only: both carry the same content
+  and the same decision keys (R-PERM-2), and both observe the same
+  input grace (R-PERM-8). The prompt shows: tool name, the
+  originating sub-agent name when present, and the **full payload**
+  the agent is asking permission to execute. "Full payload" means:
   - **File edits** — the full diff (red/green hunks) of what will be
     written, not just the target path.
   - **Shell commands** — the verbatim command line about to run, with
@@ -302,6 +313,20 @@ listed in `/help`:
   appropriate Glamour language tag from `DetailKind` so syntax
   colors line up. Both Crush and Claude Code converged on this; see
   [`ui-references.md`](./ui-references.md).
+- **R-PERM-1a** The operator can switch the layout in-session with
+  `/permissions layout`: bare, it toggles inline ↔ overlay;
+  `/permissions layout inline` / `/permissions layout overlay` set
+  it explicitly; any other word gets a usage row, not an error. The
+  switch is confirmed with a system row, applies from the next
+  prompt (one already open keeps its layout), needs no
+  `PermissionController` — the layout is the TUI's concern, not the
+  gate's — and, touching only presentation, is dispatched even while
+  a turn is running (R-HOLD-3) where bare `/permissions` waits. It is
+  persistable: `Options.PersistPermissionLayout` is called with the
+  new layout so a host can write it to config and seed
+  `Options.PermissionLayout` from it on the next launch. A persist
+  failure surfaces as an error row and the in-session switch stands;
+  a nil hook keeps the switch session-only.
 - **R-PERM-2** The modal supports six decisions: `y` allow-once,
   `n`/`esc` deny, `s` allow-session, `v` allow-session-verb (suppress
   if no verb is extractable), `t` allow-session-tool, `a`

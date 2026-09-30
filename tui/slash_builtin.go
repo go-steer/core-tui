@@ -224,11 +224,73 @@ func midTurnSlashDisposition(text string) midTurnDisposition {
 	switch {
 	case midTurnSafeSlashes[name]:
 		return midTurnDispatch
+	case name == "permissions" && isPermissionLayoutArgs(text):
+		// Carved out of /permissions, which queues: the approval-log
+		// review is a host round trip better left until the turn ends,
+		// but the layout switch is pure presentation. It never touches
+		// the gate — only how the next prompt draws — so there is no
+		// race to refuse and no reason to make the operator wait.
+		return midTurnDispatch
 	case midTurnRefusedSlashes[name]:
 		return midTurnRefuse
 	default:
 		return midTurnQueue
 	}
+}
+
+// isPermissionLayoutArgs reports whether a /permissions line is the
+// layout subcommand. text is the raw line including the command word;
+// only the first argument is looked at, so the mid-turn table and the
+// dispatcher agree on "/permissions layout <anything>".
+func isPermissionLayoutArgs(text string) bool {
+	fields := strings.Fields(text)
+	return len(fields) >= 2 && strings.EqualFold(fields[1], "layout")
+}
+
+// permissionLayoutName is the word /permissions layout reads and
+// writes for a layout. Anything that isn't PermissionOverlay renders
+// inline (newPermissionQuestion), so it names itself that way too.
+func permissionLayoutName(l PermissionLayout) string {
+	if l == PermissionOverlay {
+		return "overlay"
+	}
+	return "inline"
+}
+
+// permissionLayoutSlash handles /permissions layout [inline|overlay]
+// (R-PERM-1a). A bare subcommand toggles; a named layout sets it.
+// Needs no PermissionController — the layout is the TUI's concern,
+// not the gate's — so it runs ahead of that capability check.
+//
+// The switch lands in m.permLayout, which newPermissionQuestion reads
+// when the next prompt arrives. A prompt already open keeps its
+// layout; see the permissionRequestMsg handler.
+func (m *model) permissionLayoutSlash(arg string) tea.Cmd {
+	m.input.Reset()
+	next := m.permLayout
+	switch strings.ToLower(arg) {
+	case "":
+		if next == PermissionOverlay {
+			next = PermissionInline
+		} else {
+			next = PermissionOverlay
+		}
+	case "inline":
+		next = PermissionInline
+	case "overlay":
+		next = PermissionOverlay
+	default:
+		m.history.Append(Message{Role: RoleSystem, Text: "/permissions: usage: /permissions layout [inline|overlay]"})
+		m.refreshAndScroll()
+		return nil
+	}
+	m.permLayout = next
+	m.history.Append(Message{Role: RoleSystem, Text: "/permissions: prompt layout " + permissionLayoutName(next)})
+	m.refreshAndScroll()
+	// Off the Update goroutine for the same reason /mouse is: the
+	// callback writes the host's config file. A failure surfaces as
+	// an error row via persistDoneMsg; the in-session switch stands.
+	return persistChoiceCmd(m.sessionGen, "/permissions layout", m.opts.PersistPermissionLayout, next)
 }
 
 func (m *model) dispatchBuiltinSlash(name, args string) (bool, tea.Cmd) {
@@ -550,6 +612,12 @@ func (m *model) dispatchBuiltinSlash(name, args string) (bool, tea.Cmd) {
 		return true, reloadCmd(reloader, m.sessionGen)
 
 	case "permissions":
+		// The layout subcommand first: it is a TUI setting, so a host
+		// without PermissionController still gets it.
+		if isPermissionLayoutArgs("/permissions " + args) {
+			rest := strings.Fields(args)[1:]
+			return true, m.permissionLayoutSlash(strings.Join(rest, " "))
+		}
 		ctrl, ok := m.opts.Agent.(PermissionController)
 		if !ok {
 			m.history.Append(Message{Role: RoleSystem, Text: "/permissions: agent doesn't implement PermissionController"})
@@ -907,6 +975,7 @@ func (m *model) renderBuiltinHelp() string {
 	b.WriteString("  /theme [<name>]      — pick a theme (default, google, gopher, …)\n")
 	b.WriteString("  /reload              — rebuild agent from disk\n")
 	b.WriteString("  /permissions         — review session approvals\n")
+	b.WriteString("  /permissions layout  — toggle permission prompts inline/overlay (or name one)\n")
 	b.WriteString("  /pricing refresh|set — manage cost rates\n")
 	b.WriteString("  /subagents [<name>]  — list subagents or open one's turn log\n")
 	b.WriteString("  /interrupt, /int     — cancel the in-flight turn and hold\n")
