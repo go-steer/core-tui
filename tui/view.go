@@ -1458,6 +1458,14 @@ func (m *model) footerHint() string {
 		// state and the fail-safe key, which every prompt takes
 		// whatever its options are: short enough to fit on one row
 		// down to 30 columns.
+		//
+		// While the reason input is open esc goes back to the choices
+		// instead (R-PERM-9), and a footer still saying "esc deny"
+		// would be the one place the operator was told the wrong
+		// thing about the fail-safe key.
+		if m.openPermission().typing() {
+			return "Permission required" + sep + "esc back"
+		}
 		return "Permission required" + sep + "esc deny"
 	case m.openElicit() != nil:
 		if m.openElicit().req.Mode == ElicitURLMode {

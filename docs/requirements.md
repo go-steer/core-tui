@@ -380,6 +380,29 @@ listed in `/help`:
   `esc` is exempt: it denies, which is the fail-safe direction. The
   elicitation modal applies the same window to the keys that dispatch
   a result (see R-ELIC-4).
+- **R-PERM-9** A deny can carry the operator's reason. When the host
+  asked through `Prompter.AskApprovalDetailed`, the prompt offers one
+  more key, `r` "deny with reason…", listed next to the plain `n`
+  deny, in both layouts. `r` opens a one-line input inside the
+  prompt; while it is open every letter types into it and decides
+  nothing, `enter` submits the deny with the trimmed text as its
+  reason (an empty or whitespace-only reason is a plain deny), and
+  `esc` returns to the choices undecided, keeping the text. `esc` at
+  the choices still denies, and `n` stays a single-keypress plain
+  deny. The reason is capped at **500 bytes of UTF-8** — the server's
+  limit, measured in bytes, not characters. A `n/500 bytes` counter
+  is shown while typing and turns warning-coloured past the cap;
+  `enter` over the cap is refused with an inline note and the text is
+  left for the operator to shorten, never truncated. The reason is
+  returned to the host on `PermissionOutcome.Reason` and recorded in
+  the transcript's decision echo. It is offered **only** on a request
+  made through `AskApprovalDetailed`: a request through plain
+  `AskApproval` shows no `r` and ignores the key, because a host that
+  cannot forward a reason must never collect one. It is never offered
+  on an allow, and no dismissal (esc, a superseded or shut-down
+  prompt, a cancelled context) carries one. `r` is held by the input
+  grace like the decision keys (R-PERM-8); inside the input only
+  `enter` is.
 
 ### 3.8 Model picker (must)
 

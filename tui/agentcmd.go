@@ -257,11 +257,11 @@ func (m *model) promptListener() tea.Cmd {
 	}
 	ctx := m.listenerCtx()
 	return func() tea.Msg {
-		req, ok := p.nextRequest(ctx)
+		flow, ok := p.nextFlow(ctx)
 		if !ok {
 			return nil
 		}
-		return permissionRequestMsg{req: req}
+		return permissionRequestMsg{req: flow.req, offerReason: flow.offerReason}
 	}
 }
 

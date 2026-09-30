@@ -104,7 +104,7 @@ func TestApplySwitchTarget_ResetsState(t *testing.T) {
 	m.spinnerActive = true
 	m.inProgressText = "half done"
 	m.currentModel = "old-model"
-	m.overlayStack.ask(newPermissionQuestion(PermissionRequest{ToolName: "bash"}, PermissionInline), askAgent, nil)
+	m.overlayStack.ask(newPermissionQuestion(PermissionRequest{ToolName: "bash"}, PermissionInline, false), askAgent, nil)
 	m.pendingExit = true
 	m.confirmingClear = true
 	m.queue = []QueueEntry{{Text: "queued", State: QueueQueued}}

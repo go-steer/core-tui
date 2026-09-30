@@ -912,6 +912,19 @@ type PermissionPrompter interface {
     AskApproval(ctx context.Context, req PermissionRequest) (PermissionDecision, error)
 }
 
+// AskApprovalDetailed is a method on the concrete *Prompter, not on
+// the interface (so adding it broke nothing). It blocks exactly like
+// AskApproval and in addition lets the operator attach a reason to a
+// deny (R-PERM-9). AskApproval is a thin wrapper returning .Decision.
+func (p *Prompter) AskApprovalDetailed(ctx context.Context, req PermissionRequest) (PermissionOutcome, error)
+
+// Reason is non-empty only on DecisionDeny, only when the operator
+// typed one; trimmed, at most 500 bytes of UTF-8.
+type PermissionOutcome struct {
+    Decision PermissionDecision
+    Reason   string
+}
+
 type PermissionRequest struct {
     Kind     PermissionKind
     ToolName string
@@ -955,6 +968,15 @@ const (
     DecisionAllowSessionTool
     DecisionAllowAlways
 )
+
+// The reason step is opt-in per request, BY WHICH METHOD THE HOST
+// CALLED: a request through AskApprovalDetailed offers "r" (deny with
+// reason); one through AskApproval does not, because that caller has
+// nowhere to put a reason and collecting one it would silently drop
+// is worse than not asking. No capability interface is involved —
+// hosts never implement permission handling, they call the Prompter
+// and relay its answer, so the reason travels as a return value. See
+// docs/permission-deny-reason-design.md.
 
 // Elicitor mirrors the pattern for MCP elicitation.
 type Elicitor interface {

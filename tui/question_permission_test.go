@@ -39,7 +39,7 @@ import (
 // the mapping as a whole: a duplicate value here is a key that silently
 // grants the wrong scope, which no single-key test would catch.
 func TestPermissionQuestion_EveryKeyDecides(t *testing.T) {
-	q := newPermissionQuestion(PermissionRequest{ToolName: "bash", Verb: "run"}, PermissionOverlay)
+	q := newPermissionQuestion(PermissionRequest{ToolName: "bash", Verb: "run"}, PermissionOverlay, false)
 	want := map[string]PermissionDecision{
 		"y": DecisionAllowOnce,
 		"n": DecisionDeny,
@@ -71,7 +71,7 @@ func TestPermissionQuestion_EveryKeyDecides(t *testing.T) {
 // advertising a grant that does nothing is confusing, and honouring an
 // unadvertised one widens authority the operator was never shown.
 func TestPermissionQuestion_VerbKeyOnlyWithAVerb(t *testing.T) {
-	q := newPermissionQuestion(PermissionRequest{ToolName: "bash"}, PermissionOverlay)
+	q := newPermissionQuestion(PermissionRequest{ToolName: "bash"}, PermissionOverlay, false)
 	if strings.Contains(ansi.Strip(q.legend()), "allow verb") {
 		t.Errorf("legend offers the verb grant with no verb to scope it to: %q", q.legend())
 	}
@@ -86,7 +86,7 @@ func TestPermissionQuestion_VerbKeyOnlyWithAVerb(t *testing.T) {
 // is shown.
 func TestPermissionQuestion_LegendMatchesTheKeys(t *testing.T) {
 	for _, verb := range []string{"", "run"} {
-		q := newPermissionQuestion(PermissionRequest{ToolName: "bash", Verb: verb}, PermissionOverlay)
+		q := newPermissionQuestion(PermissionRequest{ToolName: "bash", Verb: verb}, PermissionOverlay, false)
 		// keyLegend joins with a separator and binds each pair with a
 		// non-breaking space, so split on the separator and read the
 		// first field back off.
@@ -114,7 +114,7 @@ func TestPermissionQuestion_LegendMatchesTheKeys(t *testing.T) {
 // that into a deny — the split matters because it is what lets the
 // grace window exempt esc without exempting a grant.
 func TestPermissionQuestion_EscIsADismissal(t *testing.T) {
-	q := newPermissionQuestion(PermissionRequest{ToolName: "bash"}, PermissionOverlay)
+	q := newPermissionQuestion(PermissionRequest{ToolName: "bash"}, PermissionOverlay, false)
 	ans, _ := q.Key(keyPress("esc"))
 	d, ok := ans.(dismissed)
 	if !ok {
@@ -317,7 +317,7 @@ func TestPermissionQuestion_InlineBlockIsLoud(t *testing.T) {
 		Source:     "researcher",
 		Detail:     "rm -rf ./build",
 		DetailKind: DetailShell,
-	}, PermissionInline)
+	}, PermissionInline, false)
 	raw := q.InlineBody(80, st)
 	rows := strings.Split(ansi.Strip(raw), "\n")
 
@@ -370,7 +370,7 @@ func TestPermissionQuestion_InlineBlockHonoursWidth(t *testing.T) {
 		"bare":  {ToolName: "fetch_url"},
 	}
 	for name, req := range reqs {
-		q := newPermissionQuestion(req, PermissionInline)
+		q := newPermissionQuestion(req, PermissionInline, false)
 		for _, w := range []int{6, 8, 10, 12, 16, 20, 24, 30, 40, 60, 80, 120, 200} {
 			for i, row := range strings.Split(q.InlineBody(w, st), "\n") {
 				if got := ansi.StringWidth(row); got > w {

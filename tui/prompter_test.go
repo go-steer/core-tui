@@ -35,7 +35,7 @@ func TestPrompter_RoundTripsDecision(t *testing.T) {
 	if !ok {
 		t.Fatal("nextRequest returned !ok with a pending request")
 	}
-	p.dispatchDecision(DecisionAllowSession)
+	p.dispatchDecision(DecisionAllowSession, "")
 
 	select {
 	case got := <-resultCh:
@@ -78,7 +78,7 @@ func TestPrompter_ContextCancelDuringPush(t *testing.T) {
 func TestPrompter_DispatchWithNoPendingIsNoOp(t *testing.T) {
 	p := NewPrompter()
 	// No call has been pending — dispatching should be silently no-op.
-	p.dispatchDecision(DecisionAllowOnce)
+	p.dispatchDecision(DecisionAllowOnce, "")
 }
 
 // TestElicitor_RoundTripsResult pins the elicitor's basic channel

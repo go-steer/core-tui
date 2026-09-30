@@ -133,7 +133,14 @@ type fields struct{ Values map[string]any }
 // safe fallback for an unrecognised permission option is
 // DecisionDeny. That would install a silent security downgrade inside
 // the component whose job is to be correct about permissions.
-type decision struct{ Value PermissionDecision }
+//
+// Reason is the operator's free text on a deny taken through the
+// prompt's reason step (R-PERM-9) — trimmed, within the byte cap, and
+// empty on every other decision.
+type decision struct {
+	Value  PermissionDecision
+	Reason string
+}
 
 func (dismissed) isAnswer() {}
 func (declined) isAnswer()  {}
