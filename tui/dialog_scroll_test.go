@@ -389,14 +389,14 @@ func TestHandleWheel_PermissionLayoutDecidesOwner(t *testing.T) {
 
 	inline := newModel(Options{Agent: &bareAgent{id: "a"}})
 	inline.width, inline.height = 100, 30
-	inline.overlayStack.ask(newPermissionQuestion(req, PermissionInline), askAgent, nil)
+	inline.overlayStack.ask(newPermissionQuestion(req, PermissionInline, false), askAgent, nil)
 	if _, handled := inline.handleWheel(wheel(tea.MouseWheelDown)); handled {
 		t.Error("inline permission layout claimed the wheel; the chat viewport should keep it")
 	}
 
 	overlay := newModel(Options{Agent: &bareAgent{id: "a"}, PermissionLayout: PermissionOverlay})
 	overlay.width, overlay.height = 100, 30
-	overlay.overlayStack.ask(newPermissionQuestion(req, PermissionOverlay), askAgent, nil)
+	overlay.overlayStack.ask(newPermissionQuestion(req, PermissionOverlay, false), askAgent, nil)
 	if _, handled := overlay.handleWheel(wheel(tea.MouseWheelDown)); !handled {
 		t.Error("centered permission overlay did not claim the wheel")
 	}
@@ -544,7 +544,7 @@ func TestPermissionOverlay_ScrollsWithKeys(t *testing.T) {
 		ToolName:   "bash",
 		Detail:     strings.Repeat("echo hello\n", 200),
 		DetailKind: DetailShell,
-	}, PermissionOverlay)
+	}, PermissionOverlay, false)
 	m.overlayStack.ask(q, askAgent, nil)
 	m.overlayStack.render(m.width, m)
 	if !q.sc.overflows() {

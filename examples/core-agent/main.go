@@ -106,7 +106,10 @@ func runLocal(ctx context.Context) error {
 	// SUPPLIES these two, and the host wires them into the places
 	// that need an operator decision. A real host passes the
 	// prompter to its permission gate and the elicitor to its MCP
-	// client; there is nothing to wire them into here.
+	// client; there is nothing to wire them into here. A gate that
+	// can forward the operator's reason for a deny calls
+	// prompter.AskApprovalDetailed rather than AskApproval, and relays
+	// PermissionOutcome.Reason with the deny (R-PERM-9).
 	prompter := tui.NewPrompter()
 	elicitor := tui.NewElicitor()
 	notifier := tui.NewNotifier()
@@ -172,8 +175,10 @@ func runAttach(ctx context.Context, observer bool) error {
 
 	// Attach mode has no local permission gate — approvals happen on
 	// the daemon, and a real core-agent-tui subscribes to a remote
-	// prompt stream and bridges it into this prompter. The fake
-	// daemon has no such stream, so the prompter sits idle.
+	// prompt stream and bridges it into this prompter — through
+	// AskApprovalDetailed, so a deny's reason can go back as
+	// /perms/respond's "reason" (protocol 1.15.0+). The fake daemon
+	// has no such stream, so the prompter sits idle.
 	prompter := tui.NewPrompter()
 
 	opts := tui.Options{

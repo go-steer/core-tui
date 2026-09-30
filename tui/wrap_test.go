@@ -396,7 +396,7 @@ func TestPermissionInline_StaysInTheColumnWithTabs(t *testing.T) {
 						Verb:       "run",
 						Detail:     tc.s,
 						DetailKind: k.kind,
-					}, PermissionInline)
+					}, PermissionInline, false)
 					block := q.InlineBody(m.viewport.Width(), m.styles)
 					for i, line := range strings.Split(block, "\n") {
 						if w := drawnWidth(line); w > width {

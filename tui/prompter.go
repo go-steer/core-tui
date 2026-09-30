@@ -108,18 +108,49 @@ const (
 	DecisionAllowAlways                                // a — host persists via callback
 )
 
+// permissionDenyReasonMax is the longest deny reason, in BYTES of
+// UTF-8, the prompt will submit (R-PERM-9). It is the server's limit
+// on core-agent's POST /perms/respond "reason" field, so the prompt
+// refuses to send anything longer rather than truncating it or
+// letting the host collect a 400.
+const permissionDenyReasonMax = 500
+
+// PermissionOutcome is the operator's answer to one permission
+// request, as AskApprovalDetailed returns it: the decision, plus the
+// free-text reason the operator attached to a deny.
+//
+// Reason is non-empty only when Decision is DecisionDeny AND the
+// operator chose to type one (the prompt's "r" step, R-PERM-9). It is
+// already trimmed and at most 500 bytes of UTF-8. A plain deny — the
+// "n" key, esc, a superseded or shut-down prompt, a cancelled ctx —
+// carries an empty Reason. Hosts forward a non-empty Reason to their
+// backend with the deny (core-agent: /perms/respond's "reason", on
+// protocol 1.15.0 or later) and drop nothing.
+type PermissionOutcome struct {
+	Decision PermissionDecision
+	Reason   string
+}
+
 // permissionFlow couples one PermissionRequest with the response
 // channel the TUI writes the decision back on. Lives only while
 // the modal is up; closed once a decision is dispatched.
 type permissionFlow struct {
 	req      PermissionRequest
 	response chan permissionResponse
+	// offerReason is true when the request came in through
+	// AskApprovalDetailed — the only entry point whose caller can
+	// receive a reason. A request through plain AskApproval never
+	// offers the reason step: collecting text the host cannot forward
+	// and then silently dropping it would tell the operator the agent
+	// heard something it never did.
+	offerReason bool
 }
 
 // permissionResponse carries the operator's decision back to the
 // blocked AskApproval call.
 type permissionResponse struct {
 	decision PermissionDecision
+	reason   string
 	err      error
 }
 
@@ -156,9 +187,37 @@ func NewPrompter() *Prompter {
 
 // AskApproval blocks until the operator picks a decision via the
 // modal, or until ctx cancels. Implements PermissionPrompter.
+//
+// A request made this way never offers the deny-with-reason step,
+// because this signature has nowhere to return a reason. Hosts that
+// can forward one call AskApprovalDetailed instead.
 func (p *Prompter) AskApproval(ctx context.Context, req PermissionRequest) (PermissionDecision, error) {
+	out, err := p.ask(ctx, req, false)
+	return out.Decision, err
+}
+
+// AskApprovalDetailed is AskApproval for a host that can forward the
+// operator's reason for a deny to its backend. It blocks the same way
+// and returns the same decisions, and in addition the prompt offers
+// the "r" key — deny with a one-line reason (R-PERM-9). The reason
+// comes back on the returned PermissionOutcome; see its doc for when
+// it is set.
+//
+// Opting in is per request, by which method the host calls: the TUI
+// cannot know whether a host would forward a reason, so it only asks
+// for one when the caller has said so by choosing this method. On a
+// cancelled ctx the outcome is a reasonless DecisionDeny plus the ctx
+// error, exactly as AskApproval's.
+func (p *Prompter) AskApprovalDetailed(ctx context.Context, req PermissionRequest) (PermissionOutcome, error) {
+	return p.ask(ctx, req, true)
+}
+
+// ask is the body both entry points share. offerReason is carried on
+// the flow to the prompt, which decides from it whether "r" exists.
+func (p *Prompter) ask(ctx context.Context, req PermissionRequest, offerReason bool) (PermissionOutcome, error) {
 	response := make(chan permissionResponse, 1)
-	flow := permissionFlow{req: req, response: response}
+	flow := permissionFlow{req: req, response: response, offerReason: offerReason}
+	deny := PermissionOutcome{Decision: DecisionDeny}
 
 	// Push the request onto the queue. Block briefly if the channel
 	// is full (a previous modal hasn't been drained yet); ctx
@@ -166,18 +225,18 @@ func (p *Prompter) AskApproval(ctx context.Context, req PermissionRequest) (Perm
 	select {
 	case p.requests <- flow:
 	case <-ctx.Done():
-		return DecisionDeny, ctx.Err()
+		return deny, ctx.Err()
 	}
 
 	// Block on the operator's decision.
 	select {
 	case r := <-response:
-		return r.decision, r.err
+		return PermissionOutcome{Decision: r.decision, Reason: r.reason}, r.err
 	case <-ctx.Done():
 		// Drain the response in the background so the goroutine
 		// that eventually sends doesn't leak (design.md §4.1).
 		go func() { <-response }()
-		return DecisionDeny, ctx.Err()
+		return deny, ctx.Err()
 	}
 }
 
@@ -186,14 +245,22 @@ func (p *Prompter) AskApproval(ctx context.Context, req PermissionRequest) (Perm
 // flow as pending (so the modal renderer can find it) and
 // returns the request payload for Update.
 func (p *Prompter) nextRequest(ctx context.Context) (PermissionRequest, bool) {
+	flow, ok := p.nextFlow(ctx)
+	return flow.req, ok
+}
+
+// nextFlow is nextRequest returning the whole flow, which is what the
+// listener needs: whether the request offers the reason step is a
+// property of how it was asked, not of the request itself.
+func (p *Prompter) nextFlow(ctx context.Context) (permissionFlow, bool) {
 	select {
 	case flow := <-p.requests:
 		p.mu.Lock()
 		p.pending = &flow
 		p.mu.Unlock()
-		return flow.req, true
+		return flow, true
 	case <-ctx.Done():
-		return PermissionRequest{}, false
+		return permissionFlow{}, false
 	}
 }
 
@@ -201,7 +268,11 @@ func (p *Prompter) nextRequest(ctx context.Context) (PermissionRequest, bool) {
 // flow's response channel and clears the pending slot. No-op when
 // no flow is pending — defends against double-dispatch from a key
 // press fired after the modal already closed.
-func (p *Prompter) dispatchDecision(d PermissionDecision) {
+//
+// reason rides along only on a deny, and only to a flow that offered
+// the reason step; anything else is dropped here so no path can hand
+// a plain-AskApproval caller, or an allow, a reason.
+func (p *Prompter) dispatchDecision(d PermissionDecision, reason string) {
 	p.mu.Lock()
 	flow := p.pending
 	p.pending = nil
@@ -209,6 +280,9 @@ func (p *Prompter) dispatchDecision(d PermissionDecision) {
 	if flow == nil {
 		return
 	}
+	if d != DecisionDeny || !flow.offerReason {
+		reason = ""
+	}
 	// response is buffered cap 1; this never blocks.
-	flow.response <- permissionResponse{decision: d}
+	flow.response <- permissionResponse{decision: d, reason: reason}
 }

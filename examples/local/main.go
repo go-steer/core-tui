@@ -136,12 +136,19 @@ func makeDemoWakeChannel() chan struct{} {
 func (demoAgent) WakeRequested() <-chan struct{} { return wakeCh }
 
 // demoPermissionAfter fires a synthetic permission prompt after
-// delay so the visual preview can demo the modal. The decision
-// returned by the operator is just printed to stderr — the demo
-// agent doesn't actually need approval.
-func demoPermissionAfter(p tui.PermissionPrompter, delay time.Duration) {
+// delay so the visual preview can demo the modal. It asks through
+// AskApprovalDetailed, so the prompt offers "r" — deny with a reason
+// (R-PERM-9) — and what came back is echoed into the transcript
+// through the Notifier: the demo agent doesn't actually need approval,
+// but the operator should be able to see what the agent would have
+// been told.
+//
+// A real host relays the outcome to its permission gate: the decision
+// as before, and a non-empty Reason alongside a deny (core-agent sends
+// it as /perms/respond's "reason").
+func demoPermissionAfter(p *tui.Prompter, n *tui.Notifier, delay time.Duration) {
 	time.Sleep(delay)
-	_, _ = p.AskApproval(context.Background(), tui.PermissionRequest{
+	out, err := p.AskApprovalDetailed(context.Background(), tui.PermissionRequest{
 		Kind:        tui.PermissionKindEdit,
 		ToolName:    "Write",
 		Detail:      "- if user.Email == \"\" {\n+ if user.Email == \"\" || !strings.Contains(user.Email, \"@\") {",
@@ -150,6 +157,14 @@ func demoPermissionAfter(p tui.PermissionPrompter, delay time.Duration) {
 		PersistTool: "edit",
 		PersistKey:  "internal/auth/session.go",
 	})
+	switch {
+	case err != nil:
+		n.Notify("permission: " + err.Error())
+	case out.Reason != "":
+		n.Notify("permission: denied — the agent received the reason " + strconv.Quote(out.Reason))
+	case out.Decision == tui.DecisionDeny:
+		n.Notify("permission: denied, with no reason given")
+	}
 }
 
 // demoElicitAfter fires a synthetic MCP elicit request after delay
@@ -407,7 +422,7 @@ func main() {
 	// after launch so the visual preview demos both modals end-to-
 	// end. A real host wires these into its permission gate +
 	// MCP servers.
-	go demoPermissionAfter(prompter, 8*time.Second)
+	go demoPermissionAfter(prompter, notifier, 8*time.Second)
 	go demoElicitAfter(elicitor, 18*time.Second)
 	// And the agent's own question (R-PROMPT-1), last, because it
 	// walks all five kinds and each one waits for the previous

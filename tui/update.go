@@ -1359,7 +1359,7 @@ func (m *model) update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		// layout is fixed into q here, so a switch while a prompt is
 		// already open — which the prompt owning the keys normally
 		// rules out — takes effect from the next prompt, never this one.
-		q := newPermissionQuestion(msg.req, m.permLayout)
+		q := newPermissionQuestion(msg.req, m.permLayout, msg.offerReason)
 		m.overlayStack.ask(q, askAgent, permissionResolver(q))
 		// Inline permission layout: force-snap viewport to bottom
 		// so the prompt is visible (operator was likely watching
@@ -3403,7 +3403,8 @@ func sliceContains(xs []string, target string) bool {
 // dispatchPermission writes decision d about req back to the pending
 // Prompter flow, invokes the host's AlwaysAllow callback when the
 // decision is DecisionAllowAlways, and echoes a system message naming
-// the decision.
+// the decision. reason is the operator's text on a deny taken through
+// the reason step (R-PERM-9); it is forced empty on anything else.
 //
 // req is a parameter rather than model state: the prompt is a question
 // on the overlay stack (question_permission.go), which owns the request
@@ -3421,7 +3422,10 @@ func sliceContains(xs []string, target string) bool {
 // writing to permissions.allow or path_scope.allow in .agents/
 // config.json). Errors are surfaced inline so the operator knows
 // the allow-always didn't stick.
-func (m *model) dispatchPermission(d PermissionDecision, req PermissionRequest) {
+func (m *model) dispatchPermission(d PermissionDecision, reason string, req PermissionRequest) {
+	if d != DecisionDeny {
+		reason = ""
+	}
 	if d == DecisionAllowAlways && m.opts.AlwaysAllow != nil {
 		if err := m.opts.AlwaysAllow(req); err != nil {
 			m.history.Append(Message{
@@ -3430,12 +3434,16 @@ func (m *model) dispatchPermission(d PermissionDecision, req PermissionRequest) 
 			})
 		}
 	}
-	m.history.Append(Message{
-		Role: RoleSystem,
-		Text: "Permission " + permissionDecisionLabel(d) + ": " + req.ToolName + " — " + truncate(req.Detail, 80),
-	})
+	echo := "Permission " + permissionDecisionLabel(d) + ": " + req.ToolName + " — " + truncate(req.Detail, 80)
+	if reason != "" {
+		// The reason is part of what the operator decided, and the
+		// echo is the audit trail: it is recorded in full here so a
+		// reader can see what the agent was told.
+		echo += "\nReason: " + reason
+	}
+	m.history.Append(Message{Role: RoleSystem, Text: echo})
 	if p, ok := m.opts.Prompter.(*Prompter); ok {
-		p.dispatchDecision(d)
+		p.dispatchDecision(d, reason)
 	}
 	m.refreshViewport()
 }

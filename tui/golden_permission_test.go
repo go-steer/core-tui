@@ -39,7 +39,9 @@ package tui
 
 import (
 	"strconv"
+	"strings"
 	"testing"
+	"time"
 
 	tea "charm.land/bubbletea/v2"
 )
@@ -178,4 +180,53 @@ func TestGolden_PermissionOverlayScrolled(t *testing.T) {
 	out, _ = m.Update(tea.KeyPressMsg(tea.Key{Code: tea.KeyDown}))
 	m = out.(*model)
 	assertGolden(t, "permission_overlay_scrolled_down", m.View().Content)
+}
+
+// TestGolden_PermissionReason pins the deny-with-reason step (R-PERM-9)
+// in both layouts and at every width: the prompt as AskApprovalDetailed
+// opens it (the legend gains "r deny with reason…" next to the plain
+// deny), the reason input open with text in it (the legend becomes
+// enter / esc back, the counter reads in bytes), and the same input
+// over the cap after a refused enter (the counter turns warning and the
+// note appears). The narrow widths are where the longer legend wraps
+// and where the pinned reason section squeezes the payload window, so
+// they are the cells that catch a clipped row.
+func TestGolden_PermissionReason(t *testing.T) {
+	pinChromaStyle(t)
+	pinCwd(t)
+	req := PermissionRequest{
+		ToolName:   "bash",
+		Detail:     "rm -rf ./build && go build ./...",
+		DetailKind: DetailShell,
+		Verb:       "rm",
+	}
+	layouts := []struct {
+		name   string
+		layout PermissionLayout
+	}{{"inline", PermissionInline}, {"overlay", PermissionOverlay}}
+	for _, l := range layouts {
+		for _, w := range goldenWidths {
+			t.Run(l.name+"/width-"+strconv.Itoa(w), func(t *testing.T) {
+				m := goldenLiveModel(t, w, 24)
+				m.permLayout = l.layout
+				out, _ := m.Update(permissionRequestMsg{req: req, offerReason: true})
+				m = out.(*model)
+				m.overlayStack.asked(permissionDialogID).shownAt = time.Time{}
+				suffix := "_w" + strconv.Itoa(w)
+				assertGolden(t, "permission_reason_"+l.name+"_offered"+suffix, m.View().Content)
+
+				out, _ = m.Update(tea.KeyPressMsg{Code: 'r', Text: "r"})
+				m = out.(*model)
+				out, _ = m.Update(tea.PasteMsg{Content: "keep ./build, run go clean instead"})
+				m = out.(*model)
+				assertGolden(t, "permission_reason_"+l.name+"_typing"+suffix, m.View().Content)
+
+				out, _ = m.Update(tea.PasteMsg{Content: strings.Repeat("é", 250)})
+				m = out.(*model)
+				out, _ = m.Update(tea.KeyPressMsg(tea.Key{Code: tea.KeyEnter}))
+				m = out.(*model)
+				assertGolden(t, "permission_reason_"+l.name+"_over"+suffix, m.View().Content)
+			})
+		}
+	}
 }

@@ -47,8 +47,10 @@ package tui
 
 import (
 	"image/color"
+	"strconv"
 	"strings"
 
+	"charm.land/bubbles/v2/textinput"
 	tea "charm.land/bubbletea/v2"
 	"charm.land/lipgloss/v2"
 )
@@ -92,10 +94,40 @@ type permissionQuestion struct {
 	md      *markdownRenderer
 	mdWidth int
 	mdDark  bool
+
+	// offerReason puts the "r" key on the prompt: deny with a one-line
+	// reason (R-PERM-9). It is true only for a request that came in
+	// through AskApprovalDetailed, because that is the only caller that
+	// can receive the text — see permissionFlow.offerReason.
+	offerReason bool
+	// editing is true while the reason input is open. It changes what
+	// every key means: the decision letters type into the input, enter
+	// submits the deny, and esc goes back to the choices rather than
+	// denying.
+	editing bool
+	input   textinput.Model
+	// overLimit is set when enter was refused because the reason is
+	// over the byte cap, and cleared by the next edit. It is what shows
+	// the inline note: the counter already says the number, the note
+	// says why enter did nothing.
+	overLimit bool
+	// reasonTop is the body row the reason section starts on in the
+	// centered layout, recorded by Body for Cursor. Body is what knows
+	// how many payload rows the window kept, and Cursor is handed only
+	// a width; View renders the frame before it asks for the caret, so
+	// the value is always this frame's.
+	reasonTop int
+	// styled* caches which palette the input's styles were built for —
+	// the same guard askTextQuestion keeps, for the same /theme reason.
+	styled      bool
+	styledDark  bool
+	styledTheme string
 }
 
 // newPermissionQuestion builds the prompt for req under layout.
-func newPermissionQuestion(req PermissionRequest, layout PermissionLayout) *permissionQuestion {
+// offerReason is whether the request came in through
+// AskApprovalDetailed, and so whether the prompt offers "r".
+func newPermissionQuestion(req PermissionRequest, layout PermissionLayout, offerReason bool) *permissionQuestion {
 	opts := []permissionOption{
 		{"y", "allow once", DecisionAllowOnce},
 		{"n", "deny", DecisionDeny},
@@ -112,11 +144,39 @@ func newPermissionQuestion(req PermissionRequest, layout PermissionLayout) *perm
 		permissionOption{"t", "allow tool", DecisionAllowSessionTool},
 		permissionOption{"a", "allow always", DecisionAllowAlways},
 	)
-	return &permissionQuestion{
-		req:    req,
-		opts:   opts,
-		inline: layout != PermissionOverlay,
+	inline := layout != PermissionOverlay
+	q := &permissionQuestion{
+		req:         req,
+		opts:        opts,
+		inline:      inline,
+		offerReason: offerReason,
 	}
+	if offerReason {
+		ti := textinput.New()
+		ti.Prompt = "▎ "
+		ti.Placeholder = "what should the agent do instead?"
+		// The centered layout hands the terminal a real caret through
+		// Cursor, as every other modal input does (issue #105). The
+		// inline block is drawn inside the chat viewport, whose rows
+		// the caret path cannot locate, so it paints its own.
+		ti.SetVirtualCursor(inline)
+		q.input = ti
+	}
+	return q
+}
+
+// permissionReasonKey is the stroke that opens the reason input.
+const permissionReasonKey = "r"
+
+// typing reports whether the reason input is open. The caret path asks
+// it of an inline prompt, which otherwise leaves the terminal caret in
+// the composer: blinking in a box the keys are not going to.
+func (q *permissionQuestion) typing() bool { return q.editing }
+
+// reasonText is the reason as it would be sent: trimmed, because
+// that is what the host receives and what the byte cap applies to.
+func (q *permissionQuestion) reasonText() string {
+	return strings.TrimSpace(q.input.Value())
 }
 
 // permissionResolver turns the operator's answer into the dispatch
@@ -132,14 +192,19 @@ func permissionResolver(q *permissionQuestion) resolver {
 	return func(a answer, m *model) tea.Cmd {
 		switch a := a.(type) {
 		case decision:
-			m.dispatchPermission(a.Value, q.req)
+			m.dispatchPermission(a.Value, a.Reason, q.req)
 			return m.promptListener()
 		case dismissed:
 			// Every way this modal dies is a deny. Nothing may proceed
 			// on the operator's behalf when the operator did not say
 			// yes, and a host left waiting on a channel with no writer
 			// is worse than a refusal it can act on.
-			m.dispatchPermission(DecisionDeny, q.req)
+			//
+			// And a plain one: a reason is only ever something the
+			// operator typed and submitted, so no dismissal carries
+			// one — not even esc while the reason input was open,
+			// which closes the input and never reaches here.
+			m.dispatchPermission(DecisionDeny, "", q.req)
 			switch a.Reason {
 			case dismissEscape, dismissUnrenderable:
 				return m.promptListener()
@@ -173,9 +238,21 @@ func (q *permissionQuestion) Title() string {
 // measures its chrome against, and what the inline block shows. The
 // app footer does not repeat it (issue #334).
 func (q *permissionQuestion) legend() string {
-	keys := make([]string, 0, len(q.opts)+1)
+	if q.editing {
+		// Esc is "back", not "deny", while the input is open: the
+		// operator pressed r to say more, and a key that threw that
+		// away AND decided would be the wrong way to find out.
+		return keyLegend("enter deny with reason", "esc back")
+	}
+	keys := make([]string, 0, len(q.opts)+2)
 	for _, o := range q.opts {
 		keys = append(keys, o.key+" "+o.label)
+		// Next to the plain deny, because it is one: the same decision
+		// with something said. Not an option row — it opens the input
+		// rather than deciding — so it is spliced into the legend here.
+		if o.value == DecisionDeny && q.offerReason {
+			keys = append(keys, permissionReasonKey+" deny with reason…")
+		}
 	}
 	// Esc is not an option row: it produces a dismissal rather than a
 	// decision, and the resolver is what turns that into a deny. It is
@@ -206,8 +283,21 @@ func (q *permissionQuestion) Width(avail int) int {
 // key, and only those. Esc is exempt at the seam (askedQuestion.held),
 // which is what keeps the fail-safe direction live from the first
 // frame.
+//
+// "r" is held too, although it decides nothing on its own: it is the
+// first stroke of a deny, and a buffered r would open the input and
+// hand whatever the operator typed next to it. While the input is open
+// only enter commits — the letters are text, and the window must not
+// swallow them.
 func (q *permissionQuestion) Commits(msg tea.KeyPressMsg) bool {
-	return q.option(msg.String()) != nil
+	stroke := msg.String()
+	if q.editing {
+		return stroke == "enter"
+	}
+	if q.offerReason && stroke == permissionReasonKey {
+		return true
+	}
+	return q.option(stroke) != nil
 }
 
 // ScrollBy windows the body of the centered layout.
@@ -233,9 +323,20 @@ func (q *permissionQuestion) option(stroke string) *permissionOption {
 }
 
 func (q *permissionQuestion) Key(msg tea.KeyPressMsg) (answer, tea.Cmd) {
+	if q.editing {
+		return q.reasonKey(msg)
+	}
 	stroke := msg.String()
 	if stroke == "esc" {
 		return dismissed{Reason: dismissEscape}, nil
+	}
+	if q.offerReason && stroke == permissionReasonKey {
+		q.editing = true
+		q.overLimit = false
+		// The Cmd is a blink tick, and a question's contract is
+		// keystrokes only; same discard as newAskTextQuestion's.
+		_ = q.input.Focus()
+		return nil, nil
 	}
 	if o := q.option(stroke); o != nil {
 		return decision{Value: o.value}, nil
@@ -251,6 +352,99 @@ func (q *permissionQuestion) Key(msg tea.KeyPressMsg) (answer, tea.Cmd) {
 	// this is the modal where a stroke leaking through to the composer
 	// while a grant is pending would be worst.
 	return nil, nil
+}
+
+// reasonKey is Key while the reason input is open. Every stroke that is
+// not enter or esc goes to the input — including y, s, t and a, which
+// are text here and must never grant anything.
+func (q *permissionQuestion) reasonKey(msg tea.KeyPressMsg) (answer, tea.Cmd) {
+	switch msg.String() {
+	case "esc":
+		// Back to the choices, undecided. The text is kept, so an r
+		// straight after picks up where the operator left off.
+		q.editing = false
+		q.overLimit = false
+		q.input.Blur()
+		return nil, nil
+	case "enter":
+		reason := q.reasonText()
+		if len(reason) > permissionDenyReasonMax {
+			// Refused, not truncated: a reason cut mid-sentence says
+			// something the operator did not, and sending it whole
+			// would earn the host a 400 from the server.
+			q.overLimit = true
+			return nil, nil
+		}
+		// An empty reason is a plain deny, which is what the empty
+		// string already means on the way out.
+		return decision{Value: DecisionDeny, Reason: reason}, nil
+	}
+	var cmd tea.Cmd
+	q.input, cmd = q.input.Update(msg)
+	q.overLimit = false
+	return nil, cmd
+}
+
+// reasonLines renders the reason section: a label, the input, and the
+// byte counter — muted within the cap, warning-coloured past it, with
+// a note once enter has been refused. width is the column the section
+// is drawn in.
+func (q *permissionQuestion) reasonLines(width int, st styleSet) []string {
+	q.syncStyles(st)
+	q.input.SetWidth(nonNeg(width - lipgloss.Width(q.input.Prompt) - 1))
+	n := len(q.reasonText())
+	counter := strconv.Itoa(n) + "/" + strconv.Itoa(permissionDenyReasonMax) + " bytes"
+	status := st.Muted.Render(counter)
+	if n > permissionDenyReasonMax {
+		status = permissionAccent(st).Render(counter)
+		if q.overLimit {
+			status += permissionAccent(st).Render(" " + GlyphSeparator + " too long to send — shorten it")
+		}
+	}
+	return []string{
+		st.Muted.Render("Reason for denying (sent to the agent):"),
+		q.input.View(),
+		status,
+	}
+}
+
+// reasonRows is how many rows reasonLines draws, plus the blank row
+// above it.
+const reasonRows = 4
+
+func (q *permissionQuestion) syncStyles(s styleSet) {
+	if q.styled && q.styledDark == s.Dark && q.styledTheme == s.Theme.Name {
+		return
+	}
+	q.styled = true
+	q.styledDark = s.Dark
+	q.styledTheme = s.Theme.Name
+	ts := textInputStyles(s)
+	if q.inline {
+		// A painted caret blinks only if cursor.BlinkMsg is routed back
+		// into the widget, and a question's contract is keystrokes
+		// only — so the inline block's caret holds still.
+		ts.Cursor.Blink = false
+	}
+	q.input.SetStyles(ts)
+}
+
+// Cursor implements cursorQuestion for the centered layout while the
+// reason input is open: the caret sits on the input row, under the
+// payload window and the section's label. The inline layout never
+// asks — the caret path does not consult an inline question.
+func (q *permissionQuestion) Cursor(int) *tea.Cursor {
+	if !q.editing || q.inline {
+		return nil
+	}
+	c := textInputCursor(q.input, q.input.Prompt)
+	if c == nil {
+		return nil
+	}
+	c.X += modalContentX
+	// +2: the blank row and the label above the input.
+	c.Y += modalBodyTop + q.reasonTop + 2
+	return c
 }
 
 // Body renders the centered layout's content: the provenance rows, the
@@ -277,9 +471,21 @@ func (q *permissionQuestion) Body(width, termHeight int, st styleSet) string {
 	// The legend wraps on narrow terminals, so measure it rather than
 	// assuming one row.
 	chrome := modalChromeRows - 1 + wrappedRows(q.legend(), inner)
+	if q.editing {
+		// The reason section is pinned under the window rather than
+		// scrolled with the payload: the operator is typing into it,
+		// so it has to stay on screen however long the diff is.
+		chrome += reasonRows
+	}
 	view := modalBodyHeight(termHeight, chrome)
 	q.sc.measure(len(bodyLines), view)
-	return strings.Join(scrollView(st, bodyLines, bodyWidth, view, q.sc.offset), "\n")
+	rows := scrollView(st, bodyLines, bodyWidth, view, q.sc.offset)
+	if q.editing {
+		q.reasonTop = len(rows)
+		rows = append(rows, "")
+		rows = append(rows, q.reasonLines(inner, st)...)
+	}
+	return strings.Join(rows, "\n")
 }
 
 // InlineBody renders the default layout: the same content as Body,
@@ -347,6 +553,10 @@ func (q *permissionQuestion) InlineBody(width int, st styleSet) string {
 	}
 	if q.req.Detail != "" {
 		lines = append(lines, "", q.detail(bodyWidth, st))
+	}
+	if q.editing {
+		lines = append(lines, "")
+		lines = append(lines, q.reasonLines(bodyWidth, st)...)
 	}
 	lines = append(lines, "", st.Muted.Render(q.legend()))
 
@@ -462,4 +672,5 @@ var (
 	_ gracedQuestion = (*permissionQuestion)(nil)
 	_ scrollQuestion = (*permissionQuestion)(nil)
 	_ inlineQuestion = (*permissionQuestion)(nil)
+	_ cursorQuestion = (*permissionQuestion)(nil)
 )

@@ -147,6 +147,10 @@ type pendingExitClearMsg struct{}
 // decision back via Prompter.dispatchDecision.
 type permissionRequestMsg struct {
 	req PermissionRequest
+	// offerReason is true when the host asked through
+	// AskApprovalDetailed, and is what puts the "r" deny-with-reason
+	// key on the prompt (R-PERM-9).
+	offerReason bool
 }
 
 // elicitRequestMsg fires when the elicitor's request channel

@@ -281,7 +281,16 @@ func (m *model) modalCursor(modal string) (c *tea.Cursor, covered bool) {
 		// composer exactly as it would with no modal open. Answering
 		// covered=true here would hide the caret while the operator
 		// can still see and use their own input box.
-		if _, inline := m.overlayStack.inlineFront(); inline {
+		if iq, inline := m.overlayStack.inlineFront(); inline {
+			// Except while the inline permission prompt's reason input
+			// is open (R-PERM-9): the keys go to that input, which
+			// paints its own caret, so the composer's would be a
+			// second caret in a box nothing is typed into. Hidden
+			// rather than moved — the block's rows sit inside the
+			// chat viewport, and nothing here can locate them.
+			if pq, ok := iq.(*permissionQuestion); ok && pq.typing() {
+				return nil, true
+			}
 			return nil, false
 		}
 		c = m.overlayStack.cursor(m.width, m)
