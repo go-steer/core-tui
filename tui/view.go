@@ -1435,10 +1435,16 @@ func (m *model) footerHint() string {
 		// form only because a prompt that arrives while a form is open
 		// is pushed on top of it, so it is the front one.
 		//
-		// legend() rather than a second list of the same keys: the
-		// question builds it from the options its key switch reads, so
-		// the footer cannot promise a key the prompt does not take.
-		return "Permission required" + sep + m.openPermission().legend()
+		// Not the key legend (issue #334). Both layouts already draw
+		// the full legend on the prompt itself — the inline block in
+		// its last rows, the centered modal in its footer — so a copy
+		// here said nothing new and cost a second row at the widths
+		// where rows are scarcest (it wrapped below ~100 columns in the
+		// header layout, ~120 in the sidebar one). What stays is the
+		// state and the fail-safe key, which every prompt takes
+		// whatever its options are: short enough to fit on one row
+		// down to 30 columns.
+		return "Permission required" + sep + "esc deny"
 	case m.openElicit() != nil:
 		if m.openElicit().req.Mode == ElicitURLMode {
 			return "MCP elicitation" + sep + keyLegend("a/enter accept", "n decline", "esc cancel")

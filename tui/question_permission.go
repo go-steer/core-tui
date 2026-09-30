@@ -170,8 +170,8 @@ func (q *permissionQuestion) Title() string {
 }
 
 // legend is the key hint WITHOUT the scroll prefix — what Body
-// measures its chrome against, and what the inline block and the app
-// footer both show.
+// measures its chrome against, and what the inline block shows. The
+// app footer does not repeat it (issue #334).
 func (q *permissionQuestion) legend() string {
 	keys := make([]string, 0, len(q.opts)+1)
 	for _, o := range q.opts {

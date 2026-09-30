@@ -121,7 +121,47 @@ func (m *model) spawnLiveStreamCmd(agent LiveAgent) tea.Cmd {
 // Update is the Bubble Tea dispatcher. The visual-preview slice
 // handles window-resize, background-color, and a small keymap; later
 // slices add agent-event dispatch, modal forms, etc.
+//
+// Every message goes through rebudgetFooter on the way out, because
+// most of the state the footer legend is picked from (an open prompt,
+// the turn state, a confirm flow) changes on paths that never call
+// resize() — see rebudgetFooter.
 func (m *model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
+	out, cmd := m.update(msg)
+	m.rebudgetFooter()
+	return out, cmd
+}
+
+// rebudgetFooter re-runs resize() when the footer no longer renders to
+// the row count the last chrome budget reserved for it (issue #334).
+//
+// The footer is measured in allocateChrome, which only runs from
+// resize(), but the legend it measures is chosen by footerHint from
+// modal and turn state. Opening a permission prompt, an elicit form or
+// an agent question swaps in a longer legend without a resize, so a
+// legend that wrapped to two rows was drawn into a one-row reservation
+// and clipFrame took its second row off the bottom of the frame. One
+// check here covers every path that changes the legend, present and
+// future, instead of a resize() at each of them.
+//
+// The cost on the common path is one footer render — a short string
+// wrapped and styled — and a comparison; resize() and the viewport
+// refresh run only on the message that actually changed the height.
+func (m *model) rebudgetFooter() {
+	// chrome.footer is at least 1 once any resize() has run, so 0 means
+	// there is no budget yet to correct — the first WindowSizeMsg's
+	// resize() will measure the footer along with everything else.
+	if m.width == 0 || m.height == 0 || m.chrome.footer == 0 {
+		return
+	}
+	if footerRows(m.renderFooter(m.chromeWidth())) == m.chrome.footer {
+		return
+	}
+	m.resize()
+	m.refreshViewport()
+}
+
+func (m *model) update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	// Pending huh.Form intercepts EVERY tea.Msg (KeyPress,
 	// WindowSize, ticks) so the embedded form runs its own
 	// state machine. On completion / abort, updatePricingForm
