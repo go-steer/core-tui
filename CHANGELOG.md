@@ -25,6 +25,10 @@ The wire protocol in [`docs/sse-event-stream-protocol.md`](./docs/sse-event-stre
 
 ## [Unreleased]
 
+### Added
+
+- **A deny can carry the operator's reason.** A host that calls the new `Prompter.AskApprovalDetailed` gets a `PermissionOutcome` back — the `PermissionDecision` plus a `Reason` — and its prompt offers one more key: `r` "deny with reason…", next to the plain `n` deny, in both the inline and overlay layouts. `r` opens a one-line input in the prompt; `enter` sends the deny with the trimmed text, an empty reason is a plain deny, and `esc` goes back to the choices without deciding. While the input is open the decision letters type rather than decide. The reason is capped at 500 bytes of UTF-8, which is core-agent's server limit: a byte counter shows the size while typing and turns warning-coloured past the cap, and `enter` over it is refused with a note rather than truncated. The reason is recorded in the transcript's decision echo. It is opt-in per request, by method: plain `AskApproval` never offers `r`, because a host that cannot forward a reason must never collect one. It is never offered on an allow, and no dismissal carries one. Purely additive: `AskApproval`, the `PermissionPrompter` interface and `PermissionDecision` are unchanged, and no capability interface is involved — the reason is a return value. core-agent's hosts adopt it by switching their `AskApproval` call to `AskApprovalDetailed` and sending `Reason` as `/perms/respond`'s `reason` (SSE protocol 1.15.0). See `docs/permission-deny-reason-design.md`. (#344)
+
 ## [0.27.1] — 2026-09-30
 
 A fix-only patch for the attached TUI: the spinner now follows the host's `turn_state` rather than chat chunks alone, so a running tool, or a turn another client started, no longer sits under a chat that looks idle. No exported API change; `dev/api-breaks.txt` goes into the tag empty.

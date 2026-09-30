@@ -20,7 +20,7 @@ Both live in the repo so they version with the code. Once `package tui` lands, t
 
 ## What this library is
 
-`core-tui` is the operator-facing surface for any Go agent that wants a polished terminal UI without writing one. It owns the chat loop, slash commands, command palette, `@file` expansion, permissions modal, MCP elicitation, transcript persistence, and Glamour-rendered markdown. It does **not** define an agent loop, pick LLM providers, drive MCP servers, or open files — those are the host's concern.
+`core-tui` is the operator-facing surface for any Go agent that wants a polished terminal UI without writing one. It owns the chat loop, slash commands, command palette, `@file` expansion, permissions modal (with an optional operator reason on a deny, for hosts that ask through `Prompter.AskApprovalDetailed`), MCP elicitation, transcript persistence, and Glamour-rendered markdown. It does **not** define an agent loop, pick LLM providers, drive MCP servers, or open files — those are the host's concern.
 
 The integration seam is a small Go interface set: hosts implement `tui.Agent` (one method, `Run`), optionally implement any subset of the capability interfaces, and call `tui.Run(ctx, opts)`. See [`docs/design.md` §3](https://github.com/go-steer/core-tui/blob/main/docs/design.md#3-the-plug-in-surface) for the full shape.
 
