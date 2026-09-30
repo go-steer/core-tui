@@ -215,7 +215,7 @@ cleanroom rule.
 | Claude Code pattern | Status |
 |---|---|
 | Permission-mode chip with `Shift+Tab` cycling | **Adopted** — see [R-PERM-6 / R-PERM-7](./requirements.md#37-permissions-ux-must) (default / acceptEdits / plan / bypassPermissions). |
-| Inline permission prompts (no modal) for low-risk decisions | Inspiration only — R-PERM-1 stays modal in v1. |
+| Inline permission prompts (no modal) | **Adopted**, for every decision rather than only low-risk ones — see [R-PERM-1 / R-PERM-1a](./requirements.md#37-permissions-ux-must). Inline is the default layout, the centered modal is `Options.PermissionLayout = PermissionOverlay`, and `/permissions layout` switches between them in session. |
 | Task-aware spinner verbs (Searching / Editing / Running) | **Adopted** — see [R-CHAT-3](./requirements.md#31-core-chat-loop-must) via `Options.ToolSummarizers` taking precedence over the `WorkingPhrases` rotation. |
 | Slash palette and `@` palette share the same row affordance | Already covered by R-PAL-1 + R-PAL-2. |
 | System-reminder channel separate from chat | Inspiration only — defer to v0.2+. |
