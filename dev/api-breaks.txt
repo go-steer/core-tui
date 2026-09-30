@@ -17,6 +17,13 @@
 # sit behind the new baseline, and a leftover entry would silently permit
 # a second, unrelated removal of a symbol that no longer exists.
 #
+# Nothing to empty at v0.26.0 either: verify-apidiff reported no change
+# to the exported API across the whole cycle. #266 moved model to
+# pointer receivers and #329 changed toolRenderer.RenderCall's
+# parameters, but model and toolRenderer are both unexported, so neither
+# is a symbol this gate compares. Minor rather than patch because #316
+# added behaviour, not surface.
+#
 # Nothing to empty at v0.25.1 either: a fix-only patch release, and
 # verify-apidiff reported no change to the exported API across the whole
 # cycle. #317 reworded Options.MouseHint's doc comment and gave the
@@ -53,4 +60,4 @@
 # clearing them any earlier would leave verify-apidiff reporting the
 # same removals with nothing to match them against.
 
-# Entries since v0.25.1 follow.
+# Entries since v0.26.0 follow.
