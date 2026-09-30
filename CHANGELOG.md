@@ -25,6 +25,10 @@ The wire protocol in [`docs/sse-event-stream-protocol.md`](./docs/sse-event-stre
 
 ## [Unreleased]
 
+## [0.27.1] — 2026-09-30
+
+A fix-only patch for the attached TUI: the spinner now follows the host's `turn_state` rather than chat chunks alone, so a running tool, or a turn another client started, no longer sits under a chat that looks idle. No exported API change; `dev/api-breaks.txt` goes into the tag empty.
+
 ### Fixed
 
 - **The attached TUI shows a spinner while a tool runs.** On a `LiveAgent` host the spinner followed chat chunks only: the first partial started it and the commit stopped it. An ordinary turn commits its text and then calls a tool, so the spinner stopped just before the wait it was there for, and the running tool's `▶` was the only sign of life. A turn another client started showed nothing until its first token. The spinner now follows the host's `turn_state`, which core-agent sends as `streaming` at the start of a turn and `idle` at its end. It runs across mid-turn commits and tool calls, with the working verbs while a tool is out, and reads `Waiting for approval…` / `Waiting for input…` while the turn is blocked on someone else's answer. Hosts that send no `turn_state` keep the chunk-driven spinner. One gap remains on the host side: a client that attaches mid-turn is told idle until the next transition (core-agent#896). (#339)
@@ -813,7 +817,8 @@ Initial release: `package tui` extracted from the duplicated `internal/tui` tree
 - **Performance and terminal-fidelity work** — incremental Glamour streaming, an auto-growing textarea, hanging-indent word wrap that preserves source leading whitespace, and the viewport's `h`/`j`/`k`/`l`/arrow bindings disabled with `xOffset` pinned to 0 so a wide line can't shift the whole chat sideways.
 - **The docs that govern all of it** — `docs/requirements.md`, `docs/design.md`, `docs/decisions.md`, `docs/style.md`, `docs/ui-references.md`, and `MIGRATION.md`.
 
-[Unreleased]: https://github.com/go-steer/core-tui/compare/v0.27.0...HEAD
+[Unreleased]: https://github.com/go-steer/core-tui/compare/v0.27.1...HEAD
+[0.27.1]: https://github.com/go-steer/core-tui/compare/v0.27.0...v0.27.1
 [0.27.0]: https://github.com/go-steer/core-tui/compare/v0.26.0...v0.27.0
 [0.26.0]: https://github.com/go-steer/core-tui/compare/v0.25.1...v0.26.0
 [0.25.1]: https://github.com/go-steer/core-tui/compare/v0.25.0...v0.25.1
