@@ -25,6 +25,10 @@ The wire protocol in [`docs/sse-event-stream-protocol.md`](./docs/sse-event-stre
 
 ## [Unreleased]
 
+## [0.27.0] — 2026-09-30
+
+The permission prompt, made harder to miss and switchable in session. `/permissions layout inline|overlay` flips between the inline prompt and the centered modal without a restart, and the new `Options.PersistPermissionLayout` hook lets a host save the choice (a nil hook keeps the switch session-only). The default inline layout now draws a heavy warning-coloured block with the tool name in the title, so a pending decision no longer reads like another chat message. The footer re-measures its height whenever its legend changes, which fixes a second row that went missing while a permission, elicit or question prompt was open. Minor rather than patch because of the new `Options` field. That field is a compatible addition, so `dev/api-breaks.txt` goes into the tag empty.
+
 ### Added
 
 - **`/permissions layout` switches the permission prompt between inline and overlay in-session, and `Options.PersistPermissionLayout` lets the host keep the choice.** The layout was fixed at launch by `Options.PermissionLayout`, so an operator who wanted the other one needed the host to grow a flag. Now `/permissions layout` toggles inline ↔ overlay, `/permissions layout inline` / `/permissions layout overlay` set it, and anything else gets a usage row. The switch is confirmed with a system row (`/permissions: prompt layout overlay`) and applies from the next prompt; one already open keeps its layout. It needs no `PermissionController` — the layout is the TUI's concern, not the gate's — and because it only changes presentation it runs even while a turn is in flight, where bare `/permissions` still waits. The new `Options.PersistPermissionLayout func(layout PermissionLayout) error` is called with the new layout, off the event loop, the same way `PersistMouseChoice` is: a host writes it to config and seeds `PermissionLayout` from it on the next launch, a failure surfaces as an error row with the in-session switch kept, and nil keeps the switch session-only. Bare `/permissions` and its other arguments are unchanged. `examples/local` gains `-perm-overlay` to start in the overlay layout. Additive API: one new `Options` field (R-PERM-1a).
@@ -805,7 +809,8 @@ Initial release: `package tui` extracted from the duplicated `internal/tui` tree
 - **Performance and terminal-fidelity work** — incremental Glamour streaming, an auto-growing textarea, hanging-indent word wrap that preserves source leading whitespace, and the viewport's `h`/`j`/`k`/`l`/arrow bindings disabled with `xOffset` pinned to 0 so a wide line can't shift the whole chat sideways.
 - **The docs that govern all of it** — `docs/requirements.md`, `docs/design.md`, `docs/decisions.md`, `docs/style.md`, `docs/ui-references.md`, and `MIGRATION.md`.
 
-[Unreleased]: https://github.com/go-steer/core-tui/compare/v0.26.0...HEAD
+[Unreleased]: https://github.com/go-steer/core-tui/compare/v0.27.0...HEAD
+[0.27.0]: https://github.com/go-steer/core-tui/compare/v0.26.0...v0.27.0
 [0.26.0]: https://github.com/go-steer/core-tui/compare/v0.25.1...v0.26.0
 [0.25.1]: https://github.com/go-steer/core-tui/compare/v0.25.0...v0.25.1
 [0.25.0]: https://github.com/go-steer/core-tui/compare/v0.24.1...v0.25.0
