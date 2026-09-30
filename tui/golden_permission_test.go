@@ -73,7 +73,7 @@ const goldenPermissionDiff = `--- a/config.go
 func goldenPermissionModel(t *testing.T, w, h int, layout PermissionLayout, req PermissionRequest) *model {
 	t.Helper()
 	m := goldenLiveModel(t, w, h)
-	m.opts.PermissionLayout = layout
+	m.permLayout = layout
 	out, _ := m.Update(permissionRequestMsg{req: req})
 	return out.(*model)
 }

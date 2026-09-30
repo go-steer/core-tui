@@ -478,7 +478,7 @@ func TestCursor_NilWhenNothingOwnsIt(t *testing.T) {
 			name: "permission-overlay",
 			setup: func(t *testing.T) *model {
 				m := cursorModel(t, StatusHeader, 100, 30)
-				m.opts.PermissionLayout = PermissionOverlay
+				m.permLayout = PermissionOverlay
 				out, _ := m.Update(permissionRequestMsg{req: PermissionRequest{
 					Kind:     PermissionKindBash,
 					ToolName: "bash",

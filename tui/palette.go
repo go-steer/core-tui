@@ -136,6 +136,7 @@ func builtinSlashItems() []paletteItem {
 		{Name: "mouse", Description: "toggle mouse capture (placeholder)", Available: true},
 		{Name: "pause", Description: "hold the agent — no new turn starts until you resume", Available: true},
 		{Name: "permissions", Description: "review session approvals", Available: true},
+		{Name: "permissions layout", Display: "/permissions layout [inline|overlay]", Insert: "/permissions layout", Description: "toggle permission prompts inline / overlay", Available: true},
 		{Name: "pricing", Description: "manage pricing (refresh / set)", Available: true},
 		{Name: "pricing refresh", Display: "/pricing refresh", Insert: "/pricing refresh", Description: "re-pull the upstream price table", Available: true},
 		{Name: "pricing set", Display: "/pricing set", Insert: "/pricing set", Description: "open form to override per-model rates", Available: true},

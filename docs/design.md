@@ -843,6 +843,16 @@ type Options struct {
     // a restart. Mirrors PersistThemeChoice.
     PersistMouseChoice func(on bool) error
 
+    // PermissionLayout picks the permission prompt's layout
+    // (R-PERM-1): PermissionInline (zero value) renders in the chat
+    // flow under the tool call, PermissionOverlay as a centered
+    // modal. It seeds the session; /permissions layout switches it
+    // at runtime (R-PERM-1a), and PersistPermissionLayout is called
+    // with the new layout so the choice survives a restart. Nil
+    // leaves the switch session-local.
+    PermissionLayout        PermissionLayout
+    PersistPermissionLayout func(layout PermissionLayout) error
+
     // RenderMode picks alt-screen vs hybrid-scrollback rendering
     // (R-CHAT-9). RenderAltScreen is the default.
     RenderMode RenderMode

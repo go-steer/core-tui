@@ -417,7 +417,8 @@ func (m *model) View() tea.View {
 	// prompts render INLINE inside renderInProgress (chat flow)
 	// by default — preserves the assistant text + tool-call
 	// context the operator is approving. Hosts that prefer the
-	// centered modal flip Options.PermissionLayout = PermissionOverlay.
+	// centered modal flip Options.PermissionLayout = PermissionOverlay;
+	// operators switch at runtime with /permissions layout.
 	//
 	// modalFrame retains the front-most modal's rendered block. It is
 	// what the cursor path measures to re-derive the modal's origin —
