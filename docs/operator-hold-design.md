@@ -247,10 +247,11 @@ to another client, so this operator has no modal to escape.
 painting a spinner through tool-only stretches, which is a separate
 change with its own blast radius.
 
-One gap is upstream: a client attaching *mid-turn* is seeded `idle`,
-because core-agent's status snapshot never reports a running turn
-(core-agent#896). Until that lands, Esc pressed before the first frame
-of a turn the client did not see start still takes arm 4's bare hold.
+A client attaching *mid-turn* was once seeded `idle`, because
+core-agent's status snapshot never reported a running turn. That
+closed with core-agent#896: the stream-open `status-update` reports
+`streaming` for a turn in flight (spec 1.12.0), so Esc on a turn the
+client did not see start cancels it like any other.
 
 ---
 

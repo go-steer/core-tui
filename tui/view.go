@@ -820,10 +820,10 @@ func (m *model) turnInFlight() bool {
 // reports a turn (a cancelled hold, a dropped stream).
 //
 // The host's turn_state is authoritative here: core-agent emits
-// streaming before the turn's first content and idle when it commits
-// (pkg/agent/agent.go). The one gap left is the seed — a client that
-// attaches mid-turn is told idle until the next transition, because
-// AttachStatus never reports running (core-agent#896).
+// streaming before the turn's first content and idle when the turn
+// ends (pkg/agent/agent.go), and since core-agent#896 its stream-open
+// status reports streaming for a turn already in flight, so a client
+// attaching mid-turn is seeded correctly too.
 //
 // Anything the host reports that is not idle counts, not streaming
 // alone: awaiting_permission and awaiting_elicit are a live turn
