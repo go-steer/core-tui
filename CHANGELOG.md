@@ -25,6 +25,10 @@ The wire protocol in [`docs/sse-event-stream-protocol.md`](./docs/sse-event-stre
 
 ## [Unreleased]
 
+## [0.28.0] — 2026-09-30
+
+The operator can tell the agent why. A permission deny can now carry a reason: a host that calls the new `Prompter.AskApprovalDetailed` gets back a `PermissionOutcome` with the decision and the reason, and only its prompts offer `r` to deny with a reason, a one-line input capped at the server's 500 bytes. A host still on `AskApproval` behaves exactly as before and never offers the step, so a host that can't forward a reason never collects one. This pairs with core-agent protocol 1.15.0, where `/perms/respond` accepts the reason and the model reads it in the refused call's result. `examples/local` gains `/perm` and `/elicit` to open its sample prompts on demand, replacing `ctrl+y` / `ctrl+e`, which had been documented but never wired. Minor because of the two additive exported symbols; nothing breaks, and `dev/api-breaks.txt` goes into the tag empty.
+
 ### Added
 
 - **A deny can carry the operator's reason.** A host that calls the new `Prompter.AskApprovalDetailed` gets a `PermissionOutcome` back — the `PermissionDecision` plus a `Reason` — and its prompt offers one more key: `r` "deny with reason…", next to the plain `n` deny, in both the inline and overlay layouts. `r` opens a one-line input in the prompt; `enter` sends the deny with the trimmed text, an empty reason is a plain deny, and `esc` goes back to the choices without deciding. While the input is open the decision letters type rather than decide. The reason is capped at 500 bytes of UTF-8, which is core-agent's server limit: a byte counter shows the size while typing and turns warning-coloured past the cap, and `enter` over it is refused with a note rather than truncated. The reason is recorded in the transcript's decision echo. It is opt-in per request, by method: plain `AskApproval` never offers `r`, because a host that cannot forward a reason must never collect one. It is never offered on an allow, and no dismissal carries one. Purely additive: `AskApproval`, the `PermissionPrompter` interface and `PermissionDecision` are unchanged, and no capability interface is involved — the reason is a return value. core-agent's hosts adopt it by switching their `AskApproval` call to `AskApprovalDetailed` and sending `Reason` as `/perms/respond`'s `reason` (SSE protocol 1.15.0). See `docs/permission-deny-reason-design.md`. (#344)
@@ -821,7 +825,8 @@ Initial release: `package tui` extracted from the duplicated `internal/tui` tree
 - **Performance and terminal-fidelity work** — incremental Glamour streaming, an auto-growing textarea, hanging-indent word wrap that preserves source leading whitespace, and the viewport's `h`/`j`/`k`/`l`/arrow bindings disabled with `xOffset` pinned to 0 so a wide line can't shift the whole chat sideways.
 - **The docs that govern all of it** — `docs/requirements.md`, `docs/design.md`, `docs/decisions.md`, `docs/style.md`, `docs/ui-references.md`, and `MIGRATION.md`.
 
-[Unreleased]: https://github.com/go-steer/core-tui/compare/v0.27.1...HEAD
+[Unreleased]: https://github.com/go-steer/core-tui/compare/v0.28.0...HEAD
+[0.28.0]: https://github.com/go-steer/core-tui/compare/v0.27.1...v0.28.0
 [0.27.1]: https://github.com/go-steer/core-tui/compare/v0.27.0...v0.27.1
 [0.27.0]: https://github.com/go-steer/core-tui/compare/v0.26.0...v0.27.0
 [0.26.0]: https://github.com/go-steer/core-tui/compare/v0.25.1...v0.26.0
