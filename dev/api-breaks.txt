@@ -17,6 +17,10 @@
 # sit behind the new baseline, and a leftover entry would silently permit
 # a second, unrelated removal of a symbol that no longer exists.
 #
+# Nothing to empty at v0.27.1 either: a fix-only patch release, and
+# verify-apidiff reported no change to the exported API across the
+# cycle. #340 only touched unexported spinner state.
+#
 # Nothing to empty at v0.27.0 either: verify-apidiff reported one
 # compatible change across the cycle, #332's new
 # Options.PersistPermissionLayout field, and no break. That field is
@@ -65,4 +69,4 @@
 # clearing them any earlier would leave verify-apidiff reporting the
 # same removals with nothing to match them against.
 
-# Entries since v0.27.0 follow.
+# Entries since v0.27.1 follow.
