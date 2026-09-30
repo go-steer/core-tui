@@ -31,8 +31,9 @@
 //	                the header's model + provider and survives a
 //	                /switch
 //	ctrl+x          open the tool-call detail overlay (core-tui #52)
-//	ctrl+y          open the (sample) permission modal
-//	ctrl+e          open the (sample) MCP elicitation form
+//	/perm           open the (sample) permission prompt; r denies
+//	                with a reason (R-PERM-9)
+//	/elicit         open the (sample) MCP elicitation form
 //	/switch         open the session picker; its "+ Attach to
 //	                endpoint…" row demos the text-input dialog
 //	                (core-tui #56)
@@ -370,6 +371,15 @@ func (a demoAgent) SwitchToSession(id string) (tui.SwitchTarget, error) {
 	}, nil
 }
 
+// demoHooks are what /perm and /elicit fire the sample prompts
+// through. Package-level because demoAgent is rebuilt on every
+// /switch; main sets them once, before the program starts.
+var demoHooks struct {
+	prompter *tui.Prompter
+	elicitor tui.Elicitor
+	notifier *tui.Notifier
+}
+
 func (demoAgent) SlashCommands() []tui.SlashCommandSpec {
 	return []tui.SlashCommandSpec{
 		{
@@ -377,11 +387,23 @@ func (demoAgent) SlashCommands() []tui.SlashCommandSpec {
 			Aliases:     []string{"by-the-way"},
 			Description: "ask a side question (modal, doesn't land in chat history)",
 		},
+		{Name: "perm", Description: "open the sample permission prompt (r denies with a reason)"},
+		{Name: "elicit", Description: "open the sample MCP elicitation form"},
 	}
 }
 
 func (demoAgent) InvokeSlash(_ context.Context, name, args string) (tui.SlashResult, error) {
-	if name != "btw" && name != "by-the-way" {
+	switch name {
+	case "perm":
+		// Fired off the event loop: AskApprovalDetailed blocks until
+		// the operator answers, which the loop has to be free to see.
+		go demoPermissionAfter(demoHooks.prompter, demoHooks.notifier, 0)
+		return tui.SlashResult{}, nil
+	case "elicit":
+		go demoElicitAfter(demoHooks.elicitor, 0)
+		return tui.SlashResult{}, nil
+	case "btw", "by-the-way":
+	default:
 		return tui.SlashResult{}, fmt.Errorf("unknown slash: %s", name)
 	}
 	q := args
@@ -417,10 +439,11 @@ func main() {
 	elicitor := tui.NewElicitor()
 	asker := tui.NewAsker()
 	notifier := tui.NewNotifier()
+	demoHooks.prompter, demoHooks.elicitor, demoHooks.notifier = prompter, elicitor, notifier
 
 	// Fire a fake permission prompt + elicit request a few seconds
 	// after launch so the visual preview demos both modals end-to-
-	// end. A real host wires these into its permission gate +
+	// end; /perm and /elicit open them again on demand. A real host wires these into its permission gate +
 	// MCP servers.
 	go demoPermissionAfter(prompter, notifier, 8*time.Second)
 	go demoElicitAfter(elicitor, 18*time.Second)
@@ -496,7 +519,7 @@ func seededConversation() []tui.Message {
 			Text: "Visual preview — type ? for the full keymap. Try: / for slash palette · " +
 				"@ for file palette · tab focus the transcript (then ↑↓ / k j select an item, " +
 				"space fold it, y / c copy it, shift+↑↓ scroll a line, shift+←→ pan sideways, " +
-				"g / G first / last, tab or esc back) · ctrl+g model · ctrl+y permission · ctrl+e elicit · " +
+				"g / G first / last, tab or esc back) · ctrl+g model · /perm permission · /elicit elicit form · " +
 				"ctrl+b toggle layout · shift+tab cycle perm-mode · /btw <q> for a side-answer modal · " +
 				"/switch for the session picker (its last row types in an endpoint). " +
 				"Press enter to start a streaming turn; type ahead and press enter again to " +
