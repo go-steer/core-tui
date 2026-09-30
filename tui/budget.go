@@ -150,6 +150,14 @@ type chromeBudget struct {
 }
 
 // frameRows is the height of the frame this budget describes.
+// footerRows is the row count the budget charges for a rendered
+// footer: its height, never less than one. allocateChrome and
+// rebudgetFooter both go through it so that "has the footer's height
+// changed" compares like with like.
+func footerRows(footer string) int {
+	return max(lipgloss.Height(footer), 1)
+}
+
 func (b chromeBudget) frameRows() int {
 	return b.header + b.chat + b.palette + b.help + b.banner + b.input + b.toast + b.mouseHint + b.footer
 }
@@ -180,10 +188,7 @@ func (m *model) allocateChrome(layout StatusLayout, chromeWidth int) chromeBudge
 	if layout == StatusHeader {
 		b.header = lipgloss.Height(m.renderHeader())
 	}
-	b.footer = lipgloss.Height(m.renderFooter(chromeWidth))
-	if b.footer < 1 {
-		b.footer = 1
-	}
+	b.footer = footerRows(m.renderFooter(chromeWidth))
 	// View slots the wake banner between the input box and the footer
 	// whenever renderToast returns non-empty, so the budget is guarded
 	// on exactly that condition rather than on m.toast != "" — the

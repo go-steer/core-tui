@@ -97,6 +97,16 @@ func frameStates() []frameState {
 			},
 		},
 		{
+			// Issue #334: kept out of this list while the footer's
+			// permission legend wrapped to two rows into a one-row
+			// reservation, which PanelSurvival reports as a clipped
+			// footer.
+			name: "permission-inline",
+			setup: func(_ *testing.T, m *model, _, _ int) *model {
+				return withInlinePermission(withHostileTranscript(m))
+			},
+		},
+		{
 			name: "elicit-modal",
 			setup: func(_ *testing.T, m *model, _, _ int) *model {
 				m = withHostileTranscript(m)
@@ -1329,18 +1339,14 @@ func TestFrameInvariants_Grid(t *testing.T) {
 	}
 }
 
-// TestFrameInvariants_InlinePermission runs the grid's geometry checks
-// over the permission prompt's DEFAULT layout, which frameStates does
-// not reach: every frame model there is built under PermissionOverlay,
-// and the inline block is only drawn while a turn is in flight. The
-// block brings its own chrome — a cap row above, a heavy rule down the
-// side, a cap row below — so it is swept down to widths narrower than
-// the grid's, where a floor on its body width would push a row past
-// the chat column.
-//
-// Kept out of frameStates rather than added to it: PanelSurvival would
-// then also assert on the footer, and the footer's wrapped permission
-// legend is a separate question from the block's geometry.
+// TestFrameInvariants_InlinePermission extends the permission-inline
+// frame state below the grid's narrowest width. The inline block
+// brings its own chrome — a cap row above, a heavy rule down the side,
+// a cap row below — so a floor on its body width would push a row past
+// the chat column at widths the grid never reaches. The grid's own
+// widths are covered by the permission-inline entry in frameStates,
+// which puts the state under Grid, PanelSurvival and
+// RenderersHonorWidth like every other.
 func TestFrameInvariants_InlinePermission(t *testing.T) {
 	layouts := []struct {
 		name   string
@@ -1350,22 +1356,13 @@ func TestFrameInvariants_InlinePermission(t *testing.T) {
 		{"sidebar", StatusSidebar},
 	}
 	for _, lay := range layouts {
-		for _, w := range []int{20, 24, 30, 40, 60, 80, 120, 200} {
+		for _, w := range []int{20, 24, 30} {
 			for _, h := range frameHeights {
 				name := lay.name + "/" + strconv.Itoa(w) + "x" + strconv.Itoa(h)
 				t.Run(name, func(t *testing.T) {
-					m := withHostileTranscript(newFrameModel(lay.layout, w, h))
-					m.permLayout = PermissionInline
-					out, _ := m.Update(permissionRequestMsg{req: PermissionRequest{
-						Kind:     PermissionKindBash,
-						ToolName: "mcp__a-server-with-a-long-name__a_tool_with_a_long_name",
-						Verb:     "rm",
-						Detail:   "rm -rf /tmp/a-really-quite-long-path/that/keeps/going/well/past/any/sensible/terminal/width",
-					}})
-					m = out.(*model)
-					m.state = stateStreaming
-					m.refreshViewport()
+					m := withInlinePermission(withHostileTranscript(newFrameModel(lay.layout, w, h)))
 					assertFrameFits(t, m.View().Content, w, h)
+					assertPanelsSurvive(t, m, w, h)
 					assertRenderersHonorWidth(t, m)
 				})
 			}
@@ -1557,4 +1554,78 @@ func TestFrameInvariants_ZeroSize(t *testing.T) {
 	if got := m.View().Content; got != "" {
 		t.Errorf("unsized model should render empty, got %q", got)
 	}
+}
+
+// TestFooterBudget_FollowsLegendChanges is issue #334's general form.
+// The footer's rows are charged in allocateChrome, which only resize()
+// runs, but the legend is picked from modal and turn state that every
+// surface below changes without a resize. Each one used to leave the
+// footer rendering to a different height from the one reserved — the
+// inline permission prompt visibly (a clipped second row), the modal
+// ones behind the modal — so after every Update the reservation has to
+// equal what the footer actually renders to, on the way in and on the
+// way back out.
+func TestFooterBudget_FollowsLegendChanges(t *testing.T) {
+	bash := PermissionRequest{Kind: PermissionKindBash, ToolName: "bash", Verb: "rm", Detail: "rm -rf /tmp/x"}
+	opens := []struct {
+		name string
+		msg  func(m *model) tea.Msg
+	}{
+		{"permission-inline", func(m *model) tea.Msg {
+			m.permLayout = PermissionInline
+			m.state = stateStreaming
+			return permissionRequestMsg{req: bash}
+		}},
+		{"permission-overlay", func(*model) tea.Msg { return permissionRequestMsg{req: bash} }},
+		{"elicit", func(*model) tea.Msg {
+			return elicitRequestMsg{serverName: "srv", req: ElicitRequest{
+				Mode: ElicitFormMode, Title: "t",
+				Fields: []ElicitField{{Name: "project", Type: ElicitFieldString}},
+			}}
+		}},
+		{"ask", func(*model) tea.Msg {
+			return askRequestMsg{req: AskRequest{Kind: AskConfirm, Prompt: "Ship it?"}}
+		}},
+	}
+	assertBudgeted := func(t *testing.T, m *model, when string) {
+		t.Helper()
+		if got, want := m.chrome.footer, footerRows(m.renderFooter(m.chromeWidth())); got != want {
+			t.Errorf("%s: the budget reserves %d footer rows but the footer renders to %d",
+				when, got, want)
+		}
+	}
+	for _, lay := range []StatusLayout{StatusHeader, StatusSidebar} {
+		for _, w := range []int{30, 40, 60, 80, 100, 120, 200} {
+			for _, o := range opens {
+				t.Run(fmt.Sprintf("%d/%s/%d", lay, o.name, w), func(t *testing.T) {
+					m := newFrameModel(lay, w, 24)
+					out, _ := m.Update(o.msg(m))
+					m = out.(*model)
+					assertBudgeted(t, m, "open")
+					out, _ = m.Update(tea.KeyPressMsg{Code: tea.KeyEscape})
+					m = out.(*model)
+					assertBudgeted(t, m, "after esc")
+				})
+			}
+		}
+	}
+}
+
+// withInlinePermission opens a permission prompt under the DEFAULT
+// (inline) layout mid-turn — the block is only drawn while a turn is in
+// flight, and every frame model is built under PermissionOverlay. The
+// tool name and detail are long enough to wrap inside the block at
+// every width in the grid.
+func withInlinePermission(m *model) *model {
+	m.permLayout = PermissionInline
+	out, _ := m.Update(permissionRequestMsg{req: PermissionRequest{
+		Kind:     PermissionKindBash,
+		ToolName: "mcp__a-server-with-a-long-name__a_tool_with_a_long_name",
+		Verb:     "rm",
+		Detail:   "rm -rf /tmp/a-really-quite-long-path/that/keeps/going/well/past/any/sensible/terminal/width",
+	}})
+	m = out.(*model)
+	m.state = stateStreaming
+	m.refreshViewport()
+	return m
 }

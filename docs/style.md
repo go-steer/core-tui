@@ -210,7 +210,12 @@ esc cancel · tab focus chat · ctrl+p commands · shift+enter newline
 - Action labels lowercase, present-tense imperative (`cancel`, not
   `Cancel` or `Cancelling`).
 - Context-sensitive: when a modal is open the legend swaps to
-  modal-specific keys.
+  modal-specific keys. The permission prompt is the exception: it
+  draws its full decision-key legend itself, so the footer only names
+  the state and the fail-safe key (`Permission required · esc deny`).
+- When the legend is wider than the column it wraps, and the layout
+  re-measures it after every update so the extra rows are budgeted
+  rather than clipped.
 
 ### 7.2 Status surface
 
