@@ -536,7 +536,7 @@ func (m *model) update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		}
 		// PermMode lands here too but doesn't drive any v1
 		// rendering. Reserved for follow-up work.
-		return m, m.liveStreamRenderCmd()
+		return m, m.liveStreamRenderCmd(m.followHostTurnState())
 	case usageUpdateMsg:
 		if msg.gen != m.sessionGen {
 			return m, m.eventListener()
@@ -2577,7 +2577,14 @@ func (m *model) applyStreamChunk(msg streamChunkMsg) {
 				m.inProgressStablePrefix = ""
 				m.inProgressStableRender = ""
 			}
-			m.endLiveStretch()
+			// A commit closes the stretch only when the host is not
+			// telling us its turn goes on. Mid-turn commits are the
+			// norm — text, then a tool call, then more text — and
+			// ending the stretch here is what left a running tool
+			// with no indicator under it (issue #339).
+			if !m.hostTurnActive() {
+				m.endLiveStretch()
+			}
 		}
 	}
 	m.markViewportDirty()

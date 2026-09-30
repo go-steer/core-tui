@@ -25,6 +25,10 @@ The wire protocol in [`docs/sse-event-stream-protocol.md`](./docs/sse-event-stre
 
 ## [Unreleased]
 
+### Fixed
+
+- **The attached TUI shows a spinner while a tool runs.** On a `LiveAgent` host the spinner followed chat chunks only: the first partial started it and the commit stopped it. An ordinary turn commits its text and then calls a tool, so the spinner stopped just before the wait it was there for, and the running tool's `▶` was the only sign of life. A turn another client started showed nothing until its first token. The spinner now follows the host's `turn_state`, which core-agent sends as `streaming` at the start of a turn and `idle` at its end. It runs across mid-turn commits and tool calls, with the working verbs while a tool is out, and reads `Waiting for approval…` / `Waiting for input…` while the turn is blocked on someone else's answer. Hosts that send no `turn_state` keep the chunk-driven spinner. One gap remains on the host side: a client that attaches mid-turn is told idle until the next transition (core-agent#896). (#339)
+
 ## [0.27.0] — 2026-09-30
 
 The permission prompt, made harder to miss and switchable in session. `/permissions layout inline|overlay` flips between the inline prompt and the centered modal without a restart, and the new `Options.PersistPermissionLayout` hook lets a host save the choice (a nil hook keeps the switch session-only). The default inline layout now draws a heavy warning-coloured block with the tool name in the title, so a pending decision no longer reads like another chat message. The footer re-measures its height whenever its legend changes, which fixes a second row that went missing while a permission, elicit or question prompt was open. Minor rather than patch because of the new `Options` field. That field is a compatible addition, so `dev/api-breaks.txt` goes into the tag empty.

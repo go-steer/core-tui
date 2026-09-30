@@ -44,6 +44,10 @@ func silentDaemonTurn(t *testing.T) *model {
 	if !m.liveMode {
 		t.Fatal("setup: the fixture must be a LiveAgent host")
 	}
+	// Since #339 the push opens a live stretch, so close it: what is
+	// under test is turnRunning's fallback, the window where the host
+	// still reports a turn and nothing is painting it.
+	m.endLiveStretch()
 	if m.turnInFlight() {
 		t.Fatal("setup: the render gate must read idle — a silent turn is the condition under test")
 	}
