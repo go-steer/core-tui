@@ -86,7 +86,7 @@ func TestUpdate_WakeMsgRaisesToast(t *testing.T) {
 	m.viewport.SetWidth(80)
 
 	before := time.Now()
-	out, _ := m.Update(wakeMsg{})
+	out, _ := m.Update(wakeMsg{src: agent.wakeCh})
 	got := out.(*model)
 
 	if got.toast == "" {
@@ -110,7 +110,7 @@ func TestUpdate_WakeMsg_SuppressedWhenQueuePending(t *testing.T) {
 		{Text: "queued by operator", State: QueueQueued, Created: time.Now()},
 	}
 
-	out, _ := m.Update(wakeMsg{})
+	out, _ := m.Update(wakeMsg{src: agent.wakeCh})
 	got := out.(*model)
 
 	if got.toast != "" {
@@ -132,7 +132,7 @@ func TestUpdate_WakeMsg_FiresWhenQueueEmpty(t *testing.T) {
 	m.viewport.SetWidth(80)
 	// queue is empty by default
 
-	out, _ := m.Update(wakeMsg{})
+	out, _ := m.Update(wakeMsg{src: agent.wakeCh})
 	got := out.(*model)
 
 	if got.toast == "" {
@@ -156,7 +156,7 @@ func TestUpdate_WakeMsg_RowAssertsNothingAboutTheInbox(t *testing.T) {
 	m := newModel(Options{Agent: agent})
 	m.viewport.SetWidth(80)
 
-	out, _ := m.Update(wakeMsg{})
+	out, _ := m.Update(wakeMsg{src: agent.wakeCh})
 	got := out.(*model)
 
 	snap := got.history.Snapshot()
@@ -204,7 +204,7 @@ func TestUpdate_WakeMsg_SuppressedWithInFlightEntry(t *testing.T) {
 		{Text: "in flight", State: QueueInFlight, Created: time.Now()},
 	}
 
-	out, _ := m.Update(wakeMsg{})
+	out, _ := m.Update(wakeMsg{src: agent.wakeCh})
 	got := out.(*model)
 
 	if got.toast != "" {
@@ -225,7 +225,7 @@ func TestUpdate_WakeMsg_FiresWhenAllQueueEntriesTerminal(t *testing.T) {
 		{Text: "failed", State: QueueFailed, Created: time.Now()},
 	}
 
-	out, _ := m.Update(wakeMsg{})
+	out, _ := m.Update(wakeMsg{src: agent.wakeCh})
 	got := out.(*model)
 
 	if got.toast == "" {

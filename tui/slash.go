@@ -140,6 +140,14 @@ type SwitchTarget struct {
 	// the host sends to the outgoing one after the switch is never read
 	// and waits on the caller's ctx, so a host should stop routing to
 	// it once the switch is made.
+	//
+	// Replacing the Notifier (a different instance; the same one is a
+	// keep) likewise stops the TUI reading the outgoing one. A notice
+	// it had already read but not yet shown is dropped rather than
+	// shown in the new session. Notices still queued on it stay queued,
+	// and are shown if a later switch hands that Notifier back. A kept
+	// Notifier goes on being read by one listener, so every notice
+	// queued on it is shown once, in order.
 	Prompter PermissionPrompter
 	Elicitor Elicitor
 	Asker    Asker

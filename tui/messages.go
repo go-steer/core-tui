@@ -14,7 +14,11 @@
 
 package tui
 
-import "time"
+import (
+	"time"
+
+	tea "charm.land/bubbletea/v2"
+)
 
 // Internal tea.Msg types that carry events from the agent dispatch
 // goroutine back into the Bubble Tea Update loop. The translation
@@ -129,7 +133,21 @@ type initialPromptMsg struct{ text string }
 // the operator should be notified (R-WAKE-1). Carries no payload —
 // the toast banner content is fixed; subsequent design slices can
 // extend with a Reason field if hosts want per-wake messages.
-type wakeMsg struct{}
+//
+// src is the wake channel the listener read it from and epoch the
+// wakeSlot epoch the listener was armed under. Update drops a wake
+// whose src is not m.wakeCh or whose epoch is stale: it came from a
+// listener a session switch has since released (issue #355).
+type wakeMsg struct {
+	src   <-chan struct{}
+	epoch uint64
+}
+
+// eventMsg wraps one message the eventListener read off m.eventCh.
+// The wrapper is how Update learns the listener has delivered, so it
+// can clear eventSlot and re-arm exactly one listener (issue #355);
+// the wrapped message is then handled as if it had arrived bare.
+type eventMsg struct{ msg tea.Msg }
 
 // toastClearMsg fires toastTTL after a toast was raised; Update
 // drops the toast on receive unless a fresher wake has restarted
@@ -368,7 +386,14 @@ type resumeDoneMsg struct {
 // Options.Notifier channel through to the Update loop. Internal
 // type — hosts push via Notifier.Notify(text), they don't
 // construct this directly.
+//
+// src is the Notifier the listener read it from and epoch the
+// notifySlot epoch the listener was armed under; Update drops a notice
+// from a Notifier a session switch has since replaced, or from a
+// listener the switch released (issue #355).
 type noticeMsg struct {
+	src     *Notifier
+	epoch   uint64
 	text    string
 	dropped int // coalesced drop count; appended to rendered text as "(+N dropped)"
 }

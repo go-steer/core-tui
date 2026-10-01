@@ -162,6 +162,24 @@ func (m *model) rebudgetFooter() {
 }
 
 func (m *model) update(msg tea.Msg) (tea.Model, tea.Cmd) {
+	// A message the event listener read off eventCh (issue #355). Its
+	// listener is done, so clear the slot, handle the message as if it
+	// had arrived bare, then make sure exactly one listener is parked
+	// for the next one: the handler's own re-arm when it asked for one,
+	// otherwise the one built here. Doing it here rather than trusting
+	// every handler keeps the drain alive on a path that returns no
+	// listener — a pending form below swallows every message, and an
+	// inbox state the protocol has not defined returns nil — and the
+	// armed check keeps the handlers' re-arms from adding a second.
+	if ev, ok := msg.(eventMsg); ok {
+		m.eventSlot.delivered()
+		out, cmd := m.update(ev.msg)
+		if c := m.eventListener(); c != nil {
+			cmd = tea.Batch(cmd, c)
+		}
+		return out, cmd
+	}
+
 	// Pending huh.Form intercepts EVERY tea.Msg (KeyPress,
 	// WindowSize, ticks) so the embedded form runs its own
 	// state machine. On completion / abort, updatePricingForm
@@ -1313,6 +1331,16 @@ func (m *model) update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		}
 		return m, nil
 	case wakeMsg:
+		if msg.src != m.wakeCh || msg.epoch != m.wakeSlot.epoch {
+			// From a listener a session switch has since released, on
+			// the outgoing agent's channel or before an A → B → A
+			// switch back to it (issue #355). The wake was the old
+			// session's; reporting it here would tell the operator the
+			// agent they just attached to asked for attention. No
+			// re-arm: the current slot is untouched.
+			return m, nil
+		}
+		m.wakeSlot.delivered()
 		// Issue #7: the wake signal also fires whenever Inject() is
 		// called by the queue panel (operator typed during streaming).
 		// In that case the operator can already see the queued entry
@@ -1504,6 +1532,17 @@ func (m *model) update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		// is not one Bubble Tea drew, so the repaint is not optional.
 		return m, tea.Batch(cmd, forceRenderTick())
 	case noticeMsg:
+		if msg.src != m.opts.Notifier || msg.epoch != m.notifySlot.epoch {
+			// From a listener a session switch has since released: it
+			// took the notice off the outgoing Notifier in the window
+			// before step 4 cancelled it, or off this one before an
+			// A → B → A switch back (issue #355). A notice needs no
+			// reply, so dropping it is the whole answer; painting it
+			// would put the old session's notice in the new one. No
+			// re-arm: the current slot is untouched.
+			return m, nil
+		}
+		m.notifySlot.delivered()
 		// Issue #30: host-initiated chat row, drained from
 		// Options.Notifier. Append as RoleNotice (distinct from
 		// RoleSystem so operators can tell framework speech from
@@ -3273,6 +3312,18 @@ func (m *model) applySwitchTarget(tgt *SwitchTarget) tea.Cmd {
 	// Step 4 — swap opts fields per SwitchTarget contract
 	// (non-nil / non-zero replaces; nil / zero keeps).
 	m.opts.Agent = tgt.Agent
+	// The wake channel comes with the agent, so the agent swap is what
+	// replaces it (issue #355). Drop the slot only when the incoming
+	// agent signals on a different channel: that releases the listener
+	// parked on the outgoing one, and a wake it had already taken is
+	// dropped by the wakeMsg handler. An agent that hands back the same
+	// channel keeps its listener, so step 8 does not add a second.
+	// Nothing queued on the outgoing channel is drained: it is the
+	// host's, and a wake carries no reply to refuse.
+	if w := wakeChannel(tgt.Agent); w != m.wakeCh {
+		m.wakeCh = w
+		m.wakeSlot.drop()
+	}
 	if tgt.UsageTracker != nil {
 		m.opts.UsageTracker = tgt.UsageTracker
 	}
@@ -3325,7 +3376,19 @@ func (m *model) applySwitchTarget(tgt *SwitchTarget) tea.Cmd {
 			}
 		}
 	}
+	// Same for the Notifier (issue #355): a different instance drops
+	// the slot, releasing the listener on the outgoing one, and a
+	// notice that listener had already taken is dropped by the
+	// noticeMsg handler. A kept Notifier — nil here, or the same
+	// instance handed back — keeps its parked listener, so the notices
+	// queued on it are still read, once each, by one consumer. Notices
+	// still queued on a replaced Notifier are left where they are: they
+	// carry no reply, and they are read if a later switch hands that
+	// Notifier back.
 	if tgt.Notifier != nil {
+		if tgt.Notifier != m.opts.Notifier {
+			m.notifySlot.drop()
+		}
 		m.opts.Notifier = tgt.Notifier
 	}
 	if tgt.Memory != nil {
@@ -3365,12 +3428,15 @@ func (m *model) applySwitchTarget(tgt *SwitchTarget) tea.Cmd {
 	m.refreshViewport()
 	m.chatGotoBottom()
 
-	// Step 8 — return fresh listener Cmds. The prompter, elicitor and
-	// asker listeners on replaced channels were released in step 4;
-	// for a kept channel the constructor returns nil when its listener
-	// is still parked, and a fresh one when the prompt it delivered was
-	// on screen and step 2 resolved it without re-arming. Either way
-	// each of those channels ends the switch with exactly one consumer.
+	// Step 8 — return fresh listener Cmds. The prompter, elicitor,
+	// asker, notifier and wake listeners on replaced channels were
+	// released in step 4; for a kept channel the constructor returns
+	// nil when its listener is still parked, and a fresh one when the
+	// prompt it delivered was on screen and step 2 resolved it without
+	// re-arming. eventCh is never replaced, so its listener armed at
+	// Init is still parked (or its message is on the way) and the
+	// constructor returns nil. Either way every channel ends the switch with exactly one
+	// consumer (issues #353 / #355).
 	cmds := make([]tea.Cmd, 0, 8)
 	if c := m.eventListener(); c != nil {
 		cmds = append(cmds, c)

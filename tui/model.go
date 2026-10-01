@@ -464,6 +464,22 @@ type model struct {
 	elicitSlot listenerSlot
 	askSlot    listenerSlot
 
+	// notifySlot / wakeSlot do the same for the notifier and wake
+	// listeners, and eventSlot keeps eventCh to one consumer, which is
+	// what keeps its messages in order (issue #355). eventSlot is never
+	// dropped: no switch replaces eventCh.
+	notifySlot listenerSlot
+	wakeSlot   listenerSlot
+	eventSlot  listenerSlot
+
+	// wakeCh is the channel the installed agent's WakeRequester
+	// capability signals on (nil without one), read once when the
+	// agent is installed — newModel, and step 4 of applySwitchTarget,
+	// which drops wakeSlot when the incoming agent's channel differs.
+	// wakeListener drains it and the wakeMsg handler checks a wake
+	// came from it (issue #355).
+	wakeCh <-chan struct{}
+
 	// Viewport-refresh coalescing (perf: attach to long remote
 	// sessions used to be O(N²) because each incoming event walked
 	// the full history, concatenated every rendered message, and
@@ -786,6 +802,7 @@ func newModel(opts Options) *model {
 		permLayout:      opts.PermissionLayout,
 		themeName:       opts.InitialThemeName,
 		eventCh:         make(chan tea.Msg, 32),
+		wakeCh:          wakeChannel(opts.Agent),
 		seenToolIDs:     make(map[string]bool),
 		subagentTails:   make(map[string]*subagentTail),
 		subagentNotTail: make(map[string]bool),
