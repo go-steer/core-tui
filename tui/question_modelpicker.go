@@ -446,7 +446,7 @@ func (m *model) applyModelSwitch(msg modelSwitchedMsg) tea.Cmd {
 		m.refreshViewport()
 		return nil
 	}
-	m.opts.Agent = msg.agent
+	m.installAgent(msg.agent)
 	m.history.Append(Message{Role: RoleSystem, Text: "/model: switched to " + msg.id})
 	// Refresh the theme so per-provider palettes (when AutoProviderTheme
 	// is on) track the freshly-selected model's provider. No-op when
@@ -461,6 +461,7 @@ func (m *model) applyModelSwitch(msg modelSwitchedMsg) tea.Cmd {
 	return tea.Batch(
 		persistChoiceCmd(m.sessionGen, "/model", m.opts.PersistModelChoice, msg.id),
 		m.hostSlashNamesCmd(),
+		m.wakeListener(), // nil unless the new agent brought a new wake channel
 	)
 }
 

@@ -118,7 +118,11 @@ type SlashResult struct {
 //
 // See design.md §3.3 and issues #48 / #53.
 type SwitchTarget struct {
-	// Agent is the incoming Agent. Required.
+	// Agent is the incoming Agent. Required. When it implements
+	// WakeRequester with a different channel from the outgoing one,
+	// the TUI stops reading the outgoing channel, and a wake read from
+	// it but not yet shown is dropped rather than shown in the new
+	// session.
 	Agent Agent
 
 	// UsageTracker replaces Options.UsageTracker when non-nil.
@@ -140,6 +144,14 @@ type SwitchTarget struct {
 	// the host sends to the outgoing one after the switch is never read
 	// and waits on the caller's ctx, so a host should stop routing to
 	// it once the switch is made.
+	//
+	// Replacing the Notifier (a different instance; the same one is a
+	// keep) likewise stops the TUI reading the outgoing one. A notice
+	// it had already read but not yet shown is dropped rather than
+	// shown in the new session. Notices still queued on it stay queued,
+	// and are shown if a later switch hands that Notifier back. A kept
+	// Notifier goes on being read by one listener, so every notice
+	// queued on it is shown once, in order.
 	Prompter PermissionPrompter
 	Elicitor Elicitor
 	Asker    Asker

@@ -433,7 +433,14 @@ listed in `/help`:
   The permission / elicit / ask listener on a replaced `Prompter` /
   `Elicitor` / `Asker` is released, and a kept one is not doubled:
   each of those channels ends the switch with exactly one consumer
-  (issue #353).
+  (issue #353). The same holds for the notice listener on a
+  `Notifier` and the wake listener on the agent's `WakeRequested()`
+  channel, which is replaced when the incoming agent signals on a
+  different channel; notices still queued on a kept `Notifier` are
+  all read (issue #355). The agent event channel belongs to the TUI
+  and survives every switch with its one consumer: a second would let
+  consecutive events, such as stream chunks, reach the transcript out
+  of order (issue #355).
 - **R-SWITCH-5** Server-side session lifecycle is NOT core-tui's
   concern. A remote daemon observes a dropped reader and keeps the
   session running per its own policy — operators can `/switch` back
@@ -450,7 +457,9 @@ listed in `/help`:
   `Prompter` / `Elicitor` / `Asker` the switch replaced is not dropped
   — someone is waiting on it — but answered on the source that asked
   (deny / cancel, as for a prompt on screen at the switch) and never
-  shown in the incoming session (issue #353).
+  shown in the incoming session (issue #353). A notice or wake read
+  from a `Notifier` or wake channel the switch replaced carries no
+  reply, and is dropped (issue #355).
 - **R-SWITCH-8** Switch errors (`SwitchToSession` returned err,
   `SwitchTarget.Agent == nil`) are non-fatal — a `RoleError` row
   is rendered and the current session stays attached.
@@ -723,11 +732,14 @@ listed in `/help`:
 
 - **R-WAKE-1** When the host's agent implements the optional
   `WakeRequester` capability (`WakeRequested() <-chan struct{}`),
-  the TUI subscribes to the channel at startup. Each receive
-  triggers a transient toast banner rendered between the input box
-  and the footer, in the warn color, prefixed with `⚠  `. The
-  toast clears after `toastTTL` (~4 s); a fresh wake during the TTL
-  window restarts the timer. The interface makes no promise about
+  the TUI subscribes to the channel at startup, reading it once per
+  installed agent: again after a session switch, `/model` or
+  `/reload` installs another, and moving its one listener to the new
+  channel when it differs (issue #355). Each receive triggers a
+  transient toast banner rendered between the input box and the
+  footer, in the warn color, prefixed with `⚠  `. The toast clears
+  after `toastTTL` (~4 s); a fresh wake during the TTL window
+  restarts the timer. The interface makes no promise about
   coalescing — rapid back-to-back wakes render multiple toasts in
   sequence. Hosts that close the wake channel cleanly stop the
   subscription without a goroutine leak. Without the capability,

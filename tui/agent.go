@@ -273,9 +273,13 @@ type InboxDrainer interface {
 // a host that needs the operator to know why should push the reason
 // through a channel that can carry one (an inbox entry, Notifier).
 //
-// The TUI subscribes once at startup via a goroutine that ranges
-// over the channel; the host owns channel lifecycle (closing the
-// channel is fine — the goroutine exits cleanly). The interface
+// The TUI calls WakeRequested once per installed agent — at startup,
+// and again when a session switch, /model or /reload installs another
+// — and drains the channel it returns with a single goroutine. When
+// the new agent returns a different channel, that goroutine is released
+// and one starts on the new channel, and a wake the old one read but
+// had not yet reported is dropped. The host owns channel lifecycle (closing the channel is
+// fine — the goroutine exits cleanly). The interface
 // makes no promise about coalescing: rapid back-to-back wakes will
 // render multiple toasts in sequence.
 //

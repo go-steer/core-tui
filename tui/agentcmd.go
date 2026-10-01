@@ -213,40 +213,50 @@ func (m *model) endListeners() {
 }
 
 // listenerSlot is the per-channel half of a drain-loop listener's
-// lifecycle: one each for the prompter, elicitor and asker listeners,
-// because those are the three channels a SwitchTarget can replace and
-// whose requests carry a reply someone is waiting on (issue #353).
+// lifecycle. Every drain loop has one: the prompter, elicitor and asker
+// listeners (issue #353), and the notifier, wake and event listeners
+// (issue #355).
 //
 // ctx is derived from the program lifetime (listenerCtx), so shutdown
 // still releases everything at once. On top of that, applySwitchTarget
-// calls drop when it replaces the slot's field, which releases the
-// listener still parked on the OUTGOING channel rather than leaving it
-// there for the life of the program — and, worse, leaving it able to
-// carry one more request from the old host into the new session.
+// calls drop when a switch replaces the channel the slot drains, which
+// releases the listener still parked on the OUTGOING channel rather
+// than leaving it there for the life of the program — and, worse,
+// leaving it able to carry one more message from the old host into the
+// new session. The event slot is never dropped: eventCh belongs to the
+// model and outlives every session, and its messages carry sessionGen
+// instead.
 //
 // armed is what keeps the slot to exactly one consumer. It is set when
-// the listener Cmd is built and cleared when that Cmd's request reaches
+// the listener Cmd is built and cleared when that Cmd's message reaches
 // Update, so "armed" means "a goroutine is parked on this channel, or
 // its message is on its way to the loop". The listener constructors
 // return nil while it is set. That is what lets step 8 of
-// applySwitchTarget ask for a listener unconditionally: when the field
-// was kept and its listener is still parked, it gets nil instead of a
-// second consumer, which would take alternate requests.
+// applySwitchTarget ask for a listener unconditionally: when the
+// channel was kept and its listener is still parked, it gets nil
+// instead of a second consumer. A second consumer is wrong for every
+// kind: on a request channel the two take alternate requests, and on
+// the event channel each hands its message to the program from its own
+// goroutine, so two consecutive stream chunks can reach Update in the
+// opposite order to the one they were sent in.
 //
-// A listener only ever returns without a request when its ctx is done,
-// and the only things that cancel it are drop (which also clears armed)
-// and shutdown (after which nothing is armed again), so the flag cannot
-// be left set with nobody parked behind it.
+// A listener returns without a message only when its ctx is done or
+// its channel is closed. The only things that cancel the ctx are drop
+// (which also clears armed) and shutdown (after which nothing is armed
+// again). A closed channel leaves armed set with nobody parked, which
+// is what it should do: there is nothing left to read, and a fresh
+// listener would only return nil again. A switch that replaces the
+// closed source drops the slot like any other.
 //
 // epoch is the other direction: it is what stops armed being cleared
-// while a listener IS parked. drop bumps it, and every request message
-// carries the epoch its listener was armed under. A released listener
-// can still return a request — its select may find the channel ready
-// in the same instant as the cancellation — and when the session
-// switched back to that very source (A → B → A), the source alone
-// would call it current. The epoch calls it stale, so Update refuses it
-// rather than letting it clear the armed flag of the listener step 8
-// parked on the same channel.
+// while a listener IS parked. drop bumps it, and every message carries
+// the epoch its listener was armed under. A released listener can still
+// return a message — its select may find the channel ready in the same
+// instant as the cancellation — and when the session switched back to
+// that very source (A → B → A), the source alone would call it current.
+// The epoch calls it stale, so Update refuses or drops it rather than
+// letting it clear the armed flag of the listener step 8 parked on the
+// same channel.
 type listenerSlot struct {
 	ctx    context.Context
 	cancel context.CancelFunc
@@ -354,7 +364,14 @@ func (m *model) promptListener() tea.Cmd {
 // Notifier's channel and forwards each inbound notice as a
 // noticeMsg (issue #30). Re-issued by Update after every notice
 // so the loop drains continuously. Returns nil when no Notifier
-// is wired (the common case — Notifier is opt-in).
+// is wired (the common case — Notifier is opt-in), and nil when a
+// listener is already armed on it (see listenerSlot).
+//
+// The message names the Notifier it came from and the slot epoch, as
+// the request listeners' messages do, so that a notice taken by a
+// listener a session switch has since released is dropped rather than
+// painted into the new session (issue #355). A notice needs no reply,
+// so dropping is the whole answer.
 //
 // The listener context is the second exit, and it is what makes this
 // safe outside Run. Closing the Notifier is the primary one, but only
@@ -364,21 +381,21 @@ func (m *model) promptListener() tea.Cmd {
 // what embedding looks like) has nothing that ever closes the channel
 // and would park this goroutine for the life of the process.
 func (m *model) notifyListener() tea.Cmd {
-	if m.opts.Notifier == nil {
+	n := m.opts.Notifier
+	if n == nil {
 		return nil
 	}
-	ch := m.opts.Notifier.ch
-	ctx := m.listenerCtx()
+	if m.notifySlot.armed {
+		return nil
+	}
+	ctx, epoch := m.notifySlot.arm(m.listenerCtx())
 	return func() tea.Msg {
 		select {
-		case env, ok := <-ch:
+		case env, ok := <-n.ch:
 			if !ok {
 				return nil // channel closed; subscription ends
 			}
-			// Direct conversion — noticeEnvelope and noticeMsg have
-			// identical fields by design (the listener is just a
-			// channel-to-msg bridge). Keep them in sync if either grows.
-			return noticeMsg(env)
+			return noticeMsg{src: n, epoch: epoch, text: env.text, dropped: env.dropped}
 		case <-ctx.Done():
 			return nil
 		}
@@ -441,29 +458,49 @@ func (m *model) askListener() tea.Cmd {
 }
 
 // eventListener returns a Cmd that blocks on the model's event channel
-// and forwards the next message into the Bubble Tea loop. Update
-// re-issues this Cmd after every event-flavored message so the loop
-// drains the channel one message at a time without buffering issues.
+// and forwards the next message into the Bubble Tea loop, wrapped in an
+// eventMsg so Update knows the listener has delivered. Returns nil when
+// a listener is already armed on the channel (see listenerSlot).
+//
+// The channel must have exactly one consumer, and not only to save a
+// goroutine: the program runs every Cmd on a goroutine of its own and
+// sends its result from there, so two consumers that each take a
+// message can hand them to Update in either order, and a stream's
+// chunks arrive scrambled (issue #355). One consumer cannot reorder
+// anything, because it does not receive again until Update has handled
+// what it delivered and re-armed it.
+//
+// Update re-arms it for every eventMsg in one place, after the wrapped
+// message's handler has run (see the eventMsg case), so a handler that
+// forgets to — or a path that swallows the message — cannot stop the
+// drain. The many handlers that still ask for it themselves get nil
+// from the armed check, or the one listener the unwrap would otherwise
+// have built.
 //
 // eventCh is never closed — the model owns it, the dispatch goroutines
 // only ever send on it, and closing it from any of them would race the
 // others — so the listener context is this loop's only way out. It is
 // also the listener most reliably parked at shutdown, because it is
 // armed from Init on every run regardless of which capabilities the
-// host wired.
+// host wired. No switch replaces eventCh, so the slot is never dropped
+// and the message carries no epoch; a switch's stragglers are told
+// apart by the sessionGen each one carries.
 func (m *model) eventListener() tea.Cmd {
 	if m.eventCh == nil {
 		return nil
 	}
+	if m.eventSlot.armed {
+		return nil
+	}
 	ch := m.eventCh
-	ctx := m.listenerCtx()
+	ctx, _ := m.eventSlot.arm(m.listenerCtx())
 	return func() tea.Msg {
 		select {
 		case msg, ok := <-ch:
 			if !ok {
 				return nil
 			}
-			return msg
+			return eventMsg{msg: msg}
 		case <-ctx.Done():
 			return nil
 		}
@@ -577,7 +614,14 @@ func (m *model) endLiveStretch() {
 // WakeRequested channel and forwards each receive as a wakeMsg
 // (R-WAKE-1). Update re-issues the Cmd after every wakeMsg so the
 // loop drains continuously. Returns nil when the host's agent
-// doesn't satisfy WakeRequester.
+// doesn't satisfy WakeRequester, and nil when a listener is already
+// armed on the channel (see listenerSlot).
+//
+// It drains m.wakeCh, the channel read off the agent once when the
+// agent was installed (wakeChannel), not a fresh WakeRequested() per
+// re-arm. The message names that channel and the slot epoch, so that a
+// wake taken by a listener a session switch has since released is
+// dropped rather than reported in the new session (issue #355).
 //
 // The wake channel belongs to the host's agent, which is precisely
 // why this needs the listener context: the TUI has no way to close
@@ -585,26 +629,59 @@ func (m *model) endLiveStretch() {
 // without a second case the drain parks until the host happens to
 // signal — which, at shutdown, it never does.
 func (m *model) wakeListener() tea.Cmd {
-	waker, ok := m.opts.Agent.(WakeRequester)
-	if !ok {
-		return nil
-	}
-	ch := waker.WakeRequested()
+	ch := m.wakeCh
 	if ch == nil {
 		return nil
 	}
-	ctx := m.listenerCtx()
+	if m.wakeSlot.armed {
+		return nil
+	}
+	ctx, epoch := m.wakeSlot.arm(m.listenerCtx())
 	return func() tea.Msg {
 		select {
 		case _, ok := <-ch:
 			if !ok {
 				return nil // channel closed; subscription ends
 			}
-			return wakeMsg{}
+			return wakeMsg{src: ch, epoch: epoch}
 		case <-ctx.Done():
 			return nil
 		}
 	}
+}
+
+// installAgent makes agent the model's Agent. Every path that swaps the
+// agent goes through it — a session switch, /model, /reload — because
+// the wake channel comes with the agent (issue #355). When the incoming
+// agent signals on a different channel, the slot is dropped, which
+// releases the listener parked on the outgoing one; a wake that
+// listener had already taken is dropped by the wakeMsg handler. An
+// agent that hands back the same channel keeps its listener. Nothing
+// queued on the outgoing channel is drained: it is the host's, and a
+// wake carries no reply to refuse.
+//
+// It does not arm the new listener: a Cmd built and then dropped would
+// leave the slot armed with nobody parked. Callers ask wakeListener for
+// it and return what they get — step 8 of applySwitchTarget, and the
+// /model and /reload handlers — which is nil when the kept channel's
+// listener is still parked.
+func (m *model) installAgent(agent Agent) {
+	m.opts.Agent = agent
+	if w := wakeChannel(agent); w != m.wakeCh {
+		m.wakeCh = w
+		m.wakeSlot.drop()
+	}
+}
+
+// wakeChannel returns the channel agent's WakeRequester capability
+// signals on, or nil when it has none. Called once per installed agent
+// (newModel, and installAgent), which is the "once per installed agent"
+// WakeRequester documents.
+func wakeChannel(agent Agent) <-chan struct{} {
+	if w, ok := agent.(WakeRequester); ok {
+		return w.WakeRequested()
+	}
+	return nil
 }
 
 // startAgentTurn launches a goroutine that ranges over agent.Run and
