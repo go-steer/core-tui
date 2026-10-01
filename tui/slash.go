@@ -118,7 +118,11 @@ type SlashResult struct {
 //
 // See design.md §3.3 and issues #48 / #53.
 type SwitchTarget struct {
-	// Agent is the incoming Agent. Required.
+	// Agent is the incoming Agent. Required. When it implements
+	// WakeRequester with a different channel from the outgoing one,
+	// the TUI stops reading the outgoing channel, and a wake read from
+	// it but not yet shown is dropped rather than shown in the new
+	// session.
 	Agent Agent
 
 	// UsageTracker replaces Options.UsageTracker when non-nil.

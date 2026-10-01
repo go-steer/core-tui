@@ -1514,7 +1514,7 @@ func (m *model) applyReload(msg reloadDoneMsg) tea.Cmd {
 	}
 	res := msg.result
 	if res.Agent != nil {
-		m.opts.Agent = res.Agent
+		m.installAgent(res.Agent)
 	}
 	if res.Memory != nil {
 		m.opts.Memory = res.Memory
@@ -1531,7 +1531,9 @@ func (m *model) applyReload(msg reloadDoneMsg) tea.Cmd {
 	}
 	m.history.Append(Message{Role: RoleSystem, Text: note})
 	m.refreshAndScroll()
-	return m.hostSlashNamesCmd()
+	// The wake listener is nil unless the new agent brought a new wake
+	// channel (installAgent).
+	return tea.Batch(m.hostSlashNamesCmd(), m.wakeListener())
 }
 
 // remoteInterruptCmd runs a RemoteInterrupter.Interrupt in a

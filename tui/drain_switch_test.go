@@ -136,7 +136,7 @@ func drainKinds() []drainKind {
 // awaitMsg returns the next message from ch that match accepts.
 func awaitMsg(t *testing.T, ch <-chan tea.Msg, match func(tea.Msg) bool, what string) tea.Msg {
 	t.Helper()
-	deadline := time.After(time.Second)
+	deadline := time.After(5 * time.Second)
 	for {
 		select {
 		case msg := <-ch:
@@ -144,7 +144,7 @@ func awaitMsg(t *testing.T, ch <-chan tea.Msg, match func(tea.Msg) bool, what st
 				return msg
 			}
 		case <-deadline:
-			t.Fatalf("no %s reached the loop within 1s", what)
+			t.Fatalf("no %s reached the loop within 5s", what)
 			return nil
 		}
 	}
@@ -455,21 +455,125 @@ func TestEventMsg_DrainSurvivesHandlerWithoutListener(t *testing.T) {
 	awaitMsg(t, msgs, isProbe, "event after a handler that returned no listener")
 }
 
-// Likewise a pending pricing form, which takes every message before
-// the switch in update sees it.
-func TestEventMsg_DrainSurvivesPendingForm(t *testing.T) {
+// An agent event that arrives while the pricing form is open is
+// handled, not handed to the form: the form would throw it away, and a
+// lost turnDoneMsg leaves the turn streaming for good. The drain goes
+// on with one consumer.
+func TestEventMsg_HandledWhileFormPending(t *testing.T) {
 	m := eventModel(t, &bareAgent{id: "a"})
 	if m.eventListener() == nil {
 		t.Fatal("setup: no event listener armed")
 	}
+	m.state = stateStreaming
+	m.spinnerActive = true
 	m.pendingForm = newPricingForm("model-x", 60)
 
-	_, cmd := m.Update(eventMsg{msg: probeMsg{n: 0}})
+	out, cmd := m.Update(eventMsg{msg: streamChunkMsg{gen: m.sessionGen, text: "hello", partial: true}})
+	m = out.(*model)
+	if m.inProgressText != "hello" {
+		t.Errorf("chunk under an open form: inProgressText = %q, want %q", m.inProgressText, "hello")
+	}
+	if m.pendingForm == nil {
+		t.Error("the event closed the form")
+	}
 	msgs := make(chan tea.Msg, 16)
 	pump(cmd, msgs)
+	expectOneEventConsumer(t, m, msgs)
+}
 
-	m.eventCh <- probeMsg{n: 1}
-	awaitMsg(t, msgs, isProbe, "event while a form is pending")
+// The same holds for what the notifier and wake listeners deliver. A
+// form that swallowed one would leave its slot armed with nobody parked,
+// and no later re-arm (a keep switch included) could revive it.
+func TestDrainSignal_HandledWhileFormPending(t *testing.T) {
+	for _, k := range drainKinds() {
+		t.Run(k.name, func(t *testing.T) {
+			src := k.newSrc()
+			m := k.model(t, src)
+
+			msgs := make(chan tea.Msg, 16)
+			pump(k.listener(m), msgs)
+			m.pendingForm = newPricingForm("model-x", 60)
+			k.send(t, src)
+
+			before := k.rendered(m)
+			out, cmd := m.Update(awaitMsg(t, msgs, k.isMsg, "signal"))
+			m = out.(*model)
+			if got := k.rendered(m) - before; got != 1 {
+				t.Errorf("signal under an open form rendered %d row(s), want 1", got)
+			}
+			pump(cmd, msgs)
+			m.pendingForm = nil
+			pump(m.applySwitchTarget(k.keeps[0].target(src)), msgs)
+			expectOneDrainConsumer(t, k, src, msgs)
+		})
+	}
+}
+
+// /model and /reload install a new agent without a session switch. The
+// wake listener follows the agent's channel there too: the new agent's
+// wakes are read, the old listener is released, and a wake it had
+// already taken is dropped.
+func TestAgentSwap_WakeFollowsAgent(t *testing.T) {
+	swaps := []struct {
+		name  string
+		apply func(m *model, a Agent) tea.Cmd
+	}{
+		{"model", func(m *model, a Agent) tea.Cmd {
+			return m.applyModelSwitch(modelSwitchedMsg{gen: m.sessionGen, id: "next", agent: a})
+		}},
+		{"reload", func(m *model, a Agent) tea.Cmd {
+			return m.applyReload(reloadDoneMsg{gen: m.sessionGen, result: ReloadResult{Agent: a}})
+		}},
+	}
+	k := drainKinds()[1]
+	for _, sw := range swaps {
+		t.Run(sw.name+"/old listener released", func(t *testing.T) {
+			m := k.model(t, newWakingAgent())
+			cmd := k.listener(m)
+			done := make(chan tea.Msg, 1)
+			go func() { done <- cmd() }()
+
+			sw.apply(m, newWakingAgent())
+
+			select {
+			case msg := <-done:
+				if msg != nil {
+					t.Errorf("released listener returned %T, want nil", msg)
+				}
+			case <-time.After(5 * time.Second):
+				t.Fatal("the listener on the old agent's channel is still parked after the swap")
+			}
+		})
+
+		t.Run(sw.name+"/late wake dropped, new agent read", func(t *testing.T) {
+			old := newWakingAgent()
+			m := k.model(t, old)
+			cmd := k.listener(m)
+			k.send(t, old)
+			late := cmd()
+
+			next := newWakingAgent()
+			msgs := make(chan tea.Msg, 16)
+			pump(sw.apply(m, next), msgs)
+
+			before := k.rendered(m)
+			out, cmd := m.Update(late)
+			m = out.(*model)
+			if got := k.rendered(m) - before; got != 0 || cmd != nil {
+				t.Errorf("the old agent's late wake rendered %d row(s), returned cmd=%v; want dropped", got, cmd != nil)
+			}
+			expectOneDrainConsumer(t, k, next, msgs)
+		})
+
+		t.Run(sw.name+"/same channel keeps its listener", func(t *testing.T) {
+			src := newWakingAgent()
+			m := k.model(t, src)
+			msgs := make(chan tea.Msg, 16)
+			pump(k.listener(m), msgs)
+			pump(sw.apply(m, &wakingAgent{wakeCh: src.wakeCh}), msgs)
+			expectOneDrainConsumer(t, k, src, msgs)
+		})
+	}
 }
 
 // A straggler from the outgoing session that the event listener

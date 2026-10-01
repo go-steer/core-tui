@@ -168,28 +168,55 @@ func (m *model) update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	// for the next one: the handler's own re-arm when it asked for one,
 	// otherwise the one built here. Doing it here rather than trusting
 	// every handler keeps the drain alive on a path that returns no
-	// listener — a pending form below swallows every message, and an
-	// inbox state the protocol has not defined returns nil — and the
-	// armed check keeps the handlers' re-arms from adding a second.
+	// listener (an inbox state the protocol has not defined returns
+	// nil), and the armed check keeps the handlers' re-arms from adding
+	// a second.
+	//
+	// The wrapped message goes straight to handle, past the pending-form
+	// intercept below: an agent event is not form input, and handing it
+	// to the form would throw it away (a stream chunk, a turnDoneMsg).
 	if ev, ok := msg.(eventMsg); ok {
 		m.eventSlot.delivered()
-		out, cmd := m.update(ev.msg)
+		out, cmd := m.handle(ev.msg)
 		if c := m.eventListener(); c != nil {
 			cmd = tea.Batch(cmd, c)
 		}
 		return out, cmd
 	}
 
-	// Pending huh.Form intercepts EVERY tea.Msg (KeyPress,
+	// Pending huh.Form intercepts every other tea.Msg (KeyPress,
 	// WindowSize, ticks) so the embedded form runs its own
 	// state machine. On completion / abort, updatePricingForm
 	// dispatches the result + clears m.pendingForm; the
 	// remaining Update cases run on the next msg.
-	if m.pendingForm != nil {
+	//
+	// Except what a drain listener delivered (issue #355). Those are
+	// not form input either, and the form would swallow them before
+	// their handler cleared the listener's slot, leaving it armed with
+	// nobody parked, which no later re-arm could undo — and losing the
+	// message, which for a permission / elicit / ask request leaves the
+	// host waiting on a reply nobody writes.
+	if m.pendingForm != nil && !isListenerDelivery(msg) {
 		cmd := m.updatePricingForm(msg)
 		return m, cmd
 	}
+	return m.handle(msg)
+}
 
+// isListenerDelivery reports whether msg is one a drain listener
+// delivers (other than eventMsg, which update unwraps first). These
+// bypass the pending-form intercept; see update.
+func isListenerDelivery(msg tea.Msg) bool {
+	switch msg.(type) {
+	case noticeMsg, wakeMsg, permissionRequestMsg, elicitRequestMsg, askRequestMsg:
+		return true
+	}
+	return false
+}
+
+// handle is update's dispatch on message type, once the eventMsg
+// unwrap and the pending-form intercept have had their turn.
+func (m *model) handle(msg tea.Msg) (tea.Model, tea.Cmd) {
 	switch msg := msg.(type) {
 
 	case tea.WindowSizeMsg:
@@ -3311,19 +3338,10 @@ func (m *model) applySwitchTarget(tgt *SwitchTarget) tea.Cmd {
 
 	// Step 4 — swap opts fields per SwitchTarget contract
 	// (non-nil / non-zero replaces; nil / zero keeps).
-	m.opts.Agent = tgt.Agent
-	// The wake channel comes with the agent, so the agent swap is what
-	// replaces it (issue #355). Drop the slot only when the incoming
-	// agent signals on a different channel: that releases the listener
-	// parked on the outgoing one, and a wake it had already taken is
-	// dropped by the wakeMsg handler. An agent that hands back the same
-	// channel keeps its listener, so step 8 does not add a second.
-	// Nothing queued on the outgoing channel is drained: it is the
-	// host's, and a wake carries no reply to refuse.
-	if w := wakeChannel(tgt.Agent); w != m.wakeCh {
-		m.wakeCh = w
-		m.wakeSlot.drop()
-	}
+	// installAgent also releases the wake listener when the incoming
+	// agent signals on a different channel (issue #355); step 8 arms
+	// the new one.
+	m.installAgent(tgt.Agent)
 	if tgt.UsageTracker != nil {
 		m.opts.UsageTracker = tgt.UsageTracker
 	}
@@ -3435,8 +3453,8 @@ func (m *model) applySwitchTarget(tgt *SwitchTarget) tea.Cmd {
 	// prompt it delivered was on screen and step 2 resolved it without
 	// re-arming. eventCh is never replaced, so its listener armed at
 	// Init is still parked (or its message is on the way) and the
-	// constructor returns nil. Either way every channel ends the switch with exactly one
-	// consumer (issues #353 / #355).
+	// constructor returns nil. Either way every channel ends the
+	// switch with exactly one consumer (issues #353 / #355).
 	cmds := make([]tea.Cmd, 0, 8)
 	if c := m.eventListener(); c != nil {
 		cmds = append(cmds, c)

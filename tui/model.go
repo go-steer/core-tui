@@ -474,8 +474,9 @@ type model struct {
 
 	// wakeCh is the channel the installed agent's WakeRequester
 	// capability signals on (nil without one), read once when the
-	// agent is installed — newModel, and step 4 of applySwitchTarget,
-	// which drops wakeSlot when the incoming agent's channel differs.
+	// agent is installed — newModel, and installAgent (session switch,
+	// /model, /reload), which drops wakeSlot when the incoming agent's
+	// channel differs.
 	// wakeListener drains it and the wakeMsg handler checks a wake
 	// came from it (issue #355).
 	wakeCh <-chan struct{}

@@ -733,11 +733,13 @@ listed in `/help`:
 - **R-WAKE-1** When the host's agent implements the optional
   `WakeRequester` capability (`WakeRequested() <-chan struct{}`),
   the TUI subscribes to the channel at startup, reading it once per
-  installed agent (again after a session switch installs another). Each receive
-  triggers a transient toast banner rendered between the input box
-  and the footer, in the warn color, prefixed with `⚠  `. The
-  toast clears after `toastTTL` (~4 s); a fresh wake during the TTL
-  window restarts the timer. The interface makes no promise about
+  installed agent: again after a session switch, `/model` or
+  `/reload` installs another, and moving its one listener to the new
+  channel when it differs (issue #355). Each receive triggers a
+  transient toast banner rendered between the input box and the
+  footer, in the warn color, prefixed with `⚠  `. The toast clears
+  after `toastTTL` (~4 s); a fresh wake during the TTL window
+  restarts the timer. The interface makes no promise about
   coalescing — rapid back-to-back wakes render multiple toasts in
   sequence. Hosts that close the wake channel cleanly stop the
   subscription without a goroutine leak. Without the capability,

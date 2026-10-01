@@ -650,10 +650,33 @@ func (m *model) wakeListener() tea.Cmd {
 	}
 }
 
+// installAgent makes agent the model's Agent. Every path that swaps the
+// agent goes through it — a session switch, /model, /reload — because
+// the wake channel comes with the agent (issue #355). When the incoming
+// agent signals on a different channel, the slot is dropped, which
+// releases the listener parked on the outgoing one; a wake that
+// listener had already taken is dropped by the wakeMsg handler. An
+// agent that hands back the same channel keeps its listener. Nothing
+// queued on the outgoing channel is drained: it is the host's, and a
+// wake carries no reply to refuse.
+//
+// It does not arm the new listener: a Cmd built and then dropped would
+// leave the slot armed with nobody parked. Callers ask wakeListener for
+// it and return what they get — step 8 of applySwitchTarget, and the
+// /model and /reload handlers — which is nil when the kept channel's
+// listener is still parked.
+func (m *model) installAgent(agent Agent) {
+	m.opts.Agent = agent
+	if w := wakeChannel(agent); w != m.wakeCh {
+		m.wakeCh = w
+		m.wakeSlot.drop()
+	}
+}
+
 // wakeChannel returns the channel agent's WakeRequester capability
 // signals on, or nil when it has none. Called once per installed agent
-// (newModel, and step 4 of applySwitchTarget), which is the "subscribes
-// once" WakeRequester documents.
+// (newModel, and installAgent), which is the "once per installed agent"
+// WakeRequester documents.
 func wakeChannel(agent Agent) <-chan struct{} {
 	if w, ok := agent.(WakeRequester); ok {
 		return w.WakeRequested()
