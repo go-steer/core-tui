@@ -144,7 +144,7 @@ func permissionRig(t *testing.T, layout PermissionLayout) (*model, <-chan Permis
 	m := newModel(Options{Agent: &bareAgent{id: "a"}, Prompter: p, PermissionLayout: layout})
 	out, _ := m.Update(tea.WindowSizeMsg{Width: 100, Height: 30})
 	m = out.(*model)
-	out, _ = m.Update(permissionRequestMsg{req: req})
+	out, _ = m.Update(permissionRequestMsg{src: p, req: req})
 	m = out.(*model)
 	if m.openPermission() == nil {
 		t.Fatal("setup: the permission question is not on the overlay stack")

@@ -430,6 +430,10 @@ listed in `/help`:
   live stream (releases sockets / halts in-process model calls), swap
   non-nil `SwitchTarget` fields onto `Options`, re-detect `LiveAgent`
   and spawn a fresh drain if applicable, re-issue every listener.
+  The permission / elicit / ask listener on a replaced `Prompter` /
+  `Elicitor` / `Asker` is released, and a kept one is not doubled:
+  each of those channels ends the switch with exactly one consumer
+  (issue #353).
 - **R-SWITCH-5** Server-side session lifecycle is NOT core-tui's
   concern. A remote daemon observes a dropped reader and keeps the
   session running per its own policy — operators can `/switch` back
@@ -442,7 +446,11 @@ listed in `/help`:
   buffered `streamChunkMsg`, a late `turnDoneMsg`) MUST NOT leak
   content or state changes into the incoming session. A session-
   generation counter stamped by the emitter + guarded by Update
-  drops them.
+  drops them. A permission / elicit / ask request read from a
+  `Prompter` / `Elicitor` / `Asker` the switch replaced is not dropped
+  — someone is waiting on it — but answered on the source that asked
+  (deny / cancel, as for a prompt on screen at the switch) and never
+  shown in the incoming session (issue #353).
 - **R-SWITCH-8** Switch errors (`SwitchToSession` returned err,
   `SwitchTarget.Agent == nil`) are non-fatal — a `RoleError` row
   is rendered and the current session stays attached.

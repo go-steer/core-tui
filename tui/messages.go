@@ -146,6 +146,10 @@ type pendingExitClearMsg struct{}
 // the modal-pending state; the modal's key handler dispatches the
 // decision back via Prompter.dispatchDecision.
 type permissionRequestMsg struct {
+	// src is the prompter the request was read from. Update compares
+	// it with the session's current prompter: a request from one a
+	// switch has replaced is denied on src, never shown (issue #353).
+	src *Prompter
 	req PermissionRequest
 	// offerReason is true when the host asked through
 	// AskApprovalDetailed, and is what puts the "r" deny-with-reason
@@ -158,6 +162,9 @@ type permissionRequestMsg struct {
 // elicit-pending state; the form's key handler dispatches the
 // result back via elicitor.dispatchResult.
 type elicitRequestMsg struct {
+	// src is the elicitor the request was read from; a request from a
+	// replaced one is cancelled on src (issue #353).
+	src        *elicitor
 	serverName string
 	req        ElicitRequest
 }
@@ -167,6 +174,9 @@ type elicitRequestMsg struct {
 // (R-PROMPT-1, issue #255). Update screens it and opens the question;
 // the answer goes back via asker.dispatchResult.
 type askRequestMsg struct {
+	// src is the asker the question was read from; a question from a
+	// replaced one is cancelled on src (issue #353).
+	src *asker
 	req AskRequest
 }
 

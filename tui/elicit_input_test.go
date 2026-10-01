@@ -157,7 +157,7 @@ func elicitFlowFor(t *testing.T, req ElicitRequest) (*model, chan ElicitResult) 
 	m := newModel(Options{Elicitor: e})
 	out, _ := m.Update(tea.WindowSizeMsg{Width: 100, Height: 40})
 	m = out.(*model)
-	out, _ = m.Update(elicitRequestMsg{serverName: "srv", req: req})
+	out, _ = m.Update(elicitRequestMsg{src: e, serverName: "srv", req: req})
 	m = out.(*model)
 	if m.openElicit() == nil {
 		t.Fatal("setup: elicitRequestMsg did not open the modal")
@@ -442,7 +442,7 @@ func unsupportedElicitFlow(t *testing.T, req ElicitRequest, server string) (*mod
 	m := newModel(Options{Elicitor: e})
 	out, _ := m.Update(tea.WindowSizeMsg{Width: 100, Height: 40})
 	m = out.(*model)
-	out, cmd := m.Update(elicitRequestMsg{serverName: server, req: req})
+	out, cmd := m.Update(elicitRequestMsg{src: e, serverName: server, req: req})
 	return out.(*model), replies, cmd
 }
 

@@ -560,7 +560,7 @@ func TestApplySwitchTarget_AnswersAPendingPrompt(t *testing.T) {
 		if !ok {
 			t.Fatal("nextRequest returned !ok with a pending request")
 		}
-		out, _ := m.Update(permissionRequestMsg{req: req})
+		out, _ := m.Update(permissionRequestMsg{src: p, req: req})
 		m = out.(*model)
 		if m.openPermission() == nil {
 			t.Fatal("the permission question was not seeded; the arm proves nothing")
@@ -599,7 +599,7 @@ func TestApplySwitchTarget_AnswersAPendingPrompt(t *testing.T) {
 		if !ok {
 			t.Fatal("nextRequest returned !ok with a pending request")
 		}
-		out, _ := m.Update(elicitRequestMsg{serverName: flow.serverName, req: flow.req})
+		out, _ := m.Update(elicitRequestMsg{src: e.(*elicitor), serverName: flow.serverName, req: flow.req})
 		m = out.(*model)
 		if m.openElicit() == nil {
 			t.Fatal("the elicit form is not open; the arm proves nothing")
