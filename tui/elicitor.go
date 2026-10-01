@@ -281,17 +281,48 @@ func elicitUnsupportedNotice(serverName string, req ElicitRequest) string {
 }
 
 // nextRequest is the Bubble Tea side's blocking read; mirrors the
-// Prompter's namesake.
+// Prompter's nextFlow: recv, then accept.
 func (e *elicitor) nextRequest(ctx context.Context) (elicitFlow, bool) {
+	flow, ok := e.recv(ctx)
+	if ok {
+		e.accept(flow)
+	}
+	return flow, ok
+}
+
+// recv / accept / refuseQueued mirror the Prompter's (issue #353):
+// the listener only receives, and Update either accepts the flow as
+// pending or refuses it with refuseElicit.
+func (e *elicitor) recv(ctx context.Context) (elicitFlow, bool) {
 	select {
 	case flow := <-e.requests:
-		e.mu.Lock()
-		e.pending = &flow
-		e.mu.Unlock()
 		return flow, true
 	case <-ctx.Done():
 		return elicitFlow{}, false
 	}
+}
+
+func (e *elicitor) accept(flow elicitFlow) {
+	e.mu.Lock()
+	e.pending = &flow
+	e.mu.Unlock()
+}
+
+func (e *elicitor) refuseQueued() {
+	for {
+		select {
+		case flow := <-e.requests:
+			refuseElicit(flow.response)
+		default:
+			return
+		}
+	}
+}
+
+// refuseElicit cancels one never-accepted flow directly; see
+// refusePermission.
+func refuseElicit(response chan elicitResponse) {
+	response <- elicitResponse{result: ElicitResult{Action: ElicitActionCancel}}
 }
 
 // dispatchResult writes the operator's submit / decline / cancel to

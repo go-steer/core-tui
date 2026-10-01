@@ -1351,24 +1351,27 @@ func (m *model) update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		// and a tick that auto-clears the toast after toastTTL.
 		return m, tea.Batch(m.wakeListener(), toastTick())
 	case permissionRequestMsg:
-		if p, _ := m.opts.Prompter.(*Prompter); msg.src != p {
-			// From a prompter a session switch has since replaced: the
-			// old listener took the request in the window before step 8
-			// released it (issue #353). Showing it would put the old
-			// host's question over the new session, and the answer
-			// would go to m.opts.Prompter — the new prompter, which has
-			// no flow pending and drops it, leaving the old host parked
-			// on a reply nobody writes. Deny it on the prompter that
-			// asked, the answer a prompt on screen at the switch gets
-			// (dismissSuperseded), with no transcript row for the same
-			// reason that one leaves none: it belongs to the session
-			// the operator left. No re-arm either — the listener this
-			// came from is gone, and the current prompter's own slot is
-			// untouched.
-			if msg.src != nil {
-				msg.src.dispatchDecision(DecisionDeny, "")
+		p, _ := m.opts.Prompter.(*Prompter)
+		if msg.src != p || msg.epoch != m.promptSlot.epoch {
+			// From a listener a session switch has since released: it
+			// took the request in the window before step 4 cancelled it
+			// (issue #353). Showing it would put the old host's
+			// question over the new session, and the answer would go to
+			// m.opts.Prompter's pending flow — the new prompter's, or
+			// nobody's — leaving the old host parked on a reply nobody
+			// writes. Deny it on the flow that asked, the answer a
+			// prompt on screen at the switch gets (dismissSuperseded),
+			// with no transcript row for the same reason that one
+			// leaves none: it belongs to the session the operator left.
+			// No re-arm either — the listener this came from is gone,
+			// and the current slot is untouched.
+			if msg.resp != nil {
+				refusePermission(msg.resp)
 			}
 			return m, nil
+		}
+		if msg.resp != nil {
+			p.accept(permissionFlow{req: msg.req, response: msg.resp, offerReason: msg.offerReason})
 		}
 		m.promptSlot.delivered()
 		// askAgent, not askOperator: the prompt arrived unbidden, so
@@ -1394,13 +1397,18 @@ func (m *model) update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		// the operator's next keypress.
 		return m, forceRenderTick()
 	case elicitRequestMsg:
-		if e, _ := m.opts.Elicitor.(*elicitor); msg.src != e {
-			// From a replaced elicitor — cancelled there, never shown,
-			// not re-armed. Same reasoning as the permission arm above.
-			if msg.src != nil {
-				msg.src.dispatchResult(ElicitResult{Action: ElicitActionCancel}, nil)
+		e, _ := m.opts.Elicitor.(*elicitor)
+		if msg.src != e || msg.epoch != m.elicitSlot.epoch {
+			// From a released listener — cancelled on its own flow,
+			// never shown, not re-armed. Same reasoning as the
+			// permission arm above.
+			if msg.resp != nil {
+				refuseElicit(msg.resp)
 			}
 			return m, nil
+		}
+		if msg.resp != nil {
+			e.accept(elicitFlow{serverName: msg.serverName, req: msg.req, response: msg.resp})
 		}
 		m.elicitSlot.delivered()
 		r := msg.req
@@ -1437,13 +1445,18 @@ func (m *model) update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		// or background goroutine need the kick so the form paints.
 		return m, forceRenderTick()
 	case askRequestMsg:
-		if a, _ := m.opts.Asker.(*asker); msg.src != a {
-			// From a replaced asker — cancelled there, never shown, not
-			// re-armed. Same reasoning as the permission arm above.
-			if msg.src != nil {
-				msg.src.dispatchResult(AskResult{Action: AskCancelled}, nil)
+		a, _ := m.opts.Asker.(*asker)
+		if msg.src != a || msg.epoch != m.askSlot.epoch {
+			// From a released listener — cancelled on its own flow,
+			// never shown, not re-armed. Same reasoning as the
+			// permission arm above.
+			if msg.resp != nil {
+				refuseAsk(msg.resp)
 			}
 			return m, nil
+		}
+		if msg.resp != nil {
+			a.accept(askFlow{req: msg.req, response: msg.resp})
 		}
 		m.askSlot.delivered()
 		r := msg.req
@@ -3267,22 +3280,50 @@ func (m *model) applySwitchTarget(tgt *SwitchTarget) tea.Cmd {
 	// Replacing a Prompter / Elicitor / Asker also drops its listener
 	// slot (issue #353): the listener parked on the outgoing channel is
 	// released instead of leaked, and step 8 arms a fresh one on the
-	// incoming channel. A request that old listener had already taken
-	// is still on its way to Update, stamped with the outgoing source,
-	// and the request handlers answer it there. A kept field keeps its
-	// slot — and its parked listener, if it has one — so step 8 does
-	// not add a second consumer to the same channel.
+	// incoming channel. Requests already queued on the outgoing channel
+	// are refused here, since nothing will read them again; one the old
+	// listener had already taken is still on its way to Update, stamped
+	// with the outgoing source and epoch, and the request handlers
+	// refuse it there. A kept field keeps its slot — and its parked
+	// listener, if it has one — so step 8 does not add a second
+	// consumer to the same channel. "Kept" is decided on the concrete
+	// pointer the listener drains, so a host that hands back the same
+	// instance keeps it too; comparing the interface values instead
+	// would panic on a host prompter of a non-comparable type. A host
+	// PermissionPrompter of its own has no listener and no slot use,
+	// so dropping on a switch to or from one costs nothing.
 	if tgt.Prompter != nil {
+		oldP, _ := m.opts.Prompter.(*Prompter)
+		newP, _ := tgt.Prompter.(*Prompter)
 		m.opts.Prompter = tgt.Prompter
-		m.promptSlot.drop()
+		if oldP != newP {
+			m.promptSlot.drop()
+			if oldP != nil {
+				oldP.refuseQueued()
+			}
+		}
 	}
 	if tgt.Elicitor != nil {
+		oldE, _ := m.opts.Elicitor.(*elicitor)
+		newE, _ := tgt.Elicitor.(*elicitor)
 		m.opts.Elicitor = tgt.Elicitor
-		m.elicitSlot.drop()
+		if oldE != newE {
+			m.elicitSlot.drop()
+			if oldE != nil {
+				oldE.refuseQueued()
+			}
+		}
 	}
 	if tgt.Asker != nil {
+		oldA, _ := m.opts.Asker.(*asker)
+		newA, _ := tgt.Asker.(*asker)
 		m.opts.Asker = tgt.Asker
-		m.askSlot.drop()
+		if oldA != newA {
+			m.askSlot.drop()
+			if oldA != nil {
+				oldA.refuseQueued()
+			}
+		}
 	}
 	if tgt.Notifier != nil {
 		m.opts.Notifier = tgt.Notifier

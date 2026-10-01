@@ -237,21 +237,33 @@ func (m *model) endListeners() {
 // and the only things that cancel it are drop (which also clears armed)
 // and shutdown (after which nothing is armed again), so the flag cannot
 // be left set with nobody parked behind it.
+//
+// epoch is the other direction: it is what stops armed being cleared
+// while a listener IS parked. drop bumps it, and every request message
+// carries the epoch its listener was armed under. A released listener
+// can still return a request — its select may find the channel ready
+// in the same instant as the cancellation — and when the session
+// switched back to that very source (A → B → A), the source alone
+// would call it current. The epoch calls it stale, so Update refuses it
+// rather than letting it clear the armed flag of the listener step 8
+// parked on the same channel.
 type listenerSlot struct {
 	ctx    context.Context
 	cancel context.CancelFunc
 	armed  bool
+	epoch  uint64
 }
 
 // arm marks the slot armed and returns the context the listener Cmd
-// should park on, deriving it from parent on first use. Callers check
-// armed first; arm does not, so that the check reads at the call site.
-func (s *listenerSlot) arm(parent context.Context) context.Context {
+// should park on, deriving it from parent on first use, and the epoch
+// its message must carry. Callers check armed first; arm does not, so
+// that the check reads at the call site.
+func (s *listenerSlot) arm(parent context.Context) (context.Context, uint64) {
 	if s.ctx == nil {
 		s.ctx, s.cancel = context.WithCancel(parent)
 	}
 	s.armed = true
-	return s.ctx
+	return s.ctx, s.epoch
 }
 
 // delivered records that the slot's listener handed its request to
@@ -259,13 +271,14 @@ func (s *listenerSlot) arm(parent context.Context) context.Context {
 func (s *listenerSlot) delivered() { s.armed = false }
 
 // drop releases the listener parked on the slot (if any) and resets
-// the slot, so the next arm parks on a fresh context. Called when the
-// channel the slot drains is replaced.
+// the slot under a new epoch, so the next arm parks on a fresh context
+// and anything the released listener still delivers reads as stale.
+// Called when the channel the slot drains is replaced.
 func (s *listenerSlot) drop() {
 	if s.cancel != nil {
 		s.cancel()
 	}
-	*s = listenerSlot{}
+	*s = listenerSlot{epoch: s.epoch + 1}
 }
 
 // quitCmd ends the listener lifetime and returns the Cmd that stops
@@ -294,10 +307,12 @@ func (m *model) quitCmd() tea.Cmd {
 // when no prompter is wired, and nil when a listener is already armed
 // on it (see listenerSlot): there is only ever one consumer.
 //
-// The message names the prompter it came from, so that Update can
-// tell a request from a prompter a session switch has since replaced
-// and answer it there instead of opening it over the new session
-// (issue #353).
+// The message names the prompter it came from and the slot epoch the
+// listener was armed under, and carries the flow's response channel,
+// so that Update can tell a request from a listener a session switch
+// has since released and answer that flow directly instead of opening
+// it over the new session (issue #353). The listener only receives;
+// making the flow pending is Update's job, on the loop.
 //
 // The listener context is captured here, at Cmd-construction time on
 // the event loop, rather than read out of the model inside the
@@ -322,13 +337,16 @@ func (m *model) promptListener() tea.Cmd {
 		// prompter is the one that will deliver its next request.
 		return nil
 	}
-	ctx := m.promptSlot.arm(m.listenerCtx())
+	ctx, epoch := m.promptSlot.arm(m.listenerCtx())
 	return func() tea.Msg {
-		flow, ok := p.nextFlow(ctx)
+		flow, ok := p.recv(ctx)
 		if !ok {
 			return nil
 		}
-		return permissionRequestMsg{src: p, req: flow.req, offerReason: flow.offerReason}
+		return permissionRequestMsg{
+			src: p, epoch: epoch, resp: flow.response,
+			req: flow.req, offerReason: flow.offerReason,
+		}
 	}
 }
 
@@ -383,13 +401,16 @@ func (m *model) elicitListener() tea.Cmd {
 	if m.elicitSlot.armed {
 		return nil
 	}
-	ctx := m.elicitSlot.arm(m.listenerCtx())
+	ctx, epoch := m.elicitSlot.arm(m.listenerCtx())
 	return func() tea.Msg {
-		flow, ok := e.nextRequest(ctx)
+		flow, ok := e.recv(ctx)
 		if !ok {
 			return nil
 		}
-		return elicitRequestMsg{src: e, serverName: flow.serverName, req: flow.req}
+		return elicitRequestMsg{
+			src: e, epoch: epoch, resp: flow.response,
+			serverName: flow.serverName, req: flow.req,
+		}
 	}
 }
 
@@ -409,13 +430,13 @@ func (m *model) askListener() tea.Cmd {
 	if m.askSlot.armed {
 		return nil
 	}
-	ctx := m.askSlot.arm(m.listenerCtx())
+	ctx, epoch := m.askSlot.arm(m.listenerCtx())
 	return func() tea.Msg {
-		flow, ok := a.nextRequest(ctx)
+		flow, ok := a.recv(ctx)
 		if !ok {
 			return nil
 		}
-		return askRequestMsg{src: a, req: flow.req}
+		return askRequestMsg{src: a, epoch: epoch, resp: flow.response, req: flow.req}
 	}
 }
 

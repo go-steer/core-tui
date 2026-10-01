@@ -240,27 +240,73 @@ func (p *Prompter) ask(ctx context.Context, req PermissionRequest, offerReason b
 	}
 }
 
-// nextRequest is the Bubble Tea side's blocking read. The
-// permission listener Cmd calls it; on receive it stashes the
-// flow as pending (so the modal renderer can find it) and
-// returns the request payload for Update.
+// nextRequest is a blocking read that also stashes the flow as
+// pending, so dispatchDecision can answer it, and returns the request
+// payload. The listener Cmd does not use it — it receives with recv
+// and leaves accepting to Update (issue #353) — but tests that stand
+// in for the listener do.
 func (p *Prompter) nextRequest(ctx context.Context) (PermissionRequest, bool) {
 	flow, ok := p.nextFlow(ctx)
 	return flow.req, ok
 }
 
-// nextFlow is nextRequest returning the whole flow, which is what the
-// listener needs: whether the request offers the reason step is a
-// property of how it was asked, not of the request itself.
+// nextFlow is nextRequest returning the whole flow: recv, then accept.
+// Kept for callers that read the channel directly (the tests); the
+// listener uses recv and leaves accept to Update.
 func (p *Prompter) nextFlow(ctx context.Context) (permissionFlow, bool) {
+	flow, ok := p.recv(ctx)
+	if ok {
+		p.accept(flow)
+	}
+	return flow, ok
+}
+
+// recv takes the next flow off the channel WITHOUT making it the
+// pending one. The listener runs it off the loop and Update decides
+// whether the flow is accepted (shown, answered through pending) or
+// refused on the spot because a session switch replaced this prompter
+// (issue #353). Setting pending here instead, off the loop, would let
+// a listener the switch released overwrite the flow a current one had
+// just delivered.
+func (p *Prompter) recv(ctx context.Context) (permissionFlow, bool) {
 	select {
 	case flow := <-p.requests:
-		p.mu.Lock()
-		p.pending = &flow
-		p.mu.Unlock()
 		return flow, true
 	case <-ctx.Done():
 		return permissionFlow{}, false
+	}
+}
+
+// accept makes flow the pending one, which dispatchDecision answers.
+// Called on the loop, for a request Update is about to show.
+func (p *Prompter) accept(flow permissionFlow) {
+	p.mu.Lock()
+	p.pending = &flow
+	p.mu.Unlock()
+}
+
+// refusePermission denies one flow directly, without touching pending: the
+// answer to a request from a prompter the session no longer uses
+// (issue #353). The flow was taken off the channel exactly once and
+// never accepted, so this is its only writer, and response is
+// buffered cap 1, so it never blocks.
+func refusePermission(response chan permissionResponse) {
+	response <- permissionResponse{decision: DecisionDeny}
+}
+
+// refuseQueued denies every request already waiting on the channel —
+// the buffered one and any sender parked behind it — without
+// blocking. applySwitchTarget calls it on a prompter it has just
+// replaced, whose listener it has released: nothing will read those
+// requests again, and a deny now beats a host waiting out its own ctx.
+func (p *Prompter) refuseQueued() {
+	for {
+		select {
+		case flow := <-p.requests:
+			refusePermission(flow.response)
+		default:
+			return
+		}
 	}
 }
 

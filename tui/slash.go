@@ -132,13 +132,14 @@ type SwitchTarget struct {
 	// question / notice pipes keep working. Hosts that want to fully
 	// sever those channels supply fresh instances here.
 	//
-	// Replacing a Prompter / Elicitor / Asker detaches the TUI from
-	// the outgoing one: a request it had already read is answered
-	// there (deny for a permission, cancel for an elicit or ask) rather
-	// than shown in the new session, and the TUI stops reading it. A
-	// request the host sends to the outgoing one after that is never
-	// read and waits on the caller's ctx, so a host should stop routing
-	// to it once the switch is made.
+	// Replacing a Prompter / Elicitor / Asker (a different instance;
+	// the same one handed back is a keep) detaches the TUI from the
+	// outgoing one: requests already sent to it are answered there
+	// (deny for a permission, cancel for an elicit or ask) rather than
+	// shown in the new session, and the TUI stops reading it. A request
+	// the host sends to the outgoing one after the switch is never read
+	// and waits on the caller's ctx, so a host should stop routing to
+	// it once the switch is made.
 	Prompter PermissionPrompter
 	Elicitor Elicitor
 	Asker    Asker

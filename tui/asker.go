@@ -301,17 +301,47 @@ func askUnsupportedNotice(req AskRequest) string {
 }
 
 // nextRequest is the Bubble Tea side's blocking read; mirrors the
-// Prompter's and the Elicitor's namesakes.
+// Prompter's nextFlow and the Elicitor's nextRequest: recv, then
+// accept.
 func (a *asker) nextRequest(ctx context.Context) (askFlow, bool) {
+	flow, ok := a.recv(ctx)
+	if ok {
+		a.accept(flow)
+	}
+	return flow, ok
+}
+
+// recv / accept / refuseQueued mirror the Prompter's (issue #353).
+func (a *asker) recv(ctx context.Context) (askFlow, bool) {
 	select {
 	case flow := <-a.requests:
-		a.mu.Lock()
-		a.pending = &flow
-		a.mu.Unlock()
 		return flow, true
 	case <-ctx.Done():
 		return askFlow{}, false
 	}
+}
+
+func (a *asker) accept(flow askFlow) {
+	a.mu.Lock()
+	a.pending = &flow
+	a.mu.Unlock()
+}
+
+func (a *asker) refuseQueued() {
+	for {
+		select {
+		case flow := <-a.requests:
+			refuseAsk(flow.response)
+		default:
+			return
+		}
+	}
+}
+
+// refuseAsk cancels one never-accepted flow directly; see
+// refusePermission.
+func refuseAsk(response chan askResponse) {
+	response <- askResponse{result: AskResult{Action: AskCancelled}}
 }
 
 // dispatchResult writes the operator's answer to the pending flow.

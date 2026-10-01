@@ -243,19 +243,25 @@ func awaitReq(t *testing.T, k listenerKind, ch <-chan tea.Msg) tea.Msg {
 	}
 }
 
-// countReqs counts the request messages of kind k that arrive on ch
-// within window.
-func countReqs(k listenerKind, ch <-chan tea.Msg, window time.Duration) int {
-	n := 0
-	deadline := time.After(window)
+// expectOneConsumer starts two requests on src and requires exactly one
+// of them to reach the loop: one consumer takes the first and leaves
+// the second queued, two take one each. The first is awaited with the
+// usual generous timeout so a slow run cannot fail it; only the
+// absence of a second rides on the short window.
+func expectOneConsumer(t *testing.T, k listenerKind, src any, ch <-chan tea.Msg) {
+	t.Helper()
+	k.ask(t.Context(), src)
+	k.ask(t.Context(), src)
+	awaitReq(t, k, ch)
+	deadline := time.After(200 * time.Millisecond)
 	for {
 		select {
 		case msg := <-ch:
 			if k.isReq(msg) {
-				n++
+				t.Fatal("a second listener delivered a request: the channel has two consumers")
 			}
 		case <-deadline:
-			return n
+			return
 		}
 	}
 }
@@ -381,12 +387,21 @@ func TestSwitch_KeptSourceHasOneConsumer(t *testing.T) {
 			pump(k.listener(m), msgs)
 			pump(m.applySwitchTarget(k.target(nil)), msgs)
 
-			// Two requests: with two consumers each takes one.
-			k.ask(t.Context(), src)
-			k.ask(t.Context(), src)
-			if n := countReqs(k, msgs, 300*time.Millisecond); n != 1 {
-				t.Errorf("%d listeners delivered a request after the switch, want exactly 1", n)
-			}
+			expectOneConsumer(t, k, src, msgs)
+		})
+
+		t.Run(k.name+"/same instance handed back", func(t *testing.T) {
+			// A non-nil field naming the instance already in use is a
+			// keep, not a replace: its parked listener stays the one
+			// consumer.
+			src := k.newSrc()
+			m := switchModel(t, k, src)
+
+			msgs := make(chan tea.Msg, 16)
+			pump(k.listener(m), msgs)
+			pump(m.applySwitchTarget(k.target(src)), msgs)
+
+			expectOneConsumer(t, k, src, msgs)
 		})
 
 		t.Run(k.name+"/request on screen", func(t *testing.T) {
@@ -407,11 +422,74 @@ func TestSwitch_KeptSourceHasOneConsumer(t *testing.T) {
 				t.Errorf("superseded request got %q, want refused", got)
 			}
 
-			k.ask(t.Context(), src)
-			k.ask(t.Context(), src)
-			if n := countReqs(k, msgs, 300*time.Millisecond); n != 1 {
-				t.Errorf("%d listeners delivered a request after the switch, want exactly 1", n)
+			expectOneConsumer(t, k, src, msgs)
+		})
+	}
+}
+
+// Requests still queued on a replaced source when the switch lands —
+// the buffered one and a sender parked behind it — are refused there:
+// the switch released the only thing that would ever read them.
+func TestSwitch_QueuedRequestsOnReplacedSourceAreRefused(t *testing.T) {
+	for _, k := range listenerKinds() {
+		t.Run(k.name, func(t *testing.T) {
+			old := k.newSrc()
+			m := switchModel(t, k, old)
+
+			first := k.ask(t.Context(), old)
+			second := k.ask(t.Context(), old)
+			// Let both reach the channel: one in the buffer, one
+			// parked in the send behind it.
+			time.Sleep(50 * time.Millisecond)
+
+			m.applySwitchTarget(k.target(k.newSrc()))
+
+			for i, ch := range []<-chan string{first, second} {
+				if got := awaitHostOutcome(t, ch, "queued request"); got != "refused" {
+					t.Errorf("queued request %d got %q, want refused", i, got)
+				}
 			}
+			if k.open(m) {
+				t.Error("a queued request opened a question over the new session")
+			}
+		})
+	}
+}
+
+// A released listener can still deliver after the session has switched
+// back to its source (A → B → A). Its request is refused like any
+// other from a released listener, and it does not disarm the listener
+// step 8 parked on that same source, which would let the next re-arm
+// add a second consumer.
+func TestSwitch_ReleasedListenerOnReturnedSourceIsStale(t *testing.T) {
+	for _, k := range listenerKinds() {
+		t.Run(k.name, func(t *testing.T) {
+			a := k.newSrc()
+			m := switchModel(t, k, a)
+
+			oldCmd := k.listener(m)
+			outcome := k.ask(t.Context(), a)
+			late := oldCmd()
+
+			m.applySwitchTarget(k.target(k.newSrc()))
+			msgs := make(chan tea.Msg, 16)
+			pump(m.applySwitchTarget(k.target(a)), msgs)
+
+			out, cmd := m.Update(late)
+			m = out.(*model)
+			if got := awaitHostOutcome(t, outcome, "released listener's request"); got != "refused" {
+				t.Errorf("released listener's request got %q, want refused", got)
+			}
+			if k.open(m) {
+				t.Error("the released listener's request opened a question")
+			}
+			if cmd != nil {
+				t.Error("the released listener's request returned a Cmd; it must not re-arm")
+			}
+			// The listener step 8 parked on A must still count as the
+			// consumer, so asking for another builds none.
+			pump(k.listener(m), msgs)
+			expectOneConsumer(t, k, a, msgs)
 		})
 	}
 }
