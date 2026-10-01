@@ -25,6 +25,10 @@ The wire protocol in [`docs/sse-event-stream-protocol.md`](./docs/sse-event-stre
 
 ## [Unreleased]
 
+## [0.28.1] — 2026-10-01
+
+Session switches stop leaking listeners. Every channel the TUI drains for a host (permission, elicit, ask, notify, wake, and the agent event channel) now has exactly one listener after a switch, the listener on a replaced source is released, and nothing a replaced source delivers in the switch window lands in the new session. A permission, elicit or ask request the old listener had already taken is answered on the flow that asked, with a deny or a cancel, rather than its answer going to the new host. The event-channel fix also stops stream chunks reaching the transcript out of order, which an attached `LiveAgent` session could see from startup without any switch. Pairs with core-agent's per-session prompt bridge (core-agent#1185). Patch release: fixes only, no exported API change.
+
 ### Fixed
 
 - **Permission, elicit and ask requests no longer follow the operator into a new session when a switch replaces their source.** When a session switch (`SwitchTarget`) replaced the `Prompter`, `Elicitor` or `Asker`, the listener parked on the outgoing one stayed parked for the life of the program. A host still delivering in the switch window could push one more request through it: the prompt opened over the new session, and the operator's answer went to the new prompter, which had nothing pending and dropped it, leaving the old host waiting on a reply nobody would write. Now replacing a source releases its listener and refuses whatever is already queued on it, and a request the old listener had already taken is answered on the flow that asked — a deny for a permission, a cancel for an elicit or ask, the same answer a prompt on screen at the switch gets — and opens nothing. A kept source (`SwitchTarget` field nil, or the same instance handed back), which is what core-agent does, now ends the switch with exactly one listener instead of two taking alternate requests. A request a host sends to a replaced source after the switch is not read; it waits until the host's own context ends, as it would on any unattended source. No exported API change. (#353)
@@ -833,7 +837,8 @@ Initial release: `package tui` extracted from the duplicated `internal/tui` tree
 - **Performance and terminal-fidelity work** — incremental Glamour streaming, an auto-growing textarea, hanging-indent word wrap that preserves source leading whitespace, and the viewport's `h`/`j`/`k`/`l`/arrow bindings disabled with `xOffset` pinned to 0 so a wide line can't shift the whole chat sideways.
 - **The docs that govern all of it** — `docs/requirements.md`, `docs/design.md`, `docs/decisions.md`, `docs/style.md`, `docs/ui-references.md`, and `MIGRATION.md`.
 
-[Unreleased]: https://github.com/go-steer/core-tui/compare/v0.28.0...HEAD
+[Unreleased]: https://github.com/go-steer/core-tui/compare/v0.28.1...HEAD
+[0.28.1]: https://github.com/go-steer/core-tui/compare/v0.28.0...v0.28.1
 [0.28.0]: https://github.com/go-steer/core-tui/compare/v0.27.1...v0.28.0
 [0.27.1]: https://github.com/go-steer/core-tui/compare/v0.27.0...v0.27.1
 [0.27.0]: https://github.com/go-steer/core-tui/compare/v0.26.0...v0.27.0
