@@ -146,7 +146,17 @@ type pendingExitClearMsg struct{}
 // the modal-pending state; the modal's key handler dispatches the
 // decision back via Prompter.dispatchDecision.
 type permissionRequestMsg struct {
-	req PermissionRequest
+	// src, epoch and resp identify where the request came from and
+	// how to answer it (issue #353). Update compares src with the
+	// session's current prompter and epoch with promptSlot's: a request
+	// from a listener a switch has released is denied on resp, never
+	// shown. A current one is accepted onto src as its pending flow.
+	// resp is nil only on messages tests build by hand, whose flow a
+	// direct nextRequest already made pending.
+	src   *Prompter
+	epoch uint64
+	resp  chan permissionResponse
+	req   PermissionRequest
 	// offerReason is true when the host asked through
 	// AskApprovalDetailed, and is what puts the "r" deny-with-reason
 	// key on the prompt (R-PERM-9).
@@ -158,6 +168,10 @@ type permissionRequestMsg struct {
 // elicit-pending state; the form's key handler dispatches the
 // result back via elicitor.dispatchResult.
 type elicitRequestMsg struct {
+	// src / epoch / resp: as on permissionRequestMsg (issue #353).
+	src        *elicitor
+	epoch      uint64
+	resp       chan elicitResponse
 	serverName string
 	req        ElicitRequest
 }
@@ -167,7 +181,11 @@ type elicitRequestMsg struct {
 // (R-PROMPT-1, issue #255). Update screens it and opens the question;
 // the answer goes back via asker.dispatchResult.
 type askRequestMsg struct {
-	req AskRequest
+	// src / epoch / resp: as on permissionRequestMsg (issue #353).
+	src   *asker
+	epoch uint64
+	resp  chan askResponse
+	req   AskRequest
 }
 
 // askEditorDoneMsg carries the outcome of the AskLongText round trip

@@ -455,6 +455,15 @@ type model struct {
 	lifeCtx    context.Context
 	lifeCancel context.CancelFunc
 
+	// promptSlot / elicitSlot / askSlot scope the prompter, elicitor
+	// and asker listeners to the channel they drain, under lifeCtx:
+	// applySwitchTarget drops a slot when it replaces that field, and
+	// the slot keeps each channel to one consumer (issue #353). See
+	// listenerSlot in agentcmd.go.
+	promptSlot listenerSlot
+	elicitSlot listenerSlot
+	askSlot    listenerSlot
+
 	// Viewport-refresh coalescing (perf: attach to long remote
 	// sessions used to be O(N²) because each incoming event walked
 	// the full history, concatenated every rendered message, and

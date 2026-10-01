@@ -70,7 +70,7 @@ func askFlowRaw(t *testing.T, req AskRequest) (*model, chan askReply, tea.Cmd) {
 	m := newModel(Options{Asker: a})
 	out, _ := m.Update(tea.WindowSizeMsg{Width: 100, Height: 40})
 	m = out.(*model)
-	out, cmd := m.Update(askRequestMsg{req: req})
+	out, cmd := m.Update(askRequestMsg{src: a, req: req})
 	return out.(*model), replies, cmd
 }
 

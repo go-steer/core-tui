@@ -42,7 +42,7 @@ func graceRig(t *testing.T) (*model, *Prompter, <-chan PermissionDecision) {
 	m := newModel(Options{Prompter: p})
 	out, _ := m.Update(tea.WindowSizeMsg{Width: 100, Height: 40})
 	m = out.(*model)
-	out, _ = m.Update(permissionRequestMsg{req: req})
+	out, _ = m.Update(permissionRequestMsg{src: p, req: req})
 	m = out.(*model)
 	if m.openPermission() == nil {
 		t.Fatal("setup: expected the permission modal to be open")
@@ -174,7 +174,7 @@ func TestElicitGrace_HoldsCommitKeysOnly(t *testing.T) {
 	m := newModel(Options{Elicitor: e})
 	out, _ := m.Update(tea.WindowSizeMsg{Width: 100, Height: 40})
 	m = out.(*model)
-	out, _ = m.Update(elicitRequestMsg{serverName: "srv", req: req})
+	out, _ = m.Update(elicitRequestMsg{src: e, serverName: "srv", req: req})
 	m = out.(*model)
 	if m.overlayStack.asked(elicitDialogID).shownAt.IsZero() {
 		t.Fatal("setup: elicitRequestMsg did not stamp the grace window")
