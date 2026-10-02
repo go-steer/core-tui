@@ -2045,7 +2045,7 @@ func (m *model) handleKey(msg tea.KeyPressMsg) tea.Cmd {
 			return nil
 		}
 		prev := m.permMode
-		m.permMode = prev.Next()
+		m.permMode = m.opts.PermissionMode.next(prev)
 		return permissionModeCmd(m.opts.PermissionMode, m.sessionGen, prev, m.permMode)
 
 	case "ctrl+g":

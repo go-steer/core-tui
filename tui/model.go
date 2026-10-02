@@ -723,6 +723,7 @@ func NewModel(opts Options) tea.Model {
 // first, then SeedHistory entries are appended in order, before the
 // first render.
 func newModel(opts Options) *model {
+	opts.PermissionMode.Cycle = normalizeCycle(opts.PermissionMode.Cycle)
 	ta := textarea.New()
 	ta.Placeholder = "Type a message and hit Enter. /help for commands."
 	if opts.Branding.InputPlaceholder != "" {

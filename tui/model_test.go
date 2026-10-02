@@ -18,6 +18,7 @@ import (
 	"image/color"
 	"os"
 	"path/filepath"
+	"slices"
 	"strings"
 	"testing"
 
@@ -100,6 +101,105 @@ func TestUpdate_PermissionMode_Cycles(t *testing.T) {
 func TestPermissionMode_Next_WrapsAtBypass(t *testing.T) {
 	if PermissionModeBypass.Next() != PermissionModeDefault {
 		t.Errorf("Bypass.Next() = %s, want default", PermissionModeBypass.Next())
+	}
+}
+
+// The default cycle is exactly the four it always was (#360): auto is
+// not in it, and a mode outside it — auto, or a value outside the
+// declared set — re-enters at default rather than escaping the cycle.
+func TestPermissionMode_Next_DefaultCycle(t *testing.T) {
+	want := map[PermissionMode]PermissionMode{
+		PermissionModeDefault:     PermissionModeAcceptEdits,
+		PermissionModeAcceptEdits: PermissionModePlan,
+		PermissionModePlan:        PermissionModeBypass,
+		PermissionModeBypass:      PermissionModeDefault,
+		PermissionModeAuto:        PermissionModeDefault,
+		PermissionMode(-1):        PermissionModeDefault,
+		PermissionMode(-2):        PermissionModeDefault, // -1 alone would pass by +1 arithmetic
+		PermissionMode(99):        PermissionModeDefault,
+	}
+	for from, to := range want {
+		if got := from.Next(); got != to {
+			t.Errorf("%d.Next() = %s, want %s", int(from), got, to)
+		}
+	}
+}
+
+func TestPermissionMode_AutoLabel(t *testing.T) {
+	if got := PermissionModeAuto.String(); got != "auto" {
+		t.Errorf("PermissionModeAuto.String() = %q, want \"auto\"", got)
+	}
+}
+
+// A host-supplied cycle (#360): Shift+Tab follows it and wraps, and a
+// current mode the cycle does not list advances to its first entry.
+func TestPermissionModeWiring_Cycle(t *testing.T) {
+	w := PermissionModeWiring{Cycle: []PermissionMode{
+		PermissionModeDefault, PermissionModeAuto, PermissionModeAcceptEdits, PermissionModePlan, PermissionModeBypass,
+	}}
+	path := []PermissionMode{PermissionModeAuto, PermissionModeAcceptEdits, PermissionModePlan, PermissionModeBypass, PermissionModeDefault}
+	m := PermissionModeDefault
+	for _, want := range path {
+		if m = w.next(m); m != want {
+			t.Fatalf("cycle went to %s, want %s", m, want)
+		}
+	}
+	// The first entry is deliberately not default, where the default
+	// cycle would also send auto.
+	short := PermissionModeWiring{Cycle: []PermissionMode{PermissionModePlan, PermissionModeBypass}}
+	if got := short.next(PermissionModeAuto); got != PermissionModePlan {
+		t.Errorf("a mode outside the cycle went to %s, want the cycle's first entry (plan)", got)
+	}
+	if got := (PermissionModeWiring{}).next(PermissionModePlan); got != PermissionModeBypass {
+		t.Errorf("nil Cycle: plan went to %s, want the default cycle's bypassPermissions", got)
+	}
+}
+
+// A host's Cycle is copied, de-duplicated (a repeat would make every
+// entry after it unreachable) and cleared of undeclared values (the
+// chip would read "default" while Set received the stray value).
+func TestNewModel_NormalizesTheCycle(t *testing.T) {
+	cycle := []PermissionMode{PermissionModeDefault, PermissionModeAuto, PermissionModeDefault, PermissionMode(7), PermissionModePlan}
+	m := newModel(Options{PermissionMode: PermissionModeWiring{Set: func(PermissionMode) error { return nil }, Cycle: cycle}})
+	got := m.opts.PermissionMode.Cycle
+	want := []PermissionMode{PermissionModeDefault, PermissionModeAuto, PermissionModePlan}
+	if !slices.Equal(got, want) {
+		t.Fatalf("cycle = %v, want %v", got, want)
+	}
+	cycle[1] = PermissionModeBypass
+	if m.opts.PermissionMode.Cycle[1] != PermissionModeAuto {
+		t.Error("the TUI shares the host's slice; a later edit changed its cycle")
+	}
+	bad := newModel(Options{PermissionMode: PermissionModeWiring{Cycle: []PermissionMode{-1, 42}}})
+	if bad.opts.PermissionMode.Cycle != nil {
+		t.Errorf("a cycle of only undeclared values = %v, want nil (the default four)", bad.opts.PermissionMode.Cycle)
+	}
+}
+
+// End to end through Update: Shift+Tab moves the chip along the host's
+// cycle and hands that mode to Set.
+func TestUpdate_PermissionMode_FollowsHostCycle(t *testing.T) {
+	var lastSet PermissionMode = -1
+	m := newModel(Options{
+		PermissionMode: PermissionModeWiring{
+			Initial: PermissionModeDefault,
+			Set:     func(mode PermissionMode) error { lastSet = mode; return nil },
+			Cycle:   []PermissionMode{PermissionModeDefault, PermissionModeAuto, PermissionModeAcceptEdits},
+		},
+	})
+	shiftTab := tea.KeyPressMsg(tea.Key{Code: tea.KeyTab, Mod: tea.ModShift})
+	out, cmd := m.Update(shiftTab)
+	if got := out.(*model).permMode; got != PermissionModeAuto {
+		t.Fatalf("permMode = %s, want auto", got)
+	}
+	if cmd == nil {
+		t.Fatal("shift+tab returned no Cmd")
+	}
+	if _, ok := cmd().(permissionModeAppliedMsg); !ok || lastSet != PermissionModeAuto {
+		t.Errorf("Set received %s, want auto", lastSet)
+	}
+	if !strings.Contains(out.(*model).renderPermissionChip(), "auto") {
+		t.Errorf("chip does not read auto: %q", out.(*model).renderPermissionChip())
 	}
 }
 
