@@ -25,6 +25,10 @@ The wire protocol in [`docs/sse-event-stream-protocol.md`](./docs/sse-event-stre
 
 ## [Unreleased]
 
+## [0.29.0] — 2026-10-02
+
+The TUI can show core-agent's auto permission mode (go-steer/core-agent#1175), in which a host-side approver model decides some calls before a person is asked. `PermissionModeAuto` adds a fifth chip. A host-supplied Shift+Tab cycle lets a host offer `auto` only when the session can enter it, so the chip can never trap an operator in front of a mode the host refuses. A prompt the approver passed on says so, quotes the approver's reason as untrusted text that can't forge a row or push the payload off the screen, and offers only allow once and deny, so an approver's answer can never become a standing grant. `ApprovalLog.Approver` lets the approval history show that a model, not a person, allowed a call. Minor release: four additive changes to the exported API and no break. Design: [`docs/auto-permission-mode-design.md`](./docs/auto-permission-mode-design.md).
+
 ### Added
 
 - **A fifth permission mode, `auto`, and a host-supplied Shift+Tab cycle.** `PermissionModeAuto` (label `auto`) is ask with a host-side approver in front of the person, for core-agent's auto mode (go-steer/core-agent#1175). It is appended to the enum, so existing values don't move. `PermissionModeWiring.Cycle` sets the order Shift+Tab visits. nil keeps the default four, and a current mode the cycle doesn't list advances to its first entry. The cycle is read once at startup: copied, with duplicates and undeclared values dropped. A host lists `auto` only when its `Set` will accept it: a refused mode rolls the chip back, and the next keystroke would try it again, so a fixed cycle could keep an operator from getting past it. `PermissionMode.Next` keeps the default four, and now sends any mode outside them to `default`. Before, `% 4` left a negative value stuck and sent other undeclared values around the cycle. Design: [`docs/auto-permission-mode-design.md`](./docs/auto-permission-mode-design.md). (#360)
