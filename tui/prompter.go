@@ -93,6 +93,24 @@ type PermissionRequest struct {
 	// the host knows what scope to write to disk.
 	PersistTool string
 	PersistKey  string
+
+	// Escalation is set when a host-side approver looked at the call
+	// first and passed it on to the operator rather than deciding it
+	// (core-agent's auto mode). The prompt then offers only allow once
+	// and deny — plus deny with a reason when that is offered — and
+	// quotes the approver's reason. nil is an ordinary prompt.
+	Escalation *PermissionEscalation
+}
+
+// PermissionEscalation describes the approver that passed a request
+// on. Both fields are rendered as untrusted text: the reason is model
+// output, and the call's own arguments can steer it.
+type PermissionEscalation struct {
+	// Approver names the approver, typically its model ID.
+	Approver string
+	// Reason is the approver's explanation, or "" when it gave none
+	// the host chose to show (a failed or unreadable answer).
+	Reason string
 }
 
 // PermissionDecision is the operator's choice. Six values per

@@ -336,7 +336,11 @@ listed in `/help`:
 - **R-PERM-2** The modal supports six decisions: `y` allow-once,
   `n`/`esc` deny, `s` allow-session, `v` allow-session-verb (suppress
   if no verb is extractable), `t` allow-session-tool, `a`
-  allow-always (persisted).
+  allow-always (persisted). A request a host-side approver passed on
+  (`PermissionRequest.Escalation`) offers only `y` and `n`/`esc`, plus
+  `r` when the deny reason is offered (R-PERM-9), and quotes the
+  approver's reason as untrusted text
+  ([`auto-permission-mode-design.md`](./auto-permission-mode-design.md)).
 - **R-PERM-3** Allow-always invokes a host callback to persist; if
   the host didn't wire one, fall back to allow-session and log a
   system message.

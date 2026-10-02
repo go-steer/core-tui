@@ -539,6 +539,9 @@ type ApprovalLog struct {
     // field existed, because a placeholder in an audit line reads
     // like an attribution rather than the absence of one.
     By string
+    // Approver is the host-side approver (a model) that allowed the
+    // call without asking a person. Optional, like By.
+    Approver string
 }
 
 // PricingController backs /pricing.
@@ -947,6 +950,16 @@ type PermissionRequest struct {
     // callback.
     PersistTool string
     PersistKey  string
+
+    // Set when a host-side approver passed the request on: the modal
+    // offers allow once and deny only, and quotes Reason as the
+    // approver's words. See auto-permission-mode-design.md.
+    Escalation *PermissionEscalation
+}
+
+type PermissionEscalation struct {
+    Approver string // typically the approver's model ID
+    Reason   string // untrusted model output; sanitized and capped
 }
 
 // DetailKind picks the Glamour code-fence language tag the modal

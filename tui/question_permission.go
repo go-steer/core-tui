@@ -46,9 +46,11 @@
 package tui
 
 import (
+	"fmt"
 	"image/color"
 	"strconv"
 	"strings"
+	"unicode/utf8"
 
 	"charm.land/bubbles/v2/textinput"
 	tea "charm.land/bubbletea/v2"
@@ -131,8 +133,13 @@ func newPermissionQuestion(req PermissionRequest, layout PermissionLayout, offer
 	opts := []permissionOption{
 		{"y", "allow once", DecisionAllowOnce},
 		{"n", "deny", DecisionDeny},
-		{"s", "allow session", DecisionAllowSession},
 	}
+	if req.Escalation != nil {
+		// An approver passed this on. Its answer must never turn into a
+		// standing grant, so the prompt offers once and deny only.
+		return finishPermissionQuestion(req, opts, layout, offerReason)
+	}
+	opts = append(opts, permissionOption{"s", "allow session", DecisionAllowSession})
 	// The verb-scoped grant exists only when the payload had a verb to
 	// scope it to. Conditional in ONE place now: the legend and the key
 	// switch both read this slice, so a prompt with no verb cannot
@@ -144,6 +151,11 @@ func newPermissionQuestion(req PermissionRequest, layout PermissionLayout, offer
 		permissionOption{"t", "allow tool", DecisionAllowSessionTool},
 		permissionOption{"a", "allow always", DecisionAllowAlways},
 	)
+	return finishPermissionQuestion(req, opts, layout, offerReason)
+}
+
+// finishPermissionQuestion builds the prompt around opts.
+func finishPermissionQuestion(req PermissionRequest, opts []permissionOption, layout PermissionLayout, offerReason bool) *permissionQuestion {
 	inline := layout != PermissionOverlay
 	q := &permissionQuestion{
 		req:         req,
@@ -457,6 +469,7 @@ func (q *permissionQuestion) Body(width, termHeight int, st styleSet) string {
 	if q.req.Source != "" {
 		lines = append(lines, st.Muted.Render("from sub-agent: "+q.req.Source))
 	}
+	lines = append(lines, q.escalationLines(bodyWidth, st)...)
 	if q.req.Verb != "" {
 		lines = append(lines, st.Muted.Render("verb: "+q.req.Verb))
 	}
@@ -548,6 +561,7 @@ func (q *permissionQuestion) InlineBody(width int, st styleSet) string {
 	if q.req.Source != "" {
 		lines = append(lines, st.Muted.Render("from sub-agent: "+q.req.Source))
 	}
+	lines = append(lines, q.escalationLines(bodyWidth, st)...)
 	if q.req.Verb != "" {
 		lines = append(lines, st.Muted.Render("verb: "+q.req.Verb))
 	}
@@ -572,6 +586,101 @@ func (q *permissionQuestion) InlineBody(width int, st styleSet) string {
 	// footer when the block is the last thing in the chat column.
 	b.WriteString("\n" + warn.Render(tailCap))
 	return b.String()
+}
+
+// permissionEscalationReasonMax caps the approver's reason, in bytes,
+// before it is wrapped: long enough for a sentence or two.
+const permissionEscalationReasonMax = 600
+
+// permissionEscalationRowsMax caps the quoted reason's wrapped rows.
+// With newlines collapsed (untrustedRow) the byte cap alone already
+// bounds it at a narrow terminal; this is what holds it at a very
+// narrow one, so the approver's words can never push the payload the
+// operator is deciding on off the first screen.
+const permissionEscalationRowsMax = 6
+
+// permissionEscalationApproverMax caps the approver's name, in bytes.
+const permissionEscalationApproverMax = 64
+
+// escalationLines are the rows that say an approver passed this request
+// on, and why, or nil for an ordinary prompt. The approver's words are
+// untrusted model output, so they are sanitized and capped, set off in
+// quotes, and rendered muted and italic, distinct from the lines the
+// host wrote.
+func (q *permissionQuestion) escalationLines(width int, st styleSet) []string {
+	e := q.req.Escalation
+	if e == nil {
+		return nil
+	}
+	approver := untrustedRow(e.Approver, permissionEscalationApproverMax)
+	if approver == "" {
+		approver = "the approver"
+	}
+	reason := untrustedRow(e.Reason, permissionEscalationReasonMax)
+	if reason == "" {
+		return []string{st.Muted.Render("passed to you by " + approver + ", with no reason given")}
+	}
+	lines := []string{st.Muted.Render("passed to you by " + approver + ", which said:")}
+	quoted := st.Muted.Italic(true)
+	rows := strings.Split(wordWrap("“"+reason+"”", max(width-2, 1)), "\n")
+	if len(rows) > permissionEscalationRowsMax {
+		rows = rows[:permissionEscalationRowsMax]
+		rows[len(rows)-1] += GlyphTruncate
+	}
+	for _, wl := range rows {
+		lines = append(lines, quoted.Render("  "+wl))
+	}
+	return lines
+}
+
+// untrustedRow renders untrusted text as one paragraph of at most n
+// bytes. Beyond sanitizeContent it collapses every run of whitespace,
+// newlines included, to one space — a newline in the text would start a
+// row the text controls, which can forge a host line ("verb: ls") or
+// push the payload off screen — and it escapes the invisible characters
+// that reorder or hide text (bidi controls, zero-width characters).
+func untrustedRow(s string, n int) string {
+	s = escapeInvisible(sanitizeContent(s))
+	return capBytes(strings.Join(strings.Fields(s), " "), n)
+}
+
+// escapeInvisible replaces the bidi controls and zero-width characters
+// — which a terminal applying the Unicode bidi algorithm would use to
+// reorder or hide the text around them — with a visible \uXXXX token, so the operator can see something was there.
+func escapeInvisible(s string) string {
+	var b strings.Builder
+	for _, r := range s {
+		if isInvisible(r) {
+			fmt.Fprintf(&b, "\\u%04x", r)
+			continue
+		}
+		b.WriteRune(r)
+	}
+	return b.String()
+}
+
+func isInvisible(r rune) bool {
+	switch {
+	case r >= 0x200b && r <= 0x200f, // zero-width space/joiners, LRM, RLM
+		r >= 0x202a && r <= 0x202e, // bidi embeddings and overrides
+		r >= 0x2066 && r <= 0x2069, // bidi isolates
+		r == 0xfeff:                // zero-width no-break space
+		return true
+	}
+	return false
+}
+
+// capBytes cuts s to at most n bytes on a rune boundary, marking the
+// cut with GlyphTruncate.
+func capBytes(s string, n int) string {
+	if len(s) <= n {
+		return s
+	}
+	cut := n
+	for cut > 0 && !utf8.RuneStart(s[cut]) {
+		cut--
+	}
+	return s[:cut] + GlyphTruncate
 }
 
 // permissionMinContrast is the contrast ratio the inline block's
