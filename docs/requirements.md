@@ -361,8 +361,12 @@ listed in `/help`:
   tools auto-allow; everything else still asks), `plan` (no tool
   calls execute; the agent is restricted to planning + read-only
   tools), and `bypassPermissions` (every tool call auto-allows —
-  destructive mode, the chip renders with a warning style).
-  `Shift+Tab` cycles through the four states. When the host doesn't
+  destructive mode, the chip renders with a warning style). A fifth
+  state, `auto`, is ask with a host-side approver in front of the
+  person ([`auto-permission-mode-design.md`](./auto-permission-mode-design.md)).
+  `Shift+Tab` cycles through the four default states, or through the
+  host's `Options.PermissionMode.Cycle` when it sets one; `auto` is
+  only ever in a host-supplied cycle. When the host doesn't
   wire `Options.PermissionMode` the chip is hidden and `Shift+Tab`
   has no effect.
 - **R-PERM-7** Mode changes invoke `Options.PermissionMode.Set(mode)`

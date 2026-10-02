@@ -25,6 +25,10 @@ The wire protocol in [`docs/sse-event-stream-protocol.md`](./docs/sse-event-stre
 
 ## [Unreleased]
 
+### Added
+
+- **A fifth permission mode, `auto`, and a host-supplied Shift+Tab cycle.** `PermissionModeAuto` (label `auto`) is ask with a host-side approver in front of the person, for core-agent's auto mode (go-steer/core-agent#1175). It is appended to the enum, so existing values don't move. `PermissionModeWiring.Cycle` sets the order Shift+Tab visits. nil keeps the default four, and a current mode the cycle doesn't list advances to its first entry. The cycle is read once at startup: copied, with duplicates and undeclared values dropped. A host lists `auto` only when its `Set` will accept it: a refused mode rolls the chip back, and the next keystroke would try it again, so a fixed cycle could keep an operator from getting past it. `PermissionMode.Next` keeps the default four, and now sends any mode outside them to `default`. Before, `% 4` left a negative value stuck and sent other undeclared values around the cycle. Design: [`docs/auto-permission-mode-design.md`](./docs/auto-permission-mode-design.md). (#360)
+
 ## [0.28.1] — 2026-10-01
 
 Session switches stop leaking listeners. Every channel the TUI drains for a host (permission, elicit, ask, notify, wake, and the agent event channel) now has exactly one listener after a switch, the listener on a replaced source is released, and nothing a replaced source delivers in the switch window lands in the new session. A permission, elicit or ask request the old listener had already taken is answered on the flow that asked, with a deny or a cancel, rather than its answer going to the new host. The event-channel fix also stops stream chunks reaching the transcript out of order, which an attached `LiveAgent` session could see from startup without any switch. Pairs with core-agent's per-session prompt bridge (core-agent#1185). Patch release: fixes only, no exported API change.

@@ -876,6 +876,7 @@ type PermissionModeWiring struct {
     Initial PermissionMode
     Set     func(PermissionMode) error
     Persist func(PermissionMode) error
+    Cycle   []PermissionMode // Shift+Tab order; nil = the default four
 }
 
 type PermissionMode int
@@ -885,6 +886,7 @@ const (
     PermissionModeAcceptEdits
     PermissionModePlan
     PermissionModeBypass
+    PermissionModeAuto // only in a host-supplied Cycle; see auto-permission-mode-design.md
 )
 
 type StatusLayout int

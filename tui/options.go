@@ -435,6 +435,51 @@ type PermissionModeWiring struct {
 	Initial PermissionMode
 	Set     func(PermissionMode) error
 	Persist func(PermissionMode) error
+
+	// Cycle is the order Shift+Tab visits, wrapping at the end. nil or
+	// empty is the default four (PermissionMode.Next). A current mode
+	// that Cycle does not list advances to Cycle[0].
+	//
+	// List only modes Set will accept. Set refusing a mode rolls the
+	// chip back, and the next Shift+Tab lands on that mode again, so a
+	// refused mode in the cycle keeps the operator from getting past it.
+	//
+	// Read once, when the TUI starts: it is copied, a repeated entry
+	// keeps its first position, and a value outside the declared modes
+	// is dropped. It does not change on a session switch, so a host
+	// whose sessions differ in what Set accepts must list only what
+	// every session accepts.
+	Cycle []PermissionMode
+}
+
+// normalizeCycle is Cycle as the TUI uses it: a copy, first occurrence
+// of each mode only, declared modes only. nil when nothing is left, so
+// a cycle of only bad entries falls back to the default four rather
+// than to an empty cycle.
+func normalizeCycle(cycle []PermissionMode) []PermissionMode {
+	var out []PermissionMode
+	seen := map[PermissionMode]bool{}
+	for _, m := range cycle {
+		if m < PermissionModeDefault || m > PermissionModeAuto || seen[m] {
+			continue
+		}
+		seen[m] = true
+		out = append(out, m)
+	}
+	return out
+}
+
+// next is the mode Shift+Tab moves to from m.
+func (w PermissionModeWiring) next(m PermissionMode) PermissionMode {
+	if len(w.Cycle) == 0 {
+		return m.Next()
+	}
+	for i, c := range w.Cycle {
+		if c == m {
+			return w.Cycle[(i+1)%len(w.Cycle)]
+		}
+	}
+	return w.Cycle[0]
 }
 
 // PermissionMode is the agent-wide approval policy.
@@ -445,6 +490,12 @@ const (
 	PermissionModeAcceptEdits                       // file-edit tools auto-allow
 	PermissionModePlan                              // no tool calls execute
 	PermissionModeBypass                            // every tool call auto-allows
+	// PermissionModeAuto is ask with an approver in front of the
+	// person: a host-side model may allow a call once, deny it, or
+	// pass it to the person's ordinary prompt. Not in the default
+	// cycle; a host lists it in PermissionModeWiring.Cycle when the
+	// session can enter it.
+	PermissionModeAuto
 )
 
 // String returns the canonical name of the mode.
@@ -456,6 +507,8 @@ func (m PermissionMode) String() string {
 		return "plan"
 	case PermissionModeBypass:
 		return "bypassPermissions"
+	case PermissionModeAuto:
+		return "auto"
 	case PermissionModeDefault:
 	}
 	// The zero value, and any mode outside the declared set, is
@@ -463,7 +516,14 @@ func (m PermissionMode) String() string {
 	return "default"
 }
 
-// Next returns the next mode in the Shift+Tab cycle.
+// Next returns the next mode in the default Shift+Tab cycle:
+// default → acceptEdits → plan → bypassPermissions → default. A mode
+// outside that cycle — PermissionModeAuto, or a value outside the
+// declared set — goes to default. A host that wants another order sets
+// PermissionModeWiring.Cycle.
 func (m PermissionMode) Next() PermissionMode {
-	return (m + 1) % 4
+	if m < PermissionModeDefault || m >= PermissionModeBypass {
+		return PermissionModeDefault
+	}
+	return m + 1
 }
