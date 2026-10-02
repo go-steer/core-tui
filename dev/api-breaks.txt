@@ -17,6 +17,12 @@
 # sit behind the new baseline, and a leftover entry would silently permit
 # a second, unrelated removal of a symbol that no longer exists.
 #
+# Nothing to empty at v0.29.0 either: verify-apidiff reported four
+# compatible additions across the cycle, #360's PermissionModeAuto,
+# PermissionModeWiring.Cycle, PermissionRequest.Escalation (with
+# PermissionEscalation) and ApprovalLog.Approver, and no break. They are
+# why this was a minor release.
+#
 # Nothing to empty at v0.28.1 either: a fix-only patch release, and
 # verify-apidiff reported no change to the exported API across the
 # cycle. #354 and #356 only touched unexported listener state.
