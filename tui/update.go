@@ -3600,6 +3600,13 @@ func sliceContains(xs []string, target string) bool {
 // config.json). Errors are surfaced inline so the operator knows
 // the allow-always didn't stick.
 func (m *model) dispatchPermission(d PermissionDecision, reason string, req PermissionRequest) {
+	// An escalated prompt only offers once and deny. The prompt's option
+	// list already enforces that; this is the second line, so nothing
+	// that reaches dispatch some other way can turn an approver's
+	// escalation into a standing grant — or fire AlwaysAllow for one.
+	if req.Escalation != nil && d != DecisionAllowOnce && d != DecisionDeny {
+		d = DecisionDeny
+	}
 	if d != DecisionDeny {
 		reason = ""
 	}

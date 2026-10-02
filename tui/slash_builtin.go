@@ -1413,9 +1413,16 @@ func renderApprovalLog(logs []ApprovalLog) string {
 	var b strings.Builder
 	fmt.Fprintf(&b, "/permissions: %d decision(s) this session\n", len(logs))
 	for _, l := range logs {
-		fmt.Fprintf(&b, "  • %s — %s [%s]", l.Tool, l.Key, l.Decision)
-		if l.By != "" {
-			fmt.Fprintf(&b, " by %s", l.By)
+		// Key is the model's call arguments and By a name the host
+		// relayed: one row each, sanitized, so neither can draw a row or
+		// an escape sequence of its own.
+		fmt.Fprintf(&b, "  • %s — %s [%s]", untrustedRow(l.Tool, perLineByteCap), untrustedRow(l.Key, perLineByteCap), untrustedRow(l.Decision, perLineByteCap))
+		switch {
+		case l.Approver != "":
+			// A model decided this one; By, if a host set it too, did not.
+			fmt.Fprintf(&b, " by approver %s", untrustedRow(l.Approver, permissionEscalationApproverMax))
+		case l.By != "":
+			fmt.Fprintf(&b, " by %s", untrustedRow(l.By, perLineByteCap))
 		}
 		b.WriteByte('\n')
 	}

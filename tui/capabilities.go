@@ -210,6 +210,11 @@ type ApprovalLog struct {
 	// in an audit line is indistinguishable at a glance from a name
 	// somebody actually verified (issue #277).
 	By string
+	// Approver names the host-side approver (typically a model ID)
+	// that allowed the call without asking a person, as core-agent's
+	// auto mode does. Optional, like By: empty renders as before. A
+	// row with Approver set was decided by a model, not by By.
+	Approver string
 }
 
 // PricingController backs /pricing refresh + /pricing set

@@ -1,8 +1,7 @@
 # Auto permission mode: the chip, the cycle and the escalated prompt
 
-**Status:** in progress ([#360](https://github.com/go-steer/core-tui/issues/360)).
-The chip and the cycle are implemented; the escalated prompt and
-`ApprovalLog.Approver` follow. API: [`design.md`](./design.md) §3.5.
+**Status:** implemented ([#360](https://github.com/go-steer/core-tui/issues/360)).
+API: [`design.md`](./design.md) §3.5.
 
 ## Problem
 
@@ -35,9 +34,22 @@ type PermissionModeWiring struct {
 }
 ```
 
-The escalated prompt adds an optional field to `PermissionRequest`. A
-request that carries it offers allow once, deny, and deny with a reason,
-and quotes the approver's reason in both layouts. `ApprovalLog` gains
+```go
+type PermissionRequest struct {
+    // ...
+    Escalation *PermissionEscalation // nil: an ordinary prompt
+}
+
+type PermissionEscalation struct {
+    Approver string
+    Reason   string
+}
+```
+
+A request with an `Escalation` offers allow once, deny, and deny with a
+reason (when the request came in through `AskApprovalDetailed`). It
+quotes the approver's reason in both layouts, under "passed to you by
+<approver>, which said:". `ApprovalLog` gains
 `Approver`, the model that allowed a call, so the approval history can
 show that a model and not a person decided.
 
@@ -73,14 +85,29 @@ show that a model and not a person decided.
    session's gate inherits both.
 6. **`auto` uses the ordinary chip style.** Only `bypassPermissions` is
    loud. `auto` still puts every call it cannot allow in front of a person.
-7. **An escalated prompt keeps "deny with a reason".** Decision 11 forbids
-   the grants an approver's answer could otherwise become: allow for the
+7. **An escalated prompt keeps "deny with a reason".** core-agent's
+   decision 11 (its `docs/auto-mode-design.md`) forbids the grants an approver's answer could otherwise become: allow for the
    session, the verb or the tool, and allow always. A reason grants
    nothing, and it tells the agent why.
 8. **The approver's reason is untrusted text.** It is model output, and
    arguments planted in the call can steer it ("routine, safe to always
-   allow"). It is sanitized, capped, labelled as the approver's words, and
-   rendered distinctly from host-authored lines.
+   allow"). It is labelled as the approver's words and rendered as one
+   quoted, indented, muted-italic paragraph:
+   - every whitespace run, newlines included, collapses to one space, so
+     it can never start a row of its own (a forged `verb:` line, a fake
+     legend);
+   - it is sanitized, and bidi controls and zero-width characters are
+     shown as `\uXXXX` rather than obeyed;
+   - it is capped at 600 bytes and 6 wrapped rows, so it can never push
+     the payload off the first screen.
+
+   The approver's name gets the same treatment, as one row of at most 64
+   bytes.
+9. **The once-or-deny restriction is enforced twice.** The prompt offers
+   only those options, and the dispatch path turns any other decision on
+   an escalated request into a deny, so `AlwaysAllow` can never fire for
+   one. The host should still refuse standing grants on its own side:
+   the TUI is not the security boundary.
 
 ## Out of scope
 
