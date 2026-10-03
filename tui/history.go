@@ -303,7 +303,7 @@ func (h *History) SetToolResult(i int, response map[string]any, errStr string, l
 // MarkLastUserAutoContinue flips Message.AutoContinue=true on the
 // most-recently-appended RoleUser entry (and bumps its Version so
 // the lazy-render cache invalidates). Used by the AutoContinueFromInbox
-// loop (issue #9): submitTurn appends the RoleUser as an operator-
+// loop (issue #9): submitTypedTurn appends the RoleUser as an operator-
 // typed prompt; this helper retro-fits the synthesized marker so
 // the renderer picks the ↻ glyph + muted style on the next paint.
 // No-op when there's no RoleUser entry in history.

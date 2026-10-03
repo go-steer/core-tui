@@ -30,7 +30,7 @@ func streamingModel(t *testing.T) (*model, uint64) {
 	t.Helper()
 	m := newModel(Options{Agent: stubAgent{}})
 	m.viewport.SetWidth(80)
-	m.submitTurn("first prompt")
+	m.submitTypedTurn("first prompt")
 	if m.state != stateStreaming {
 		t.Fatalf("setup: state = %v, want stateStreaming", m.state)
 	}
@@ -46,7 +46,7 @@ func TestSubmitTurn_BumpsSpinnerGeneration(t *testing.T) {
 	m, first := streamingModel(t)
 	before := m.sessionGen
 
-	m.submitTurn("second prompt")
+	m.submitTypedTurn("second prompt")
 	if m.spinnerGen == first {
 		t.Errorf("spinnerGen unchanged across turns (%d) — a second turn would share the first's tick chain", first)
 	}
@@ -63,7 +63,7 @@ func TestSpinnerTick_StaleChainDroppedAndDoesNotReArm(t *testing.T) {
 	m, stale := streamingModel(t)
 
 	// Second turn begins while turn one's tick is still in flight.
-	m.submitTurn("second prompt")
+	m.submitTypedTurn("second prompt")
 	if m.state != stateStreaming {
 		t.Fatalf("setup: state = %v, want stateStreaming", m.state)
 	}
@@ -106,7 +106,7 @@ func TestSpinnerTick_CurrentChainRotatesAndReArms(t *testing.T) {
 // not twice.
 func TestSpinnerTick_TwoChainsAdvanceVerbPoolOnce(t *testing.T) {
 	m, stale := streamingModel(t)
-	m.submitTurn("second prompt")
+	m.submitTypedTurn("second prompt")
 	fresh := m.spinnerGen
 	idxBefore := m.spinnerFrame
 
@@ -159,7 +159,7 @@ func TestSpinnerTick_AutoContinueRetiresPreviousChain(t *testing.T) {
 		MidTurnInjectionMode: AutoContinueFromInbox,
 	})
 	m.viewport.SetWidth(80)
-	m.submitTurn("first prompt")
+	m.submitTypedTurn("first prompt")
 	stale := m.spinnerGen
 
 	cmd, ok := m.maybeAutoContinue()
@@ -184,7 +184,7 @@ func TestSpinnerTick_AutoContinueRetiresPreviousChain(t *testing.T) {
 }
 
 // TestSpinnerTick_LiveAgentStretchStillAnimates guards the path that
-// never touches submitTurn: LiveAgent hosts flip spinnerActive from
+// never touches submitTypedTurn: LiveAgent hosts flip spinnerActive from
 // applyStreamChunk. That stretch has to get its own generation and
 // keep ticking — the new guard must not starve it.
 func TestSpinnerTick_LiveAgentStretchStillAnimates(t *testing.T) {

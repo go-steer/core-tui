@@ -769,8 +769,8 @@ func (m *model) syncFollow() {
 //
 // Two paths answer that question differently, and the difference is
 // issue #135. The per-turn Run path carries it in m.state, which
-// submitTurn sets to stateStreaming. The LiveAgent path (#22) never
-// calls submitTurn: it is driven from applyStreamChunk, which
+// submitTypedTurn sets to stateStreaming. The LiveAgent path (#22) never
+// calls submitTypedTurn: it is driven from applyStreamChunk, which
 // accumulates m.inProgressText and flips m.spinnerActive but leaves
 // m.state at stateIdle. A gate that asks only about m.state therefore
 // answers "nothing in flight" for the whole of an autonomous stretch,

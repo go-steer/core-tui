@@ -42,12 +42,12 @@ func elapsedModel(t *testing.T, at *time.Time) *model {
 	m := newModel(Options{Agent: stubAgent{}})
 	m.now = fixedClock(at)
 	m.viewport.SetWidth(80)
-	m.submitTurn("how long is this going to take")
+	m.submitTypedTurn("how long is this going to take")
 	if m.state != stateStreaming {
 		t.Fatalf("setup: state = %v, want stateStreaming", m.state)
 	}
 	if m.turnStarted.IsZero() {
-		t.Fatal("setup: submitTurn left turnStarted at the zero value")
+		t.Fatal("setup: submitTypedTurn left turnStarted at the zero value")
 	}
 	return m
 }
@@ -195,7 +195,7 @@ func TestElapsed_NotRenderedWhenIdle(t *testing.T) {
 
 // TestElapsed_LiveAgentPathStampsTheStretch is the bug this feature
 // could most easily have shipped: the LiveAgent path never calls
-// submitTurn, so an unstamped turnStarted would measure from the
+// submitTypedTurn, so an unstamped turnStarted would measure from the
 // zero time and render a fifty-five-year turn.
 func TestElapsed_LiveAgentPathStampsTheStretch(t *testing.T) {
 	clock := time.Date(2026, 8, 15, 9, 0, 0, 0, time.UTC)
@@ -280,14 +280,14 @@ func TestElapsed_BackwardsClockDoesNotRenderGarbage(t *testing.T) {
 }
 
 // TestSubmitTurn_ReStampsTheOrigin: a queue drain or auto-continue
-// re-enters submitTurn, and the new turn's readout must start at
+// re-enters submitTypedTurn, and the new turn's readout must start at
 // zero rather than continue the previous turn's count.
 func TestSubmitTurn_ReStampsTheOrigin(t *testing.T) {
 	clock := time.Date(2026, 8, 15, 9, 0, 0, 0, time.UTC)
 	m := elapsedModel(t, &clock)
 
 	clock = clock.Add(45 * time.Second)
-	m.submitTurn("second prompt")
+	m.submitTypedTurn("second prompt")
 	if !m.turnStarted.Equal(clock) {
 		t.Fatalf("turnStarted = %v, want the second turn's start %v", m.turnStarted, clock)
 	}

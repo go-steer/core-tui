@@ -873,6 +873,15 @@ const (
     RenderInline
 )
 
+// TurnInput is stamped on every Agent.Run context (#359): the
+// operator's text before @-expansion, and whether the turn is an
+// auto-continue built from DrainInbox. Read with TurnInputFrom(ctx).
+type TurnInput struct {
+    Typed        string   // "" on an auto-continue turn
+    AutoContinue bool
+    Drained      []string // the inbox texts an auto-continue turn was built from
+}
+
 // PermissionModeWiring backs R-PERM-6 / R-PERM-7. Set is required
 // when any field is non-zero; Persist is optional.
 type PermissionModeWiring struct {

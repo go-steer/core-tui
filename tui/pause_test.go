@@ -235,7 +235,7 @@ func TestPausePoll_AttachToAnAlreadyPausedSession(t *testing.T) {
 }
 
 // TestEnterWhilePaused_SteersRatherThanSubmitting is the regression
-// net on the hang. Routing typed text through submitTurn while the
+// net on the hang. Routing typed text through submitTypedTurn while the
 // host's gate is shut means Agent.Run blocks in awaitResume before it
 // does anything — the spinner would run against a gate only this
 // keystroke could have opened.
@@ -649,7 +649,7 @@ func (a *perTurnPausable) waitRan(t *testing.T) (string, int) {
 // hasOneUserRow reports whether the transcript holds exactly one
 // RoleUser row with this text — "exactly" because one failure mode of
 // the split below is a steer appended twice, once by the held branch
-// and once by submitTurn.
+// and once by submitTypedTurn.
 func hasOneUserRow(m *model, text string) bool {
 	n := 0
 	for _, row := range m.history.Snapshot() {
@@ -686,7 +686,7 @@ func TestEnterWhilePaused_PerTurnHostRunsTheSteerItself(t *testing.T) {
 	if _, calls := agent.ran(); calls != 0 {
 		t.Fatal("the turn started before the gate was open — this is the awaitResume hang")
 	}
-	// No user row yet: submitTurn appends it when the resume lands,
+	// No user row yet: submitTypedTurn appends it when the resume lands,
 	// and a row here would double it.
 	if got := len(next.history.Snapshot()); got != before {
 		t.Errorf("history grew by %d before the resume landed, want 0", got-before)

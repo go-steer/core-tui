@@ -92,7 +92,7 @@ func TestUpdate_InitialPromptMsg_SubmitsTurn(t *testing.T) {
 	if len(entries) == 0 {
 		t.Fatal("expected a history entry after initialPromptMsg")
 	}
-	// submitTurn appends a RoleUser row with the raw text.
+	// submitTypedTurn appends a RoleUser row with the raw text.
 	first := entries[0]
 	if first.Role != RoleUser {
 		t.Errorf("expected first history entry Role=RoleUser, got %v", first.Role)

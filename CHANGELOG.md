@@ -25,6 +25,10 @@ The wire protocol in [`docs/sse-event-stream-protocol.md`](./docs/sse-event-stre
 
 ## [Unreleased]
 
+### Added
+
+- **A host can tell what the operator typed from what core-tui composed.** Every `Agent.Run` context now carries a `TurnInput`, read with `TurnInputFrom(ctx)`. `Typed` is the operator's text before any `@`-reference was expanded into file content. `AutoContinue` marks the turn built from `DrainInbox`, and `Drained` lists the inbox texts it was built from. A host that forwards turns elsewhere must carry `Typed` across itself. `Options.InitialPrompt` is reported as typed, so set it only from text the operator supplied. The internal entry point for typed turns is renamed so that a future caller has to claim its text is the operator's. Before, a host had to parse the prompt, matching the `Referenced files:` header and pairing the auto-continue turn with the drain by order. core-agent's auto-mode approver needs exactly this distinction: it judges calls only against words a person wrote, and inlined file content is where an injection would sit. Additive API. (#359)
+
 ## [0.29.0] — 2026-10-02
 
 The TUI can show core-agent's auto permission mode (go-steer/core-agent#1175), in which a host-side approver model decides some calls before a person is asked. `PermissionModeAuto` adds a fifth chip. A host-supplied Shift+Tab cycle lets a host offer `auto` only when the session can enter it, so the chip can never trap an operator in front of a mode the host refuses. A prompt the approver passed on says so, quotes the approver's reason as untrusted text that can't forge a row or push the payload off the screen, and offers only allow once and deny, so an approver's answer can never become a standing grant. `ApprovalLog.Approver` lets the approval history show that a model, not a person, allowed a call. Minor release: four additive changes to the exported API and no break. Design: [`docs/auto-permission-mode-design.md`](./docs/auto-permission-mode-design.md).

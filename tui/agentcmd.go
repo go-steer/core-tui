@@ -520,7 +520,7 @@ func spinnerTick(gen uint64) tea.Cmd {
 // current spinnerGen. Every arming site in the TUI goes through here
 // so the stamp can't be forgotten at one of them — that is the whole
 // point of the guard (issue #112). The generation itself is bumped
-// where a *new* animation begins (submitTurn for a per-turn spinner,
+// where a *new* animation begins (submitTypedTurn for a per-turn spinner,
 // beginLiveStretch for a LiveAgent one); re-arming from the tick
 // handler keeps the same generation because it continues the chain
 // that is already live rather than starting another one.
@@ -530,8 +530,8 @@ func (m *model) armSpinner() tea.Cmd {
 
 // beginLiveStretch starts a LiveAgent spinner stretch and reports
 // whether it actually started one — i.e. whether the caller owes an
-// armSpinner. It is submitTurn's counterpart for the #22 path, which
-// has no submitTurn to hang this off.
+// armSpinner. It is submitTypedTurn's counterpart for the #22 path, which
+// has no submitTypedTurn to hang this off.
 //
 // Idempotent by design. Two events can open a stretch — the operator
 // injecting a prompt and the first partial chunk of an autonomous
@@ -689,8 +689,8 @@ func wakeChannel(agent Agent) <-chan struct{} {
 // the cancel func for the turn's context so Esc-interrupt (R-CHAT-6)
 // can call it. The goroutine emits exactly one terminal message
 // (turnDoneMsg / turnErrMsg / turnCancelledMsg) before returning.
-func (m *model) startAgentTurn(agent Agent, prompt string) context.CancelFunc {
-	ctx, cancel := context.WithCancel(context.Background())
+func (m *model) startAgentTurn(agent Agent, prompt string, in TurnInput) context.CancelFunc {
+	ctx, cancel := context.WithCancel(withTurnInput(context.Background(), in))
 	started := time.Now()
 	// Snapshot the session generation at goroutine start so any
 	// terminal msg we emit later carries the gen of the Agent that

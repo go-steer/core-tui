@@ -257,9 +257,9 @@ type model struct {
 	// turnStarted is when the current spinner animation began, and
 	// is what the thinking line's elapsed readout counts from
 	// (issue #111). Stamped at exactly the two sites that bump
-	// spinnerGen — submitTurn for the per-turn Run path, and
+	// spinnerGen — submitTypedTurn for the per-turn Run path, and
 	// applyStreamChunk's spinnerActive false→true flip for the
-	// LiveAgent path, which never calls submitTurn — and zeroed
+	// LiveAgent path, which never calls submitTypedTurn — and zeroed
 	// wherever that animation stops. Invariant: non-zero iff a
 	// spinner animation is live. Read via model.turnElapsed, which
 	// treats the zero value as "no turn" rather than as 1970.
@@ -366,7 +366,7 @@ type model struct {
 
 	// spinnerGen identifies the spinner tick chain that is allowed to
 	// be live (issue #112). Bumped wherever a new animation starts —
-	// submitTurn (per turn) and applyStreamChunk (per LiveAgent
+	// submitTypedTurn (per turn) and applyStreamChunk (per LiveAgent
 	// stretch) — and stamped onto every spinnerTickMsg by armSpinner.
 	// The handler drops a tick whose stamp is stale, which terminates
 	// the superseded chain instead of letting it re-arm forever

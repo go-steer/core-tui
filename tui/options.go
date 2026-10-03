@@ -320,7 +320,7 @@ type Options struct {
 
 	// InitialPrompt seeds the first turn on startup. When non-empty,
 	// Init() emits a one-shot message that Update routes through the
-	// same submitTurn path as an operator-typed submission — so the
+	// same submitTypedTurn path as an operator-typed submission — so the
 	// prompt renders as a normal RoleUser row, the assistant response
 	// streams into the chat scroll, and the operator lands on the
 	// input line when the turn completes. Empty (the default) keeps
@@ -330,6 +330,12 @@ type Options struct {
 	// (core-agent's -i / --interactive-prompt); library callers
 	// wanting non-interactive one-shot behavior should keep using
 	// their headless entrypoint instead.
+	//
+	// core-tui reports this text to Run as TurnInput.Typed, the
+	// operator's own words (#359), so set it only from text the operator
+	// supplied — not from a recipe file, an issue body or a harness's
+	// task. An @-reference in it is expanded into the prompt and kept
+	// out of Typed, as for anything typed.
 	InitialPrompt string
 }
 

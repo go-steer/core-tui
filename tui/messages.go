@@ -124,7 +124,7 @@ type bannerTickMsg struct{}
 
 // initialPromptMsg fires exactly once from Init() when the host set
 // Options.InitialPrompt to a non-empty value. Update routes it
-// through the same submitTurn path an operator-typed submission uses,
+// through the same submitTypedTurn path an operator-typed submission uses,
 // so the seed prompt renders as a normal RoleUser row + streams the
 // response into chat scroll.
 type initialPromptMsg struct{ text string }
@@ -374,7 +374,7 @@ type pauseDoneMsg struct{ err error }
 // submit is the steer a PER-TURN host still has to be handed: on such
 // a host the operator's process owns the turn, so the gate is opened
 // with ResumeModeAbandon and the typed text rides back here to go
-// through submitTurn. Empty on a LiveAgent host, where the steer went
+// through submitTypedTurn. Empty on a LiveAgent host, where the steer went
 // out as ResumeModeSteer and the host's own loop runs it.
 type resumeDoneMsg struct {
 	mode   string
