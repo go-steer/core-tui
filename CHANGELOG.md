@@ -25,6 +25,10 @@ The wire protocol in [`docs/sse-event-stream-protocol.md`](./docs/sse-event-stre
 
 ## [Unreleased]
 
+## [0.30.0] — 2026-10-03
+
+A host can tell what the operator typed from what core-tui composed. Every `Agent.Run` context carries a `TurnInput`: the operator's text before any `@`-reference was expanded, and whether the turn is an auto-continue built from the drained inbox. core-agent's auto-mode approver judges calls only against words a person wrote, and used to parse the prompt for core-tui's `Referenced files:` header to find them. Minor release: one additive type and one accessor, no break.
+
 ### Added
 
 - **A host can tell what the operator typed from what core-tui composed.** Every `Agent.Run` context now carries a `TurnInput`, read with `TurnInputFrom(ctx)`. `Typed` is the operator's text before any `@`-reference was expanded into file content. `AutoContinue` marks the turn built from `DrainInbox`, and `Drained` lists the inbox texts it was built from. A host that forwards turns elsewhere must carry `Typed` across itself. `Options.InitialPrompt` is reported as typed, so set it only from text the operator supplied. The internal entry point for typed turns is renamed so that a future caller has to claim its text is the operator's. Before, a host had to parse the prompt, matching the `Referenced files:` header and pairing the auto-continue turn with the drain by order. core-agent's auto-mode approver needs exactly this distinction: it judges calls only against words a person wrote, and inlined file content is where an injection would sit. Additive API. (#359)
