@@ -17,6 +17,10 @@
 # sit behind the new baseline, and a leftover entry would silently permit
 # a second, unrelated removal of a symbol that no longer exists.
 #
+# Nothing to empty at v0.30.1 either: a fix-only patch release, and
+# verify-apidiff reported no change to the exported API across the
+# cycle. #364 only touched unexported auto-continue state.
+#
 # Nothing to empty at v0.30.0 either: verify-apidiff reported two
 # compatible additions across the cycle, #359's TurnInput and
 # TurnInputFrom, and no break. They are why this was a minor release.
