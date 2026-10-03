@@ -25,6 +25,10 @@ The wire protocol in [`docs/sse-event-stream-protocol.md`](./docs/sse-event-stre
 
 ## [Unreleased]
 
+## [0.30.1] — 2026-10-03
+
+A relayed inbox message can no longer make the TUI read one of the operator's local files into the prompt. On an auto-continue turn, `@`-references are now expanded only in the drained texts this TUI queued itself. Patch release: a fix only, no exported API change.
+
 ### Security
 
 - **A relayed inbox message can no longer make the TUI read a local file.** On an auto-continue turn, core-tui expanded every `@`-reference in the drained inbox batch. The inbox also holds what a host relays, such as a watcher's wake payload or a chat message, so a relayed `@/home/op/.ssh/id_rsa` read that file into the model's prompt. Now only the `@`-references in drained texts this TUI queued itself are expanded. The inbox keeps the raw text, so the drained texts a host sees (`TurnInput.Drained`) never carry file content; the prompt still carries the files the operator referenced, after the formatted batch, and the ↻ row in the transcript shows the batch alone. An operator's own mid-turn `@`-reference still works. (#364)
