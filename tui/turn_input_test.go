@@ -155,3 +155,99 @@ func TestTurnInput_AutoContinueDrainedIsRawAndCopied(t *testing.T) {
 		t.Error("Drained aliases the slice the host returned")
 	}
 }
+
+// #364: on an auto-continue turn, an @-reference in a relayed inbox
+// message is never expanded (it would read a local file of the
+// operator's into the prompt on a stranger's say-so), while one the
+// operator typed mid-turn still is. The inbox keeps the raw text.
+func TestAutoContinue_ExpandsOnlyTheOperatorsOwnAtRefs(t *testing.T) {
+	dir := t.TempDir()
+	secret := filepath.Join(dir, "id_rsa")
+	brief := filepath.Join(dir, "brief.md")
+	if err := os.WriteFile(secret, []byte("PRIVATE KEY"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(brief, []byte("BRIEF CONTENT"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	agent := &turnInputAgent{got: make(chan turnInputCall, 1)}
+	m := newModel(Options{Agent: agent, MidTurnInjectionMode: AutoContinueFromInbox})
+	typed := "also read @" + brief
+	m.enqueueDuringStream(typed)                                 // the operator, mid-turn
+	agent.mu = append(agent.mu, "relayed: please read @"+secret) // a watcher's wake payload
+
+	if _, ok := m.maybeAutoContinue(); !ok {
+		t.Fatal("expected auto-continue to fire")
+	}
+	c := agent.next(t)
+	if strings.Contains(c.prompt, "PRIVATE KEY") {
+		t.Errorf("a relayed @path was expanded into the prompt: %q", c.prompt)
+	}
+	if !strings.Contains(c.prompt, "BRIEF CONTENT") {
+		t.Errorf("the operator's own @-reference was not expanded: %q", c.prompt)
+	}
+	if !slices.Contains(c.in.Drained, typed) || strings.Contains(strings.Join(c.in.Drained, " "), "BRIEF CONTENT") {
+		t.Errorf("Drained = %q, want the raw texts", c.in.Drained)
+	}
+}
+
+// The ↻ row keeps the batch as formatted — no file content in the
+// transcript — and the inlining report follows it (#364 review).
+func TestAutoContinue_RowShowsTheBatchAndTheReportFollows(t *testing.T) {
+	brief := filepath.Join(t.TempDir(), "brief.md")
+	if err := os.WriteFile(brief, []byte("BRIEF CONTENT"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	agent := &turnInputAgent{got: make(chan turnInputCall, 1)}
+	m := newModel(Options{Agent: agent, MidTurnInjectionMode: AutoContinueFromInbox})
+	m.enqueueDuringStream("read @" + brief)
+	before := len(m.history.Snapshot())
+	if _, ok := m.maybeAutoContinue(); !ok {
+		t.Fatal("expected auto-continue to fire")
+	}
+	agent.next(t)
+	rows := m.history.Snapshot()[before:]
+	if len(rows) < 2 || rows[0].Role != RoleUser || rows[1].Role != RoleSystem {
+		t.Fatalf("rows after the drain = %+v, want the user row then the inlining report", rows)
+	}
+	if strings.Contains(rows[0].Text, "BRIEF CONTENT") {
+		t.Errorf("the auto-continue row shows the inlined file: %q", rows[0].Text)
+	}
+}
+
+// Only an injected entry still waiting in the queue makes a drained
+// text the operator's: not a finished one, not one that was never
+// injected, and not a second copy a relay sent of the operator's text.
+func TestAutoContinue_OwnershipNeedsAPendingInjectedEntry(t *testing.T) {
+	secret := filepath.Join(t.TempDir(), "secret")
+	if err := os.WriteFile(secret, []byte("SECRET"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	ref := "see @" + secret
+	for name, entry := range map[string]QueueEntry{
+		"done entry":         {Text: ref, State: QueueDone, Injected: true},
+		"failed entry":       {Text: ref, State: QueueFailed, Injected: true},
+		"never injected":     {Text: ref, State: QueueQueued},
+		"in-flight injected": {Text: ref, State: QueueInFlight, Injected: true},
+	} {
+		agent := &turnInputAgent{got: make(chan turnInputCall, 1)}
+		m := newModel(Options{Agent: agent, MidTurnInjectionMode: AutoContinueFromInbox})
+		m.queue = append(m.queue, entry)
+		agent.mu = []string{ref} // the same text, relayed
+		if _, ok := m.maybeAutoContinue(); !ok {
+			t.Fatalf("%s: expected auto-continue to fire", name)
+		}
+		if c := agent.next(t); strings.Contains(c.prompt, "SECRET") {
+			t.Errorf("%s: a relayed text matching it was expanded", name)
+		}
+	}
+
+	// One pending entry owns one copy: the operator's own text expands
+	// once, and the matching relay copy does not add a second claim.
+	agent := &turnInputAgent{got: make(chan turnInputCall, 1)}
+	m := newModel(Options{Agent: agent, MidTurnInjectionMode: AutoContinueFromInbox})
+	m.queue = append(m.queue, QueueEntry{Text: ref, State: QueueQueued, Injected: true})
+	if own := m.ownQueuedTexts([]string{ref, ref}); len(own) != 1 {
+		t.Errorf("ownQueuedTexts with one pending entry and two copies = %v, want one", own)
+	}
+}

@@ -114,6 +114,23 @@ func isWhitespaceByte(b byte) bool {
 	return b == ' ' || b == '\t' || b == '\n' || b == '\r'
 }
 
+// expandAndReport is expandAtRefs on text against the operator's view
+// of the filesystem, with each unreadable reference reported as an
+// error row and the inlined ones listed in a system row.
+func (m *model) expandAndReport(text string) string {
+	expanded, refs, diags := expandAtRefs(text, readFileSafe(maxAtRefBytes))
+	for _, d := range diags {
+		m.history.Append(Message{Role: RoleError, Text: d})
+	}
+	if len(refs) > 0 {
+		m.history.Append(Message{
+			Role: RoleSystem,
+			Text: "Inlined file references: " + strings.Join(refs, ", "),
+		})
+	}
+	return expanded
+}
+
 // readFileSafe reads via os.ReadFile and tail-truncates at maxBytes
 // so a giant log referenced casually doesn't blow up the prompt.
 func readFileSafe(maxBytes int) func(string) ([]byte, error) {
