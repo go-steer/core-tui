@@ -36,9 +36,10 @@ type TurnInput struct {
 	Typed string
 	// AutoContinue is set on the turn core-tui builds from
 	// InboxDrainer.DrainInbox. Its prompt is Options.AutoContinueFormatter
-	// applied to Drained, with any @-reference in it expanded like any
-	// other prompt's; so a host cannot rebuild or bound the prompt from
-	// Drained alone.
+	// applied to Drained, followed by the files that @-references in the
+	// drained texts this TUI queued itself point at (a relayed text's
+	// references are never expanded, #364); so a host cannot rebuild or
+	// bound the prompt from Drained alone.
 	AutoContinue bool
 	// Drained is the inbox texts an auto-continue turn was built from,
 	// in DrainInbox order, without the blank entries core-tui drops; nil

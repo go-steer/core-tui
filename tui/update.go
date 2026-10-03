@@ -2594,17 +2594,15 @@ func (m *model) submitTurnAs(text string, in TurnInput) {
 	m.history.Append(Message{Role: RoleUser, Text: text})
 
 	// Resolve @-refs against the operator's view of the filesystem.
-	expanded, refs, diags := expandAtRefs(text, readFileSafe(maxAtRefBytes))
-	for _, d := range diags {
-		m.history.Append(Message{Role: RoleError, Text: d})
+	// The history row above keeps the text as submitted. An auto-continue
+	// prompt gains only the files its own queued texts reference
+	// (autoContinueFiles, #364): expanding the whole batch would read a
+	// local file for any @path a relayed message carried.
+	if in.AutoContinue {
+		text += m.autoContinueFiles(in.Drained)
+	} else {
+		text = m.expandAndReport(text)
 	}
-	if len(refs) > 0 {
-		m.history.Append(Message{
-			Role: RoleSystem,
-			Text: "Inlined file references: " + strings.Join(refs, ", "),
-		})
-	}
-	text = expanded
 	m.input.Reset()
 	m.state = stateStreaming
 	// Origin for the thinking line's elapsed readout (issue #111).

@@ -79,18 +79,19 @@ func (m *model) maybeAutoContinue() (tea.Cmd, bool) {
 	if strings.TrimSpace(prompt) == "" {
 		return nil, false
 	}
-
-	// Mark any matching Queued entries as Done — the operator's
-	// view of "what did the system process" stays accurate.
-	m.markQueueDoneByText(drained)
 	m.consecutiveAutoContinues++
 
 	// submitTypedTurn appends the RoleUser entry itself (as part of
 	// the normal turn lifecycle); MarkLastUserAutoContinue then
 	// flips the AutoContinue bit so the renderer picks ↻ + muted
 	// on the next paint. Avoids a double-append.
+	// submitTurnAs expands only the @-references in drained texts this
+	// TUI queued, so it reads the queue before it is marked below.
 	m.submitTurnAs(prompt, TurnInput{AutoContinue: true, Drained: append([]string(nil), drained...)})
 	m.history.MarkLastUserAutoContinue()
+	// Mark any matching Queued entries as Done — the operator's
+	// view of "what did the system process" stays accurate.
+	m.markQueueDoneByText(drained)
 	return tea.Batch(m.armSpinner(), m.eventListener()), true
 }
 
@@ -122,6 +123,49 @@ func compactNonEmpty(in []string) []string {
 		}
 	}
 	return out
+}
+
+// autoContinueFiles is the files section an auto-continue prompt gains
+// (#364): the files that @-references in the drained texts this TUI
+// queued itself point at, or "" when there are none. A relayed text's
+// references are never expanded — the inbox also holds what a host
+// relays, a watcher's wake payload or a chat message, and expanding an
+// @path in that would read a local file of the operator's into the
+// prompt on a stranger's say-so. The inbox keeps the raw text, so the
+// drained texts a host sees (TurnInput.Drained) never carry file
+// content.
+func (m *model) autoContinueFiles(drained []string) string {
+	own := m.ownQueuedTexts(drained)
+	if len(own) == 0 {
+		return ""
+	}
+	joined := strings.Join(own, "\n")
+	expanded := m.expandAndReport(joined)
+	if len(expanded) <= len(joined) {
+		return ""
+	}
+	return expanded[len(joined):]
+}
+
+// ownQueuedTexts is the drained texts this TUI injected itself — a
+// queued, injected entry's text — each matched at most once per entry,
+// so a relayed message is never mistaken for one more copy of the
+// operator's.
+func (m *model) ownQueuedTexts(drained []string) []string {
+	pending := map[string]int{}
+	for _, e := range m.queue {
+		if e.Injected && e.State == QueueQueued {
+			pending[e.Text]++
+		}
+	}
+	var own []string
+	for _, s := range drained {
+		if pending[s] > 0 {
+			pending[s]--
+			own = append(own, s)
+		}
+	}
+	return own
 }
 
 // markQueueDoneByText flips any QueueQueued / QueueInFlight entry

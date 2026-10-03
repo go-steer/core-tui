@@ -25,6 +25,10 @@ The wire protocol in [`docs/sse-event-stream-protocol.md`](./docs/sse-event-stre
 
 ## [Unreleased]
 
+### Security
+
+- **A relayed inbox message can no longer make the TUI read a local file.** On an auto-continue turn, core-tui expanded every `@`-reference in the drained inbox batch. The inbox also holds what a host relays, such as a watcher's wake payload or a chat message, so a relayed `@/home/op/.ssh/id_rsa` read that file into the model's prompt. Now only the `@`-references in drained texts this TUI queued itself are expanded. The inbox keeps the raw text, so the drained texts a host sees (`TurnInput.Drained`) never carry file content; the prompt still carries the files the operator referenced, after the formatted batch, and the ↻ row in the transcript shows the batch alone. An operator's own mid-turn `@`-reference still works. (#364)
+
 ## [0.30.0] — 2026-10-03
 
 A host can tell what the operator typed from what core-tui composed. Every `Agent.Run` context carries a `TurnInput`: the operator's text before any `@`-reference was expanded, and whether the turn is an auto-continue built from the drained inbox. core-agent's auto-mode approver judges calls only against words a person wrote, and used to parse the prompt for core-tui's `Referenced files:` header to find them. Minor release: one additive type and one accessor, no break.
