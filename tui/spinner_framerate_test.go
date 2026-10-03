@@ -50,7 +50,7 @@ func spinnerParts(t *testing.T, m *model, frame int) (glyph, rest string) {
 func TestSpinnerFrameRate_GlyphAdvancesOnEveryFrame(t *testing.T) {
 	m := newModel(Options{Agent: stubAgent{}})
 	m.viewport.SetWidth(80)
-	m.submitTurn("go")
+	m.submitTypedTurn("go")
 
 	prev, _ := spinnerParts(t, m, 0)
 	for frame := 1; frame < len(brailleSpinnerGlyphs); frame++ {
@@ -66,7 +66,7 @@ func TestSpinnerFrameRate_GlyphAdvancesOnEveryFrame(t *testing.T) {
 func TestSpinnerFrameRate_VerbHoldsForOneCadence(t *testing.T) {
 	m := newModel(Options{Agent: stubAgent{}})
 	m.viewport.SetWidth(80)
-	m.submitTurn("go")
+	m.submitTypedTurn("go")
 
 	_, want := spinnerParts(t, m, 0)
 	for frame := 1; frame < spinnerFramesPerVerb; frame++ {

@@ -48,10 +48,10 @@ func offscreenSpinnerModel(t *testing.T) *model {
 		m.history.Append(Message{Role: RoleUser, Text: "question " + n})
 		m.history.Append(Message{Role: RoleAssistant, Text: "answer " + n})
 	}
-	m.submitTurn("one more")
+	m.submitTypedTurn("one more")
 	// The paint the program would have done before the first tick
 	// arrived. Direct rather than through coalescedRefreshMsg because
-	// submitTurn leaves nothing dirty for that handler to service, and
+	// submitTypedTurn leaves nothing dirty for that handler to service, and
 	// the dirty flag is cleared by hand for the same reason: what the
 	// tests below read is whether a TICK asked for a repaint.
 	m.refreshViewport()
@@ -184,14 +184,14 @@ func TestSpinnerOffScreen_FollowingTailAlwaysAnimates(t *testing.T) {
 
 // TestSpinnerOffScreen_UnbuiltTailIsNotHidden pins the negative that
 // keeps the spinner from never appearing at all. The tail is built
-// inside refreshViewport, so between submitTurn and the first paint
+// inside refreshViewport, so between submitTypedTurn and the first paint
 // there is nothing to be visible — and answering "hidden" there would
 // suppress the very repaint that brings the animation into existence.
 func TestSpinnerOffScreen_UnbuiltTailIsNotHidden(t *testing.T) {
 	m := newModel(Options{Agent: stubAgent{}})
 	out, _ := m.Update(tea.WindowSizeMsg{Width: 80, Height: 24})
 	m = out.(*model)
-	m.submitTurn("go")
+	m.submitTypedTurn("go")
 	m.chatTail = nil
 	m.follow = false
 

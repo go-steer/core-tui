@@ -90,7 +90,7 @@ func (m *model) Init() tea.Cmd {
 	}
 	// Options.InitialPrompt seeds the first turn on startup — the msg
 	// lands in Update after the wiring above so the event listener +
-	// theme are already primed by the time we start submitTurn. Skip
+	// theme are already primed by the time we start submitTypedTurn. Skip
 	// in liveMode since the autonomous stream is already producing
 	// events; the two don't compose cleanly.
 	if m.opts.InitialPrompt != "" && !m.liveMode {
@@ -337,7 +337,7 @@ func (m *model) handle(msg tea.Msg) (tea.Model, tea.Cmd) {
 		needSpinner := m.liveMode && msg.partial && !m.spinnerActive
 		m.applyStreamChunk(msg)
 		// In LiveAgent mode the spinner tick isn't scheduled by
-		// any submitTurn — kick it off when the first partial
+		// any submitTypedTurn — kick it off when the first partial
 		// chunk after an idle stretch arrives. applyStreamChunk
 		// flips m.spinnerActive=true in that case; needSpinner
 		// is captured BEFORE the call so we only spawn a single
@@ -1172,7 +1172,7 @@ func (m *model) handle(msg tea.Msg) (tea.Model, tea.Cmd) {
 		// not which chain this tick belongs to — and m.state flips
 		// back to stateStreaming well inside one spinnerFrameCadence
 		// when a turn end is immediately followed by another
-		// submitTurn (queue drain, auto-continue). The superseded
+		// submitTypedTurn (queue drain, auto-continue). The superseded
 		// chain's next tick therefore passes the level gates and
 		// re-arms, and the animation runs at 2x for the rest of the
 		// session. The stamp is what distinguishes the chains.
@@ -1239,7 +1239,7 @@ func (m *model) handle(msg tea.Msg) (tea.Model, tea.Cmd) {
 		// shouldn't be reachable this early but we skip rather than
 		// stack turns; slash commands are refused (seed prompts drive
 		// the model, not the TUI's own control surface). Everything
-		// else flows through submitTurn identically to a real
+		// else flows through submitTypedTurn identically to a real
 		// operator submission.
 		text := strings.TrimSpace(msg.text)
 		if text == "" {
@@ -1257,7 +1257,7 @@ func (m *model) handle(msg tea.Msg) (tea.Model, tea.Cmd) {
 			return m, nil
 		}
 		m.recordPrompt(text)
-		m.submitTurn(text)
+		m.submitTypedTurn(text)
 		return m, m.armSpinner()
 	case remoteInterruptDoneMsg:
 		// Follow-up to the "/interrupt: cancelling remote turn…"
@@ -1353,7 +1353,7 @@ func (m *model) handle(msg tea.Msg) (tea.Model, tea.Cmd) {
 		if msg.submit != "" {
 			// Per-turn steer: the gate is open, so this is now an
 			// ordinary submission (see resumeThenSubmitCmd).
-			m.submitTurn(msg.submit)
+			m.submitTypedTurn(msg.submit)
 			return m, m.armSpinner()
 		}
 		return m, nil
@@ -2336,7 +2336,7 @@ func (m *model) paletteComplete() {
 	_ = m.refreshPalette()
 }
 
-// submitTurn appends the user's message, kicks off the agent dispatch
+// submitTypedTurn appends the user's message, kicks off the agent dispatch
 // goroutine, schedules a spinner tick, and flips to the streaming
 // state. The textarea stays focused so the operator can type ahead
 // (R-CHAT-10 prompt queueing). Called from the Enter handler and
@@ -2475,7 +2475,7 @@ func (m *model) submitInputLine(text string) tea.Cmd {
 		return m.dispatchSlash(text)
 	}
 	// Paused: typed text is a steer, not a new turn (R-HOLD-4).
-	// Routing it through submitTurn would be a hang, not a slow
+	// Routing it through submitTypedTurn would be a hang, not a slow
 	// path — on the local Run path Agent.Run blocks in awaitResume
 	// before it does anything else, so the spinner would spin
 	// against a gate only this keystroke could have opened.
@@ -2495,10 +2495,10 @@ func (m *model) submitInputLine(text string) tea.Cmd {
 			}
 			// Per-turn host: WE own the turn. Open the gate,
 			// drop the held work, and run the steer through
-			// submitTurn when the resume lands — a turn the host
+			// submitTypedTurn when the resume lands — a turn the host
 			// started for us would stream to a subscription
 			// Agent.Run has not opened. No user row here;
-			// submitTurn appends it, so the transcript gets one
+			// submitTypedTurn appends it, so the transcript gets one
 			// copy either way.
 			m.refreshAndScroll()
 			return resumeThenSubmitCmd(p, ResumeRequest{Mode: ResumeModeAbandon}, text)
@@ -2573,11 +2573,24 @@ func (m *model) submitInputLine(text string) tea.Cmd {
 	// Operator-initiated turn resets the auto-continue cap so
 	// the next streak gets the full budget. (Issue #9.)
 	m.consecutiveAutoContinues = 0
-	m.submitTurn(text)
+	m.submitTypedTurn(text)
 	return m.armSpinner()
 }
 
-func (m *model) submitTurn(text string) {
+// submitTypedTurn starts a turn whose text the operator supplied: what
+// they typed, a prompt they queued, a steer sent on resume, or the
+// host's InitialPrompt. Run sees it as TurnInput.Typed (#359), which a
+// host may treat as the operator's own words — core-agent's auto-mode
+// approver does. Text core-tui or a host composed must go through
+// submitTurnAs with a TurnInput that says so, never through here.
+func (m *model) submitTypedTurn(text string) {
+	m.submitTurnAs(text, TurnInput{Typed: text})
+}
+
+// submitTurnAs is submitTypedTurn with the TurnInput the turn's Run sees on
+// its context (#359). in.Typed is the text before @-expansion, so it is
+// taken from text here, never from the expanded prompt.
+func (m *model) submitTurnAs(text string, in TurnInput) {
 	m.history.Append(Message{Role: RoleUser, Text: text})
 
 	// Resolve @-refs against the operator's view of the filesystem.
@@ -2616,7 +2629,7 @@ func (m *model) submitTurn(text string) {
 	for k := range m.seenToolIDs {
 		delete(m.seenToolIDs, k)
 	}
-	m.cancelTurn = m.startAgentTurn(m.opts.Agent, text)
+	m.cancelTurn = m.startAgentTurn(m.opts.Agent, text, in)
 	// Operator-initiated submit always scrolls to bottom — they want
 	// to see their own message land and the response start, even if
 	// they'd been scrolled up reading backlog. Re-arming follow is
@@ -3710,7 +3723,7 @@ func (m *model) maybeDrainQueue() tea.Cmd {
 	}
 	prompt := m.queue[idx].Text
 	m.queue[idx].State = QueueInFlight
-	m.submitTurn(prompt)
+	m.submitTypedTurn(prompt)
 	return tea.Batch(m.armSpinner(), m.eventListener())
 }
 

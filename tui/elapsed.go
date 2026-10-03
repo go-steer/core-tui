@@ -59,7 +59,7 @@ func (m *model) nowFn() time.Time {
 // has been running, or 0 when no turn is in flight.
 //
 // The IsZero guard is load-bearing: turnStarted is stamped only
-// where the animation starts (submitTurn and applyStreamChunk's
+// where the animation starts (submitTypedTurn and applyStreamChunk's
 // spinnerActive false→true flip), so an unstamped model would
 // otherwise measure from the zero time and report a fifty-five-year
 // turn. A backwards clock (NTP step, suspend/resume) clamps to 0 for

@@ -85,11 +85,11 @@ func (m *model) maybeAutoContinue() (tea.Cmd, bool) {
 	m.markQueueDoneByText(drained)
 	m.consecutiveAutoContinues++
 
-	// submitTurn appends the RoleUser entry itself (as part of
+	// submitTypedTurn appends the RoleUser entry itself (as part of
 	// the normal turn lifecycle); MarkLastUserAutoContinue then
 	// flips the AutoContinue bit so the renderer picks ↻ + muted
 	// on the next paint. Avoids a double-append.
-	m.submitTurn(prompt)
+	m.submitTurnAs(prompt, TurnInput{AutoContinue: true, Drained: append([]string(nil), drained...)})
 	m.history.MarkLastUserAutoContinue()
 	return tea.Batch(m.armSpinner(), m.eventListener()), true
 }
