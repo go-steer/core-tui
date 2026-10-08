@@ -37,10 +37,12 @@
 //	/switch         open the session picker; its "+ Attach to
 //	                endpoint…" row demos the text-input dialog
 //	                (core-tui #56)
-//	/spawn [name]   start another scripted subagent; three start on
+//	/spawn [name]   start another scripted subagent; four start on
 //	                their own at launch, and they drive the
 //	                running-tasks bar under the input box (R-SUB-4).
-//	                A few /spawns in a row push it past its row cap
+//	                cluster-watch, the last, sleeps on scheduled
+//	                wakes (◷ … · wakes in …). A few /spawns in a row
+//	                push the bar past its row cap
 //	/subagents      the roster; /subagents <name> drills into one
 //	esc             close any open modal
 //

@@ -109,7 +109,7 @@ func (m *model) statusLineKey() statusKey {
 		permWired: m.permissionModeWired(),
 		permMode:  m.permMode,
 		usage:     m.usageSummaryOneLine(),
-		subagents: m.subagentsRunningLabel(),
+		subagents: m.subagentsCountLabel(),
 	}
 	if m.inFlightSlash != nil {
 		k.slash = m.inFlightSlash.name

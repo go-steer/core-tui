@@ -285,6 +285,20 @@ type SubagentInfo struct {
 	Status     string // "running" / "done" / "failed" / "paused"
 	LastReport string // most recent alert / completion text (truncated)
 	StartedAt  time.Time
+
+	// NextWakeAt is when a subagent that has scheduled its next turn
+	// (core-agent's schedule_next_turn) will run it. Zero means none
+	// is pending: the subagent is working, or it has finished. Set it
+	// only while the subagent sleeps and clear it when the turn
+	// starts. Status stays "running" while asleep — a new status word
+	// would read as finished to TUIs that predate these fields. See
+	// docs/scheduled-wakes-design.md.
+	NextWakeAt time.Time
+
+	// WakeDetail is the one-line reason the subagent gave when it
+	// scheduled the wake ("polling cluster-A on 10m cadence"). May be
+	// empty even when NextWakeAt is set.
+	WakeDetail string
 }
 
 // SubagentEventPage is one page of a subagent's inner turns.

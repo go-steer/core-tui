@@ -491,7 +491,8 @@ func withLiveStretch(m *model) *model {
 // withHostileRoster lands a host snapshot whose subagent roster
 // stresses the running-tasks bar: more entries than tasksBarMaxRows,
 // names and reports far wider than any terminal, a multi-line report,
-// a tab and an escape sequence, and the widest elapsed column.
+// a tab and an escape sequence, the widest elapsed column, and a
+// subagent asleep until a far-off wake with a long detail.
 func withHostileRoster(m *model) *model {
 	start := time.Date(2026, 8, 15, 9, 0, 0, 0, time.UTC)
 	m.now = func() time.Time { return start.Add(99 * time.Hour) }
@@ -503,6 +504,10 @@ func withHostileRoster(m *model) *model {
 			{Name: long, Status: "running", StartedAt: start, LastReport: strings.Repeat("report ", 40)},
 			{Name: "tabbed\tname", Status: "running", StartedAt: start, LastReport: "line one\nline two\x1b[31m"},
 			{Name: "held", Status: "paused", StartedAt: start},
+			// Started first so it sorts into a drawn row rather than
+			// into the "+ N more" count.
+			{Name: "sleeper", Status: "running", StartedAt: start.Add(-time.Minute), NextWakeAt: start.Add(200 * time.Hour),
+				WakeDetail: strings.Repeat("polling a cluster on a long cadence ", 8)},
 			{Name: "fourth", Status: "running", StartedAt: start},
 		},
 	}})

@@ -84,6 +84,7 @@ fixed meaning across the TUI.
 | `●`   | `U+25CF`   | Tool call running (appended after name).             |
 | `✓`   | `U+2713`   | Tool call completed (appended after name).           |
 | `✗`   | `U+2717`   | Tool call failed / denied (appended after name).     |
+| `◷`   | `U+25F7`   | Subagent asleep until a scheduled wake (tasks bar).  |
 | `▸`   | `U+25B8`   | Collapsible / expandable section (collapsed state).  |
 | `▾`   | `U+25BE`   | Collapsible / expandable section (expanded state).   |
 | `⚠`   | `U+26A0`   | Warning row (system color: `FgWarn`).                |
@@ -232,7 +233,8 @@ Two layouts (per [R-USE-2](./requirements.md#310-usage-tracking--display-must)).
 - Permission mode in `FgAccent` (regular) or `FgWarn` (when
   `bypassPermissions`).
 - Context % + tokens + cost in `FgMuted` regular.
-- `N subagent(s) running` in `FgMuted` while any are, absent otherwise.
+- `N subagent(s) running` in `FgMuted` while any are, with
+  `· N scheduled` for any asleep until a wake; absent otherwise.
 
 **StatusSidebar** — fixed 32-column right-hand panel:
 
@@ -253,15 +255,17 @@ subagent in flight ([R-SUB-4](./requirements.md#316-sub-agent-awareness-should))
 
 ```
   ▶ reviewer · 1m05s · Load and pin actions were examined…
-  ‖ indexer · paused
+  ◷ cluster-watch · wakes in 8m12s · polling cluster-A on 10m cadence
   ✓ linter · done · 0 findings
 ```
 
-- Glyph by state: `▶` running in `FgAccent`, `‖` paused, `✓` done
-  (both `FgMuted`), `✗` failed in `FgError`.
-- Name in `BrandPink`; elapsed (running) or outcome (finished) and
-  the first line of the latest report in `FgMuted`, cut at the column
-  edge with `…`.
+- Glyph by state: `▶` running in `FgAccent`; `◷` asleep until a
+  scheduled wake, `‖` paused, `✓` done (all `FgMuted`); `✗` failed in
+  `FgError`.
+- Name in `BrandPink`; elapsed (running), countdown to the wake
+  (scheduled; `waking` once past due) or outcome (finished), then the
+  first line of the latest report in `FgMuted` (the wake's reason, for
+  a scheduled row that has one), cut at the column edge with `…`.
 - At most three rows; past that the last row reads
   `+ N more · /subagents`. Absent entirely when nothing is in flight.
 - A finished subagent keeps its row for five seconds, then goes.

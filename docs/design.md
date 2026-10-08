@@ -634,6 +634,8 @@ type SubagentReporter interface {
 type SubagentInfo struct {
     Name, Status, LastReport string
     StartedAt                time.Time
+    NextWakeAt               time.Time // pending scheduled wake; zero = none (R-SUB-5)
+    WakeDetail               string    // the wake's one-line reason
 }
 type SubagentEventPage struct {
     Events    []SubagentEvent

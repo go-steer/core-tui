@@ -107,6 +107,26 @@ func TestDemoRoster_SpawnSlash(t *testing.T) {
 	}
 }
 
+// A sleep step sets the wake and its reason; the next step clears
+// both, as a host does when the awaited turn starts. Status stays
+// running throughout.
+func TestDemoRoster_SleepSetsAndClearsWake(t *testing.T) {
+	resetRoster(t)
+	demoRoster.spawn("watch", nil)
+	before := time.Now()
+	demoRoster.apply("watch", subagentStep{sleep: time.Minute, wakeDetail: "polling"})
+	s := (demoAgent{}).Subagents()[0]
+	if s.Status != "running" || s.WakeDetail != "polling" ||
+		s.NextWakeAt.Before(before.Add(time.Minute)) || s.NextWakeAt.After(time.Now().Add(time.Minute)) {
+		t.Fatalf("after a sleep step: %+v, want running with a wake a minute out", s)
+	}
+	demoRoster.apply("watch", subagentStep{report: "polled"})
+	s = (demoAgent{}).Subagents()[0]
+	if !s.NextWakeAt.IsZero() || s.WakeDetail != "" {
+		t.Errorf("after the next step: %+v, want the wake cleared", s)
+	}
+}
+
 // The launch scripts are what an operator sees first, so they have to
 // cover every state the bar draws.
 func TestDemoRoster_ScriptsCoverEveryState(t *testing.T) {
@@ -116,9 +136,12 @@ func TestDemoRoster_ScriptsCoverEveryState(t *testing.T) {
 			if step.status != "" {
 				seen[step.status] = true
 			}
+			if step.sleep > 0 {
+				seen["scheduled"] = true
+			}
 		}
 	}
-	for _, want := range []string{"running", "paused", "done", "failed"} {
+	for _, want := range []string{"running", "paused", "done", "failed", "scheduled"} {
 		if !seen[want] {
 			t.Errorf("no launch script reaches %q", want)
 		}

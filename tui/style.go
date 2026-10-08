@@ -55,6 +55,11 @@ const (
 	// render it double-width in the system palette and the banner's
 	// padding computation lands a cell short.
 	GlyphPaused = "‖"
+	// glyphScheduled anchors a running-tasks bar row for a subagent
+	// asleep until a scheduled wake (docs/scheduled-wakes-design.md).
+	// A clock face from Geometric Shapes: text presentation and one
+	// cell wide, unlike the alarm-clock emoji.
+	glyphScheduled = "◷"
 	// GlyphAutoContinue marks RoleUser messages synthesized by the
 	// AutoContinueFromInbox loop (issue #9). Visually distinct
 	// from GlyphUserPrompt so operators can tell at a glance which

@@ -678,6 +678,13 @@ listed in `/help`:
   seconds; one already finished when first seen is never shown. Read
   from the off-loop host snapshot like the rest of the status surface,
   so it needs nothing beyond R-SUB-1's capability.
+- **R-SUB-5** A running subagent whose roster entry carries a
+  `NextWakeAt` is asleep until a scheduled wake. Its bar row counts down
+  to the wake (`wakes in 8m12s`, `waking` once past due) and shows its
+  `WakeDetail` in place of the report when it has one. The status count
+  keeps it apart from working subagents (`1 subagent running ·
+  1 scheduled`). A host that never sets the fields gets R-SUB-4
+  unchanged. Design: [`scheduled-wakes-design.md`](./scheduled-wakes-design.md).
 
 ### 3.17 Reload (should)
 
