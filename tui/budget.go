@@ -57,9 +57,10 @@
 //  4. The chat viewport's floor, chatMinHeight, and one row for each
 //     collapsible panel that is open — enough to say it is open.
 //  5. The input box's GROWTH, up to textareaMaxHeight.
-//  6. The palette.
-//  7. The help panel.
-//  8. Anything still unspent goes to the chat viewport.
+//  6. The running-tasks bar, up to tasksBarMaxRows.
+//  7. The palette.
+//  8. The help panel.
+//  9. Anything still unspent goes to the chat viewport.
 //
 // Two notes on that order, since #121 suggested a flatter one
 // (input > footer > header > palette > help):
@@ -83,8 +84,8 @@
 // resize has no lever to make them smaller. Their position in the list is therefore
 // documentation rather than mechanism — they are reserved off the top
 // and the ordering between them never has to be applied. Items 1 and
-// 4-7 are the ones resize can actually control, via the textarea
-// height, the viewport height, and the two panel caps recorded in the
+// 4-8 are the ones resize can actually control, via the textarea
+// height, the viewport height, and the three caps recorded in the
 // budget.
 //
 // # When even the minimum does not fit
@@ -124,6 +125,7 @@ type chromeBudget struct {
 	palette   int
 	help      int
 	input     int
+	tasks     int
 	banner    int
 	toast     int
 	mouseHint int
@@ -135,6 +137,12 @@ type chromeBudget struct {
 	// ceiling (the panel is closed, or the model was never sized).
 	helpCap    int
 	paletteCap int
+
+	// tasksWant is the row count the running-tasks bar asked for
+	// before the budget capped it to tasks. rebudgetTasks compares
+	// against it, not against tasks, so a bar squeezed by a short
+	// terminal does not read as a change on every tick.
+	tasksWant int
 
 	// inputMax is the tallest textarea the budget can afford —
 	// textareaMaxHeight on a roomy terminal, less on a short one.
@@ -159,7 +167,7 @@ func footerRows(footer string) int {
 }
 
 func (b chromeBudget) frameRows() int {
-	return b.header + b.chat + b.palette + b.help + b.banner + b.input + b.toast + b.mouseHint + b.footer
+	return b.header + b.chat + b.palette + b.help + b.banner + b.input + b.tasks + b.toast + b.mouseHint + b.footer
 }
 
 // allocateChrome hands out m.height's rows in the priority order
@@ -242,7 +250,23 @@ func (m *model) allocateChrome(layout StatusLayout, chromeWidth int) chromeBudge
 	b.chat = chatMinHeight
 	free -= chatMinHeight
 
-	// --- Priority 6 + 7: the collapsible panels --------------------
+	// --- Priority 6: the running-tasks bar -------------------------
+	//
+	// After the input box's growth, ahead of the panels. It yields to
+	// everything that is the operator's own work in progress — the
+	// transcript floor and the line they are typing — and gives way
+	// entirely on a terminal with nothing left, since the status
+	// line's count still says what it would have. The panels are
+	// below it because they are transient and one key from closed;
+	// the bar is not the operator's to close.
+	b.tasksWant = m.tasksBarWant(chromeWidth)
+	if b.tasksWant > 0 {
+		m.chrome.tasks = min(b.tasksWant, max(free, 0))
+		b.tasks = len(m.tasksBarLines(chromeWidth, m.chrome.tasks))
+		free -= b.tasks
+	}
+
+	// --- Priority 7 + 8: the collapsible panels --------------------
 	//
 	// Each gets what is left, and shrinks (palette: fewer visible
 	// rows; help: elided) rather than overflowing. The one row an open
@@ -267,7 +291,7 @@ func (m *model) allocateChrome(layout StatusLayout, chromeWidth int) chromeBudge
 		free -= b.help
 	}
 
-	// --- Priority 8: the remainder is the chat's --------------------
+	// --- Priority 9: the remainder is the chat's --------------------
 	//
 	// No queue term anywhere above. renderQueuePanel is appended by
 	// renderInProgress into the viewport's CONTENT, not joined beside

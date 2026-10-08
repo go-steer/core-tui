@@ -97,6 +97,15 @@ func TestStatusCache_StaysFresh(t *testing.T) {
 			m.inFlightSlash = &slashFlight{name: "reload", startedAt: time.Unix(0, 0)}
 		}},
 		{"slash lands", func(m *model) { m.inFlightSlash = nil }},
+		{"subagent starts", func(m *model) {
+			m.tasks.observe([]SubagentInfo{{Name: "a", Status: "running"}}, time.Unix(0, 0))
+		}},
+		{"a second subagent starts", func(m *model) {
+			m.tasks.observe([]SubagentInfo{{Name: "a", Status: "running"}, {Name: "b", Status: "running"}}, time.Unix(1, 0))
+		}},
+		{"subagents finish", func(m *model) {
+			m.tasks.observe([]SubagentInfo{{Name: "a", Status: "done"}, {Name: "b", Status: "done"}}, time.Unix(2, 0))
+		}},
 	}
 
 	for _, step := range steps {

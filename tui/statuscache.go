@@ -72,6 +72,7 @@ type statusKey struct {
 	permMode  PermissionMode
 	usage     string
 	slash     string
+	subagents string
 }
 
 // statusCache holds the last header and the key that produced it.
@@ -108,6 +109,7 @@ func (m *model) statusLineKey() statusKey {
 		permWired: m.permissionModeWired(),
 		permMode:  m.permMode,
 		usage:     m.usageSummaryOneLine(),
+		subagents: m.subagentsRunningLabel(),
 	}
 	if m.inFlightSlash != nil {
 		k.slash = m.inFlightSlash.name

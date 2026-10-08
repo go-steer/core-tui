@@ -232,24 +232,39 @@ Two layouts (per [R-USE-2](./requirements.md#310-usage-tracking--display-must)).
 - Permission mode in `FgAccent` (regular) or `FgWarn` (when
   `bypassPermissions`).
 - Context % + tokens + cost in `FgMuted` regular.
+- `N subagent(s) running` in `FgMuted` while any are, absent otherwise.
 
 **StatusSidebar** — fixed 32-column right-hand panel:
 
 ```
 │  ◇ Claude Sonnet 4
-│    default · 9% (19.3K) · $0.04
-│
-│  ─ modified files ───────
-│    cmd/foo/main.go     +12 -3
-│    pkg/bar/bar_test.go  +5
-│
-│  ─ subagents ────────────
-│    none
+│    default
+│    9% (19.3K) · $0.04
+│    2 subagents running
 ```
 
 - Single `│` divider column on the left, `BorderDim`.
-- Section headings dim-bold with a thin underline.
 - Width fixed at 32 columns; collapsible via `Ctrl+B`.
+
+### 7.3 Running-tasks bar
+
+Both layouts, between the input box and the footer, one row per
+subagent in flight ([R-SUB-4](./requirements.md#316-sub-agent-awareness-should)):
+
+```
+  ▶ reviewer · 1m05s · Load and pin actions were examined…
+  ‖ indexer · paused
+  ✓ linter · done · 0 findings
+```
+
+- Glyph by state: `▶` running in `FgAccent`, `‖` paused, `✓` done
+  (both `FgMuted`), `✗` failed in `FgError`.
+- Name in `BrandPink`; elapsed (running) or outcome (finished) and
+  the first line of the latest report in `FgMuted`, cut at the column
+  edge with `…`.
+- At most three rows; past that the last row reads
+  `+ N more · /subagents`. Absent entirely when nothing is in flight.
+- A finished subagent keeps its row for five seconds, then goes.
 
 ---
 

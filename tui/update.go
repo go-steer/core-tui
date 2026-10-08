@@ -627,6 +627,10 @@ func (m *model) handle(msg tea.Msg) (tea.Model, tea.Cmd) {
 		}
 		providerChanged := m.hostSnap.provider != msg.snap.provider
 		m.hostSnap = msg.snap
+		// Folded every tick, roster or not: a lingering row expires on
+		// the clock, not on a roster change.
+		m.tasks.observe(msg.snap.subagents, m.nowFn())
+		m.rebudgetTasks()
 		// The gate state rides the same tick. Reconciliation lives in
 		// applyPoll: a poll sampled before a just-applied transition
 		// must not undo it (pauseSettleWindow), but beyond that window
@@ -3327,6 +3331,7 @@ func (m *model) applySwitchTarget(tgt *SwitchTarget) tea.Cmd {
 	// a session that never reported a turn (see turnRunning).
 	m.pushedTurnState = ""
 	m.hostSnap = hostSnapshot{}
+	m.tasks = taskRoster{}
 	m.liveDisconnected = false
 	m.liveReadOnlyNoted = false
 	m.liveLastPartialAt = time.Time{}

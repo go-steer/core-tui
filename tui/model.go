@@ -298,6 +298,10 @@ type model struct {
 	// refresh lands; the helpers fall back to placeholders in that window.
 	hostSnap hostSnapshot
 
+	// tasks is the running-tasks bar's memory of the subagent roster
+	// across snapshot ticks (tasks_bar.go).
+	tasks taskRoster
+
 	// AsyncSlashProvider in-flight state (issue #13). The TUI used
 	// to dispatch /btw / /compact and sit silent for the entire 1-10s
 	// model call; inFlightSlash carries the running slash's name +
@@ -1212,32 +1216,4 @@ func formatKTokens(n int) string {
 		return fmt.Sprintf("%.1fK", float64(n)/1000)
 	}
 	return fmt.Sprintf("%dK", n/1000)
-}
-
-// subagentSummary renders the sidebar's subagent rows from the host
-// snapshot's SubagentReporter read. Returns ("none") when the capability
-// is unwired or the list is empty so the section reads consistently.
-//
-// Reads hostSnap rather than calling Subagents() directly: this runs
-// from renderSidebar, i.e. from View(), which host_snapshot.go
-// guarantees never blocks on a host method. The roster refreshes on
-// the same hostSnapshotInterval tick as the header figures.
-func (m *model) subagentSummary() []string {
-	if _, ok := m.opts.Agent.(SubagentReporter); !ok {
-		return []string{"none (no SubagentReporter)"}
-	}
-	if !m.hostSnap.valid {
-		// Wired, but the first off-loop pull hasn't landed yet.
-		return []string{"…"}
-	}
-	subs := m.hostSnap.subagents
-	if len(subs) == 0 {
-		return []string{"none"}
-	}
-	out := make([]string, 0, len(subs))
-	for _, s := range subs {
-		row := s.Name + " [" + s.Status + "]"
-		out = append(out, row)
-	}
-	return out
 }

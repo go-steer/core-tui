@@ -369,6 +369,9 @@ func (m *model) View() tea.View {
 		// JoinVertical puts above it.
 		origin = inputOrigin{x: 0, y: stackedHeight(leftParts)}
 		leftParts = append(leftParts, input)
+		if tb := m.renderTasksBar(chatWidth); tb != "" {
+			leftParts = append(leftParts, tb)
+		}
 		if t := m.renderToast(chatWidth); t != "" {
 			leftParts = append(leftParts, t)
 		}
@@ -403,6 +406,9 @@ func (m *model) View() tea.View {
 		// 0, one row below the header + chat + any open panels.
 		origin = inputOrigin{x: 0, y: stackedHeight(parts)}
 		parts = append(parts, input)
+		if tb := m.renderTasksBar(m.width); tb != "" {
+			parts = append(parts, tb)
+		}
 		if t := m.renderToast(m.width); t != "" {
 			parts = append(parts, t)
 		}
@@ -1274,6 +1280,11 @@ func (m *model) renderStatusLine() string {
 			m.styles.Accent.Render("▸ /"+m.inFlightSlash.name+" running"),
 		)
 	}
+	// The count beside the running-tasks bar (tasks_bar.go): the bar
+	// can be capped or squeezed out by the budget, the count cannot.
+	if label := m.subagentsRunningLabel(); label != "" {
+		parts = append(parts, m.sep(), m.styles.Muted.Render(label))
+	}
 	return strings.Join(parts, "")
 }
 
@@ -1281,23 +1292,32 @@ func (m *model) renderStatusLine() string {
 // (style.md §7.2). Stacks the model + mode + spend metrics in a
 // readable vertical layout — separate input/output tokens, context-
 // window %, cumulative cost — sourced live from the host's
-// UsageTracker + SubagentReporter. The "modified files" preview section
-// was dropped pending a real file-watch capability; until one exists
-// any rendered value is fiction.
+// UsageTracker. The "modified files" preview section was dropped
+// pending a real file-watch capability; until one exists any rendered
+// value is fiction.
+//
+// The subagent roster that used to be a section here is the
+// running-tasks bar now (tasks_bar.go), which both layouts draw under
+// the input box. What stays is the count, mirroring the status line.
 func (m *model) renderSidebar() string {
-	headerLines := []string{
+	lines := []string{
 		sidebarRow(2, m.styles.AgentIdentity.Render(GlyphModel+" "+m.displayModelName())),
 		sidebarRow(4, m.styles.Muted.Render(m.permMode.String())),
 	}
 	if line1, line2 := m.usageSummaryStacked(); line1 != "" {
-		headerLines = append(headerLines,
+		lines = append(lines,
 			sidebarRow(4, m.styles.Muted.Render(line1)),
 			sidebarRow(4, m.styles.Muted.Render(line2)),
 		)
 	}
-	header := lipgloss.JoinVertical(lipgloss.Left, headerLines...)
-	sub := m.sidebarSection("subagents", m.subagentSummary()...)
-	return lipgloss.JoinVertical(lipgloss.Left, header, "", sub)
+	if label := m.subagentsRunningLabel(); label != "" {
+		lines = append(lines, sidebarRow(4, m.styles.Muted.Render(label)))
+	}
+	// Padded to the column rather than left as wide as its longest
+	// row: the panel is fixed-width by contract (issue #159), and its
+	// rows are all short enough now that nothing else holds it there.
+	return lipgloss.NewStyle().Width(sidebarWidth).Render(
+		lipgloss.JoinVertical(lipgloss.Left, lines...))
 }
 
 // sidebarRow indents one already-styled sidebar line and bounds it to
@@ -1321,56 +1341,6 @@ func (m *model) renderSidebar() string {
 // every other row on the screen.
 func sidebarRow(indent int, styled string) string {
 	return fitCells(strings.Repeat(" ", indent)+styled, sidebarWidth)
-}
-
-// sidebarIndent is the left gutter every sidebar row sits behind. It
-// is part of the fixed column, not extra to it, so the section rule
-// below has to pay for it out of sidebarWidth.
-const sidebarIndent = 2
-
-// sidebarSection renders a `─ heading ─` section with body rows,
-// filling the sidebar's fixed column exactly.
-//
-// The rule length is derived from the label rather than from a
-// hand-counted constant, which is what it used to be. The old
-// `sidebarWidth - len(heading) - 4` had to cover five cells that are
-// not the heading — the label's three (the leading glyph and the
-// space either side of the heading) plus the two-cell indent — and
-// only charged for four, so every section head came out one cell over
-// sidebarWidth. Because JoinVertical pads every part to the width of
-// the widest, that one cell widened the WHOLE sidebar block, header
-// rows included.
-//
-// It stayed invisible because chromeWidth() reserves two columns of
-// slack beside the sidebar, which absorbed the overrun before the
-// frame clamp ever saw it. That is the failure mode issue #159 is
-// about: the panel was not the fixed-width panel it is documented to
-// be, nothing downstream could tell, and the only assertion that
-// could catch it is one that measures the renderer's output against
-// the width the renderer was handed (see
-// TestFrameInvariants_RenderersHonorWidth).
-//
-// The measurement is lipgloss.Width, not len: the glyph in the label
-// is multi-byte, a heading is a display string, and the arithmetic
-// they feed is in cells.
-func (m *model) sidebarSection(heading string, rows ...string) string {
-	label := GlyphRule + " " + heading + " "
-	fill := sidebarWidth - sidebarIndent - lipgloss.Width(label)
-	if fill < 1 {
-		// A heading longer than the column has no rule to draw. One
-		// glyph keeps the section reading as a section; the overrun
-		// belongs to the caller that named it, not to the rule.
-		fill = 1
-	}
-	hr := strings.Repeat(GlyphRule, fill)
-	head := sidebarRow(sidebarIndent,
-		m.styles.SidebarHeading.Render(label)+m.styles.Rule.Render(hr))
-	body := make([]string, 0, len(rows)+1)
-	body = append(body, head)
-	for _, r := range rows {
-		body = append(body, sidebarRow(4, m.styles.Muted.Render(r)))
-	}
-	return lipgloss.JoinVertical(lipgloss.Left, body...)
 }
 
 // renderPermissionChip renders the permission-mode chip (R-PERM-6).

@@ -166,6 +166,15 @@ func frameStates() []frameState {
 			},
 		},
 		{
+			// The running-tasks bar is budgeted chrome whose content
+			// is entirely host-supplied: names and reports from a
+			// SubagentReporter, more entries than the bar has rows.
+			name: "tasks-bar",
+			setup: func(_ *testing.T, m *model, _, _ int) *model {
+				return withHostileRoster(withHostileTranscript(m))
+			},
+		},
+		{
 			// Issue #117: the pickers grew a filter row. It costs a
 			// body row (paid for with modalChromeRows+1) and puts a
 			// hardware caret on a modal that used to have none, so
@@ -477,6 +486,27 @@ func withLiveStretch(m *model) *model {
 	m.now = func() time.Time { return start.Add(2 * time.Hour) }
 	m.refreshViewport()
 	return m
+}
+
+// withHostileRoster lands a host snapshot whose subagent roster
+// stresses the running-tasks bar: more entries than tasksBarMaxRows,
+// names and reports far wider than any terminal, a multi-line report,
+// a tab and an escape sequence, and the widest elapsed column.
+func withHostileRoster(m *model) *model {
+	start := time.Date(2026, 8, 15, 9, 0, 0, 0, time.UTC)
+	m.now = func() time.Time { return start.Add(99 * time.Hour) }
+	long := strings.Repeat("unbreakable-subagent-name-", 6)
+	out, _ := m.Update(hostSnapshotMsg{gen: m.sessionGen, snap: hostSnapshot{
+		valid:        true,
+		hasSubagents: true,
+		subagents: []SubagentInfo{
+			{Name: long, Status: "running", StartedAt: start, LastReport: strings.Repeat("report ", 40)},
+			{Name: "tabbed\tname", Status: "running", StartedAt: start, LastReport: "line one\nline two\x1b[31m"},
+			{Name: "held", Status: "paused", StartedAt: start},
+			{Name: "fourth", Status: "running", StartedAt: start},
+		},
+	}})
+	return out.(*model)
 }
 
 // withHostileTranscript seeds a transcript whose content is chosen
@@ -830,7 +860,7 @@ func (p framePanel) matchAt(frame []string, row int) (int, string) {
 
 // composedStack re-derives the vertical stack View builds, in View's
 // order, from the same renderers View calls. The conditional members
-// (help panel, palette, toast) are included on the same conditions
+// (help panel, palette, tasks bar, toast) are included on the same conditions
 // View includes them on — a non-empty render.
 //
 // It returns the left column's stack, the sidebar panel, and whether
@@ -851,6 +881,9 @@ func composedStack(m *model) (stack []framePanel, sidebar framePanel, hasSidebar
 		add("palette", pal)
 	}
 	add("input box", m.renderInputBox())
+	if bar := m.renderTasksBar(cw); bar != "" {
+		add("tasks bar", bar)
+	}
 	if toast := m.renderToast(cw); toast != "" {
 		add("toast", toast)
 	}
@@ -1016,7 +1049,11 @@ func assertPanelsSurvive(t *testing.T, m *model, w, h int) {
 			break
 		}
 	}
-	if sbw, sbh := lipgloss.Width(sidebar.block), sidebar.rows(); sbw < 16 || sbh < 3 {
+	// Two rows is the floor every host gets — the model and the
+	// permission mode. The grid's bare agent wires nothing else, and
+	// since the subagent roster moved to the running-tasks bar there is
+	// no always-on section to make it taller.
+	if sbw, sbh := lipgloss.Width(sidebar.block), sidebar.rows(); sbw < 16 || sbh < 2 {
 		t.Errorf("sidebar collapsed to %dx%d cells — it is contracted to a %d-column panel, "+
 			"and a marker-presence check would not notice",
 			sbw, sbh, sidebarWidth)
@@ -1277,6 +1314,9 @@ func renderedBlocks(m *model) []widthContract {
 	}
 	if toast := m.renderToast(cw); toast != "" {
 		out = append(out, widthContract{"renderToast", toast, cw})
+	}
+	if bar := m.renderTasksBar(cw); bar != "" {
+		out = append(out, widthContract{"renderTasksBar", bar, cw})
 	}
 	if block, ok := modalBlock(m); ok {
 		// A modal is centred over the whole terminal rather than
