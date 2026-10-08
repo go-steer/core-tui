@@ -668,6 +668,16 @@ listed in `/help`:
   operator sees progress instead of a spinner. The block collapses
   to a one-line summary (turn / tool-call counts, and where to read
   the rest) when the result lands.
+- **R-SUB-4** While any subagent is in flight, a running-tasks bar
+  between the input box and the footer shows one row per subagent —
+  state, name, elapsed time, latest report — in both status layouts,
+  with a running count on the status surface. Capped at three rows
+  (the last pointing at `/subagents` when there are more), absent when
+  idle, and the first chrome to yield on a short terminal. A subagent
+  the bar watched finish keeps its row, with its outcome, for five
+  seconds; one already finished when first seen is never shown. Read
+  from the off-loop host snapshot like the rest of the status surface,
+  so it needs nothing beyond R-SUB-1's capability.
 
 ### 3.17 Reload (should)
 

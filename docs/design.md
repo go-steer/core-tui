@@ -1169,7 +1169,7 @@ present-continuous string replaces the rotation entirely. No new
   capability is fast, so every call site returns a `tea.Cmd` that
   does the work off-loop and delivers the result as a msg. `View`
   reads only snapshots (`host_snapshot.go` for the status header and
-  the sidebar roster; per-dialog snapshots for the model and session
+  the running-tasks bar; per-dialog snapshots for the model and session
   pickers). Capability methods that take a `context.Context` are
   given a bounded one — the signature is the host saying it may be
   slow, and answering with `context.Background()` inverts the

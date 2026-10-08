@@ -693,21 +693,20 @@ func TestSlashPalette_OpensWithBuiltinsThenMergesHost(t *testing.T) {
 	}
 }
 
-// TestSidebarSubagents_ReadsTheSnapshot — the sidebar's roster comes
-// from hostSnapshot, refreshed off-loop, not from a View()-time
-// Subagents() call.
-func TestSidebarSubagents_ReadsTheSnapshot(t *testing.T) {
+// TestTasksBar_ReadsTheSnapshot — the running-tasks bar and the
+// sidebar's count come from hostSnapshot, refreshed off-loop, not from
+// a View()-time Subagents() call.
+func TestTasksBar_ReadsTheSnapshot(t *testing.T) {
 	agent := &slowAgent{id: "slow", subs: []SubagentInfo{{Name: "probe", Status: "running"}}}
 	m := newModel(Options{Agent: agent, StatusLayout: StatusSidebar})
 	m.width, m.height = 120, 40
 	m.viewport.SetWidth(80)
 	m.resize()
 
-	// Before the first refresh lands the section reads as pending,
-	// not as "none" (which would be a lie) and not by calling the
-	// host (which would block).
-	if got := m.subagentSummary(); len(got) != 1 || got[0] != "…" {
-		t.Errorf("pre-refresh summary = %v, want the pending placeholder", got)
+	// Before the first refresh lands there is nothing to say, and
+	// saying it must not call the host (which would block).
+	if got := m.renderTasksBar(m.chromeWidth()); got != "" {
+		t.Errorf("pre-refresh bar = %q, want empty", got)
 	}
 
 	cmd := m.refreshHostSnapshotCmd()
@@ -717,9 +716,11 @@ func TestSidebarSubagents_ReadsTheSnapshot(t *testing.T) {
 	out, _ := m.Update(cmd())
 	m = out.(*model)
 
-	got := m.subagentSummary()
-	if len(got) != 1 || !strings.Contains(got[0], "probe") {
-		t.Fatalf("post-refresh summary = %v, want the probe row", got)
+	if got := ansi.Strip(m.renderTasksBar(m.chromeWidth())); !strings.Contains(got, "probe") {
+		t.Fatalf("post-refresh bar = %q, want the probe row", got)
+	}
+	if got := ansi.Strip(m.renderSidebar()); !strings.Contains(got, "1 subagent running") {
+		t.Errorf("post-refresh sidebar = %q, want the running count", got)
 	}
 	mustBeFast(t, "View with a populated roster", func() { _ = m.View() })
 }

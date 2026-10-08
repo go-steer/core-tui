@@ -25,6 +25,14 @@ The wire protocol in [`docs/sse-event-stream-protocol.md`](./docs/sse-event-stre
 
 ## [Unreleased]
 
+### Added
+
+- **Running-tasks bar (R-SUB-4).** While a `SubagentReporter` host has subagents in flight, a strip between the input box and the footer shows one row per subagent: state glyph, name, elapsed time, and the first line of its latest report. It works in both status layouts and shows at most three rows; past that, the last row reads `+ N more · /subagents`. It is hidden when nothing is running, and on a short terminal it is the first chrome to give up its rows. A subagent the bar saw finish keeps its row, with its outcome, for five seconds. The status line (header layout) and the sidebar show an `N subagents running` count alongside. The bar reads the existing off-loop host snapshot, so a host needs no change to get it, and no exported API changes. `examples/local` now implements `SubagentReporter`: three scripted subagents start at launch and cover the running, paused, done and failed states, and `/spawn [name]` starts more.
+
+### Changed
+
+- **Sidebar no longer lists subagents.** The `─ subagents ─` section is replaced by the running-tasks bar plus a one-row running count. The full roster is still available via `/subagents`.
+
 ## [0.30.1] — 2026-10-03
 
 A relayed inbox message can no longer make the TUI read one of the operator's local files into the prompt. On an auto-continue turn, `@`-references are now expanded only in the drained texts this TUI queued itself. Patch release: a fix only, no exported API change.

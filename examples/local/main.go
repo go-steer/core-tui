@@ -37,6 +37,11 @@
 //	/switch         open the session picker; its "+ Attach to
 //	                endpoint…" row demos the text-input dialog
 //	                (core-tui #56)
+//	/spawn [name]   start another scripted subagent; three start on
+//	                their own at launch, and they drive the
+//	                running-tasks bar under the input box (R-SUB-4).
+//	                A few /spawns in a row push it past its row cap
+//	/subagents      the roster; /subagents <name> drills into one
 //	esc             close any open modal
 //
 // With the transcript holding the keyboard, the last seeded turn — a
@@ -389,6 +394,7 @@ func (demoAgent) SlashCommands() []tui.SlashCommandSpec {
 		},
 		{Name: "perm", Description: "open the sample permission prompt (r denies with a reason)"},
 		{Name: "elicit", Description: "open the sample MCP elicitation form"},
+		{Name: "spawn", Description: "start another scripted subagent (shows in the running-tasks bar)"},
 	}
 }
 
@@ -404,6 +410,9 @@ func (demoAgent) InvokeSlash(ctx context.Context, name, args string) (tui.SlashR
 	case "elicit":
 		go demoElicitAfter(context.WithoutCancel(ctx), demoHooks.elicitor, 0)
 		return tui.SlashResult{}, nil
+	case "spawn":
+		name := spawnNext(strings.TrimSpace(args))
+		return tui.SlashResult{SystemMessage: "spawned subagent " + name}, nil
 	case "btw", "by-the-way":
 	default:
 		return tui.SlashResult{}, fmt.Errorf("unknown slash: %s", name)
@@ -453,6 +462,10 @@ func main() {
 	// walks all five kinds and each one waits for the previous
 	// answer.
 	go demoAskAfter(asker, notifier, 28*time.Second)
+	// Background subagents, first of all, so the running-tasks bar is
+	// already populated by the time the permission prompt opens over
+	// it.
+	go demoSubagentsAfter(2 * time.Second)
 
 	opts := tui.Options{
 		// Scripted agent plays a believable coding-task turn on every
@@ -523,7 +536,8 @@ func seededConversation() []tui.Message {
 				"space fold it, y / c copy it, shift+↑↓ scroll a line, shift+←→ pan sideways, " +
 				"g / G first / last, tab or esc back) · ctrl+g model · /perm permission · /elicit elicit form · " +
 				"ctrl+b toggle layout · shift+tab cycle perm-mode · /btw <q> for a side-answer modal · " +
-				"/switch for the session picker (its last row types in an endpoint). " +
+				"/switch for the session picker (its last row types in an endpoint) · " +
+				"/spawn for another background subagent, /subagents to list them. " +
 				"Press enter to start a streaming turn; type ahead and press enter again to " +
 				"queue follow-up prompts — they auto-fire as each turn ends.",
 		},

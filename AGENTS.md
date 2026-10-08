@@ -45,7 +45,8 @@ tui/                  the library; public API per design.md §3.
 examples/             runnable host examples.
   local/              scripted agent + every capability wired; the
                       visual harness (/perm permission, /elicit elicit,
-                      ctrl+x tool detail, /switch, -verbose-tools).
+                      ctrl+x tool detail, /switch, /spawn subagents,
+                      -verbose-tools).
   notifier-smoke/     standalone Notifier-contract exerciser.
   core-agent/         reference-host adapter sketch, both flavors
                       (in-process + attachclient over HTTP/SSE),
