@@ -25,6 +25,10 @@ The wire protocol in [`docs/sse-event-stream-protocol.md`](./docs/sse-event-stre
 
 ## [Unreleased]
 
+## [0.31.0] — 2026-10-09
+
+You can see what's running in the background. A running-tasks bar under the input box shows one row per in-flight subagent: name, elapsed time and latest report. A subagent asleep until its next scheduled turn counts down to the wake instead (`◷ name · wakes in 8m12s · <reason>`). The API change is additive: two optional fields on `SubagentInfo`, with no new interface and nothing a host has to change. The sidebar's subagent list is replaced by a count.
+
 ### Added
 
 - **Running-tasks bar (R-SUB-4).** While a `SubagentReporter` host has subagents in flight, a strip between the input box and the footer shows one row per subagent: state glyph, name, elapsed time, and the first line of its latest report. It works in both status layouts and shows at most three rows; past that, the last row reads `+ N more · /subagents`. It is hidden when nothing is running, and on a short terminal it is the first chrome to give up its rows. A subagent the bar saw finish keeps its row, with its outcome, for five seconds. The status line (header layout) and the sidebar show an `N subagents running` count alongside. The bar reads the existing off-loop host snapshot, so a host needs no change to get it, and no exported API changes. `examples/local` now implements `SubagentReporter`: three scripted subagents start at launch and cover the running, paused, done and failed states, and `/spawn [name]` starts more.
