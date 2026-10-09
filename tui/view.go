@@ -1282,7 +1282,7 @@ func (m *model) renderStatusLine() string {
 	}
 	// The count beside the running-tasks bar (tasks_bar.go): the bar
 	// can be capped or squeezed out by the budget, the count cannot.
-	if label := m.subagentsRunningLabel(); label != "" {
+	if label := m.subagentsCountLabel(); label != "" {
 		parts = append(parts, m.sep(), m.styles.Muted.Render(label))
 	}
 	return strings.Join(parts, "")
@@ -1310,7 +1310,7 @@ func (m *model) renderSidebar() string {
 			sidebarRow(4, m.styles.Muted.Render(line2)),
 		)
 	}
-	if label := m.subagentsRunningLabel(); label != "" {
+	if label := m.subagentsCountLabel(); label != "" {
 		lines = append(lines, sidebarRow(4, m.styles.Muted.Render(label)))
 	}
 	// Padded to the column rather than left as wide as its longest

@@ -1,6 +1,7 @@
 # Scheduled wakes in the running-tasks bar
 
-**Status:** proposed. Builds on the running-tasks bar
+**Status:** core-tui side implemented (R-SUB-5); core-agent side open.
+Builds on the running-tasks bar
 ([#369](https://github.com/go-steer/core-tui/pull/369), R-SUB-4 in
 [`requirements.md`](./requirements.md)). API:
 [`design.md`](./design.md) §3 (`SubagentReporter`). core-agent side:

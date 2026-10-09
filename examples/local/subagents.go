@@ -45,6 +45,14 @@ type subagentStep struct {
 	status string        // new status; "" keeps the current one
 	report string        // new LastReport; "" keeps the current one
 	turn   tui.SubagentEvent
+
+	// sleep, when non-zero, schedules the subagent's next turn that
+	// far ahead with wakeDetail as its reason — what core-agent's
+	// schedule_next_turn does. Every step without one clears any
+	// pending wake, the way a host clears NextWakeAt when the turn it
+	// was waiting for starts.
+	sleep      time.Duration
+	wakeDetail string
 }
 
 // demoSubagent is one roster entry and its turn log.
@@ -96,6 +104,11 @@ func (r *demoRosterT) apply(name string, step subagentStep) {
 	}
 	if step.report != "" {
 		s.info.LastReport = step.report
+	}
+	s.info.NextWakeAt, s.info.WakeDetail = time.Time{}, ""
+	if step.sleep > 0 {
+		s.info.NextWakeAt = time.Now().Add(step.sleep)
+		s.info.WakeDetail = step.wakeDetail
 	}
 	if step.turn.Author != "" || step.turn.Text != "" || len(step.turn.ToolCalls) > 0 {
 		r.seq++
@@ -209,23 +222,50 @@ func indexerScript() []subagentStep {
 }
 
 // spawnScripts is what /spawn plays, in rotation.
-var spawnScripts = []struct {
-	name   string
-	script func() []subagentStep
-}{
-	{"reviewer", reviewerScript},
-	{"linter", linterScript},
-	{"indexer", indexerScript},
+// clusterWatchScript polls, then schedules its next turn and sleeps
+// until it, twice over: the scheduled-wake row (◷ … · wakes in …),
+// its countdown, and the flip back to ▶ when the wake fires
+// (docs/scheduled-wakes-design.md).
+func clusterWatchScript() []subagentStep {
+	poll := func(id string) tui.SubagentEvent {
+		return call(id, "kubectl", map[string]any{"args": "get pods -A --field-selector=status.phase!=Running"},
+			map[string]any{"stdout": "No resources found", "exit_code": 0})
+	}
+	return []subagentStep{
+		{after: 2 * time.Second, report: "Polling cluster-A", turn: poll("c1")},
+		{after: 3 * time.Second, report: "0 unhealthy pods",
+			sleep: 15 * time.Second, wakeDetail: "polling cluster-A on a 15s cadence",
+			turn: say("Cluster healthy; scheduling the next poll in 15s.")},
+		{after: 15 * time.Second, report: "Polling cluster-A", turn: poll("c2")},
+		{after: 3 * time.Second, report: "1 pod restarting: api-7f9c",
+			sleep: 15 * time.Second, wakeDetail: "re-checking api-7f9c before alerting",
+			turn: say("api-7f9c is in CrashLoopBackOff; giving it one more cycle before alerting.")},
+		{after: 15 * time.Second, report: "Re-checking api-7f9c", turn: poll("c3")},
+		{after: 3 * time.Second, status: "done", report: "api-7f9c recovered; cluster healthy",
+			turn: say("api-7f9c recovered on its own. Nothing to alert on.")},
+	}
 }
 
-// demoSubagentsAfter starts the launch roster after delay: all three
-// scripts, staggered so the rows arrive one at a time.
+// spawnScripts is the launch roster and what /spawn plays, in
+// rotation. launchAt staggers the launch so rows arrive one at a time,
+// and holds cluster-watch back until the linter's row has come and
+// gone, so the bar never needs its "+ N more" row before /spawn.
+var spawnScripts = []struct {
+	name     string
+	script   func() []subagentStep
+	launchAt time.Duration
+}{
+	{"reviewer", reviewerScript, 0},
+	{"linter", linterScript, time.Second},
+	{"indexer", indexerScript, 2 * time.Second},
+	{"cluster-watch", clusterWatchScript, 15 * time.Second},
+}
+
+// demoSubagentsAfter starts the launch roster after delay.
 func demoSubagentsAfter(delay time.Duration) {
-	time.Sleep(delay)
-	for i, s := range spawnScripts {
-		if i > 0 {
-			time.Sleep(time.Second)
-		}
+	start := time.Now().Add(delay)
+	for _, s := range spawnScripts {
+		time.Sleep(time.Until(start.Add(s.launchAt)))
 		demoRoster.spawn(s.name, s.script())
 	}
 }

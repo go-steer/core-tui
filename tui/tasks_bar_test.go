@@ -169,7 +169,7 @@ func TestTasksBar_PausedRow(t *testing.T) {
 		t.Errorf("bar = %q, want the paused row", rows)
 	}
 	// Paused is in flight but not running.
-	if got := m.subagentsRunningLabel(); got != "" {
+	if got := m.subagentsCountLabel(); got != "" {
 		t.Errorf("running label = %q with only a paused subagent, want empty", got)
 	}
 }
