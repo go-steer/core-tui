@@ -1481,6 +1481,10 @@ func (m *model) footerHint() string {
 		// pgdn do here exactly what they do everywhere else.
 		return "Transcript" + sep + "↑↓ select" + sep + "space fold" + sep +
 			"g/G top/bottom" + sep + "tab/esc composer"
+	case m.focus == focusTasks:
+		// Above the streaming arm for the transcript's reason: looking
+		// in on a subagent while the parent's turn runs is the point.
+		return "Subagents" + sep + "↑↓ select" + sep + "enter open" + sep + "tab/esc composer"
 	case m.pause.paused():
 		// Above the streaming arm: /pause lets a running turn finish,
 		// so both can be true, and "held" is the fact that changes
@@ -1498,6 +1502,13 @@ func (m *model) footerHint() string {
 	hint := m.newlineHint
 	if hint == "" {
 		hint = "ctrl+j"
+	}
+	// The bar can be stepped into only from an empty composer, so the
+	// hint shows only then; a legend naming a key that does nothing
+	// right now teaches the operator the key doesn't work.
+	if m.input.Value() == "" && len(m.tasksSelectable()) > 0 {
+		return "enter submit" + sep + hint + " newline" + sep + "↓ subagents" + sep +
+			"ctrl+c quit" + sep + "? for more"
 	}
 	return "enter submit" + sep + hint + " newline" + sep + "ctrl+c quit" + sep + "? for more"
 }

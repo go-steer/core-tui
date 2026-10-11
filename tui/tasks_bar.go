@@ -42,6 +42,7 @@ import (
 	"strings"
 	"time"
 
+	tea "charm.land/bubbletea/v2"
 	"charm.land/lipgloss/v2"
 	"github.com/charmbracelet/x/ansi"
 )
@@ -179,6 +180,31 @@ func pluralize(n int, one, many string) string {
 	return many
 }
 
+// tasksEntries is every row the bar could draw, in the order it draws
+// them: in flight in start order, then lingering oldest first.
+func (m *model) tasksEntries() []SubagentInfo {
+	out := make([]SubagentInfo, 0, len(m.tasks.active)+len(m.tasks.finished))
+	out = append(out, m.tasks.active...)
+	for _, f := range m.tasks.finished {
+		out = append(out, f.info)
+	}
+	return out
+}
+
+// tasksBarShown is how many of total entries get a row of their own in
+// maxRows: all of them when they fit, otherwise one fewer than the
+// rows, because the last becomes the "+ N more" count.
+func tasksBarShown(total, maxRows int) int {
+	maxRows = min(maxRows, tasksBarMaxRows)
+	switch {
+	case total == 0 || maxRows <= 0:
+		return 0
+	case total > maxRows:
+		return maxRows - 1
+	}
+	return total
+}
+
 // tasksBarLines renders the bar's rows at width, at most maxRows of
 // them (and never more than tasksBarMaxRows). Nil when there is
 // nothing to show or no row to show it in.
@@ -187,24 +213,20 @@ func pluralize(n int, one, many string) string {
 // at `/subagents` rather than a silently shorter list: the operator
 // should know the bar is not the whole roster.
 func (m *model) tasksBarLines(width, maxRows int) []string {
-	maxRows = min(maxRows, tasksBarMaxRows)
-	total := len(m.tasks.active) + len(m.tasks.finished)
-	if total == 0 || maxRows <= 0 {
+	entries := m.tasksEntries()
+	total := len(entries)
+	if total == 0 || min(maxRows, tasksBarMaxRows) <= 0 {
 		return nil
 	}
-	shown := total
-	if total > maxRows {
-		shown = maxRows - 1
+	shown := tasksBarShown(total, maxRows)
+	sel := -1
+	if m.focus == focusTasks {
+		sel = m.tasksSelectedIndex(entries[:shown])
 	}
 	now := m.nowFn()
 	lines := make([]string, 0, shown+1)
-	for i := 0; i < shown; i++ {
-		if i < len(m.tasks.active) {
-			lines = append(lines, m.tasksBarRow(m.tasks.active[i], true, now, width))
-		} else {
-			f := m.tasks.finished[i-len(m.tasks.active)]
-			lines = append(lines, m.tasksBarRow(f.info, false, now, width))
-		}
+	for i, s := range entries[:shown] {
+		lines = append(lines, m.tasksBarRow(s, i < len(m.tasks.active), i == sel, now, width))
 	}
 	if shown < total {
 		more := fmt.Sprintf("  + %d more", total-shown)
@@ -220,8 +242,9 @@ func (m *model) tasksBarLines(width, maxRows int) []string {
 // tasksBarRow renders one subagent: a status glyph, the name, then
 // how long it has been running (in flight), when it next wakes
 // (scheduled) or how it ended (lingering), then the latest report, cut
-// at the frame edge.
-func (m *model) tasksBarRow(s SubagentInfo, active bool, now time.Time, width int) string {
+// at the frame edge. A selected row takes the transcript's selection
+// bar in its gutter.
+func (m *model) tasksBarRow(s SubagentInfo, active, selected bool, now time.Time, width int) string {
 	sep := m.sep()
 	report := s.LastReport
 	var glyph, state string
@@ -257,7 +280,11 @@ func (m *model) tasksBarRow(s SubagentInfo, active bool, now time.Time, width in
 		glyph = m.styles.Muted.Render(GlyphToolDone)
 		state = m.styles.Muted.Render(status)
 	}
-	row := "  " + glyph + " " + m.styles.AgentIdentity.Render(sanitizeLine(s.Name))
+	gutter := "  "
+	if selected {
+		gutter = m.styles.Accent.Render(glyphSelectBar) + " "
+	}
+	row := gutter + glyph + " " + m.styles.AgentIdentity.Render(sanitizeLine(s.Name))
 	if state != "" {
 		row += sep + state
 	}
@@ -311,4 +338,100 @@ func (m *model) rebudgetTasks() {
 	}
 	m.resize()
 	m.refreshViewport()
+}
+
+// tasksSelectable is the entries the bar gives a row of their own at
+// the rows the chrome budget granted it — the ones the cursor can sit
+// on. The "+ N more" row is not one of them: `/subagents` is a command
+// to type, and there is no single subagent behind the row to open.
+func (m *model) tasksSelectable() []SubagentInfo {
+	entries := m.tasksEntries()
+	return entries[:tasksBarShown(len(entries), m.chrome.tasks)]
+}
+
+// tasksSelectedIndex resolves the selection against rows: the
+// selected subagent wherever it now sits, since a roster tick can
+// reorder the bar under the cursor, or, when it has left the bar, the
+// row that took its place.
+func (m *model) tasksSelectedIndex(rows []SubagentInfo) int {
+	for i, s := range rows {
+		if s.Name == m.tasksSel {
+			return i
+		}
+	}
+	return max(min(m.tasksSelIdx, len(rows)-1), 0)
+}
+
+// focusTasksBar hands the keyboard to the bar with the cursor on its
+// first row. False, and nothing changes, when the bar has no row to
+// put it on.
+func (m *model) focusTasksBar() bool {
+	rows := m.tasksSelectable()
+	if len(rows) == 0 {
+		return false
+	}
+	m.tasksSel, m.tasksSelIdx = rows[0].Name, 0
+	m.setFocus(focusTasks)
+	return true
+}
+
+// tasksSelectBy moves the cursor delta rows. Moving up off the first
+// row hands the keyboard back to the composer: ↓ is how the operator
+// got here, so ↑ has to be a way back.
+func (m *model) tasksSelectBy(delta int) {
+	rows := m.tasksSelectable()
+	i := m.tasksSelectedIndex(rows) + delta
+	if i < 0 {
+		m.setFocus(focusInput)
+		return
+	}
+	i = min(i, len(rows)-1)
+	m.tasksSel, m.tasksSelIdx = rows[i].Name, i
+}
+
+// handleTasksKey runs the bar's keymap while it holds the keyboard.
+// Like handleTranscriptKey it declines what it does not bind, so the
+// frame-level chords (ctrl+c, ctrl+g, ctrl+x, `?`) still reach
+// handleKey's global switch. esc never arrives here: handleKey's esc
+// cascade returns the keyboard to the composer for every focus mode.
+//
+// enter opens the selected subagent in the `/subagents <name>`
+// overlay, which tails its turn log live while it is open. Focus
+// stays on the bar underneath, so closing the overlay lands back on
+// the row it was opened from, ready for the next one.
+func (m *model) handleTasksKey(stroke string) (tea.Cmd, bool) {
+	switch stroke {
+	case "tab":
+		m.setFocus(focusInput)
+	case "up", "k":
+		m.tasksSelectBy(-1)
+	case "down", "j":
+		m.tasksSelectBy(1)
+	case "enter":
+		rows := m.tasksSelectable()
+		if len(rows) == 0 {
+			m.setFocus(focusInput)
+			return nil, true
+		}
+		text, cmd := m.openSubagentDetail(rows[m.tasksSelectedIndex(rows)].Name)
+		if text != "" {
+			m.history.Append(Message{Role: RoleSystem, Text: text})
+			m.refreshViewport()
+		}
+		return cmd, true
+	default:
+		return nil, false
+	}
+	return nil, true
+}
+
+// reconcileTasksFocus returns the keyboard to the composer when the
+// bar it was given to has no row left to hold it: the last subagent
+// finished and stopped lingering, a session switch emptied the roster,
+// or a resize took the bar's rows. Run after every message, so no path
+// that empties the bar has to remember to do it.
+func (m *model) reconcileTasksFocus() {
+	if m.focus == focusTasks && len(m.tasksSelectable()) == 0 {
+		m.setFocus(focusInput)
+	}
 }

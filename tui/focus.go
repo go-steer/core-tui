@@ -31,10 +31,11 @@
 // the whole of #155, and #152-#154 extend the same switch rather
 // than negotiating for chords.
 //
-// Deliberately NOT a general focus-ring abstraction. There are two
-// regions today and a sidebar is the only plausible third, so the
-// enum is the whole mechanism; cycleFocus is where a third entry
-// would go.
+// Deliberately NOT a general focus-ring abstraction. The enum is the
+// whole mechanism. The running-tasks bar is a third region, but it
+// stays off the tab cycle: it is there only while subagents are, so
+// it is entered spatially, with ↓ from the composer it sits under,
+// and tab from it goes back to the composer (tasks_bar.go).
 
 package tui
 
@@ -56,6 +57,10 @@ const (
 	// focusTranscript: the transcript takes the keymap in
 	// handleTranscriptKey and the composer is blurred.
 	focusTranscript
+	// focusTasks: the running-tasks bar takes the keymap in
+	// handleTasksKey and the composer is blurred. Reached with ↓ from
+	// an empty composer rather than through cycleFocus (tasks_bar.go).
+	focusTasks
 )
 
 // setFocus moves the keyboard to a region, blurring or re-arming the
@@ -90,6 +95,9 @@ func (m *model) setFocus(t focusTarget) {
 		return
 	}
 	m.input.Blur()
+	if t != focusTranscript {
+		return
+	}
 	// Taking the keyboard is also what puts the cursor on an item
 	// (issue #152). The transcript's keymap is a keymap over a
 	// selection, so entering the mode has to leave one on screen —
@@ -100,7 +108,8 @@ func (m *model) setFocus(t focusTarget) {
 }
 
 // cycleFocus advances to the next region. With exactly two of them
-// forward and backward are the same move, which is why tab alone
+// on the cycle (the tasks bar is not; see the file comment) forward
+// and backward are the same move, which is why tab alone
 // carries this and shift+tab keeps the permission-mode chip it has
 // had since R-PERM-1. Add a third region and that stops being true —
 // split the binding then, not before.

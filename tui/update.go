@@ -128,6 +128,7 @@ func (m *model) spawnLiveStreamCmd(agent LiveAgent) tea.Cmd {
 // resize() — see rebudgetFooter.
 func (m *model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	out, cmd := m.update(msg)
+	m.reconcileTasksFocus()
 	m.rebudgetFooter()
 	return out, cmd
 }
@@ -1939,6 +1940,11 @@ func (m *model) handleKey(msg tea.KeyPressMsg) tea.Cmd {
 			return cmd
 		}
 	}
+	if m.focus == focusTasks {
+		if cmd, claimed := m.handleTasksKey(stroke); claimed {
+			return cmd
+		}
+	}
 
 	switch stroke {
 	case "ctrl+c":
@@ -2119,6 +2125,12 @@ func (m *model) handleKey(msg tea.KeyPressMsg) tea.Cmd {
 		// (more common while composing).
 		if m.historyCursor >= 0 {
 			m.recallPrompt(+1)
+			return nil
+		}
+		// From an empty composer, step down into the running-tasks
+		// bar that sits under it. Empty only, for the reason end is:
+		// in a box being composed in, down is cursor movement.
+		if m.input.Value() == "" && m.focusTasksBar() {
 			return nil
 		}
 

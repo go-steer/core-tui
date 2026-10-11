@@ -192,6 +192,7 @@ func helpSections() []helpSection {
 		{"Modals", [][2]string{
 			{"ctrl+g", "model picker (when ModelSwapper is wired)"},
 			{"ctrl+x", "expand a tool call (args + response detail)"},
+			{"↓ then enter", "from an empty input: pick a running subagent, open its live turn log"},
 			{"↑↓ / pgup / pgdn / mouse wheel", "scroll any modal body"},
 			{"esc", "close / cancel any open modal"},
 		}},

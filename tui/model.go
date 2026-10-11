@@ -132,7 +132,7 @@ type model struct {
 
 	// focus is the region that owns the keyboard: the composer (the
 	// zero value, and what every path assumed before issue #151) or
-	// the transcript. Move it with model.setFocus rather than
+	// the transcript or the running-tasks bar. Move it with model.setFocus rather than
 	// assigning here — the textarea's own focus flag has to track
 	// it, and that is what keeps stray text out of a prompt nobody
 	// is looking at. See focus.go.
@@ -301,6 +301,12 @@ type model struct {
 	// tasks is the running-tasks bar's memory of the subagent roster
 	// across snapshot ticks (tasks_bar.go).
 	tasks taskRoster
+
+	// tasksSel is the bar row the cursor sits on while the bar holds
+	// the keyboard, by subagent name, with tasksSelIdx as the position
+	// to fall back to when that row leaves the bar (tasks_bar.go).
+	tasksSel    string
+	tasksSelIdx int
 
 	// AsyncSlashProvider in-flight state (issue #13). The TUI used
 	// to dispatch /btw / /compact and sit silent for the entire 1-10s
