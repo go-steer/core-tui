@@ -25,6 +25,10 @@ The wire protocol in [`docs/sse-event-stream-protocol.md`](./docs/sse-event-stre
 
 ## [Unreleased]
 
+## [0.32.0] — 2026-10-11
+
+You can open a running subagent from the running-tasks bar. Press ↓ from an empty input to step onto the bar, pick a row, and press enter to watch that subagent's turn log as it runs. No API change, and nothing a host has to change.
+
 ### Added
 
 - **Open a subagent from the running-tasks bar (R-SUB-6).** Press ↓ in an empty input to move the keyboard onto the bar, ↑↓ to pick a row, and enter to open that subagent's `/subagents <name>` overlay, which tails its turn log live while it runs. Closing the overlay returns to the same row. ↑ off the top row, tab, or esc go back to the input. While the bar has rows and the input is empty, the footer shows `↓ subagents`. No API change, and hosts need no change: this reuses the existing `SubagentReporter` poll. core-agent's side of true live streaming is tracked in go-steer/core-agent#1311.
