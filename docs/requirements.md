@@ -685,6 +685,14 @@ listed in `/help`:
   keeps it apart from working subagents (`1 subagent running ·
   1 scheduled`). A host that never sets the fields gets R-SUB-4
   unchanged. Design: [`scheduled-wakes-design.md`](./scheduled-wakes-design.md).
+- **R-SUB-6** The bar's rows are a way in to R-SUB-2. ↓ from an empty
+  composer moves the keyboard onto the bar, ↑↓ (or k / j) select a
+  row, and enter opens that subagent's detail overlay, which tails its
+  turn log live while it is open. Closing the overlay returns to the
+  same row; ↑ off the top row, tab, or esc return to the composer, and
+  so does the bar emptying under the cursor. The `+ N more` row is not
+  selectable. The footer advertises `↓ subagents` only while ↓ would
+  do it.
 
 ### 3.17 Reload (should)
 
