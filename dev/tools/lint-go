@@ -23,7 +23,33 @@ cd "$(repo_root)"
 # Pin the version that the project currently targets. Bump deliberately —
 # new linter versions can surface findings that block CI.
 GOLANGCI_LINT_VERSION="v2.12.1"
-ensure_tool golangci-lint "github.com/golangci/golangci-lint/v2/cmd/golangci-lint@${GOLANGCI_LINT_VERSION}"
+GOLANGCI_LINT_PKG="github.com/golangci/golangci-lint/v2/cmd/golangci-lint@${GOLANGCI_LINT_VERSION}"
+ensure_tool golangci-lint "$GOLANGCI_LINT_PKG"
+
+# Align GOTOOLCHAIN only when a pre-built golangci-lint binary was compiled
+# with an older Go 1.x minor release than the workstation's active toolchain.
+built_go="$(golangci-lint --version 2>/dev/null | sed -nE 's/.*built with (go1\.[0-9]+(\.[0-9]+)?).*/\1/p' || true)"
+host_go="$(go env GOVERSION 2>/dev/null || true)"
+built_minor="$(sed -nE 's/^go1\.([0-9]+).*/\1/p' <<<"$built_go")"
+built_patch="$(sed -nE 's/^go1\.[0-9]+\.([0-9]+).*/\1/p' <<<"$built_go")"
+host_minor="$(sed -nE 's/^go1\.([0-9]+).*/\1/p' <<<"$host_go")"
+
+if [[ -n "$built_minor" && -n "$host_minor" ]] && (( 10#$built_minor < 10#$host_minor )); then
+  gomod_ver="$(awk '/^go 1\.[0-9]+/ {print $2; exit}' go.mod || true)"
+  gomod_minor="$(sed -nE 's/^1\.([0-9]+).*/\1/p' <<<"$gomod_ver")"
+  gomod_patch="$(sed -nE 's/^1\.[0-9]+\.([0-9]+).*/\1/p' <<<"$gomod_ver")"
+  if [[ -n "$gomod_minor" ]] && (( 10#$built_minor < 10#$gomod_minor )); then
+    # Pre-built linter is older than go.mod's minimum Go minor; rebuild with host Go.
+    gobin="${GOBIN:-$(go env GOPATH)/bin}"
+    echo "▸ golangci-lint ($built_go) older than go.mod (go $gomod_ver) — rebuilding with $host_go" >&2
+    GOBIN="$gobin" go install "$GOLANGCI_LINT_PKG"
+    export PATH="$gobin:$PATH"
+  elif [[ -n "$gomod_minor" && -n "$gomod_patch" ]] && (( 10#$gomod_minor == 10#$built_minor && 10#$gomod_patch > 10#${built_patch:-0} )); then
+    export GOTOOLCHAIN="go${gomod_ver}"
+  else
+    export GOTOOLCHAIN="$built_go"
+  fi
+fi
 
 exec golangci-lint run \
   --config=dev/tools/.golangci.yml \

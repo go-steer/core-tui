@@ -51,9 +51,20 @@ linters:
     # Security.
     - gosec          # OWASP-style checks (nosec via // #nosec)
 
+    # Complexity ratchet. Thresholds are pinned to today's measured in-tree
+    # maximum so existing code passes untouched and only functions worse than
+    # today's ceiling fail; tui/architecture_test.go additionally caps the
+    # count of non-test functions over 150 lines (4).
+    - funlen
+    - gocognit
+
   exclusions:
     # Generated code shouldn't fail the lint.
     generated: lax
+    # Git worktrees under .claude/ or .worktrees/ hold other branches' work in progress.
+    paths:
+      - (^|/)\.claude/
+      - (^|/)\.worktrees/
     presets:
       - common-false-positives
       - legacy
@@ -63,6 +74,8 @@ linters:
       - path: _test\.go
         linters:
           - errcheck
+          - funlen
+          - gocognit
           - gosec
           - unparam
       # SA5011 in tests is a harness artifact, not a finding. With
@@ -92,6 +105,18 @@ linters:
         - fmt.Fprint
         - (*os.File).Close
         - os.Remove
+    # --- Complexity ratchet (measured 2026-11-20) -------------------
+    #   funlen lines       802   tui/update.go `(*model).handle`
+    #   funlen statements  600   tui/update.go `(*model).handle`
+    #   gocognit           327   tui/update.go `(*model).handle`
+    #   funcs > 150 lines    4   capped in tui/architecture_test.go
+    # Ratchet DOWN as hotspots get refactored — never up.
+    funlen:
+      lines: 802
+      statements: 600
+      ignore-comments: true
+    gocognit:
+      min-complexity: 327
     gocritic:
       disabled-checks:
         # "ifElseChain" pushes us toward switch statements that aren't
