@@ -23,6 +23,7 @@ profile.cov
 
 # AI assistant working state — never committed to this repo.
 .claude/
+.worktrees/
 
 # Per-user .agents/ state.
 /.agents/sessions/
